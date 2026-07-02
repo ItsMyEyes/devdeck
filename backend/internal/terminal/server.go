@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,7 +120,7 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 	workDir = proj.Path
 	// For branch mode, use the worktree directory
 	if !wt.Root && wt.Branch != "" {
-		workDir = proj.Path + "/.wt/" + session
+		workDir = filepath.Join(proj.Path, ".wt", session)
 	}
 
 	// wt.Agent is the agent ID chosen at worktree creation (e.g. "codex"),
@@ -148,6 +150,23 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 }
 
 func pickShell() string {
+	if runtime.GOOS == "windows" {
+		for _, shell := range []string{"pwsh.exe", "powershell.exe"} {
+			if resolved, err := exec.LookPath(shell); err == nil {
+				return resolved
+			}
+		}
+		if shell := os.Getenv("COMSPEC"); shell != "" {
+			if _, err := os.Stat(shell); err == nil {
+				return shell
+			}
+		}
+		if resolved, err := exec.LookPath("cmd.exe"); err == nil {
+			return resolved
+		}
+		return "cmd.exe"
+	}
+
 	// Try $SHELL first, then common paths, then LookPath.
 	if p := os.Getenv("SHELL"); p != "" {
 		if _, err := os.Stat(p); err == nil {

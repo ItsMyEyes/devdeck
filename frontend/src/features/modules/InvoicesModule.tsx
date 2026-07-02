@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Download, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Pill } from '@/components/ui/pill'
 import { Select } from '@/components/ui/select'
 import { INVST } from '@/lib/constants'
-import { fmtDate, fmtRupiah, isPastDue } from '@/lib/format'
+import { fmtDate, fmtMonthYear, fmtRupiah, isPastDue } from '@/lib/format'
 import { downloadInvoice } from '@/lib/invoiceDocument'
+import { cn } from '@/lib/utils'
 import type { Invoice, InvoiceStatus } from '@/store/types'
 import {
   useCreateBank,
@@ -22,7 +23,9 @@ import { DataLoading } from '@/features/screens/DataLoading'
 import { InvoicesEmpty } from '@/features/screens/InvoicesEmpty'
 import { BankPicker } from './BankPicker'
 import { CompanyPicker } from './CompanyPicker'
+import { FinanceAnalysisTab } from './finance/FinanceAnalysisTab'
 import { ModuleHeader } from './ModuleHeader'
+import { RecurringTab } from './recurring/RecurringTab'
 
 const STATUS_OPTIONS = (['draft', 'sent', 'paid', 'overdue'] as InvoiceStatus[]).map((s) => ({
   value: s,
@@ -56,6 +59,29 @@ function itemTotal(it: DraftItem): number {
   return (parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice.replace(/[^0-9.]/g, '')) || 0)
 }
 
+interface MonthGroup {
+  ym: string
+  label: string
+  total: number
+  items: Invoice[]
+}
+
+/** Groups invoices by createdAt's YYYY-MM, newest month first, preserving each invoice's existing order within its month. */
+function groupInvoicesByMonth(invoices: Invoice[]): MonthGroup[] {
+  const groups = new Map<string, MonthGroup>()
+  for (const iv of invoices) {
+    const ym = iv.createdAt.slice(0, 7)
+    let group = groups.get(ym)
+    if (!group) {
+      group = { ym, label: fmtMonthYear(iv.createdAt), total: 0, items: [] }
+      groups.set(ym, group)
+    }
+    group.total += iv.amount
+    group.items.push(iv)
+  }
+  return [...groups.values()].sort((a, b) => (a.ym < b.ym ? 1 : -1))
+}
+
 /** Per-workspace invoicing: reusable company/bank presets, a job-details table, and per-invoice download. */
 export function InvoicesModule({ wsId }: { wsId: string }) {
   const q = useWorkspace(wsId)
@@ -66,12 +92,14 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
   const createBank = useCreateBank()
 
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [tab, setTab] = useState<'invoices' | 'recurring' | 'finance'>('invoices')
 
   if (q.isPending) return <DataLoading label="loading invoices…" />
   if (q.isError) return <DataError error={q.error} onRetry={() => q.refetch()} />
 
   const workspace = q.data
   const invoices = workspace?.invoices ?? []
+  const recurringTemplates = workspace?.recurringTemplates ?? []
   const total = invoices.reduce((sum, iv) => sum + iv.amount, 0)
   const outstanding = invoices
     .filter((iv) => iv.status !== 'paid' && iv.status !== 'draft')
@@ -191,6 +219,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
 
   const saving = createInvoice.isPending || updateInvoice.isPending
   const draftGrandTotal = draft ? draft.items.reduce((sum, it) => sum + itemTotal(it), 0) : 0
+  const monthGroups = groupInvoicesByMonth(invoices)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -202,14 +231,40 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             : undefined
         }
         actions={
-          <Button size="sm" onClick={openNew}>
-            <Plus size={13} />
-            New invoice
-          </Button>
+          tab === 'invoices' ? (
+            <Button size="sm" onClick={openNew}>
+              <Plus size={13} />
+              New invoice
+            </Button>
+          ) : undefined
         }
       />
 
-      {draft ? (
+      <div className="flex flex-none items-center gap-1 border-b border-loom-border px-4 py-2">
+        {(
+          [
+            { key: 'invoices', label: 'Invoices' },
+            { key: 'recurring', label: 'Recurring' },
+            { key: 'finance', label: 'Finance Analysis' },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'cursor-pointer rounded-md px-2.5 py-1.5 font-mono text-[11.5px] transition-colors',
+              tab === t.key ? 'bg-loom-accent/10 text-loom-fg' : 'text-loom-muted hover:text-loom-fg',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'recurring' ? <RecurringTab wsId={wsId} templates={recurringTemplates} /> : null}
+      {tab === 'finance' ? <FinanceAnalysisTab invoices={invoices} /> : null}
+
+      {tab === 'invoices' && draft ? (
         <div className="flex-none border-b border-loom-border bg-loom-card/40 px-4 py-3">
           <div className="mb-2.5 flex items-center justify-between">
             <span className="font-mono text-[11.5px] text-loom-muted-2">
@@ -392,7 +447,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
         </div>
       ) : null}
 
-      {invoices.length === 0 ? (
+      {tab === 'invoices' && (invoices.length === 0 ? (
         <InvoicesEmpty />
       ) : (
         <div className="flex-1 overflow-auto p-4">
@@ -410,85 +465,101 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               </tr>
             </thead>
             <tbody>
-              {invoices.map((iv) => {
-                const st = INVST[iv.status]
-                const overdue = iv.status !== 'paid' && isPastDue(iv.dueDate)
-                return (
-                  <tr
-                    key={iv.id}
-                    className="border-b border-loom-border-card last:border-none hover:bg-loom-card/50"
-                  >
-                    <td className="px-3 py-2.5 font-mono text-[11.5px] whitespace-nowrap text-loom-muted-2">
-                      {iv.number}
-                    </td>
-                    <td className="max-w-[160px] truncate px-3 py-2.5 text-loom-fg">
-                      {iv.companyName || '—'}
-                    </td>
-                    <td className="max-w-[180px] px-3 py-2.5 text-loom-dim">
-                      <div className="truncate">{iv.bankDetail.bankName || '—'}</div>
-                      <div className="truncate font-mono text-[10.5px] text-loom-dim">
-                        {iv.bankDetail.accountNumber}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-loom-dim">
-                      {fmtDate(iv.createdAt)}
-                    </td>
-                    <td
-                      className={`px-3 py-2.5 font-mono text-[11px] whitespace-nowrap ${
-                        overdue ? 'text-loom-red-soft' : 'text-loom-dim'
-                      }`}
-                    >
-                      {fmtDate(iv.dueDate)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-[12px] whitespace-nowrap text-loom-fg">
-                      {fmtRupiah(iv.amount)}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Pill color={st.color}>{st.label}</Pill>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-0.5">
-                        <button
-                          onClick={() => downloadInvoice(iv)}
-                          aria-label="Download invoice"
-                          title="Download"
-                          className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
-                        >
-                          <Download size={13} />
-                        </button>
-                        {iv.status !== 'paid' ? (
-                          <button
-                            onClick={() =>
-                              updateInvoice.mutate({ id: iv.id, patch: { status: 'paid' } })
-                            }
-                            className="cursor-pointer rounded-md px-1.5 py-1 font-mono text-[10.5px] text-loom-muted-2 hover:text-loom-green-soft"
-                          >
-                            mark paid
-                          </button>
-                        ) : null}
-                        <button
-                          onClick={() => openEdit(iv)}
-                          aria-label="Edit invoice"
-                          className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => deleteInvoice.mutate(iv.id)}
-                          aria-label="Delete invoice"
-                          className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-red-soft"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+              {monthGroups.map((group) => (
+                <Fragment key={group.ym}>
+                  <tr className="border-b border-loom-border bg-loom-card/30">
+                    <td colSpan={8} className="px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[11px] font-semibold tracking-wide text-loom-fg-2 uppercase">
+                          {group.label}
+                        </span>
+                        <span className="font-mono text-[12px] font-semibold text-loom-fg">
+                          {fmtRupiah(group.total)}
+                        </span>
                       </div>
                     </td>
                   </tr>
-                )
-              })}
+                  {group.items.map((iv) => {
+                    const st = INVST[iv.status]
+                    const overdue = iv.status !== 'paid' && isPastDue(iv.dueDate)
+                    return (
+                      <tr
+                        key={iv.id}
+                        className="border-b border-loom-border-card last:border-none hover:bg-loom-card/50"
+                      >
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] whitespace-nowrap text-loom-muted-2">
+                          {iv.number}
+                        </td>
+                        <td className="max-w-[160px] truncate px-3 py-2.5 text-loom-fg">
+                          {iv.companyName || '—'}
+                        </td>
+                        <td className="max-w-[180px] px-3 py-2.5 text-loom-dim">
+                          <div className="truncate">{iv.bankDetail.bankName || '—'}</div>
+                          <div className="truncate font-mono text-[10.5px] text-loom-dim">
+                            {iv.bankDetail.accountNumber}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-loom-dim">
+                          {fmtDate(iv.createdAt)}
+                        </td>
+                        <td
+                          className={`px-3 py-2.5 font-mono text-[11px] whitespace-nowrap ${
+                            overdue ? 'text-loom-red-soft' : 'text-loom-dim'
+                          }`}
+                        >
+                          {fmtDate(iv.dueDate)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-[12px] whitespace-nowrap text-loom-fg">
+                          {fmtRupiah(iv.amount)}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Pill color={st.color}>{st.label}</Pill>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-end gap-0.5">
+                            <button
+                              onClick={() => downloadInvoice(iv)}
+                              aria-label="Download invoice"
+                              title="Download"
+                              className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
+                            >
+                              <Download size={13} />
+                            </button>
+                            {iv.status !== 'paid' ? (
+                              <button
+                                onClick={() =>
+                                  updateInvoice.mutate({ id: iv.id, patch: { status: 'paid' } })
+                                }
+                                className="cursor-pointer rounded-md px-1.5 py-1 font-mono text-[10.5px] text-loom-muted-2 hover:text-loom-green-soft"
+                              >
+                                mark paid
+                              </button>
+                            ) : null}
+                            <button
+                              onClick={() => openEdit(iv)}
+                              aria-label="Edit invoice"
+                              className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteInvoice.mutate(iv.id)}
+                              aria-label="Delete invoice"
+                              className="cursor-pointer p-1 text-loom-muted-2 hover:text-loom-red-soft"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>
-      )}
+      ))}
     </div>
   )
 }

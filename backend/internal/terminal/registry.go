@@ -2,13 +2,11 @@ package terminal
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
+	crosspty "github.com/aymanbagabas/go-pty"
 	"nhooyr.io/websocket"
 )
 
@@ -64,8 +62,8 @@ func (b *ringBuffer) contents() []byte {
 // one losing scrollback and stdin routing.
 type ptySession struct {
 	id   string
-	ptmx *os.File
-	cmd  *exec.Cmd
+	ptmx crosspty.Pty
+	cmd  *crosspty.Cmd
 	buf  *ringBuffer
 
 	mu        sync.Mutex
@@ -73,17 +71,24 @@ type ptySession struct {
 	cols      int
 	rows      int
 	killTimer *time.Timer
+	closeOnce sync.Once
 }
 
 func (sess *ptySession) write(p []byte) {
 	_, _ = sess.ptmx.Write(p)
 }
 
+func (sess *ptySession) close() {
+	sess.closeOnce.Do(func() {
+		_ = sess.ptmx.Close()
+	})
+}
+
 func (sess *ptySession) resize(cols, rows int) {
 	sess.mu.Lock()
 	sess.cols, sess.rows = cols, rows
 	sess.mu.Unlock()
-	_ = pty.Setsize(sess.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	_ = sess.ptmx.Resize(cols, rows)
 }
 
 // attachConn binds conn as the session's active socket, cancels any pending
@@ -98,7 +103,7 @@ func (sess *ptySession) attachConn(conn *websocket.Conn, cols, rows int) []byte 
 	sess.conn = conn
 	if cols != sess.cols || rows != sess.rows {
 		sess.cols, sess.rows = cols, rows
-		_ = pty.Setsize(sess.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+		_ = sess.ptmx.Resize(cols, rows)
 	}
 	return sess.buf.contents()
 }
@@ -121,11 +126,35 @@ func (r *registry) get(id string) *ptySession {
 }
 
 // spawn starts a new PTY session for cmd (not yet started) and registers it.
-func (r *registry) spawn(id string, cmd *exec.Cmd, cols, rows int) (*ptySession, error) {
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySession, error) {
+	ptmx, err := crosspty.New()
 	if err != nil {
 		return nil, err
 	}
+	if err := ptmx.Resize(cols, rows); err != nil {
+		_ = ptmx.Close()
+		return nil, err
+	}
+
+	args := source.Args
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	cmd := ptmx.Command(source.Path, args...)
+	cmd.Dir = source.Dir
+	cmd.Env = source.Env
+	cmd.SysProcAttr = source.SysProcAttr
+	if err := cmd.Start(); err != nil {
+		_ = ptmx.Close()
+		return nil, err
+	}
+
+	// The parent must not keep the Unix slave end open or the master never
+	// receives EOF after the child exits. ConPTY exposes separate pipe ends.
+	if unixPTY, ok := ptmx.(crosspty.UnixPty); ok {
+		_ = unixPTY.Slave().Close()
+	}
+
 	sess := &ptySession{
 		id:   id,
 		ptmx: ptmx,
@@ -141,9 +170,12 @@ func (r *registry) spawn(id string, cmd *exec.Cmd, cols, rows int) (*ptySession,
 
 	go r.pump(sess)
 	// Reap the child once it exits (naturally or via kill), otherwise it
-	// stays a zombie — which also makes a plain `kill(pid, 0)` liveness
-	// check report it as still running forever.
-	go func() { _ = cmd.Wait() }()
+	// stays a zombie. Closing the PTY also unblocks the output pump.
+	go func() {
+		_ = cmd.Wait()
+		sess.close()
+		r.discard(sess)
+	}()
 	return sess, nil
 }
 
@@ -167,7 +199,7 @@ func (r *registry) pump(sess *ptySession) {
 			}
 		}
 		if err != nil {
-			r.discard(sess.id)
+			r.discard(sess)
 			return
 		}
 	}
@@ -192,13 +224,16 @@ func (r *registry) detach(id string, conn *websocket.Conn) {
 	})
 }
 
-// discard removes a session that exited on its own (PTY read hit EOF/error)
-// without killing anything — the process is already gone.
-func (r *registry) discard(id string) {
+// discard removes this exact session after its process or PTY exits. Comparing
+// pointers prevents a late goroutine from deleting a newer session with the
+// same id.
+func (r *registry) discard(sess *ptySession) {
 	r.mu.Lock()
-	sess, ok := r.sessions[id]
-	if ok {
-		delete(r.sessions, id)
+	current, ok := r.sessions[sess.id]
+	if ok && current == sess {
+		delete(r.sessions, sess.id)
+	} else {
+		ok = false
 	}
 	r.mu.Unlock()
 	if !ok {
@@ -236,25 +271,8 @@ func (r *registry) kill(id string) {
 			[]byte("\r\n\x1b[38;5;102m■ [process terminated]\x1b[0m\r\n"))
 	}
 
-	_ = sess.ptmx.Close()
-	if sess.cmd.Process == nil {
-		return
-	}
-	pid := sess.cmd.Process.Pid
-	// pty.StartWithSize sets Setsid, so pid is also the process group id —
-	// signal the group first to catch any children, then the pid itself.
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if syscall.Kill(pid, 0) == nil {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-	}
+	// Closing a ConPTY tears down the attached console. Unix additionally
+	// signals the process group; Windows kills the attached process directly.
+	sess.close()
+	terminateProcess(sess.cmd)
 }

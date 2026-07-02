@@ -2,8 +2,8 @@ package terminal
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -17,14 +17,20 @@ func TestKillSessionTerminatesRunningProcess(t *testing.T) {
 	activeRegistry = newRegistry()
 	session := testSessionID(t)
 
-	sess, err := activeRegistry.spawn(session, exec.Command("sleep", "100"), 80, 24)
+	var command *exec.Cmd
+	if runtime.GOOS == "windows" {
+		command = exec.Command("ping.exe", "-n", "100", "127.0.0.1")
+	} else {
+		command = exec.Command("sleep", "100")
+	}
+	sess, err := activeRegistry.spawn(session, command, 80, 24)
 	if err != nil {
 		t.Fatalf("failed to spawn test session: %v", err)
 	}
 	pid := sess.cmd.Process.Pid
 
-	if err := syscall.Kill(pid, 0); err != nil {
-		t.Fatalf("spawned process %d is not alive: %v", pid, err)
+	if !processAlive(pid) {
+		t.Fatalf("spawned process %d is not alive", pid)
 	}
 
 	if err := KillSession(session); err != nil {
@@ -33,12 +39,12 @@ func TestKillSessionTerminatesRunningProcess(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
+		if !processAlive(pid) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := syscall.Kill(pid, 0); err == nil {
+	if processAlive(pid) {
 		t.Errorf("process %d is still alive after KillSession", pid)
 	}
 	if activeRegistry.get(session) != nil {

@@ -8,16 +8,20 @@ import {
   createBank,
   createCompany,
   createInvoice,
+  createIssue,
   createNews,
   createProject,
+  createRecurringTemplate,
   createTodo,
   createWorkspace,
   createWorktree,
   deleteBank,
   deleteCompany,
   deleteInvoice,
+  deleteIssue,
   deleteNews,
   deleteProject,
+  deleteRecurringTemplate,
   deleteTodo,
   deleteWorkspace,
   deleteWorktree,
@@ -35,8 +39,10 @@ import {
   updateBank,
   updateCompany,
   updateInvoice,
+  updateIssue,
   updateNews,
   updateProject,
+  updateRecurringTemplate,
   updateSettings,
   updateTodo,
   updateWorkspace,
@@ -46,8 +52,10 @@ import type {
   CreateBankBody,
   CreateCompanyBody,
   CreateInvoiceBody,
+  CreateIssueBody,
   CreateNewsBody,
   CreateProjectBody,
+  CreateRecurringTemplateBody,
   CreateTodoBody,
   CreateWorkspaceBody,
   CreateWorktreeBody,
@@ -55,8 +63,10 @@ import type {
   UpdateBankBody,
   UpdateCompanyBody,
   UpdateInvoiceBody,
+  UpdateIssueBody,
   UpdateNewsBody,
   UpdateProjectBody,
+  UpdateRecurringTemplateBody,
   UpdateTodoBody,
   UpdateWorkspaceBody,
   UpdateWorktreeBody,
@@ -232,6 +242,56 @@ export function useDeleteInvoice() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
     mutationFn: (id: string) => deleteInvoice(id),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useCreateIssue() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: ({ projectId, body }: { projectId: string; body: CreateIssueBody }) => createIssue(projectId, body),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useUpdateIssue() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateIssueBody }) => updateIssue(id, patch),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useDeleteIssue() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: (id: string) => deleteIssue(id),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useCreateRecurringTemplate() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: ({ wsId, body }: { wsId: string; body: CreateRecurringTemplateBody }) =>
+      createRecurringTemplate(wsId, body),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useUpdateRecurringTemplate() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateRecurringTemplateBody }) =>
+      updateRecurringTemplate(id, patch),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useDeleteRecurringTemplate() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: (id: string) => deleteRecurringTemplate(id),
     onSuccess: () => invalidate(),
   })
 }

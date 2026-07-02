@@ -16,25 +16,32 @@ cd frontend && npm run dev:web
 # Backend only
 cd frontend && npm run dev:api
 # or directly:
-cd backend && go run ./cmd/server
+cd backend && go run ./cmd/server --db loom.db --open=false
 ```
 
 The Go backend accepts flags:
-- `--addr` — listen address (default `:8989`, env `LOOM_ADDR`)
-- `--db` — SQLite path (default `backend/loom.db`, env `LOOM_DB`)
+- `--addr` — listen address (default `127.0.0.1:8989`, env `LOOM_ADDR`)
+- `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
+- `--open` — open the embedded UI in the default browser (default true)
 
 ## Build
 
 ```bash
-# Frontend production build
-cd frontend && npm run build
+# Host binary with the production UI embedded
+make build
 
-# Backend binary
-cd frontend && npm run build:api
-# or directly:
-cd backend && go build -o loom-api ./cmd/server
+# Portable binary for the current OS and architecture
+make portable
+
+# macOS, Linux, and Windows release matrix (amd64 + arm64)
+make portable-all
 ```
+
+`make build` writes `backend/loom-api`. Portable builds are written to `dist/`.
+The executable creates `data/loom.db` beside itself on first launch. Node.js and
+Go are build-time dependencies only; end users still need Git and their selected
+coding-agent CLI installed.
 
 ## Type checking / linting
 

@@ -29,6 +29,11 @@ func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
 			return nil, err
 		}
 		out[i].Worktrees = wts
+		iss, err := s.issuesOf(out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Issues = iss
 	}
 	return out, nil
 }
@@ -41,6 +46,9 @@ func (s *Store) ProjectByID(id string) (domain.Project, error) {
 		return domain.Project{}, mapNotFound(err)
 	}
 	if p.Worktrees, err = s.worktreesOf(id); err != nil {
+		return p, err
+	}
+	if p.Issues, err = s.issuesOf(id); err != nil {
 		return p, err
 	}
 	return p, nil

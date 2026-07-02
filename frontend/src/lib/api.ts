@@ -12,9 +12,11 @@ import type {
   Invoice,
   InvoiceItem,
   InvoiceStatus,
+  Issue,
   NewsItem,
   Priority,
   Project,
+  RecurringInvoiceTemplate,
   Settings,
   TermLine,
   Todo,
@@ -180,6 +182,29 @@ export interface UpdateBankBody {
   accountNumber?: string
 }
 
+export interface CreateRecurringTemplateBody {
+  companyName?: string
+  companyAddress?: string
+  items?: InvoiceItem[]
+  bankName?: string
+  bankAccountName?: string
+  bankAccountNumber?: string
+  dayOfMonth?: number
+  paymentTermDays?: number
+}
+
+export interface UpdateRecurringTemplateBody {
+  companyName?: string
+  companyAddress?: string
+  items?: InvoiceItem[]
+  bankName?: string
+  bankAccountName?: string
+  bankAccountNumber?: string
+  dayOfMonth?: number
+  paymentTermDays?: number
+  active?: boolean
+}
+
 export interface CreateNewsBody {
   source: string
   title: string
@@ -190,6 +215,20 @@ export interface CreateNewsBody {
 
 export interface UpdateNewsBody {
   unread?: boolean
+}
+
+export interface CreateIssueBody {
+  title: string
+  status?: Issue['status']
+}
+
+export interface UpdateIssueBody {
+  title?: string
+  description?: string
+  status?: Issue['status']
+  priority?: Priority
+  position?: number
+  assignee?: string | null
 }
 
 // ---- Queries ----
@@ -322,6 +361,20 @@ export function deleteBank(id: string): Promise<void> {
   return request<void>('DELETE', `/banks/${id}`)
 }
 
+// ---- Recurring templates ----
+
+export function createRecurringTemplate(wsId: string, body: CreateRecurringTemplateBody): Promise<RecurringInvoiceTemplate> {
+  return request<RecurringInvoiceTemplate>('POST', `/workspaces/${wsId}/recurring-templates`, body)
+}
+
+export function updateRecurringTemplate(id: string, patch: UpdateRecurringTemplateBody): Promise<RecurringInvoiceTemplate> {
+  return request<RecurringInvoiceTemplate>('PATCH', `/recurring-templates/${id}`, patch)
+}
+
+export function deleteRecurringTemplate(id: string): Promise<void> {
+  return request<void>('DELETE', `/recurring-templates/${id}`)
+}
+
 // ---- News ----
 
 export function createNews(wsId: string, body: CreateNewsBody): Promise<NewsItem> {
@@ -338,6 +391,20 @@ export function markAllNewsRead(wsId: string): Promise<{ updated: number }> {
 
 export function deleteNews(id: string): Promise<void> {
   return request<void>('DELETE', `/news/${id}`)
+}
+
+// ---- Issues ----
+
+export function createIssue(projectId: string, body: CreateIssueBody): Promise<Issue> {
+  return request<Issue>('POST', `/projects/${projectId}/issues`, body)
+}
+
+export function updateIssue(id: string, patch: UpdateIssueBody): Promise<Issue> {
+  return request<Issue>('PATCH', `/issues/${id}`, patch)
+}
+
+export function deleteIssue(id: string): Promise<void> {
+  return request<void>('DELETE', `/issues/${id}`)
 }
 
 // ---- Seed ----

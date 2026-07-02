@@ -36,6 +36,21 @@ type Project struct {
 	Path      string     `json:"path"`
 	Expanded  bool       `json:"expanded"`
 	Worktrees []Worktree `json:"worktrees"`
+	Issues    []Issue    `json:"issues"`
+}
+
+// Issue mirrors the frontend Issue type.
+type Issue struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	Priority    string  `json:"priority"`
+	Assignee    *string `json:"assignee"`
+	Position    float64 `json:"position"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+	ProjectID   string  `json:"-"` // internal use, not exposed to frontend — matches Worktree.ProjectID
 }
 
 // NewsItem mirrors the frontend NewsItem type.
@@ -101,14 +116,30 @@ type Invoice struct {
 	BankDetail     BankDetail    `json:"bankDetail"`
 }
 
+// RecurringInvoiceTemplate mirrors the frontend RecurringInvoiceTemplate type — a saved
+// billing snapshot that generates a draft Invoice on a monthly schedule.
+type RecurringInvoiceTemplate struct {
+	ID              string        `json:"id"`
+	CompanyName     string        `json:"companyName"`
+	CompanyAddress  string        `json:"companyAddress"`
+	Items           []InvoiceItem `json:"items"`
+	BankDetail      BankDetail    `json:"bankDetail"`
+	DayOfMonth      int           `json:"dayOfMonth"`
+	PaymentTermDays int           `json:"paymentTermDays"`
+	Active          bool          `json:"active"`
+	LastGeneratedYm string        `json:"lastGeneratedYm"`
+	CreatedAt       string        `json:"createdAt"`
+}
+
 // Workspace mirrors the frontend Workspace type (full nested tree).
 type Workspace struct {
-	ID       string     `json:"id"`
-	Name     string     `json:"name"`
-	Projects []Project  `json:"projects"`
-	News     []NewsItem `json:"news"`
-	Todos    []Todo     `json:"todos"`
-	Invoices []Invoice  `json:"invoices"`
+	ID                 string                     `json:"id"`
+	Name               string                     `json:"name"`
+	Projects           []Project                  `json:"projects"`
+	News               []NewsItem                 `json:"news"`
+	Todos              []Todo                     `json:"todos"`
+	Invoices           []Invoice                  `json:"invoices"`
+	RecurringTemplates []RecurringInvoiceTemplate `json:"recurringTemplates"`
 }
 
 // Settings mirrors the frontend Settings type.

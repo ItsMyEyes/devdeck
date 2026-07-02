@@ -44,6 +44,9 @@ func (s *Store) Workspaces() ([]domain.Workspace, error) {
 		if ws.Invoices, err = s.invoicesOf(ws.ID); err != nil {
 			return nil, err
 		}
+		if ws.RecurringTemplates, err = s.recurringTemplatesOf(ws.ID); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -69,6 +72,9 @@ func (s *Store) workspaceByID(id string) (domain.Workspace, error) {
 		return ws, err
 	}
 	if ws.Invoices, err = s.invoicesOf(id); err != nil {
+		return ws, err
+	}
+	if ws.RecurringTemplates, err = s.recurringTemplatesOf(id); err != nil {
 		return ws, err
 	}
 	return ws, nil

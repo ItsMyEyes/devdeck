@@ -21,13 +21,13 @@ the backend is the source of truth. zustand now holds only transient UI state.
 - **@tanstack/react-query** for all server/domain data
 - **zustand** for transient UI state (drafts, dialogs, menus)
 - **Go (stdlib net/http) + SQLite** (`modernc.org/sqlite`, pure Go) REST backend
-- **xterm.js** wired to a **WebSocket ↔ node-pty** gateway
+- **xterm.js** wired to a **WebSocket ↔ Go PTY/ConPTY** gateway
 - **sonner** toasts, **lucide-react** icons
 
 ## Prerequisites
 
 - Node 22+
-- Go 1.22+ (for the REST backend)
+- Go 1.25+ (for the REST backend)
 
 ## Install
 
@@ -36,9 +36,9 @@ cd frontend
 npm install
 ```
 
-`node-pty` is an **optional** dependency. If its native build is unavailable the
-terminal gateway automatically falls back to a self-contained mock agent stream,
-so the app stays fully usable.
+The Go terminal gateway uses native Unix PTYs on macOS/Linux and ConPTY on
+Windows 10 version 1809 or newer. If a native PTY cannot be created, the
+terminal falls back to a self-contained simulated stream.
 
 ## Develop
 
@@ -46,20 +46,16 @@ so the app stays fully usable.
 npm run dev
 ```
 
-This runs three processes concurrently:
+This runs two processes concurrently:
 
 - **web** — Vite on <http://localhost:5173>
-- **term** — the terminal gateway on `ws://localhost:8788` (proxied by Vite at
-  `/ws/terminal`)
-- **api** — the Go + SQLite REST backend on <http://localhost:8989> (proxied by
-  Vite at `/api`)
+- **api** — the Go + SQLite REST and terminal WebSocket backend on
+  <http://localhost:8989> (proxied by Vite at `/api` and `/ws/terminal`)
 
-Open <http://localhost:5173>. Expand any worktree to get a live terminal: on a
-normal machine node-pty spawns your `$SHELL`; in locked-down environments you get
-the mock stream.
+Open <http://localhost:5173>. Expand any worktree to get a live native terminal;
+in locked-down environments you get the simulated stream.
 
-Run a single process alone with `npm run dev:web` / `npm run dev:term` /
-`npm run dev:api`.
+Run a single process alone with `npm run dev:web` / `npm run dev:api`.
 
 ## Backend (Go + SQLite)
 
@@ -68,14 +64,15 @@ The REST API lives in [`backend/`](backend/) and is a pure-Go
 [`backend/README.md`](backend/README.md) for full details.
 
 ```bash
-npm run dev:api        # cd backend && go run .
-npm run build:api      # cd backend && go build -o loom-api .
+npm run dev:api        # backend with project-local development database
+npm run build:api      # production Go binary with embedded frontend
 ```
 
 - Serves `/api/*` (proxied through Vite in dev; set `VITE_API_BASE` to point
   elsewhere).
-- Listen address from `-addr` flag / `LOOM_ADDR` env (default `:8989`); SQLite
-  path from `-db` flag / `LOOM_DB` env (default `backend/loom.db`).
+- Listen address from `-addr` flag / `LOOM_ADDR` env (default
+  `127.0.0.1:8989`); SQLite path from `-db` flag / `LOOM_DB` env (default
+  `data/loom.db` beside the portable executable).
 - **The database starts EMPTY** — there is no auto-seed. On first run the app
   shows empty states everywhere.
 - Load the demo dataset (two workspaces with projects, worktrees, news, todos
@@ -86,7 +83,9 @@ npm run build:api      # cd backend && go build -o loom-api .
 ## Build & check
 
 ```bash
-npm run build       # production build (also generates the route tree)
+make build          # host binary with embedded production UI
+make portable       # portable binary for the current platform
+make portable-all   # macOS/Linux/Windows, amd64 + arm64
 npm run typecheck   # tsc --noEmit
 ```
 

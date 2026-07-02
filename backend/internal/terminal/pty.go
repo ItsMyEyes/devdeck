@@ -10,22 +10,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/creack/pty"
+	crosspty "github.com/aymanbagabas/go-pty"
 	"nhooyr.io/websocket"
 )
 
-// ptyAvailable checks if we can spawn a PTY.
+// ptyAvailable checks whether the host can create a native PTY. On Windows
+// this probes ConPTY, which requires Windows 10 version 1809 or newer.
 func ptyAvailable() bool {
-	shell := pickShell()
-	cmd := exec.Command(shell, "-c", "echo ok")
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 80, Rows: 24})
+	ptmx, err := crosspty.New()
 	if err != nil {
 		return false
 	}
-	f.Close()
-	cmd.Wait()
-	return true
+	defer ptmx.Close()
+	return ptmx.Resize(80, 24) == nil
 }
 
 // resolveWorkDir expands a leading ~ (os/exec does not expand it for cmd.Dir)
@@ -52,9 +49,9 @@ func resolveWorkDir(workDir string) string {
 func buildSessionCmd(session, agentBin, workDir string, args []string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if agentBin != "" {
-		cmd = exec.Command(agentBin, args...)
+		cmd = platformCommand(agentBin, args...)
 	} else {
-		cmd = exec.Command(pickShell())
+		cmd = platformCommand(pickShell())
 	}
 	cmd.Dir = resolveWorkDir(workDir)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "LOOM_SESSION="+session)
@@ -76,7 +73,7 @@ func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session st
 		if err != nil {
 			return fmt.Errorf("pty start: %w", err)
 		}
-		log.Printf("terminal: session %s spawned %s (pid %d)", session, cmd.Path, cmd.Process.Pid)
+		log.Printf("terminal: session %s spawned %s (pid %d)", session, sess.cmd.Path, sess.cmd.Process.Pid)
 	} else {
 		log.Printf("terminal: session %s reattached (pid %d)", session, sess.cmd.Process.Pid)
 	}

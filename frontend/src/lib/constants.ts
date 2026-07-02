@@ -1,4 +1,4 @@
-import type { InvoiceStatus, LineKind, Priority, WorktreeState } from '@/store/types'
+import type { InvoiceStatus, IssueStatus, LineKind, Priority, WorktreeState } from '@/store/types'
 
 /** Worktree lifecycle → label + status color. */
 export const STATE: Record<WorktreeState, { label: string; color: string }> = {
@@ -13,6 +13,13 @@ export const PRI: Record<Priority, { label: string; color: string }> = {
   high: { label: 'High', color: '#f5c451' },
   normal: { label: 'Normal', color: '#6d8bff' },
   low: { label: 'Low', color: '#5f6672' },
+}
+
+export const ISSUE_STATUS: Record<IssueStatus, { label: string; color: string }> = {
+  todo: { label: 'Todo', color: '#6b7280' },
+  in_progress: { label: 'In Progress', color: '#6d8bff' },
+  in_review: { label: 'In Review', color: '#f5c451' },
+  done: { label: 'Done', color: '#56d58a' },
 }
 
 export const INVST: Record<InvoiceStatus, { label: string; color: string }> = {

@@ -16,7 +16,7 @@
 | Backend | Go 1.25, stdlib `net/http` (Go 1.22 enhanced mux) |
 | Database | SQLite via modernc.org/sqlite (pure Go, no CGO) |
 | WebSocket | nhooyr.io/websocket |
-| PTY | creack/pty (optional — mock fallback when native build fails) |
+| PTY | go-pty: Unix PTY + Windows ConPTY (mock fallback when unavailable) |
 
 ## Request flow
 
@@ -27,9 +27,13 @@ Browser (fetch)    ──HTTP──────→ Vite proxy (:5173) → Go bac
 ```
 
 - Vite dev server proxies `/api` and `/ws/terminal` to the Go backend.
+- Production builds embed the Vite output in the Go binary and serve the SPA,
+  REST API, and WebSocket from the same loopback HTTP server.
 - Handlers parse/validate, call services, delegate persistence to `port.Store`.
 - Services own business logic; handlers own HTTP concerns.
 - Middleware stack: `CorsMiddleware` → `JSONErrorMiddleware` → handler.
+- Terminal sessions use native Unix PTYs on macOS/Linux and ConPTY on Windows
+  10 version 1809 or newer.
 
 ## Dependency wiring
 

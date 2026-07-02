@@ -3,8 +3,11 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 
 	"loom/backend/internal/handler"
 	"loom/backend/internal/port"
@@ -12,16 +15,19 @@ import (
 	"loom/backend/internal/service"
 	"loom/backend/internal/store"
 	"loom/backend/internal/terminal"
+	"loom/backend/internal/webui"
 )
 
-const defaultDBPath = "/Users/kiyora/Documents/explorer/agent/enginer.kiyora.dev/backend/loom.db"
-
 func main() {
-	addr := flag.String("addr", envOr("LOOM_ADDR", ":8989"), "listen address")
-	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath), "sqlite database path")
+	addr := flag.String("addr", envOr("LOOM_ADDR", "127.0.0.1:8989"), "listen address")
+	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path")
 	jadiURL := flag.String("jadi", envOr("LOOM_JADI_URL", ""), "jadi backend URL (empty = static registry)")
+	openUI := flag.Bool("open", true, "open the embedded UI in the default browser")
 	flag.Parse()
 
+	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
+		log.Fatalf("create database directory: %v", err)
+	}
 	db, err := store.Open(*dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -29,6 +35,24 @@ func main() {
 	defer db.Close()
 
 	st := store.New(db)
+
+	if generated, err := st.RunDueRecurringInvoices(); err != nil {
+		log.Printf("recurring invoices: startup check failed: %v", err)
+	} else if len(generated) > 0 {
+		log.Printf("recurring invoices: generated %d draft invoice(s) on startup", len(generated))
+	}
+
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if generated, err := st.RunDueRecurringInvoices(); err != nil {
+				log.Printf("recurring invoices: daily check failed: %v", err)
+			} else if len(generated) > 0 {
+				log.Printf("recurring invoices: generated %d draft invoice(s)", len(generated))
+			}
+		}
+	}()
 
 	var baseReg port.AgentRegistry
 	if *jadiURL != "" {
@@ -55,7 +79,9 @@ func main() {
 	invH := handler.NewInvoiceHandler(st)
 	companyH := handler.NewCompanyHandler(st)
 	bankH := handler.NewBankHandler(st)
+	recH := handler.NewRecurringTemplateHandler(st)
 	newsH := handler.NewNewsHandler(st)
+	issueH := handler.NewIssueHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
 
@@ -84,6 +110,10 @@ func main() {
 	mux.HandleFunc("PATCH /api/worktrees/{id}", wtH.PatchWorktree)
 	mux.HandleFunc("DELETE /api/worktrees/{id}", wtH.DeleteWorktree)
 
+	mux.HandleFunc("POST /api/projects/{projectId}/issues", issueH.PostIssue)
+	mux.HandleFunc("PATCH /api/issues/{id}", issueH.PatchIssue)
+	mux.HandleFunc("DELETE /api/issues/{id}", issueH.DeleteIssue)
+
 	mux.HandleFunc("GET /api/agents", agentH.ListAgents)
 	mux.HandleFunc("GET /api/agents/{agentId}", agentH.GetAgent)
 	mux.HandleFunc("GET /api/agents/{agentId}/models", agentH.ListModels)
@@ -108,6 +138,10 @@ func main() {
 	mux.HandleFunc("PATCH /api/banks/{id}", bankH.PatchBank)
 	mux.HandleFunc("DELETE /api/banks/{id}", bankH.DeleteBank)
 
+	mux.HandleFunc("POST /api/workspaces/{wsId}/recurring-templates", recH.PostRecurringTemplate)
+	mux.HandleFunc("PATCH /api/recurring-templates/{id}", recH.PatchRecurringTemplate)
+	mux.HandleFunc("DELETE /api/recurring-templates/{id}", recH.DeleteRecurringTemplate)
+
 	mux.HandleFunc("POST /api/workspaces/{wsId}/news", newsH.PostNews)
 	mux.HandleFunc("POST /api/workspaces/{wsId}/news/read-all", newsH.ReadAllNews)
 	mux.HandleFunc("PATCH /api/news/{id}", newsH.PatchNews)
@@ -116,13 +150,33 @@ func main() {
 	mux.HandleFunc("POST /api/seed", seedH.PostSeed)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
+	mux.Handle("/", webui.Handler())
 
 	root := handler.CorsMiddleware(handler.JSONErrorMiddleware(mux))
 
-	log.Printf("loom backend listening on %s (db: %s)", *addr, *dbPath)
-	if err := http.ListenAndServe(*addr, root); err != nil {
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatalf("listen on %s: %v", *addr, err)
+	}
+	uiURL, err := browserURL(listener.Addr())
+	if err != nil {
+		log.Fatalf("resolve UI URL: %v", err)
+	}
+	log.Printf("loom listening on %s (db: %s)", uiURL, *dbPath)
+	if *openUI && webui.Available() {
+		openBrowserSoon(uiURL)
+	}
+	if err := http.Serve(listener, root); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+func defaultDBPath() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return filepath.Join("data", "loom.db")
+	}
+	return filepath.Join(filepath.Dir(executable), "data", "loom.db")
 }
 
 func envOr(key, fallback string) string {

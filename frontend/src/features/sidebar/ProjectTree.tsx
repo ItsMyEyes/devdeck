@@ -1,5 +1,5 @@
-import { useNavigate } from '@tanstack/react-router'
-import { ChevronDown, ChevronRight, House, Plus } from 'lucide-react'
+import { useLocation, useNavigate } from '@tanstack/react-router'
+import { ChevronDown, ChevronRight, House, Kanban, Plus } from 'lucide-react'
 import { STATE } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import type { Project } from '@/store/types'
@@ -53,12 +53,14 @@ export function ProjectTree() {
 function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
   const navigate = useNavigate()
   const { projectId, wtId } = useScope()
+  const pathname = useLocation({ select: (l) => l.pathname })
   const updateProject = useUpdateProject()
   const openSpawn = useLoomStore((s) => s.openSpawn)
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
 
   const toggleExpanded = (id: string, expanded: boolean) => updateProject.mutate({ id, patch: { expanded } })
-  const selected = projectId === p.id && !wtId
+  const onIssues = projectId === p.id && pathname.includes('/issues')
+  const selected = projectId === p.id && !wtId && !onIssues
   const running = p.worktrees.filter((w) => w.state === 'running').length
   const hasWait = p.worktrees.some((w) => w.state === 'waiting')
   const hasErr = p.worktrees.some((w) => w.state === 'error')
@@ -118,6 +120,30 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
 
       {p.expanded && (
         <div className="ml-[11px] mt-px border-l border-loom-border pl-0.5">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate({ to: '/w/$wsId/p/$projectId/issues', params: { wsId, projectId: p.id } })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                navigate({ to: '/w/$wsId/p/$projectId/issues', params: { wsId, projectId: p.id } })
+              }
+            }}
+            className={cn(
+              'flex h-[29px] cursor-pointer select-none items-center gap-[7px] rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              onIssues ? 'bg-loom-accent/10 shadow-[inset_2px_0_0_var(--loom-accent)]' : 'hover:bg-loom-hover-wash',
+            )}
+          >
+            <Kanban size={12} className={cn('w-[11px] flex-none', onIssues ? 'text-loom-fg' : 'text-loom-dim')} />
+            <span className={cn('min-w-0 flex-1 truncate font-mono text-[11.5px]', onIssues ? 'text-loom-fg' : 'text-loom-muted')}>
+              Issues
+            </span>
+            {p.issues.length > 0 && (
+              <span className="flex-none font-mono text-[9.5px] text-loom-dim">{p.issues.length}</span>
+            )}
+          </div>
+
           {p.worktrees.map((w) => {
             const st = STATE[w.state]
             const wsel = wtId === w.id

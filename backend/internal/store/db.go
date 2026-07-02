@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS worktrees (
 );
 CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id);
 
+CREATE TABLE IF NOT EXISTS issues (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'todo',
+  priority    TEXT NOT NULL DEFAULT 'normal',
+  assignee    TEXT,
+  position    REAL NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id);
+
 CREATE TABLE IF NOT EXISTS news (
   id           TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -98,6 +112,23 @@ CREATE TABLE IF NOT EXISTS invoices (
   bank_account_number TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_ws ON invoices(workspace_id);
+
+CREATE TABLE IF NOT EXISTS recurring_templates (
+  id                  TEXT PRIMARY KEY,
+  workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  company_name        TEXT NOT NULL DEFAULT '',
+  company_address     TEXT NOT NULL DEFAULT '',
+  items_json          TEXT NOT NULL DEFAULT '[]',
+  bank_name           TEXT NOT NULL DEFAULT '',
+  bank_account_name   TEXT NOT NULL DEFAULT '',
+  bank_account_number TEXT NOT NULL DEFAULT '',
+  day_of_month        INTEGER NOT NULL DEFAULT 1,
+  payment_term_days   INTEGER NOT NULL DEFAULT 14,
+  active              INTEGER NOT NULL DEFAULT 1,
+  last_generated_ym   TEXT NOT NULL DEFAULT '',
+  created_at          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_templates_ws ON recurring_templates(workspace_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),

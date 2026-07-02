@@ -28,6 +28,11 @@ type Store interface {
 	DeleteWorktree(id string) error
 	WorktreeByID(id string) (domain.Worktree, error)
 
+	// Issues
+	CreateIssue(projectID, title, status, createdAt string) (domain.Issue, error)
+	UpdateIssue(id, updatedAt string, p IssuePatch) (domain.Issue, error)
+	DeleteIssue(id string) error
+
 	// Todos
 	CreateTodo(wsID, text, priority string) (domain.Todo, error)
 	UpdateTodo(id string, p TodoPatch) (domain.Todo, error)
@@ -50,6 +55,12 @@ type Store interface {
 	CreateBank(bankName, accountName, accountNumber string) (domain.Bank, error)
 	UpdateBank(id string, p BankPatch) (domain.Bank, error)
 	DeleteBank(id string) error
+
+	// Recurring invoice templates (workspace-scoped; auto-generate draft Invoices on schedule)
+	CreateRecurringTemplate(wsID, companyName, companyAddress string, items []domain.InvoiceItem, bankName, bankAccountName, bankAccountNumber string, dayOfMonth, paymentTermDays int, createdAt string) (domain.RecurringInvoiceTemplate, error)
+	UpdateRecurringTemplate(id string, p RecurringTemplatePatch) (domain.RecurringInvoiceTemplate, error)
+	DeleteRecurringTemplate(id string) error
+	RunDueRecurringInvoices() ([]domain.Invoice, error)
 
 	// News
 	CreateNews(wsID, source, title, tag, time string, unread bool) (domain.NewsItem, error)
@@ -120,7 +131,31 @@ type BankPatch struct {
 	AccountNumber *string
 }
 
+// RecurringTemplatePatch carries optional fields for a partial recurring-template update.
+type RecurringTemplatePatch struct {
+	CompanyName       *string
+	CompanyAddress    *string
+	Items             *[]domain.InvoiceItem
+	BankName          *string
+	BankAccountName   *string
+	BankAccountNumber *string
+	DayOfMonth        *int
+	PaymentTermDays   *int
+	Active            *bool
+}
+
 // NewsPatch carries optional fields for a partial news update.
 type NewsPatch struct {
 	Unread *bool
+}
+
+// IssuePatch carries optional fields for a partial issue update.
+type IssuePatch struct {
+	Title       *string
+	Description *string
+	Status      *string
+	Priority    *string
+	Position    *float64
+	Assignee    *string
+	HasAssignee bool // true when the JSON key "assignee" was present (allows explicit null)
 }

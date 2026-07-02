@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,6 +13,16 @@ import (
 
 	"nhooyr.io/websocket"
 )
+
+func TestPTYUTF8HelperProcess(t *testing.T) {
+	if os.Getenv("LOOM_TEST_UTF8_HELPER") != "1" {
+		return
+	}
+	_, _ = os.Stdout.Write([]byte{0xE2, 0x96})
+	time.Sleep(300 * time.Millisecond)
+	_, _ = os.Stdout.Write([]byte{0xA0})
+	os.Exit(0)
+}
 
 // TestPumpForwardsSplitUTF8IntactAsBinary reproduces the "connection error"
 // symptom seen after a reattach: PTY output containing a multi-byte UTF-8
@@ -30,7 +41,8 @@ func TestPumpForwardsSplitUTF8IntactAsBinary(t *testing.T) {
 	// registry's pump() goroutine reads them as two distinct chunks instead
 	// of coalescing them into one — mirroring how a 4096-byte ptmx.Read or a
 	// ring-buffer chunk eviction can split a multi-byte character in two.
-	cmd := exec.Command("/bin/sh", "-c", `sleep 0.3; printf '\342\226'; sleep 0.3; printf '\240'`)
+	cmd := exec.Command(os.Args[0], "-test.run=TestPTYUTF8HelperProcess")
+	cmd.Env = append(os.Environ(), "LOOM_TEST_UTF8_HELPER=1")
 	sess, err := activeRegistry.spawn(session, cmd, 80, 24)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)

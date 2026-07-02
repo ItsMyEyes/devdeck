@@ -47,6 +47,13 @@ export function fmtDate(iso: string): string {
   return isValid(d) ? format(d, 'MMM d, yyyy') : iso
 }
 
+/** ISO date (YYYY-MM-DD) → "January 2026". Falls back to the raw string if unparsable. */
+export function fmtMonthYear(iso: string): string {
+  if (!iso) return '—'
+  const d = parseISO(iso)
+  return isValid(d) ? format(d, 'MMMM yyyy') : iso
+}
+
 /** True when an ISO due date (YYYY-MM-DD) is strictly before today. */
 export function isPastDue(iso: string): boolean {
   const d = parseISO(iso)

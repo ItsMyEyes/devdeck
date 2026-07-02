@@ -1,7 +1,8 @@
-import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
+import { Outlet, createFileRoute, redirect, useLocation, useNavigate } from '@tanstack/react-router'
 import { fetchWorkspaces } from '@/lib/api'
 import { qk } from '@/features/data/keys'
 import { AgentsBreadcrumb } from '@/features/agents/AgentsBreadcrumb'
+import { cn } from '@/lib/utils'
 
 export const Route = createFileRoute('/w/$wsId/p/$projectId')({
   beforeLoad: async ({ context, params }) => {
@@ -20,10 +21,37 @@ export const Route = createFileRoute('/w/$wsId/p/$projectId')({
   component: ProjectLayout,
 })
 
+const TABS = [
+  { to: '/w/$wsId/p/$projectId', label: 'Worktrees', match: (path: string) => !path.includes('/issues') },
+  { to: '/w/$wsId/p/$projectId/issues', label: 'Issues', match: (path: string) => path.includes('/issues') },
+] as const
+
 function ProjectLayout() {
+  const { wsId, projectId } = Route.useParams()
+  const navigate = useNavigate()
+  const pathname = useLocation({ select: (l) => l.pathname })
+  const inWorktree = pathname.includes('/wt/')
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <AgentsBreadcrumb />
+      {inWorktree ? null : (
+        <div className="flex flex-none items-center gap-1 border-b border-loom-border px-4 py-1.5">
+          {TABS.map((tab) => (
+            <button
+              key={tab.to}
+              type="button"
+              onClick={() => navigate({ to: tab.to, params: { wsId, projectId } })}
+              className={cn(
+                'cursor-pointer rounded-md px-2.5 py-1 font-mono text-[11.5px] transition-colors',
+                tab.match(pathname) ? 'bg-loom-popover text-loom-fg' : 'text-loom-dim hover:text-loom-fg-2',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
       <Outlet />
     </div>
   )

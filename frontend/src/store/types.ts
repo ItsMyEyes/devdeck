@@ -3,6 +3,7 @@
 export type WorktreeState = 'running' | 'waiting' | 'idle' | 'stopped' | 'error'
 export type Priority = 'high' | 'normal' | 'low'
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue'
+export type IssueStatus = 'todo' | 'in_progress' | 'in_review' | 'done'
 
 /** Kinds of terminal-log lines, each mapped to a color in constants.ts. */
 export type LineKind = 'cmd' | 'out' | 'ok' | 'warn' | 'err' | 'sys' | 'file' | 'dim'
@@ -36,6 +37,18 @@ export interface Worktree {
   pending: string | null
 }
 
+export interface Issue {
+  id: string
+  title: string
+  description: string
+  status: IssueStatus
+  priority: Priority
+  assignee: string | null
+  position: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -43,6 +56,7 @@ export interface Project {
   path: string
   expanded: boolean
   worktrees: Worktree[]
+  issues: Issue[]
 }
 
 export interface NewsItem {
@@ -101,6 +115,19 @@ export interface Invoice {
   bankDetail: BankDetail
 }
 
+export interface RecurringInvoiceTemplate {
+  id: string
+  companyName: string
+  companyAddress: string
+  items: InvoiceItem[]
+  bankDetail: BankDetail
+  dayOfMonth: number
+  paymentTermDays: number
+  active: boolean
+  lastGeneratedYm: string
+  createdAt: string
+}
+
 export interface Workspace {
   id: string
   name: string
@@ -108,6 +135,7 @@ export interface Workspace {
   news: NewsItem[]
   todos: Todo[]
   invoices: Invoice[]
+  recurringTemplates: RecurringInvoiceTemplate[]
 }
 
 export type ModuleView = 'agents' | 'news' | 'todos' | 'invoices'

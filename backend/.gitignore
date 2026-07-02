@@ -12,3 +12,7 @@
 
 # Go build/test artifacts
 *.out
+
+# Generated production UI copied from frontend/dist before portable builds
+/internal/webui/dist/*
+!/internal/webui/dist/.placeholder

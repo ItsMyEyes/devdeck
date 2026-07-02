@@ -7,15 +7,18 @@
   "scripts": {
     "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${LOOM_API_PORT:-8989} && vite\" \"npm run dev:api\"",
     "dev:web": "vite",
-    "dev:api": "cd ../backend && go run ./cmd/server",
+    "dev:api": "cd ../backend && go run ./cmd/server --db loom.db --open=false",
     "build": "vite build",
-    "build:api": "cd ../backend && go build -o loom-api ./cmd/server",
+    "build:api": "cd .. && make build-api",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@date-fns/tz": "^1.2.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-query-devtools": "^5.101.2",
     "@tanstack/react-router": "^1.170.16",
@@ -29,6 +32,9 @@
     "lucide-react": "^1.22.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.9.1",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"
