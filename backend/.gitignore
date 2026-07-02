@@ -1,0 +1,14 @@
+# Compiled binaries
+/server
+/loom-api
+*.exe
+*.test
+
+# SQLite database (runtime data, not source)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Go build/test artifacts
+*.out

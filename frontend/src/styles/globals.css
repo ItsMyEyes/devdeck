@@ -1,0 +1,261 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@xterm/xterm/css/xterm.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * loom design tokens — dark-only palette lifted 1:1 from the Loom v2 mockup.
+ * Raw palette is exposed as --loom-* for pixel-faithful spots; semantic tokens
+ * (--background, --primary, …) drive the shadcn/base-ui component layer.
+ */
+:root {
+  /* raw loom palette */
+  --loom-bg: #0c0d10;
+  --loom-surface: #0e0f13; /* header / sidebar */
+  --loom-surface-2: #101217; /* drawer / sidebar cards */
+  --loom-card: #13151a;
+  --loom-terminal: #08090c;
+  --loom-popover: #15171c;
+  --loom-elevated: #1a1d23;
+
+  --loom-border: #181b21; /* hairline */
+  --loom-border-strong: #23272f; /* inputs */
+  --loom-border-card: #1d2027;
+  --loom-border-menu: #2a2f39;
+  --loom-border-accent: #2c3550;
+
+  --loom-fg: #e8eaed;
+  --loom-fg-2: #cdd2da;
+  --loom-muted: #9aa0aa;
+  --loom-muted-2: #7f8794;
+  --loom-dim: #5f6672;
+  --loom-dim-2: #4c525d;
+  --loom-dim-3: #3a3f49;
+
+  --loom-accent: #6d8bff;
+  --loom-accent-hover: #86a0ff;
+  --loom-accent-soft: #9db1ff;
+  --loom-accent-ink: #0a0b0e;
+
+  --loom-green: #56d58a;
+  --loom-green-soft: #8fd99f;
+  --loom-yellow: #f5c451;
+  --loom-yellow-soft: #ffd66a;
+  --loom-red: #f87171;
+  --loom-red-soft: #f08a8a;
+  --loom-purple: #c7a3ff;
+  --loom-gray: #6b7280;
+
+  /* tint tokens — background/border/text colours for soft, warning, success,
+     destructive, and ghost surface variants (button cva + feature-level alerts).
+     Hoisted from raw hexes so a single source drives every tint. */
+  --loom-accent-tint: #1d2230;
+  --loom-accent-tint-hover: #242b3d;
+  --loom-warning-ink: #1a1606;
+  --loom-green-tint: #1a1f17;
+  --loom-green-tint-border: #2c3a29;
+  --loom-green-tint-hover: #20271c;
+  --loom-red-tint: #3a2626;
+  --loom-red-tint-hover: #241818;
+  --loom-red-tint-strong: #3a1f1f;
+  --loom-red-tint-strong-border: #5a2c2c;
+  --loom-red-tint-strong-hover: #4a2424;
+  --loom-red-tint-strong-text: #f5a3a3;
+  --loom-yellow-tint: #241e0f;
+  --loom-yellow-tint-border: #3d331a;
+  --loom-yellow-tint-text: #d1a52c;
+  --loom-yellow-ink: #1e1604;
+  --loom-hover-wash: rgba(255, 255, 255, 0.03);
+  --loom-hover-wash-menu: rgba(255, 255, 255, 0.05);
+  --loom-accent-gradient: linear-gradient(135deg, var(--loom-accent), #3a4ea8);
+
+  /* semantic (shadcn-style) */
+  --background: var(--loom-bg);
+  --foreground: var(--loom-fg);
+  --card: var(--loom-card);
+  --card-foreground: var(--loom-fg);
+  --popover: var(--loom-popover);
+  --popover-foreground: var(--loom-fg);
+  --primary: var(--loom-accent);
+  --primary-foreground: var(--loom-accent-ink);
+  --secondary: var(--loom-elevated);
+  --secondary-foreground: var(--loom-fg-2);
+  --muted: #14161b;
+  --muted-foreground: var(--loom-muted);
+  --accent: var(--loom-popover);
+  --accent-foreground: var(--loom-fg);
+  --destructive: var(--loom-red);
+  --destructive-foreground: var(--loom-accent-ink);
+  --border: var(--loom-border-strong);
+  --input: var(--loom-border-strong);
+  --ring: var(--loom-border-accent);
+
+  --radius: 0.6rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* raw loom palette, usable as e.g. text-loom-accent, bg-loom-card */
+  --color-loom-bg: var(--loom-bg);
+  --color-loom-surface: var(--loom-surface);
+  --color-loom-surface-2: var(--loom-surface-2);
+  --color-loom-card: var(--loom-card);
+  --color-loom-terminal: var(--loom-terminal);
+  --color-loom-popover: var(--loom-popover);
+  --color-loom-elevated: var(--loom-elevated);
+  --color-loom-border: var(--loom-border);
+  --color-loom-border-strong: var(--loom-border-strong);
+  --color-loom-border-card: var(--loom-border-card);
+  --color-loom-border-menu: var(--loom-border-menu);
+  --color-loom-border-accent: var(--loom-border-accent);
+  --color-loom-fg: var(--loom-fg);
+  --color-loom-fg-2: var(--loom-fg-2);
+  --color-loom-muted: var(--loom-muted);
+  --color-loom-muted-2: var(--loom-muted-2);
+  --color-loom-dim: var(--loom-dim);
+  --color-loom-dim-2: var(--loom-dim-2);
+  --color-loom-dim-3: var(--loom-dim-3);
+  --color-loom-accent: var(--loom-accent);
+  --color-loom-accent-hover: var(--loom-accent-hover);
+  --color-loom-accent-soft: var(--loom-accent-soft);
+  --color-loom-accent-ink: var(--loom-accent-ink);
+  --color-loom-green: var(--loom-green);
+  --color-loom-green-soft: var(--loom-green-soft);
+  --color-loom-yellow: var(--loom-yellow);
+  --color-loom-yellow-soft: var(--loom-yellow-soft);
+  --color-loom-red: var(--loom-red);
+  --color-loom-red-soft: var(--loom-red-soft);
+  --color-loom-purple: var(--loom-purple);
+  --color-loom-gray: var(--loom-gray);
+
+  /* tint tokens */
+  --color-loom-accent-tint: var(--loom-accent-tint);
+  --color-loom-accent-tint-hover: var(--loom-accent-tint-hover);
+  --color-loom-warning-ink: var(--loom-warning-ink);
+  --color-loom-green-tint: var(--loom-green-tint);
+  --color-loom-green-tint-border: var(--loom-green-tint-border);
+  --color-loom-green-tint-hover: var(--loom-green-tint-hover);
+  --color-loom-red-tint: var(--loom-red-tint);
+  --color-loom-red-tint-hover: var(--loom-red-tint-hover);
+  --color-loom-red-tint-strong: var(--loom-red-tint-strong);
+  --color-loom-red-tint-strong-border: var(--loom-red-tint-strong-border);
+  --color-loom-red-tint-strong-hover: var(--loom-red-tint-strong-hover);
+  --color-loom-red-tint-strong-text: var(--loom-red-tint-strong-text);
+  --color-loom-yellow-tint: var(--loom-yellow-tint);
+  --color-loom-yellow-tint-border: var(--loom-yellow-tint-border);
+  --color-loom-yellow-tint-text: var(--loom-yellow-tint-text);
+  --color-loom-yellow-ink: var(--loom-yellow-ink);
+  --color-loom-hover-wash: var(--loom-hover-wash);
+  --color-loom-hover-wash-menu: var(--loom-hover-wash-menu);
+
+  --font-sans: 'Geist', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --animate-pulse-dot: agpulse 1.8s ease-in-out infinite;
+  --animate-blink: agblink 1.1s step-end infinite;
+  --animate-slide-in: agslidein 0.18s ease;
+}
+
+@keyframes agpulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+@keyframes agblink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes agslidein {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--loom-bg);
+    color: var(--loom-fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #23272f;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2f343d;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--loom-dim-2);
+  }
+}
