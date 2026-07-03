@@ -40,6 +40,27 @@ export class ApiError extends Error {
   }
 }
 
+/** Builds the ApiError for a non-2xx response, reading the `{"error"}` envelope. */
+async function toApiError(res: Response): Promise<ApiError> {
+  let message = `Request failed with status ${res.status}`
+  try {
+    const data = (await res.json()) as { error?: string }
+    if (data && typeof data.error === 'string') message = data.error
+  } catch {
+    // response had no JSON body; keep the default message
+  }
+  // The server's --only-from IP allowlist rejected us mid-session (the SPA was
+  // already loaded); every request will fail, so show the dedicated page.
+  if (
+    res.status === 403 &&
+    message.startsWith('access denied') &&
+    window.location.pathname !== '/access-denied'
+  ) {
+    window.location.assign('/access-denied')
+  }
+  return new ApiError(message, res.status)
+}
+
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
 async function request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
@@ -58,14 +79,7 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown): Pro
   }
 
   if (!res.ok) {
-    let message = `Request failed with status ${res.status}`
-    try {
-      const data = (await res.json()) as { error?: string }
-      if (data && typeof data.error === 'string') message = data.error
-    } catch {
-      // response had no JSON body; keep the default message
-    }
-    throw new ApiError(message, res.status)
+    throw await toApiError(res)
   }
 
   if (res.status === 204) return undefined as T
@@ -463,14 +477,7 @@ export async function uploadAttachment(issueId: string, file: File): Promise<Att
   }
 
   if (!res.ok) {
-    let message = `Request failed with status ${res.status}`
-    try {
-      const data = (await res.json()) as { error?: string }
-      if (data && typeof data.error === 'string') message = data.error
-    } catch {
-      // response had no JSON body; keep the default message
-    }
-    throw new ApiError(message, res.status)
+    throw await toApiError(res)
   }
 
   return res.json() as Promise<Attachment>
@@ -568,7 +575,16 @@ export interface TotpVerifySetupResponse {
 }
 
 export interface LoginResponse {
-  status: 'totp_required'
+  /** 'ok' when the server runs with --2fa=false and the session is already set. */
+  status: 'totp_required' | 'ok'
+}
+
+export interface AuthConfig {
+  totpRequired: boolean
+}
+
+export function fetchAuthConfig(): Promise<AuthConfig> {
+  return request<AuthConfig>('GET', '/auth/config')
 }
 
 export function register(body: RegisterBody): Promise<User> {
@@ -597,4 +613,58 @@ export function logout(): Promise<void> {
 
 export function fetchMe(): Promise<User> {
   return request<User>('GET', '/auth/me')
+}
+
+// ---- Tools ----
+
+export interface MarkitdownResult {
+  filename: string
+  markdown: string
+}
+
+/** Converts an uploaded document (pdf/docx/pptx/xlsx/image/audio/html/...) to markdown via markitdown. */
+export async function convertToMarkdown(file: File): Promise<MarkitdownResult> {
+  const form = new FormData()
+  form.append('file', file)
+
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/tools/markitdown`, { method: 'POST', body: form })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+
+  return res.json() as Promise<MarkitdownResult>
+}
+
+export type MarkdownExportFormat = 'docx' | 'pdf'
+
+/** Exports markdown (mermaid blocks rendered to images) to a docx/pdf Blob, ready for download. */
+export async function exportMarkdown(
+  markdown: string,
+  format: MarkdownExportFormat,
+  filename?: string,
+): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/tools/markdown-export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown, format, filename }),
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+
+  return res.blob()
 }

@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { LayoutGrid, Receipt, type LucideIcon } from 'lucide-react'
+import { LayoutGrid, Receipt, Wrench, type LucideIcon } from 'lucide-react'
 import type { ModuleView } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -25,6 +25,7 @@ export function SidebarNav() {
   const items: NavDef[] = [
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, color: '#56d58a', badge: running },
     { key: 'invoices', label: 'Invoices', Icon: Receipt, color: '#c7a3ff', badge: openInvoices },
+    { key: 'tools', label: 'Tools', Icon: Wrench, color: '#ffb454', badge: 0 },
   ]
 
   function goto(key: ModuleView) {

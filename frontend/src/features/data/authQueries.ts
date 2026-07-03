@@ -1,7 +1,16 @@
 // React-query hooks for authentication endpoints.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchMe, login, logout, register, setupTotp, verifyTotp, verifyTotpSetup } from '@/lib/api'
+import {
+  fetchAuthConfig,
+  fetchMe,
+  login,
+  logout,
+  register,
+  setupTotp,
+  verifyTotp,
+  verifyTotpSetup,
+} from '@/lib/api'
 import { qk } from '@/features/data/keys'
 
 /** Shared so the root route guard's ensureQueryData and useMe() behave identically. */
@@ -13,6 +22,11 @@ export const meQueryOptions = {
 
 export function useMe() {
   return useQuery(meQueryOptions)
+}
+
+/** Public flow flags (e.g. whether the server requires TOTP; see --2fa). */
+export function useAuthConfig() {
+  return useQuery({ queryKey: qk.authConfig, queryFn: fetchAuthConfig, staleTime: Infinity })
 }
 
 export function useRegister() {

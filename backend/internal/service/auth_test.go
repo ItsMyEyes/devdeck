@@ -330,3 +330,51 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 		t.Errorf("CurrentUser after logout err = %v, want ErrUnauthorized", err)
 	}
 }
+
+func TestCompleteLoginRefusedWhile2FARequired(t *testing.T) {
+	svc := newTestAuthService(t)
+	if !svc.TOTPRequired() {
+		t.Fatal("2FA should be required by default")
+	}
+	_, pendingToken, err := svc.Register("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.CompleteLogin(pendingToken); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("CompleteLogin with 2FA required err = %v, want ErrUnauthorized", err)
+	}
+}
+
+func TestCompleteLoginIssuesSessionWhen2FADisabled(t *testing.T) {
+	svc := newTestAuthService(t)
+	svc.SetTOTPRequired(false)
+	if _, _, err := svc.Register("owner@example.com", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	pendingToken, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionToken, user, err := svc.CompleteLogin(pendingToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Email != "owner@example.com" {
+		t.Errorf("Email = %q, want owner@example.com", user.Email)
+	}
+	if _, err := svc.CurrentUser(sessionToken); err != nil {
+		t.Errorf("session from CompleteLogin is not valid: %v", err)
+	}
+	// The pending token must be consumed.
+	if _, _, err := svc.CompleteLogin(pendingToken); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("reusing pending token err = %v, want ErrUnauthorized", err)
+	}
+}
+
+func TestCompleteLoginRejectsBogusToken(t *testing.T) {
+	svc := newTestAuthService(t)
+	svc.SetTOTPRequired(false)
+	if _, _, err := svc.CompleteLogin("bogus"); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("CompleteLogin with bogus token err = %v, want ErrUnauthorized", err)
+	}
+}

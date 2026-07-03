@@ -65,12 +65,20 @@ func NewServer(store port.Store) *Server {
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
+		// Terminal output is highly repetitive ANSI text; the shared
+		// sliding window compresses it heavily, which matters most when
+		// production is reached through a tunnel. Clients that don't
+		// support it (e.g. Safari) simply fall back to uncompressed.
+		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		log.Printf("terminal: websocket accept: %v", err)
 		return
 	}
 	defer conn.CloseNow()
+	// Default read limit is 32 KB, which fails the connection on a large
+	// paste into the terminal.
+	conn.SetReadLimit(1 << 20)
 
 	q := r.URL.Query()
 	session := q.Get("session")
@@ -210,14 +218,17 @@ func writeText(ctx context.Context, conn *websocket.Conn, s string) {
 	_ = conn.Write(ctx, websocket.MessageText, []byte(s))
 }
 
-func writeBanner(ctx context.Context, conn *websocket.Conn, session, shell string, isPTY bool) {
+func bannerText(session, shell string, isPTY bool) string {
 	mode := "simulated agent"
 	if isPTY {
 		mode = fmt.Sprintf("live PTY · %s", shell)
 	}
-	banner := fmt.Sprintf("%sloom terminal · session %s · %s%s\r\n\r\n",
+	return fmt.Sprintf("%sloom terminal · session %s · %s%s\r\n\r\n",
 		ansi.Dim, session, mode, ansi.Reset)
-	writeText(ctx, conn, banner)
+}
+
+func writeBanner(ctx context.Context, conn *websocket.Conn, session, shell string, isPTY bool) {
+	writeText(ctx, conn, bannerText(session, shell, isPTY))
 }
 
 // Keepalive sends pings every 30s and terminates dead connections.

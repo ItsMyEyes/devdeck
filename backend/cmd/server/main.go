@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"loom/backend/internal/codeserver"
+	"loom/backend/internal/config"
 	"loom/backend/internal/handler"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
@@ -24,11 +26,34 @@ import (
 )
 
 func main() {
+	envFile := flag.String("env", envOr("LOOM_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
 	addr := flag.String("addr", envOr("LOOM_ADDR", "127.0.0.1:8989"), "listen address")
 	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path")
 	jadiURL := flag.String("jadi", envOr("LOOM_JADI_URL", ""), "jadi backend URL (empty = static registry)")
 	openUI := flag.Bool("open", true, "open the embedded UI in the default browser")
+	onlyFrom := flag.String("only-from", envOr("LOOM_ONLY_FROM", ""), "comma-separated IPs/CIDRs allowed to access the server (empty = no restriction)")
+	trustedProxies := flag.String("trusted-proxies", envOr("LOOM_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
+	clientIPHeader := flag.String("client-ip-header", envOr("LOOM_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
+	twoFA := flag.Bool("2fa", envBool("LOOM_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
+	pythonBin := flag.String("python-bin", envOr("LOOM_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
+	pandocBin := flag.String("pandoc-bin", envOr("LOOM_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
+	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
 	flag.Parse()
+
+	if applied, err := config.LoadDotEnv(*envFile); err != nil {
+		log.Fatalf("--env %s: %v", *envFile, err)
+	} else if applied > 0 {
+		log.Printf("env: loaded %d variable(s) from %s", applied, *envFile)
+	}
+
+	allowNets, err := handler.ParseCIDRList(*onlyFrom)
+	if err != nil {
+		log.Fatalf("--only-from: %v", err)
+	}
+	proxyNets, err := handler.ParseCIDRList(*trustedProxies)
+	if err != nil {
+		log.Fatalf("--trusted-proxies: %v", err)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
 		log.Fatalf("create database directory: %v", err)
@@ -46,6 +71,10 @@ func main() {
 		log.Fatalf("auth key: %v", err)
 	}
 	authSvc := service.NewAuthService(st, authKey)
+	authSvc.SetTOTPRequired(*twoFA)
+	if !*twoFA {
+		log.Printf("auth: warning: TOTP two-factor authentication disabled (--2fa=false); logins complete with password only")
+	}
 	authH := handler.NewAuthHandler(authSvc)
 
 	if generated, err := st.RunDueRecurringInvoices(); err != nil {
@@ -109,8 +138,19 @@ func main() {
 	termSrv := terminal.NewServer(st)
 	fsH := handler.NewFsHandler()
 
+	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
+		PythonBin: *pythonBin,
+		PandocBin: *pandocBin,
+		MmdcBin:   *mmdcBin,
+	})
+	if err != nil {
+		log.Fatalf("tools service: %v", err)
+	}
+	toolsH := handler.NewToolsHandler(toolsSvc)
+
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/auth/config", authH.GetConfig)
 	mux.HandleFunc("POST /api/auth/register", authH.PostRegister)
 	mux.HandleFunc("POST /api/auth/login", authH.PostLogin)
 	mux.HandleFunc("POST /api/auth/totp/setup", authH.PostTotpSetup)
@@ -198,10 +238,31 @@ func main() {
 
 	mux.HandleFunc("POST /api/seed", seedH.PostSeed)
 
+	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
+	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)
+
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
 
-	root := handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc)(mux)))
+	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc)(mux)))
+	if len(allowNets) > 0 {
+		root = handler.OnlyFrom(allowNets, proxyNets, *clientIPHeader)(root)
+		log.Printf("access: restricted to %s (--only-from)", *onlyFrom)
+		if !handler.LoopbackAllowed(allowNets) {
+			log.Printf("access: warning: loopback is not in the allowlist; local requests to this instance will be denied")
+		}
+	}
+	if len(proxyNets) > 0 {
+		log.Printf("access: trusting forwarding headers from proxies %s (--trusted-proxies)", *trustedProxies)
+	}
+	if *clientIPHeader != "" {
+		if len(proxyNets) == 0 {
+			log.Printf("access: warning: --client-ip-header %s is set but --trusted-proxies is empty, so the header will never be honored", *clientIPHeader)
+		} else {
+			log.Printf("access: resolving client IPs from %s (--client-ip-header)", *clientIPHeader)
+		}
+	}
+	root = handler.AccessLog(proxyNets, *clientIPHeader)(root)
 
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -233,6 +294,34 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Fatalf("%s: invalid boolean %q", key, v)
+	}
+	return parsed
+}
+
+// defaultPythonBin prefers a local venv at ./tools/venv (see COMMANDS.md —
+// `python3 -m venv tools/venv && tools/venv/bin/pip install "markitdown[all]" openai pymupdf4llm`),
+// since markitdown can't be pip-installed into a system Python on most
+// platforms. Falls back to whatever "python3" resolves to on PATH.
+func defaultPythonBin() string {
+	for _, candidate := range []string{
+		filepath.Join("tools", "venv", "bin", "python3"),
+		filepath.Join("tools", "venv", "Scripts", "python.exe"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return "python3"
 }
 
 // loadOrCreateAuthKey resolves the AES-256 key used to encrypt TOTP secrets

@@ -22,6 +22,8 @@ export function useScope(): Scope {
       ? 'todos'
       : pathname.includes('/invoices')
         ? 'invoices'
-        : 'agents'
+        : pathname.includes('/tools')
+          ? 'tools'
+          : 'agents'
   return { wsId: params.wsId, projectId: params.projectId, wtId: params.wtId, view }
 }

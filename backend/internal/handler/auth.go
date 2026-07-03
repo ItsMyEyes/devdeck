@@ -69,8 +69,23 @@ func (h *AuthHandler) PostRegister(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
+	if !h.svc.TOTPRequired() {
+		sessionToken, sessUser, err := h.svc.CompleteLogin(pendingToken)
+		if handleStoreErr(w, err) {
+			return
+		}
+		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+		writeJSON(w, http.StatusCreated, sessUser)
+		return
+	}
 	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute)
 	writeJSON(w, http.StatusCreated, user)
+}
+
+// GetConfig handles GET /api/auth/config — public flow flags the SPA needs
+// before a session exists (e.g. whether login/registration includes TOTP).
+func (h *AuthHandler) GetConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"totpRequired": h.svc.TOTPRequired()})
 }
 
 // PostLogin handles POST /api/auth/login.
@@ -85,6 +100,15 @@ func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	pendingToken, err := h.svc.Login(body.Email, body.Password)
 	if handleStoreErr(w, err) {
+		return
+	}
+	if !h.svc.TOTPRequired() {
+		sessionToken, _, err := h.svc.CompleteLogin(pendingToken)
+		if handleStoreErr(w, err) {
+			return
+		}
+		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute)

@@ -14,6 +14,7 @@ import {
   Quote,
   Strikethrough,
   Table,
+  Workflow,
 } from 'lucide-react'
 
 export interface EditResult {
@@ -137,6 +138,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     icon: Table,
     snippet: '| Col 1 | Col 2 |\n| --- | --- |\n|  |  |\n',
     cursorOffset: 2,
+  },
+  {
+    id: 'mermaid',
+    label: 'Mermaid diagram',
+    hint: 'Rendered on docx/pdf export',
+    icon: Workflow,
+    snippet: '```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```\n',
+    cursorOffset: 11,
   },
   { id: 'divider', label: 'Divider', hint: 'Horizontal rule', icon: Minus, snippet: '---\n', cursorOffset: 4 },
 ]

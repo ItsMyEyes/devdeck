@@ -174,7 +174,7 @@ export interface Workspace {
   recurringTemplates: RecurringInvoiceTemplate[]
 }
 
-export type ModuleView = 'agents' | 'news' | 'todos' | 'invoices'
+export type ModuleView = 'agents' | 'news' | 'todos' | 'invoices' | 'tools'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {

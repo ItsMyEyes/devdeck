@@ -24,9 +24,71 @@ The Go backend accepts flags:
 - `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
 - `--open` — open the embedded UI in the default browser (default true)
+- `--only-from` — comma-separated IPs/CIDRs allowed to access the server
+  (env `LOOM_ONLY_FROM`, empty = no restriction). Blocked API/WebSocket
+  requests get a 403 JSON error; blocked page loads get a standalone
+  access-denied page. Include `127.0.0.0/8` if local access should keep working.
+- `--trusted-proxies` — comma-separated proxy IPs/CIDRs whose `X-Forwarded-For`
+  is trusted when resolving the client IP (env `LOOM_TRUSTED_PROXIES`).
+  Without this, forwarding headers are ignored entirely (they are trivially
+  spoofable) and the TCP peer address is used. Required for `--only-from` to
+  see real public IPs when running behind a tunnel/reverse proxy — set it to
+  the proxy's ingress address (e.g. `127.0.0.1` for a local tunnel daemon).
+- `--2fa` — require TOTP two-factor authentication for login (default `true`,
+  env `LOOM_2FA`). With `--2fa=false`, registration skips TOTP enrollment and
+  login completes with password only (the login response is `{"status":"ok"}`
+  instead of `{"status":"totp_required"}`); `GET /api/auth/config` exposes the
+  setting to the SPA.
 - `LOOM_AUTH_KEY` — base64-encoded 32-byte AES key used to encrypt TOTP
   secrets at rest (env only, no flag). If unset, a key is generated once and
   stored as `auth.key` beside the database.
+- `--env` — path to a `.env` file loaded into the process environment before
+  startup (default `.env`, env `LOOM_ENV_FILE`); a missing file is not an
+  error. Used for LLM credentials consumed by the Tools module (see below).
+- `--python-bin` / `--pandoc-bin` / `--mmdc-bin` — external binaries the Tools
+  module shells out to (env `LOOM_PYTHON_BIN` / `LOOM_PANDOC_BIN` /
+  `LOOM_MMDC_BIN`). `--python-bin` defaults to `./tools/venv/bin/python3` if
+  that venv exists (see Tools module setup below), else `python3` on PATH.
+
+## Tools module setup (markitdown, pandoc, mermaid)
+
+The Tools sidebar page (`/w/:wsId/tools`) shells out to three external CLIs —
+none have a pure-Go equivalent, so they aren't bundled in the binary:
+
+- **markitdown** (any document → markdown, https://github.com/microsoft/markitdown):
+  install into a dedicated venv, since most system Pythons are externally
+  managed and block a plain `pip install`:
+  ```bash
+  cd backend && python3 -m venv tools/venv
+  tools/venv/bin/pip install "markitdown[all]" openai pymupdf4llm
+  ```
+  `openai` is optional — it's only imported if `OPENAI_API_KEY` and
+  `MARKITDOWN_LLM_MODEL` are set (see below), enabling LLM-generated image
+  descriptions during conversion. `pymupdf4llm` handles the PDF path:
+  markitdown's own PDF converter is plain-text extraction (headings, tables,
+  and emphasis are lost — its LLM hook never applies to PDFs), so PDFs go
+  through pymupdf4llm's layout-aware extraction instead; without it, PDF
+  conversion falls back to plain text. `tools/venv/` is gitignored; each
+  checkout/deploy needs its own.
+- **pandoc** (markdown → docx/pdf): `brew install pandoc` (or see
+  https://pandoc.org/installing.html). PDF export uses pandoc's default PDF
+  engine — install a LaTeX distribution (e.g. `brew install --cask basictex`)
+  if PDF export fails with a missing-engine error.
+- **mermaid-cli** (`mmdc`, renders ` ```mermaid ` fenced blocks to PNG before
+  the pandoc pass): `npm install -g @mermaid-js/mermaid-cli`.
+
+If a binary is missing, the Tools API responds `503` with an actionable
+install command rather than failing silently.
+
+**LLM integration for markitdown** — put credentials in a `.env` file beside
+the database (or wherever `--env` points) and they load automatically at
+startup via `config.LoadDotEnv` (real environment variables always win over
+the file):
+```
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=https://api.openai.com/v1   # optional, for OpenAI-compatible endpoints
+MARKITDOWN_LLM_MODEL=gpt-4o-mini
+```
 
 ## MCP server (agent-facing issue tracker)
 
@@ -87,9 +149,11 @@ cd backend && go vet ./...
 
 ## Testing
 
-No test suite yet. When added:
-- Frontend: Vitest (anticipated — Vite-native)
-- Backend: `go test ./...` (stdlib testing)
+- Backend: `go test ./...` (stdlib testing). The Tools module tests
+  (`internal/service/tools_test.go`, `internal/handler/tools_test.go`) shell
+  out to the real markitdown/pandoc/mmdc binaries and skip themselves if a
+  binary isn't on `PATH`.
+- Frontend: no test suite yet; Vitest is the anticipated choice (Vite-native).
 
 ## Code generation
 

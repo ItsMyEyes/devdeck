@@ -23,6 +23,9 @@ interface SlashMenuState {
  * canvas (no card/border/permanent toolbar) and swaps to a borderless
  * auto-growing textarea — with a formatting toolbar, "/" block-command menu,
  * and file attachment upload (button, drag-drop, or paste) — while focused.
+ * Attachments are stored per issue, so upload UI only appears when an
+ * `issueId` is provided; without one (e.g. the Tools page) the editor is
+ * text-only.
  */
 export function MarkdownEditor({
   value,
@@ -35,7 +38,7 @@ export function MarkdownEditor({
   onChange: (value: string) => void
   onBlur?: () => void
   placeholder?: string
-  issueId: string
+  issueId?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
@@ -81,6 +84,7 @@ export function MarkdownEditor({
   }
 
   function insertAttachment(file: File) {
+    if (!issueId) return
     upload.mutate(
       { issueId, file },
       {
@@ -163,6 +167,7 @@ export function MarkdownEditor({
   }
 
   function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!issueId) return
     const file = Array.from(e.clipboardData.items)
       .find((item) => item.kind === 'file')
       ?.getAsFile()
@@ -216,18 +221,22 @@ export function MarkdownEditor({
             </button>
           </Tooltip>
         ))}
-        <span className="mx-0.5 h-4 w-px bg-loom-border-strong" />
-        <Tooltip label="Attach file">
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={upload.isPending}
-            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
-          >
-            {upload.isPending ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
-          </button>
-        </Tooltip>
+        {issueId ? (
+          <>
+            <span className="mx-0.5 h-4 w-px bg-loom-border-strong" />
+            <Tooltip label="Attach file">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={upload.isPending}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
+              >
+                {upload.isPending ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
+              </button>
+            </Tooltip>
+          </>
+        ) : null}
       </div>
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePick} />
 

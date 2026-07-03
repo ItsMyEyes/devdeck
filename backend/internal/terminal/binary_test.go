@@ -54,7 +54,7 @@ func TestPumpForwardsSplitUTF8IntactAsBinary(t *testing.T) {
 			return
 		}
 		defer conn.CloseNow()
-		sess.attachConn(conn, 80, 24)
+		sess.attachConn(conn, 80, 24, nil)
 		time.Sleep(1200 * time.Millisecond)
 	}))
 	defer srv.Close()

@@ -78,16 +78,14 @@ func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session st
 		log.Printf("terminal: session %s reattached (pid %d)", session, sess.cmd.Process.Pid)
 	}
 
-	buffered := sess.attachConn(conn, cols, rows)
-
 	shellLabel := agentBin
 	if shellLabel == "" {
 		shellLabel = pickShell()
 	}
-	writeBanner(ctx, conn, session, shellLabel, true)
-	if len(buffered) > 0 {
-		_ = conn.Write(ctx, websocket.MessageBinary, buffered)
-	}
+	// The banner and buffered-history replay are delivered by the pump's
+	// coalescing writer (see registry.pump), not written here, so they can't
+	// interleave with live output racing in from the PTY.
+	sess.attachConn(conn, cols, rows, []byte(bannerText(session, shellLabel, true)))
 
 	go keepalive(ctx, conn)
 
@@ -110,7 +108,10 @@ func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session st
 		}
 	}
 
-	s.registry.detach(session, conn)
-	log.Printf("terminal: session %s detached (process continues in background)", session)
+	if s.registry.detach(session, conn) {
+		log.Printf("terminal: session %s detached (process continues in background)", session)
+	} else {
+		log.Printf("terminal: session %s connection closed (process already terminated)", session)
+	}
 	return nil
 }

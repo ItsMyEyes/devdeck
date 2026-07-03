@@ -25,7 +25,10 @@ function LoginPage() {
     login.mutate(
       { email, password },
       {
-        onSuccess: () => setStep('totp'),
+        // status 'ok' means the server runs with --2fa=false and the
+        // session cookie is already set; there is no TOTP step.
+        onSuccess: (data) =>
+          data.status === 'ok' ? navigate({ to: '/' }) : setStep('totp'),
         onError: (err) => setError(err instanceof ApiError ? err.message : 'Login failed'),
       },
     )

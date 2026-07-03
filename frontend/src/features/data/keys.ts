@@ -15,4 +15,5 @@ export const qk = {
   issueComments: (issueId: string) => ['issues', issueId, 'comments'] as const,
   issueEvents: (issueId: string) => ['issues', issueId, 'events'] as const,
   me: ['me'] as const,
+  authConfig: ['authConfig'] as const,
 }

@@ -17,7 +17,7 @@ dev-web:
 
 # Backend only (Go :8989)
 dev-api:
-	cd backend && go run ./cmd/server --db loom.db --open=false
+	cd backend && go run ./cmd/server --db loom.db --open=false --env .env
 
 # Delete the dev database (wipes seed/demo data used by `make dev-api`)
 seed-clean:

@@ -71,16 +71,24 @@ func hashToken(token string) string {
 // session lifecycle. now is overridden by tests to make the lockout
 // escalation math deterministic.
 type AuthService struct {
-	store   port.Store
-	authKey []byte
-	now     func() time.Time
+	store      port.Store
+	authKey    []byte
+	require2FA bool
+	now        func() time.Time
 }
 
 // NewAuthService creates an auth service. authKey must be 32 bytes
-// (AES-256) and is used to encrypt TOTP secrets at rest.
+// (AES-256) and is used to encrypt TOTP secrets at rest. 2FA is required
+// by default; SetTOTPRequired(false) relaxes it (--2fa=false).
 func NewAuthService(store port.Store, authKey []byte) *AuthService {
-	return &AuthService{store: store, authKey: authKey, now: time.Now}
+	return &AuthService{store: store, authKey: authKey, require2FA: true, now: time.Now}
 }
+
+// SetTOTPRequired toggles the global 2FA requirement (the --2fa flag).
+func (a *AuthService) SetTOTPRequired(required bool) { a.require2FA = required }
+
+// TOTPRequired reports whether logins must complete TOTP verification.
+func (a *AuthService) TOTPRequired() bool { return a.require2FA }
 
 func (a *AuthService) issuePendingLogin(userID string) (string, error) {
 	token, err := randomToken()
@@ -319,6 +327,24 @@ func (a *AuthService) VerifyTotp(pendingToken, code string) (string, domain.User
 		return a.completeVerification(pendingToken, userID, user)
 	}
 	return "", domain.User{}, fmt.Errorf("invalid verification code: %w", ErrValidation)
+}
+
+// CompleteLogin exchanges a pending-login token for a real session without a
+// TOTP code. It refuses to run while 2FA is required (the default), so it can
+// never become a verification bypass — it only exists for --2fa=false.
+func (a *AuthService) CompleteLogin(pendingToken string) (string, domain.User, error) {
+	if a.require2FA {
+		return "", domain.User{}, fmt.Errorf("2fa verification required: %w", ErrUnauthorized)
+	}
+	userID, err := a.store.PendingLoginUserID(hashToken(pendingToken), a.now())
+	if err != nil {
+		return "", domain.User{}, fmt.Errorf("invalid or expired login: %w", ErrUnauthorized)
+	}
+	user, err := a.store.UserByID(userID)
+	if err != nil {
+		return "", domain.User{}, err
+	}
+	return a.completeVerification(pendingToken, userID, user)
 }
 
 func (a *AuthService) completeVerification(pendingToken, userID string, user domain.User) (string, domain.User, error) {

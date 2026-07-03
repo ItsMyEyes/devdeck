@@ -83,6 +83,7 @@ func decodeBody(r *http.Request, dst any) (map[string]json.RawMessage, error) {
 func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 	publicPaths := map[string]bool{
 		"/api/health":                 true,
+		"/api/auth/config":            true,
 		"/api/auth/register":          true,
 		"/api/auth/login":             true,
 		"/api/auth/totp/setup":        true,
