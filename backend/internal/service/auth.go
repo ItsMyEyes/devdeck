@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,11 +14,18 @@ import (
 
 	"loom/backend/internal/domain"
 	"loom/backend/internal/port"
+	"loom/backend/internal/store"
 )
 
 const (
 	pendingLoginTTL = 2 * time.Minute
 	backupCodeCount = 10
+
+	lockoutThreshold  = 5
+	baseLockout       = 5 * time.Minute
+	maxLockout        = 24 * time.Hour
+	lockoutDecayAfter = 24 * time.Hour
+	maxLockoutLevel   = 9 // baseLockout * 2^9 (42.7h) already exceeds maxLockout; caps the shift below
 )
 
 // commonPasswords is a small blocklist of well-known weak passwords, checked
@@ -184,4 +192,88 @@ func (a *AuthService) ConfirmTotpEnrollment(userID, code string) ([]string, erro
 		return nil, err
 	}
 	return codes, nil
+}
+
+func (a *AuthService) isLocked(user domain.User) (bool, time.Time) {
+	if user.LockedUntil == nil {
+		return false, time.Time{}
+	}
+	lockedUntil, err := time.Parse(time.RFC3339, *user.LockedUntil)
+	if err != nil {
+		return false, time.Time{}
+	}
+	if a.now().Before(lockedUntil) {
+		return true, lockedUntil
+	}
+	return false, time.Time{}
+}
+
+// recordFailedAttempt applies the escalating-lockout algorithm: 5 failures
+// locks the account for 5min × 2^lockoutLevel (capped at 24h); a clean 24h
+// since the last failure decays lockoutLevel back to 0 first.
+func (a *AuthService) recordFailedAttempt(user domain.User) error {
+	now := a.now()
+	failedAttempts := user.FailedAttempts + 1
+	lockoutLevel := user.LockoutLevel
+	if user.LastFailedAt != nil {
+		if lastFailed, err := time.Parse(time.RFC3339, *user.LastFailedAt); err == nil {
+			if now.Sub(lastFailed) > lockoutDecayAfter {
+				lockoutLevel = 0
+			}
+		}
+	}
+
+	patch := port.UserPatch{}
+	nowStr := now.UTC().Format(time.RFC3339)
+	patch.LastFailedAt = &nowStr
+
+	if failedAttempts >= lockoutThreshold {
+		duration := baseLockout * time.Duration(uint64(1)<<uint(lockoutLevel))
+		if duration > maxLockout {
+			duration = maxLockout
+		}
+		lockedUntilStr := now.Add(duration).UTC().Format(time.RFC3339)
+		patch.LockedUntil = &lockedUntilStr
+		patch.HasLockedUntil = true
+		nextLevel := lockoutLevel + 1
+		if nextLevel > maxLockoutLevel {
+			nextLevel = maxLockoutLevel
+		}
+		patch.LockoutLevel = &nextLevel
+		zero := 0
+		patch.FailedAttempts = &zero
+	} else {
+		patch.FailedAttempts = &failedAttempts
+		patch.LockoutLevel = &lockoutLevel
+	}
+	_, err := a.store.UpdateUser(user.ID, patch)
+	return err
+}
+
+// Login verifies email+password and, on success, issues a pending-login
+// token for the caller to complete with VerifyTotp. It never distinguishes
+// "no such account" from "wrong password" in its error, to avoid account
+// enumeration.
+func (a *AuthService) Login(email, password string) (string, error) {
+	user, err := a.store.UserByEmail(email)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return "", fmt.Errorf("invalid email or password: %w", ErrUnauthorized)
+		}
+		return "", err
+	}
+	if locked, lockedUntil := a.isLocked(user); locked {
+		return "", fmt.Errorf("account locked until %s: %w", lockedUntil.Format(time.RFC3339), ErrLocked)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		if err := a.recordFailedAttempt(user); err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("invalid email or password: %w", ErrUnauthorized)
+	}
+	zero := 0
+	if _, err := a.store.UpdateUser(user.ID, port.UserPatch{FailedAttempts: &zero, LockoutLevel: &zero}); err != nil {
+		return "", err
+	}
+	return a.issuePendingLogin(user.ID)
 }
