@@ -147,6 +147,37 @@ CREATE TABLE IF NOT EXISTS settings (
   default_model       TEXT NOT NULL DEFAULT 'claude-sonnet-5'
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id                 TEXT PRIMARY KEY,
+  email              TEXT NOT NULL UNIQUE,
+  password_hash      TEXT NOT NULL,
+  totp_secret_enc    TEXT NOT NULL DEFAULT '',
+  totp_enabled       INTEGER NOT NULL DEFAULT 0,
+  backup_code_hashes TEXT NOT NULL DEFAULT '[]',
+  failed_attempts    INTEGER NOT NULL DEFAULT 0,
+  lockout_level      INTEGER NOT NULL DEFAULT 0,
+  locked_until       TEXT,
+  last_failed_at     TEXT,
+  created_at         TEXT NOT NULL
+);
+
+-- id is the SHA-256 hash of the opaque session token, never the raw token,
+-- so a DB dump alone can't be replayed as a valid session.
+CREATE TABLE IF NOT EXISTS sessions (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Short-lived (2 min) token issued after password success, before TOTP is
+-- verified, and reused for the mandatory post-registration TOTP enrollment.
+CREATE TABLE IF NOT EXISTS pending_logins (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL
+);
+
 INSERT OR IGNORE INTO settings (id, active_workspace_id, default_model)
 VALUES (1, NULL, 'claude-sonnet-5');
 `

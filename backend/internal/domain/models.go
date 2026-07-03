@@ -165,3 +165,20 @@ type FsEntry struct {
 	IsDir bool   `json:"isDir"`
 	Git   bool   `json:"git"`
 }
+
+// User mirrors the frontend User type. Sensitive fields are tagged json:"-"
+// and never serialize into an API response — same mechanism already used
+// for Worktree.ProjectID / Issue.ProjectID.
+type User struct {
+	ID               string   `json:"id"`
+	Email            string   `json:"email"`
+	TotpEnabled      bool     `json:"totpEnabled"`
+	CreatedAt        string   `json:"createdAt"`
+	PasswordHash     string   `json:"-"`
+	TotpSecretEnc    string   `json:"-"`
+	BackupCodeHashes []string `json:"-"`
+	FailedAttempts   int      `json:"-"`
+	LockoutLevel     int      `json:"-"`
+	LockedUntil      *string  `json:"-"`
+	LastFailedAt     *string  `json:"-"`
+}
