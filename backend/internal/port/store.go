@@ -76,6 +76,13 @@ type Store interface {
 
 	// Seed — wipes all data and inserts demo dataset.
 	Seed() ([]domain.Workspace, error)
+
+	// Users (single-operator: at most one row ever exists)
+	CreateUser(email, passwordHash, createdAt string) (domain.User, error)
+	UserByEmail(email string) (domain.User, error)
+	UserByID(id string) (domain.User, error)
+	UserCount() (int, error)
+	UpdateUser(id string, p UserPatch) (domain.User, error)
 }
 
 // SettingsPatch carries optional fields for a partial settings update.
@@ -164,4 +171,16 @@ type IssuePatch struct {
 	Position    *float64
 	Assignee    *string
 	HasAssignee bool // true when the JSON key "assignee" was present (allows explicit null)
+}
+
+// UserPatch carries optional fields for a partial user update.
+type UserPatch struct {
+	TotpSecretEnc    *string
+	TotpEnabled      *bool
+	BackupCodeHashes *[]string
+	FailedAttempts   *int
+	LockoutLevel     *int
+	LockedUntil      *string
+	HasLockedUntil   bool // true when the "lockedUntil" field was explicitly set (allows clearing to null)
+	LastFailedAt     *string
 }

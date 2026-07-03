@@ -97,3 +97,25 @@ func setInt(db *sql.DB, table, col, id string, v *int) error {
 	_, err := db.Exec("UPDATE "+table+" SET "+col+" = ? WHERE id = ?", *v, id)
 	return err
 }
+
+// setBool applies an optional scalar bool update to a column.
+func setBool(db *sql.DB, table, col, id string, v *bool) error {
+	if v == nil {
+		return nil
+	}
+	_, err := db.Exec("UPDATE "+table+" SET "+col+" = ? WHERE id = ?", boolInt(*v), id)
+	return err
+}
+
+// setJSONStrSlice applies an optional JSON-encoded []string update to a column.
+func setJSONStrSlice(db *sql.DB, table, col, id string, v *[]string) error {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(*v)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("UPDATE "+table+" SET "+col+" = ? WHERE id = ?", string(b), id)
+	return err
+}
