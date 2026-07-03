@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"loom/backend/internal/codeserver"
 	"loom/backend/internal/handler"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
@@ -75,17 +76,23 @@ func main() {
 	}
 	agentReg := registry.NewLocalRegistry(baseReg)
 
+	csManager := codeserver.NewManager()
 	wsSvc := service.NewWorkspaceService(st)
-	pSvc := service.NewProjectService(st)
-	wtSvc := service.NewWorktreeService(st, terminal.KillSession)
+	pSvc := service.NewProjectService(st, csManager.Stop)
+	wtSvc := service.NewWorktreeService(st, func(id string) error {
+		_ = csManager.Stop(id)
+		return terminal.KillSession(id)
+	})
 	agentSvc := service.NewAgentService(agentReg)
 	seedSvc := service.NewSeedService(st)
+	csSvc := service.NewCodeServerService(st, csManager)
 
 	healthH := handler.NewHealthHandler()
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
 	agentH := handler.NewAgentHandler(agentSvc)
+	csH := handler.NewCodeServerHandler(csSvc)
 	todoH := handler.NewTodoHandler(st)
 	invH := handler.NewInvoiceHandler(st)
 	companyH := handler.NewCompanyHandler(st)
@@ -94,6 +101,8 @@ func main() {
 	newsH := handler.NewNewsHandler(st)
 	issueH := handler.NewIssueHandler(st)
 	attH := handler.NewAttachmentHandler(st)
+	commentH := handler.NewCommentHandler(st)
+	eventH := handler.NewEventHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
 
@@ -126,9 +135,17 @@ func main() {
 	mux.HandleFunc("DELETE /api/projects/{id}", pH.DeleteProject)
 	mux.HandleFunc("GET /api/projects/{id}/branches", pH.GetProjectBranches)
 
+	mux.HandleFunc("POST /api/projects/{id}/code-server", csH.PostProjectCodeServer)
+	mux.HandleFunc("GET /api/projects/{id}/code-server", csH.GetProjectCodeServer)
+	mux.HandleFunc("DELETE /api/projects/{id}/code-server", csH.DeleteProjectCodeServer)
+
 	mux.HandleFunc("POST /api/projects/{projectId}/worktrees", wtH.PostWorktree)
 	mux.HandleFunc("PATCH /api/worktrees/{id}", wtH.PatchWorktree)
 	mux.HandleFunc("DELETE /api/worktrees/{id}", wtH.DeleteWorktree)
+
+	mux.HandleFunc("POST /api/worktrees/{id}/code-server", csH.PostCodeServer)
+	mux.HandleFunc("GET /api/worktrees/{id}/code-server", csH.GetCodeServer)
+	mux.HandleFunc("DELETE /api/worktrees/{id}/code-server", csH.DeleteCodeServer)
 
 	mux.HandleFunc("POST /api/projects/{projectId}/issues", issueH.PostIssue)
 	mux.HandleFunc("PATCH /api/issues/{id}", issueH.PatchIssue)
@@ -138,6 +155,13 @@ func main() {
 	mux.HandleFunc("GET /api/issues/{issueId}/attachments", attH.ListAttachments)
 	mux.HandleFunc("GET /api/attachments/{id}", attH.GetAttachment)
 	mux.HandleFunc("DELETE /api/attachments/{id}", attH.DeleteAttachment)
+
+	mux.HandleFunc("POST /api/issues/{issueId}/comments", commentH.PostComment)
+	mux.HandleFunc("GET /api/issues/{issueId}/comments", commentH.ListComments)
+	mux.HandleFunc("PATCH /api/comments/{id}", commentH.PatchComment)
+	mux.HandleFunc("DELETE /api/comments/{id}", commentH.DeleteComment)
+
+	mux.HandleFunc("GET /api/issues/{issueId}/events", eventH.ListEvents)
 
 	mux.HandleFunc("GET /api/agents", agentH.ListAgents)
 	mux.HandleFunc("GET /api/agents/{agentId}", agentH.GetAgent)

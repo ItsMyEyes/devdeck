@@ -64,6 +64,32 @@ type Attachment struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// IssueComment mirrors the frontend IssueComment type — a comment on an
+// issue's Activity timeline, or (when ParentID is set) a single-level-deep
+// reply to another comment.
+type IssueComment struct {
+	ID        string  `json:"id"`
+	IssueID   string  `json:"issueId"`
+	ParentID  *string `json:"parentId"`
+	Author    string  `json:"author"`
+	Body      string  `json:"body"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
+}
+
+// IssueEvent mirrors the frontend IssueEvent type — a single Activity
+// timeline entry auto-recorded when UpdateIssue changes a tracked field
+// (status, priority, assignee). Read-only from the API: there's no
+// create/update/delete endpoint, only ListIssueEvents.
+type IssueEvent struct {
+	ID        string  `json:"id"`
+	IssueID   string  `json:"issueId"`
+	Kind      string  `json:"kind"`
+	FromValue *string `json:"fromValue"`
+	ToValue   *string `json:"toValue"`
+	CreatedAt string  `json:"createdAt"`
+}
+
 // NewsItem mirrors the frontend NewsItem type.
 type NewsItem struct {
 	ID     string `json:"id"`

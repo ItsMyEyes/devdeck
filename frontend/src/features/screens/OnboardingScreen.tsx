@@ -32,7 +32,7 @@ export function OnboardingScreen() {
         <Button onClick={openNewWorkspace} size="xl" className="px-5">
           Create your first workspace
         </Button>
-        <Button
+        {/* <Button
           variant="secondary"
           size="xl"
           onClick={loadDemo}
@@ -40,7 +40,7 @@ export function OnboardingScreen() {
           className="px-5 font-mono"
         >
           {seed.isPending ? 'Loading demo…' : 'Load demo data'}
-        </Button>
+        </Button> */}
       </div>
       <NewWorkspaceDialog />
     </div>

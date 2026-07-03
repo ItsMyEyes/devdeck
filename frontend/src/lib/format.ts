@@ -1,7 +1,7 @@
 // Formatting helpers — ported verbatim from the Loom v2 mockup so numbers read
 // identically to the design.
 
-import { format, isValid, parseISO } from 'date-fns'
+import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns'
 
 /** Compact token count: 1_840_000 → "1.84M", 96_100 → "96k". */
 export function fmtTok(n: number): string {
@@ -59,6 +59,13 @@ export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** ISO timestamp → "3 hours ago" / "2 days ago". Falls back to the raw string if unparsable. */
+export function fmtTimeAgo(iso: string): string {
+  if (!iso) return '—'
+  const d = parseISO(iso)
+  return isValid(d) ? formatDistanceToNow(d, { addSuffix: true }) : iso
 }
 
 /** True when an ISO due date (YYYY-MM-DD) is strictly before today. */

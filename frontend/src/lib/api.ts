@@ -14,6 +14,8 @@ import type {
   InvoiceItem,
   InvoiceStatus,
   Issue,
+  IssueComment,
+  IssueEvent,
   NewsItem,
   Priority,
   Project,
@@ -224,6 +226,17 @@ export interface CreateIssueBody {
   status?: Issue['status']
 }
 
+export interface CreateCommentBody {
+  author: string
+  body: string
+  /** Set to reply to an existing comment; omit for a top-level comment. */
+  parentId?: string | null
+}
+
+export interface UpdateCommentBody {
+  body: string
+}
+
 export interface UpdateIssueBody {
   title?: string
   description?: string
@@ -293,6 +306,27 @@ export function updateWorktree(id: string, patch: UpdateWorktreeBody): Promise<W
 
 export function deleteWorktree(id: string): Promise<void> {
   return request<void>('DELETE', `/worktrees/${id}`)
+}
+
+export interface CodeServerStatus {
+  url: string
+  running: boolean
+}
+
+export function startCodeServer(worktreeId: string): Promise<CodeServerStatus> {
+  return request<CodeServerStatus>('POST', `/worktrees/${worktreeId}/code-server`)
+}
+
+export function stopCodeServer(worktreeId: string): Promise<void> {
+  return request<void>('DELETE', `/worktrees/${worktreeId}/code-server`)
+}
+
+export function startProjectCodeServer(projectId: string): Promise<CodeServerStatus> {
+  return request<CodeServerStatus>('POST', `/projects/${projectId}/code-server`)
+}
+
+export function stopProjectCodeServer(projectId: string): Promise<void> {
+  return request<void>('DELETE', `/projects/${projectId}/code-server`)
 }
 
 // ---- Todos ----
@@ -448,6 +482,30 @@ export function fetchAttachments(issueId: string): Promise<Attachment[]> {
 
 export function deleteAttachment(id: string): Promise<void> {
   return request<void>('DELETE', `/attachments/${id}`)
+}
+
+// ---- Comments ----
+
+export function fetchComments(issueId: string): Promise<IssueComment[]> {
+  return request<IssueComment[]>('GET', `/issues/${issueId}/comments`)
+}
+
+export function createComment(issueId: string, body: CreateCommentBody): Promise<IssueComment> {
+  return request<IssueComment>('POST', `/issues/${issueId}/comments`, body)
+}
+
+export function updateComment(id: string, patch: UpdateCommentBody): Promise<IssueComment> {
+  return request<IssueComment>('PATCH', `/comments/${id}`, patch)
+}
+
+export function deleteComment(id: string): Promise<void> {
+  return request<void>('DELETE', `/comments/${id}`)
+}
+
+// ---- Issue timeline (auto-recorded field-change events, read-only) ----
+
+export function fetchIssueEvents(issueId: string): Promise<IssueEvent[]> {
+  return request<IssueEvent[]>('GET', `/issues/${issueId}/events`)
 }
 
 // ---- Seed ----

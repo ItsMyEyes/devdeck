@@ -42,6 +42,15 @@ func Resolve(agentID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("detect: unknown agent %q", agentID)
 	}
+	return ResolveBinary(bin)
+}
+
+// ResolveBinary returns the absolute path to any CLI binary by name, using
+// the same PATH + fallback-dir + login-shell-PATH search Resolve uses for
+// agent binaries. Exported so callers that need a non-agent tool (e.g. the
+// code-server integration) can reuse the same install-location probing
+// instead of trusting a bare $PATH lookup.
+func ResolveBinary(bin string) (string, error) {
 	if p, err := exec.LookPath(bin); err == nil {
 		return p, nil
 	}

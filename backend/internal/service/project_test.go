@@ -14,7 +14,7 @@ func TestProjectListBranchesReturnsRealBranches(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	svc := NewProjectService(st)
+	svc := NewProjectService(st, nil)
 
 	ws, err := st.CreateWorkspace("Acme")
 	if err != nil {

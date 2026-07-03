@@ -11,11 +11,17 @@ import (
 // ProjectService wraps project operations with business logic.
 type ProjectService struct {
 	store port.Store
+	// kill stops a project's own running code-server instance (keyed by
+	// project ID), if any. It must be idempotent (nil error when nothing is
+	// running).
+	kill func(id string) error
 }
 
-// NewProjectService creates a project service.
-func NewProjectService(s port.Store) *ProjectService {
-	return &ProjectService{store: s}
+// NewProjectService creates a project service. kill is called to stop a
+// project's own code-server instance on Delete; it's typically
+// codeserver.Manager.Stop.
+func NewProjectService(s port.Store, kill func(id string) error) *ProjectService {
+	return &ProjectService{store: s, kill: kill}
 }
 
 // Create creates a project under a workspace.
@@ -41,6 +47,9 @@ func (svc *ProjectService) Update(id string, name, path, repo *string, expanded 
 
 // Delete deletes a project and its worktrees.
 func (svc *ProjectService) Delete(id string) error {
+	if svc.kill != nil {
+		_ = svc.kill(id)
+	}
 	return svc.store.DeleteProject(id)
 }
 

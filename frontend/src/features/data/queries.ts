@@ -7,6 +7,7 @@ import {
   clearDoneTodos,
   createBank,
   createCompany,
+  createComment,
   createInvoice,
   createIssue,
   createNews,
@@ -17,6 +18,7 @@ import {
   createWorktree,
   deleteAttachment,
   deleteBank,
+  deleteComment,
   deleteCompany,
   deleteInvoice,
   deleteIssue,
@@ -31,15 +33,20 @@ import {
   fetchAgents,
   fetchAttachments,
   fetchBanks,
+  fetchComments,
   fetchCompanies,
   fetchFsList,
+  fetchIssueEvents,
   fetchProjectBranches,
   fetchSettings,
   fetchWorkspaces,
   markAllNewsRead,
   seed,
+  startCodeServer,
+  startProjectCodeServer,
   uploadAttachment,
   updateBank,
+  updateComment,
   updateCompany,
   updateInvoice,
   updateIssue,
@@ -53,6 +60,7 @@ import {
 } from '@/lib/api'
 import type {
   CreateBankBody,
+  CreateCommentBody,
   CreateCompanyBody,
   CreateInvoiceBody,
   CreateIssueBody,
@@ -64,6 +72,7 @@ import type {
   CreateWorktreeBody,
   SettingsPatch,
   UpdateBankBody,
+  UpdateCommentBody,
   UpdateCompanyBody,
   UpdateInvoiceBody,
   UpdateIssueBody,
@@ -193,6 +202,20 @@ export function useDeleteWorktree() {
   })
 }
 
+/** Starts (or reuses) a worktree's code-server instance; no cache to invalidate. */
+export function useStartCodeServer() {
+  return useMutation({
+    mutationFn: (worktreeId: string) => startCodeServer(worktreeId),
+  })
+}
+
+/** Starts (or reuses) a code-server instance rooted at a project's own directory. */
+export function useStartProjectCodeServer() {
+  return useMutation({
+    mutationFn: (projectId: string) => startProjectCodeServer(projectId),
+  })
+}
+
 export function useCreateTodo() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
@@ -259,9 +282,14 @@ export function useCreateIssue() {
 
 export function useUpdateIssue() {
   const invalidate = useInvalidateWorkspaces()
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: UpdateIssueBody }) => updateIssue(id, patch),
-    onSuccess: () => invalidate(),
+    // A status/priority/assignee change also records an Activity timeline
+    // entry server-side, so the timeline must be refetched alongside the
+    // workspace tree, not just on an explicit comment/reply mutation.
+    onSuccess: (_iss, { id }) =>
+      Promise.all([invalidate(), queryClient.invalidateQueries({ queryKey: qk.issueEvents(id) })]),
   })
 }
 
@@ -299,6 +327,48 @@ export function useDeleteAttachment() {
   return useMutation({
     mutationFn: ({ id }: { id: string; issueId: string }) => deleteAttachment(id),
     onSuccess: (_void, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueAttachments(issueId) }),
+  })
+}
+
+/** Every comment and reply on an issue, for the Activity tab. */
+export function useComments(issueId: string | undefined) {
+  return useQuery({
+    queryKey: qk.issueComments(issueId ?? ''),
+    queryFn: () => fetchComments(issueId!),
+    enabled: !!issueId,
+  })
+}
+
+/** An issue's auto-recorded field-change timeline, for the Activity tab. */
+export function useIssueEvents(issueId: string | undefined) {
+  return useQuery({
+    queryKey: qk.issueEvents(issueId ?? ''),
+    queryFn: () => fetchIssueEvents(issueId!),
+    enabled: !!issueId,
+  })
+}
+
+export function useCreateComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ issueId, body }: { issueId: string; body: CreateCommentBody }) => createComment(issueId, body),
+    onSuccess: (_c, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueComments(issueId) }),
+  })
+}
+
+export function useUpdateComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; issueId: string; patch: UpdateCommentBody }) => updateComment(id, patch),
+    onSuccess: (_c, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueComments(issueId) }),
+  })
+}
+
+export function useDeleteComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: string; issueId: string }) => deleteComment(id),
+    onSuccess: (_void, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueComments(issueId) }),
   })
 }
 

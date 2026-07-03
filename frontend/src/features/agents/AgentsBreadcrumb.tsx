@@ -1,9 +1,10 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Settings2 } from 'lucide-react'
+import { Code2, Settings2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { WorktreeGlyph } from './WorktreeGlyph'
 import { useScope } from '@/features/useScope'
-import { useWorkspace } from '@/features/data/queries'
+import { useStartProjectCodeServer, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function AgentsBreadcrumb() {
@@ -13,9 +14,18 @@ export function AgentsBreadcrumb() {
   const toggleWsMenu = useLoomStore((s) => s.toggleWsMenu)
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
   const openEdit = useLoomStore((s) => s.openEdit)
+  const startCodeServer = useStartProjectCodeServer()
 
   const project = ws?.projects.find((p) => p.id === projectId) ?? null
   const worktree = project?.worktrees.find((w) => w.id === wtId) ?? null
+
+  function openCode() {
+    if (!project) return
+    startCodeServer.mutate(project.id, {
+      onSuccess: (data) => window.open(data.url, '_blank', 'noopener,noreferrer'),
+      onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to start code-server'),
+    })
+  }
 
   function openWorkspaceMenu() {
     // On mobile the popover anchor is inside the off-screen sidebar, so we must
@@ -60,6 +70,13 @@ export function AgentsBreadcrumb() {
       )}
 
       <div className="min-w-2 flex-1" />
+
+      {project && (
+        <Button variant="secondary" size="sm" onClick={openCode} disabled={startCodeServer.isPending}>
+          <Code2 size={13} />
+          {startCodeServer.isPending ? 'opening…' : 'Open code'}
+        </Button>
+      )}
 
       {project && !worktree && (
         <Button variant="secondary" size="sm" onClick={() => openEdit('project', project.id, { a: project.name, b: project.path })}>

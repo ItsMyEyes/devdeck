@@ -228,9 +228,11 @@ GET  /api/auth/me              ()                         -> User (200) or 401
 
 Cookies: `HttpOnly; Secure; SameSite=Strict; Path=/`. (`Secure` is technically
 moot for loopback HTTP in local dev, but costs nothing and is correct if Loom is
-ever reverse-proxied over TLS.) Locked-out `POST /api/auth/login` responses
-include a `retryAfter` (RFC3339 timestamp) in the JSON body alongside the 423
-status so the frontend can show a countdown.
+ever reverse-proxied over TLS.) Locked-out `POST /api/auth/login` responses use
+the standard `{"error":"..."}` envelope (CONTRACTS.md forbids extra fields like
+a top-level `retryAfter`) — the unlock time is embedded in the message itself,
+e.g. `{"error":"account locked until 2026-01-01T00:05:00Z"}`, which the
+frontend parses out of the string to render a countdown.
 
 ### Auth middleware (`backend/internal/handler/middleware.go`)
 

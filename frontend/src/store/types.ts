@@ -70,6 +70,31 @@ export interface Attachment {
   createdAt: string
 }
 
+/** A comment on an issue's Activity timeline, or — when parentId is set — a
+ *  single-level-deep reply to another comment. */
+export interface IssueComment {
+  id: string
+  issueId: string
+  parentId: string | null
+  author: string
+  body: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type IssueEventKind = 'status_changed' | 'priority_changed' | 'assignee_changed'
+
+/** A single Activity timeline entry, auto-recorded when an issue's status,
+ *  priority, or assignee changes. Read-only — there's no author input. */
+export interface IssueEvent {
+  id: string
+  issueId: string
+  kind: IssueEventKind
+  fromValue: string | null
+  toValue: string | null
+  createdAt: string
+}
+
 export interface NewsItem {
   id: string
   source: string

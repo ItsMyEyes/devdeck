@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Maximize2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { KIND, STATE } from '@/lib/constants'
 import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
 import type { Worktree } from '@/store/types'
@@ -7,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Pill } from '@/components/ui/pill'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from './WorktreeGlyph'
-import { useUpdateWorktree } from '@/features/data/queries'
+import { useStartCodeServer, useUpdateWorktree } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 interface WorktreeCardProps {
@@ -19,8 +20,16 @@ interface WorktreeCardProps {
 export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps) {
   const navigate = useNavigate()
   const updateWorktree = useUpdateWorktree()
+  const startCodeServer = useStartCodeServer()
   const openEdit = useLoomStore((s) => s.openEdit)
   const askDelete = useLoomStore((s) => s.askDelete)
+
+  function openCode() {
+    startCodeServer.mutate(w.id, {
+      onSuccess: (data) => window.open(data.url, '_blank', 'noopener,noreferrer'),
+      onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to start code-server'),
+    })
+  }
 
   function approve(ok: boolean) {
     updateWorktree.mutate({
@@ -126,6 +135,14 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
         <span className="text-loom-green-soft">{fmtCost(w.tokens)}</span>
         <span>{fmtEl(w.elapsed)}</span>
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={openCode}
+          disabled={startCodeServer.isPending}
+          className="cursor-pointer px-1 py-0.5 text-loom-muted-2 hover:text-loom-accent-soft disabled:cursor-wait disabled:opacity-60"
+        >
+          {startCodeServer.isPending ? 'opening…' : 'code'}
+        </button>
         <button type="button" onClick={() => openEdit('worktree', w.id, { a: w.branch, b: w.task, model: w.model })} className="cursor-pointer px-1 py-0.5 text-loom-muted-2 hover:text-loom-accent-soft">
           details
         </button>

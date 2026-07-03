@@ -43,6 +43,15 @@ type Store interface {
 	AttachmentData(id string) (domain.Attachment, []byte, error)
 	DeleteAttachment(id string) error
 
+	// Issue comments (top-level, or a reply when parentID is set)
+	CreateIssueComment(issueID string, parentID *string, author, body, createdAt string) (domain.IssueComment, error)
+	ListIssueComments(issueID string) ([]domain.IssueComment, error)
+	UpdateIssueComment(id, updatedAt, body string) (domain.IssueComment, error)
+	DeleteIssueComment(id string) error
+
+	// Issue timeline — auto-recorded field-change events, read-only from the API.
+	ListIssueEvents(issueID string) ([]domain.IssueEvent, error)
+
 	// Todos
 	CreateTodo(wsID, text, priority string) (domain.Todo, error)
 	UpdateTodo(id string, p TodoPatch) (domain.Todo, error)

@@ -10,6 +10,7 @@ import { fmtDate } from '@/lib/format'
 import { ISSUE_STATUS, PRI } from '@/lib/constants'
 import type { Issue, IssueStatus, Priority } from '@/store/types'
 import { useDeleteIssue, useUpdateIssue } from '@/features/data/queries'
+import { ActivitySection } from './ActivitySection'
 import { AttachmentList } from './AttachmentList'
 import { MarkdownEditor } from './MarkdownEditor'
 
@@ -117,6 +118,7 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
               issueId={issue.id}
             />
             <AttachmentList issueId={issue.id} />
+            <ActivitySection issueId={issue.id} />
           </div>
 
           <div className="w-full flex-none border-t border-loom-border pt-6 md:w-64 md:border-l md:border-t-0 md:pl-8 md:pt-0">

@@ -83,9 +83,12 @@ func (s *Store) CreateIssue(projectID, title, status, createdAt string) (domain.
 }
 
 // UpdateIssue applies a partial patch. Status+Position together is how a
-// kanban drag-and-drop move is expressed — the client computes both.
+// kanban drag-and-drop move is expressed — the client computes both. Any
+// tracked field (status, priority, assignee) that actually changes value
+// gets an Activity timeline entry via recordIssueChangeEvents.
 func (s *Store) UpdateIssue(id, updatedAt string, p port.IssuePatch) (domain.Issue, error) {
-	if _, err := s.issueByID(id); err != nil {
+	before, err := s.issueByID(id)
+	if err != nil {
 		return domain.Issue{}, err
 	}
 	if err := firstErr(
@@ -109,7 +112,50 @@ func (s *Store) UpdateIssue(id, updatedAt string, p port.IssuePatch) (domain.Iss
 	if _, err := s.db.Exec(`UPDATE issues SET updated_at = ? WHERE id = ?`, updatedAt, id); err != nil {
 		return domain.Issue{}, err
 	}
+	if err := s.recordIssueChangeEvents(before, p, updatedAt); err != nil {
+		return domain.Issue{}, err
+	}
 	return s.issueByID(id)
+}
+
+// recordIssueChangeEvents writes an Activity timeline entry for each tracked
+// property patched to a value different from before — kanban moves, priority
+// bumps, and reassignment all become visible in the issue's Activity feed.
+func (s *Store) recordIssueChangeEvents(before domain.Issue, p port.IssuePatch, updatedAt string) error {
+	if p.Status != nil && *p.Status != before.Status {
+		from, to := before.Status, *p.Status
+		if err := s.recordIssueEvent(before.ID, "status_changed", &from, &to, updatedAt); err != nil {
+			return err
+		}
+	}
+	if p.Priority != nil && *p.Priority != before.Priority {
+		from, to := before.Priority, *p.Priority
+		if err := s.recordIssueEvent(before.ID, "priority_changed", &from, &to, updatedAt); err != nil {
+			return err
+		}
+	}
+	if p.HasAssignee {
+		beforeVal, afterVal := "", ""
+		if before.Assignee != nil {
+			beforeVal = *before.Assignee
+		}
+		if p.Assignee != nil {
+			afterVal = *p.Assignee
+		}
+		if beforeVal != afterVal {
+			var fromPtr, toPtr *string
+			if beforeVal != "" {
+				fromPtr = &beforeVal
+			}
+			if afterVal != "" {
+				toPtr = &afterVal
+			}
+			if err := s.recordIssueEvent(before.ID, "assignee_changed", fromPtr, toPtr, updatedAt); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeleteIssue deletes an issue.

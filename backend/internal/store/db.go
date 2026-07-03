@@ -72,6 +72,28 @@ CREATE TABLE IF NOT EXISTS issue_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_issue_attachments_issue ON issue_attachments(issue_id);
 
+CREATE TABLE IF NOT EXISTS issue_comments (
+  id         TEXT PRIMARY KEY,
+  issue_id   TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  parent_id  TEXT REFERENCES issue_comments(id) ON DELETE CASCADE,
+  author     TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_issue_comments_issue ON issue_comments(issue_id);
+CREATE INDEX IF NOT EXISTS idx_issue_comments_parent ON issue_comments(parent_id);
+
+CREATE TABLE IF NOT EXISTS issue_events (
+  id         TEXT PRIMARY KEY,
+  issue_id   TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL DEFAULT '',
+  from_value TEXT,
+  to_value   TEXT,
+  created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_issue_events_issue ON issue_events(issue_id);
+
 CREATE TABLE IF NOT EXISTS news (
   id           TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

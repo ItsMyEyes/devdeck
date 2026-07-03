@@ -42,14 +42,21 @@ function itemTotal(it: DraftItem): number {
   return (parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice.replace(/[^0-9.]/g, '')) || 0)
 }
 
-function nextRunLabel(tpl: RecurringInvoiceTemplate): string {
+function fmtShortDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** Next auto-generation date, and the estimated due date (next run + payment term). */
+function nextRunInfo(tpl: RecurringInvoiceTemplate): { nextRun: Date; due: Date } {
   const now = new Date()
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
   const day = Math.min(tpl.dayOfMonth, daysInMonth)
   const generatedThisMonth = tpl.lastGeneratedYm === ym
-  const target = new Date(now.getFullYear(), now.getMonth() + (generatedThisMonth ? 1 : 0), day)
-  return target.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const nextRun = new Date(now.getFullYear(), now.getMonth() + (generatedThisMonth ? 1 : 0), day)
+  const due = new Date(nextRun)
+  due.setDate(due.getDate() + tpl.paymentTermDays)
+  return { nextRun, due }
 }
 
 /** Recurring invoice templates: create/edit/delete monthly billing schedules. */
@@ -335,8 +342,18 @@ export function RecurringTab({ wsId, templates }: { wsId: string; templates: Rec
             <thead>
               <tr className="border-b border-loom-border text-left font-mono text-[10px] tracking-wide text-loom-dim uppercase">
                 <th className="px-3 py-2 font-medium">Company</th>
-                <th className="px-3 py-2 font-medium">Schedule</th>
-                <th className="px-3 py-2 font-medium">Next run</th>
+                <th className="px-3 py-2 font-medium">
+                  <span className="flex items-center gap-1">
+                    Schedule
+                    <InfoTooltip text="Day of month the draft invoice is generated, and how many days after that it becomes due (net terms)." />
+                  </span>
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  <span className="flex items-center gap-1">
+                    Next run
+                    <InfoTooltip text="The next date this template will auto-generate a draft invoice, and the estimated due date (next run + net terms). Skips to the current month if this month's invoice was already generated." />
+                  </span>
+                </th>
                 <th className="px-3 py-2 text-right font-medium">Monthly total</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium" />
@@ -345,13 +362,17 @@ export function RecurringTab({ wsId, templates }: { wsId: string; templates: Rec
             <tbody>
               {templates.map((tpl) => {
                 const total = tpl.items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0)
+                const { nextRun, due } = nextRunInfo(tpl)
                 return (
                   <tr key={tpl.id} className="border-b border-loom-border-card last:border-none hover:bg-loom-card/50">
                     <td className="max-w-[160px] truncate px-3 py-2.5 text-loom-fg">{tpl.companyName || '—'}</td>
                     <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-loom-dim">
                       Day {tpl.dayOfMonth}, net {tpl.paymentTermDays}d
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-loom-dim">{nextRunLabel(tpl)}</td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-loom-dim">
+                      <div className="text-loom-fg-2">{fmtShortDate(nextRun)}</div>
+                      <div className="text-loom-dim">Due {fmtShortDate(due)}</div>
+                    </td>
                     <td className="px-3 py-2.5 text-right font-mono text-[12px] whitespace-nowrap text-loom-fg">{fmtRupiah(total)}</td>
                     <td className="px-3 py-2.5">
                       <button
