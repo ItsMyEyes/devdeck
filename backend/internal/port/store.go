@@ -1,6 +1,10 @@
 package port
 
-import "loom/backend/internal/domain"
+import (
+	"time"
+
+	"loom/backend/internal/domain"
+)
 
 // Store is the data-access interface. All persistence operations go through this
 // interface, making it possible to swap implementations (SQLite, Postgres, etc.)
@@ -83,6 +87,14 @@ type Store interface {
 	UserByID(id string) (domain.User, error)
 	UserCount() (int, error)
 	UpdateUser(id string, p UserPatch) (domain.User, error)
+
+	// Sessions and pending (post-password, pre-TOTP) logins
+	CreateSession(userID, tokenHash string, expiresAt time.Time) error
+	SessionUserID(tokenHash string, now time.Time) (string, error)
+	DeleteSession(tokenHash string) error
+	CreatePendingLogin(userID, tokenHash string, expiresAt time.Time) error
+	PendingLoginUserID(tokenHash string, now time.Time) (string, error)
+	DeletePendingLogin(tokenHash string) error
 }
 
 // SettingsPatch carries optional fields for a partial settings update.
