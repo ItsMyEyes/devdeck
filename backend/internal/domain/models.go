@@ -53,6 +53,17 @@ type Issue struct {
 	ProjectID   string  `json:"-"` // internal use, not exposed to frontend — matches Worktree.ProjectID
 }
 
+// Attachment mirrors the frontend Attachment type. Raw file bytes are
+// fetched separately via GET /api/attachments/{id}, not embedded here.
+type Attachment struct {
+	ID        string `json:"id"`
+	IssueID   string `json:"issueId"`
+	Filename  string `json:"filename"`
+	MimeType  string `json:"mimeType"`
+	Size      int64  `json:"size"`
+	CreatedAt string `json:"createdAt"`
+}
+
 // NewsItem mirrors the frontend NewsItem type.
 type NewsItem struct {
 	ID     string `json:"id"`

@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api build build-web prepare-webui build-api portable portable-current portable-all typecheck lint vet test install clean
+.PHONY: dev dev-web dev-api seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -19,6 +19,10 @@ dev-web:
 dev-api:
 	cd backend && go run ./cmd/server --db loom.db --open=false
 
+# Delete the dev database (wipes seed/demo data used by `make dev-api`)
+seed-clean:
+	rm -f backend/loom.db backend/loom.db-wal backend/loom.db-shm
+
 # ── Build ────────────────────────────────────────────────────
 # Production host build — UI is embedded in the Go binary.
 build: build-api
@@ -32,6 +36,12 @@ prepare-webui: build-web
 
 build-api: prepare-webui
 	cd backend && go build -o loom-api ./cmd/server
+
+# MCP stdio server exposing the issue tracker to coding agents (list_projects,
+# create_issue, upload_attachment, mark_issue_done). Reads the same --db file
+# the main server uses.
+build-mcp:
+	cd backend && go build -o loom-mcp-server ./cmd/mcp-server
 
 # Portable binary for the selected GOOS/GOARCH (defaults to the host).
 portable: portable-current

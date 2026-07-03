@@ -5,7 +5,7 @@
   "type": "module",
   "description": "loom — one operator, many companies. Multi-project dashboard for coding agents (git worktrees + terminals).",
   "scripts": {
-    "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${LOOM_API_PORT:-8989} && vite\" \"npm run dev:api\"",
+    "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${LOOM_API_PORT:-8989} && vite --host 0.0.0.0\" \"npm run dev:api\"",
     "dev:web": "vite",
     "dev:api": "cd ../backend && go run ./cmd/server --db loom.db --open=false",
     "build": "vite build",

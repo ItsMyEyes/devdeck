@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { LayoutGrid, ListTodo, Receipt, type LucideIcon } from 'lucide-react'
+import { LayoutGrid, Receipt, type LucideIcon } from 'lucide-react'
 import type { ModuleView } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -21,12 +21,9 @@ export function SidebarNav() {
   const worktrees = ws ? ws.projects.flatMap((p) => p.worktrees) : []
   const running = worktrees.filter((w) => w.state === 'running').length
   const openInvoices = ws ? ws.invoices.filter((iv) => iv.status === 'sent' || iv.status === 'overdue').length : 0
-  const activeTodos = ws ? ws.todos.filter((t) => !t.done).length : 0
 
   const items: NavDef[] = [
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, color: '#56d58a', badge: running },
-    // { key: 'news', label: 'News', Icon: Sparkles, color: '#6d8bff', badge: unread },
-    { key: 'todos', label: 'Todos', Icon: ListTodo, color: '#f5c451', badge: activeTodos },
     { key: 'invoices', label: 'Invoices', Icon: Receipt, color: '#c7a3ff', badge: openInvoices },
   ]
 

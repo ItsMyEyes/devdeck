@@ -33,6 +33,12 @@ type Store interface {
 	UpdateIssue(id, updatedAt string, p IssuePatch) (domain.Issue, error)
 	DeleteIssue(id string) error
 
+	// Attachments (files uploaded from an issue's description editor)
+	CreateAttachment(issueID, filename, mimeType string, data []byte, createdAt string) (domain.Attachment, error)
+	ListAttachments(issueID string) ([]domain.Attachment, error)
+	AttachmentData(id string) (domain.Attachment, []byte, error)
+	DeleteAttachment(id string) error
+
 	// Todos
 	CreateTodo(wsID, text, priority string) (domain.Todo, error)
 	UpdateTodo(id string, p TodoPatch) (domain.Todo, error)

@@ -82,6 +82,7 @@ func main() {
 	recH := handler.NewRecurringTemplateHandler(st)
 	newsH := handler.NewNewsHandler(st)
 	issueH := handler.NewIssueHandler(st)
+	attH := handler.NewAttachmentHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
 
@@ -113,6 +114,11 @@ func main() {
 	mux.HandleFunc("POST /api/projects/{projectId}/issues", issueH.PostIssue)
 	mux.HandleFunc("PATCH /api/issues/{id}", issueH.PatchIssue)
 	mux.HandleFunc("DELETE /api/issues/{id}", issueH.DeleteIssue)
+
+	mux.HandleFunc("POST /api/issues/{issueId}/attachments", attH.PostAttachment)
+	mux.HandleFunc("GET /api/issues/{issueId}/attachments", attH.ListAttachments)
+	mux.HandleFunc("GET /api/attachments/{id}", attH.GetAttachment)
+	mux.HandleFunc("DELETE /api/attachments/{id}", attH.DeleteAttachment)
 
 	mux.HandleFunc("GET /api/agents", agentH.ListAgents)
 	mux.HandleFunc("GET /api/agents/{agentId}", agentH.GetAgent)

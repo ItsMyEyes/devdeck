@@ -59,6 +59,17 @@ export interface Project {
   issues: Issue[]
 }
 
+/** A file uploaded from an issue's description editor. Fetch its bytes via
+ *  GET /api/attachments/{id} — see `attachmentUrl()` in lib/api.ts. */
+export interface Attachment {
+  id: string
+  issueId: string
+  filename: string
+  mimeType: string
+  size: number
+  createdAt: string
+}
+
 export interface NewsItem {
   id: string
   source: string

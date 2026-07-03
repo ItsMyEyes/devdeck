@@ -11,4 +11,5 @@ export const qk = {
   projectBranches: (id: string) => ['projects', id, 'branches'] as const,
   companies: ['companies'] as const,
   banks: ['banks'] as const,
+  issueAttachments: (issueId: string) => ['issues', issueId, 'attachments'] as const,
 }

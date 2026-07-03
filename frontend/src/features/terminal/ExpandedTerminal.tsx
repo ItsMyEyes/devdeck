@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { ChevronLeft } from 'lucide-react'
 import { STATE } from '@/lib/constants'
@@ -10,6 +10,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
 import { useUpdateWorktree } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
+import { MobileKeyToolbar } from './MobileKeyToolbar'
 import { Terminal, type TerminalHandle } from './Terminal'
 
 interface Props {
@@ -21,10 +22,16 @@ interface Props {
 export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
   const navigate = useNavigate()
   const termRef = useRef<TerminalHandle>(null)
+  const [ctrlArmed, setCtrlArmed] = useState(false)
 
   const openEdit = useLoomStore((s) => s.openEdit)
   const updateWorktree = useUpdateWorktree()
   const askDelete = useLoomStore((s) => s.askDelete)
+
+  function sendKey(data: string) {
+    termRef.current?.sendInput(data)
+    termRef.current?.focus()
+  }
 
   function approve(ok: boolean) {
     updateWorktree.mutate({
@@ -75,8 +82,16 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
       {/* xterm.js terminal */}
       <div className="min-h-0 flex-1 overflow-hidden bg-loom-terminal px-3 py-2">
         {/* key by session so switching worktrees mounts a fresh terminal + socket */}
-        <Terminal key={w.id} ref={termRef} session={w.id} />
+        <Terminal
+          key={w.id}
+          ref={termRef}
+          session={w.id}
+          ctrlArmed={ctrlArmed}
+          onCtrlConsumed={() => setCtrlArmed(false)}
+        />
       </div>
+
+      <MobileKeyToolbar ctrlArmed={ctrlArmed} onToggleCtrl={() => setCtrlArmed((a) => !a)} onSend={sendKey} />
     </div>
   )
 }

@@ -15,6 +15,7 @@ import {
   createTodo,
   createWorkspace,
   createWorktree,
+  deleteAttachment,
   deleteBank,
   deleteCompany,
   deleteInvoice,
@@ -28,6 +29,7 @@ import {
   fetchAgentModels,
   fetchAgentSkills,
   fetchAgents,
+  fetchAttachments,
   fetchBanks,
   fetchCompanies,
   fetchFsList,
@@ -36,6 +38,7 @@ import {
   fetchWorkspaces,
   markAllNewsRead,
   seed,
+  uploadAttachment,
   updateBank,
   updateCompany,
   updateInvoice,
@@ -267,6 +270,35 @@ export function useDeleteIssue() {
   return useMutation({
     mutationFn: (id: string) => deleteIssue(id),
     onSuccess: () => invalidate(),
+  })
+}
+
+/** All files uploaded to an issue, for the dedicated Attachments view — kept
+ *  separate from what's inlined in the markdown description. */
+export function useAttachments(issueId: string | undefined) {
+  return useQuery({
+    queryKey: qk.issueAttachments(issueId ?? ''),
+    queryFn: () => fetchAttachments(issueId!),
+    enabled: !!issueId,
+  })
+}
+
+/** Uploads a file from the description editor's toolbar/drag-drop/paste. The
+ *  caller inserts the returned attachment's URL directly into the markdown
+ *  it's already editing; this also refreshes the Attachments view. */
+export function useUploadAttachment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ issueId, file }: { issueId: string; file: File }) => uploadAttachment(issueId, file),
+    onSuccess: (_att, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueAttachments(issueId) }),
+  })
+}
+
+export function useDeleteAttachment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: string; issueId: string }) => deleteAttachment(id),
+    onSuccess: (_void, { issueId }) => queryClient.invalidateQueries({ queryKey: qk.issueAttachments(issueId) }),
   })
 }
 

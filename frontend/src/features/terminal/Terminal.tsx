@@ -34,12 +34,31 @@ const THEME = {
   brightWhite: '#e8eaed',
 }
 
+interface TerminalProps {
+  session: string
+  /** When true, the next single keystroke is sent as its Ctrl+key control code. */
+  ctrlArmed?: boolean
+  onCtrlConsumed?: () => void
+}
+
 /** xterm.js terminal wired to the loom WebSocket gateway for one session. */
-export const Terminal = forwardRef<TerminalHandle, { session: string }>(function Terminal({ session }, ref) {
+export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
+  { session, ctrlArmed = false, onCtrlConsumed },
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const outbox = useRef<string[]>([])
+  const ctrlArmedRef = useRef(ctrlArmed)
+  const onCtrlConsumedRef = useRef(onCtrlConsumed)
+
+  useEffect(() => {
+    ctrlArmedRef.current = ctrlArmed
+  }, [ctrlArmed])
+  useEffect(() => {
+    onCtrlConsumedRef.current = onCtrlConsumed
+  }, [onCtrlConsumed])
 
   useImperativeHandle(ref, () => ({
     sendInput: (text: string) => send(inputFrame(text)),
@@ -91,7 +110,19 @@ export const Terminal = forwardRef<TerminalHandle, { session: string }>(function
     ws.onclose = () => term.write('\r\n\x1b[38;5;102m[connection closed]\x1b[0m\r\n')
     ws.onerror = () => term.write('\r\n\x1b[38;5;210m[connection error — is the terminal server running?]\x1b[0m\r\n')
 
-    const onData = term.onData((data) => send(inputFrame(data)))
+    const onData = term.onData((data) => {
+      // Sticky Ctrl (armed from the mobile key toolbar): fold the next single
+      // keystroke into its control code, e.g. "c" -> Ctrl+C (0x03).
+      if (ctrlArmedRef.current && data.length === 1) {
+        const code = data.toUpperCase().charCodeAt(0)
+        if (code >= 64 && code <= 95) {
+          send(inputFrame(String.fromCharCode(code - 64)))
+          onCtrlConsumedRef.current?.()
+          return
+        }
+      }
+      send(inputFrame(data))
+    })
     const onResize = term.onResize(({ cols, rows }) => send(resizeFrame(cols, rows)))
 
     const ro = new ResizeObserver(() => {

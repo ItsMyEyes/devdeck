@@ -6,6 +6,7 @@ import type {
   AgentModel,
   AgentSkill,
   AgentSummary,
+  Attachment,
   Bank,
   Company,
   FsEntry,
@@ -405,6 +406,47 @@ export function updateIssue(id: string, patch: UpdateIssueBody): Promise<Issue> 
 
 export function deleteIssue(id: string): Promise<void> {
   return request<void>('DELETE', `/issues/${id}`)
+}
+
+// ---- Attachments ----
+
+/** Direct src/href for a previously uploaded attachment. */
+export function attachmentUrl(id: string): string {
+  return `${API_BASE}/attachments/${id}`
+}
+
+export async function uploadAttachment(issueId: string, file: File): Promise<Attachment> {
+  const form = new FormData()
+  form.append('file', file)
+
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/issues/${issueId}/attachments`, { method: 'POST', body: form })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`
+    try {
+      const data = (await res.json()) as { error?: string }
+      if (data && typeof data.error === 'string') message = data.error
+    } catch {
+      // response had no JSON body; keep the default message
+    }
+    throw new ApiError(message, res.status)
+  }
+
+  return res.json() as Promise<Attachment>
+}
+
+export function fetchAttachments(issueId: string): Promise<Attachment[]> {
+  return request<Attachment[]>('GET', `/issues/${issueId}/attachments`)
+}
+
+export function deleteAttachment(id: string): Promise<void> {
+  return request<void>('DELETE', `/attachments/${id}`)
 }
 
 // ---- Seed ----

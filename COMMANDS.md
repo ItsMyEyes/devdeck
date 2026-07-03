@@ -25,6 +25,35 @@ The Go backend accepts flags:
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
 - `--open` — open the embedded UI in the default browser (default true)
 
+## MCP server (agent-facing issue tracker)
+
+`backend/cmd/mcp-server` exposes Loom's issues as MCP tools over stdio, so a
+coding agent (e.g. one running inside a Loom-managed worktree) can file its
+own tickets: `list_projects`, `create_issue` (assignee is required — the
+calling agent should ask if it isn't obvious), `upload_attachment` (attaches
+a local file and, by default, appends its link to the issue description),
+and `mark_issue_done` (moves an issue to `in_review`). It opens the **same**
+`--db` file as the main server (WAL mode makes that safe) — point it at
+`loom.db` beside your running instance, not a separate database.
+
+```bash
+cd backend && go run ./cmd/mcp-server --db loom.db
+# or: make build-mcp   (writes backend/loom-mcp-server)
+```
+
+Point an MCP client at it, e.g. in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "loom-issues": {
+      "command": "/path/to/loom-mcp-server",
+      "args": ["--db", "/path/to/loom.db"]
+    }
+  }
+}
+```
+
 ## Build
 
 ```bash

@@ -54,6 +54,13 @@ export function fmtMonthYear(iso: string): string {
   return isValid(d) ? format(d, 'MMMM yyyy') : iso
 }
 
+/** Byte count → "1.2 MB" / "840 KB" / "96 B". */
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 /** True when an ISO due date (YYYY-MM-DD) is strictly before today. */
 export function isPastDue(iso: string): boolean {
   const d = parseISO(iso)
