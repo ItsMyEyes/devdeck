@@ -42,6 +42,14 @@ func handleStoreErr(w http.ResponseWriter, err error) bool {
 		writeErr(w, http.StatusConflict, err.Error())
 		return true
 	}
+	if errors.Is(err, service.ErrUnauthorized) {
+		writeErr(w, http.StatusUnauthorized, err.Error())
+		return true
+	}
+	if errors.Is(err, service.ErrLocked) {
+		writeErr(w, http.StatusLocked, err.Error())
+		return true
+	}
 	writeErr(w, http.StatusInternalServerError, err.Error())
 	return true
 }

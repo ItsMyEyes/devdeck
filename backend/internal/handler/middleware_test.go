@@ -40,3 +40,25 @@ func TestHandleStoreErrStillMapsNotFoundTo404(t *testing.T) {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestHandleStoreErrMapsUnauthorizedTo401(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := fmt.Errorf("invalid email or password: %w", service.ErrUnauthorized)
+	if !handleStoreErr(rec, err) {
+		t.Fatal("expected handleStoreErr to report an error was handled")
+	}
+	if rec.Code != 401 {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestHandleStoreErrMapsLockedTo423(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := fmt.Errorf("account locked until 2026-01-01T00:05:00Z: %w", service.ErrLocked)
+	if !handleStoreErr(rec, err) {
+		t.Fatal("expected handleStoreErr to report an error was handled")
+	}
+	if rec.Code != 423 {
+		t.Errorf("status = %d, want 423", rec.Code)
+	}
+}

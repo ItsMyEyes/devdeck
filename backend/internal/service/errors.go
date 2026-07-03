@@ -10,3 +10,13 @@ var ErrValidation = errors.New("validation")
 // (e.g. a branch already checked out by another worktree). Wrap it with
 // fmt.Errorf("...: %w", ErrConflict) — handleStoreErr maps it to HTTP 409.
 var ErrConflict = errors.New("conflict")
+
+// ErrUnauthorized indicates invalid credentials or an invalid/expired
+// session or pending-login token. Wrap it with fmt.Errorf("...: %w",
+// ErrUnauthorized) — handleStoreErr maps it to HTTP 401.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// ErrLocked indicates the account is locked out after repeated failed
+// login attempts. Wrap it with fmt.Errorf("...: %w", ErrLocked) —
+// handleStoreErr maps it to HTTP 423.
+var ErrLocked = errors.New("locked")
