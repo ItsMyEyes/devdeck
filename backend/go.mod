@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/mark3labs/mcp-go v0.41.1
+	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
@@ -13,6 +14,7 @@ require (
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
