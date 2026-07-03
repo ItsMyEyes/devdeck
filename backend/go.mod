@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/mark3labs/mcp-go v0.41.1
+	golang.org/x/crypto v0.51.0
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
 	nhooyr.io/websocket v1.8.17
@@ -25,7 +26,6 @@ require (
 	github.com/u-root/u-root v0.16.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
