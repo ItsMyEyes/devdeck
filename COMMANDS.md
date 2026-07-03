@@ -24,6 +24,9 @@ The Go backend accepts flags:
 - `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
 - `--open` — open the embedded UI in the default browser (default true)
+- `LOOM_AUTH_KEY` — base64-encoded 32-byte AES key used to encrypt TOTP
+  secrets at rest (env only, no flag). If unset, a key is generated once and
+  stored as `auth.key` beside the database.
 
 ## MCP server (agent-facing issue tracker)
 

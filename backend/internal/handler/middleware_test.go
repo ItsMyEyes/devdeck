@@ -2,8 +2,13 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/pquerna/otp/totp"
 
 	"loom/backend/internal/service"
 	"loom/backend/internal/store"
@@ -60,5 +65,92 @@ func TestHandleStoreErrMapsLockedTo423(t *testing.T) {
 	}
 	if rec.Code != 423 {
 		t.Errorf("status = %d, want 423", rec.Code)
+	}
+}
+
+func newTestAuthServiceForMiddleware(t *testing.T) *service.AuthService {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return service.NewAuthService(store.New(db), make([]byte, 32))
+}
+
+func TestRequireAuthAllowsPublicPathWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", nil))
+	if !called {
+		t.Error("RequireAuth blocked a public path")
+	}
+}
+
+func TestRequireAuthBlocksProtectedPathWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+	if called {
+		t.Error("RequireAuth let a protected path through without a session cookie")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestRequireAuthBlocksTerminalWebsocketPathWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws/terminal", nil))
+	if called {
+		t.Error("RequireAuth let /ws/terminal through without a session cookie")
+	}
+}
+
+func TestRequireAuthAllowsProtectedPathWithValidCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	user, _, err := svc.Register("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := svc.BeginTotpEnrollment(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConfirmTotpEnrollment(user.ID, setupCode); err != nil {
+		t.Fatal(err)
+	}
+	pendingToken, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionToken, _, err := svc.VerifyTotp(pendingToken, loginCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	mw.ServeHTTP(rec, req)
+	if !called {
+		t.Errorf("RequireAuth blocked a valid session, status = %d, body=%s", rec.Code, rec.Body)
 	}
 }

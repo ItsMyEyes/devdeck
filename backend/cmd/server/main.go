@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"loom/backend/internal/handler"
@@ -35,6 +39,13 @@ func main() {
 	defer db.Close()
 
 	st := store.New(db)
+
+	authKey, err := loadOrCreateAuthKey(*dbPath)
+	if err != nil {
+		log.Fatalf("auth key: %v", err)
+	}
+	authSvc := service.NewAuthService(st, authKey)
+	authH := handler.NewAuthHandler(authSvc)
 
 	if generated, err := st.RunDueRecurringInvoices(); err != nil {
 		log.Printf("recurring invoices: startup check failed: %v", err)
@@ -90,6 +101,14 @@ func main() {
 	fsH := handler.NewFsHandler()
 
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /api/auth/register", authH.PostRegister)
+	mux.HandleFunc("POST /api/auth/login", authH.PostLogin)
+	mux.HandleFunc("POST /api/auth/totp/setup", authH.PostTotpSetup)
+	mux.HandleFunc("POST /api/auth/totp/verify-setup", authH.PostTotpVerifySetup)
+	mux.HandleFunc("POST /api/auth/totp/verify", authH.PostTotpVerify)
+	mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
+	mux.HandleFunc("GET /api/auth/me", authH.GetMe)
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
@@ -158,7 +177,7 @@ func main() {
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
 
-	root := handler.CorsMiddleware(handler.JSONErrorMiddleware(mux))
+	root := handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc)(mux)))
 
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -190,4 +209,34 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loadOrCreateAuthKey resolves the AES-256 key used to encrypt TOTP secrets
+// at rest. LOOM_AUTH_KEY (base64, 32 bytes) takes precedence; otherwise a
+// key is generated once and persisted beside the database, matching the
+// app's zero-config local-app model (see defaultDBPath).
+func loadOrCreateAuthKey(dbPath string) ([]byte, error) {
+	if envKey := os.Getenv("LOOM_AUTH_KEY"); envKey != "" {
+		key, err := base64.StdEncoding.DecodeString(envKey)
+		if err != nil || len(key) != 32 {
+			return nil, fmt.Errorf("LOOM_AUTH_KEY must be a base64-encoded 32-byte key")
+		}
+		return key, nil
+	}
+	keyPath := filepath.Join(filepath.Dir(dbPath), "auth.key")
+	if data, err := os.ReadFile(keyPath); err == nil {
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+		if err != nil || len(key) != 32 {
+			return nil, fmt.Errorf("corrupt auth key file %s", keyPath)
+		}
+		return key, nil
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(keyPath, []byte(base64.StdEncoding.EncodeToString(key)), 0o600); err != nil {
+		return nil, err
+	}
+	return key, nil
 }

@@ -76,6 +76,43 @@ func decodeBody(r *http.Request, dst any) (map[string]json.RawMessage, error) {
 	return raw, nil
 }
 
+// RequireAuth returns middleware requiring a valid session cookie for every
+// request except a small public-path allowlist. It protects both the JSON
+// API and the /ws/terminal WebSocket upgrade (arbitrary shell access) since
+// both are registered on the same mux.
+func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
+	publicPaths := map[string]bool{
+		"/api/health":                 true,
+		"/api/auth/register":          true,
+		"/api/auth/login":             true,
+		"/api/auth/totp/setup":        true,
+		"/api/auth/totp/verify-setup": true,
+		"/api/auth/totp/verify":       true,
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if publicPaths[r.URL.Path] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !strings.HasPrefix(r.URL.Path, "/api") && r.URL.Path != "/ws/terminal" {
+				next.ServeHTTP(w, r) // static SPA assets stay public
+				return
+			}
+			cookie, err := r.Cookie(sessionCookieName)
+			if err != nil {
+				writeErr(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			if _, err := svc.CurrentUser(cookie.Value); err != nil {
+				writeErr(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // CorsMiddleware sets permissive CORS headers on every /api response and
 // short-circuits OPTIONS preflight requests.
 func CorsMiddleware(next http.Handler) http.Handler {
