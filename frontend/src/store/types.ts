@@ -195,3 +195,11 @@ export interface FsEntry {
   isDir: boolean
   git: boolean
 }
+
+/** The single Loom operator account. Never carries a password or TOTP secret. */
+export interface User {
+  id: string
+  email: string
+  totpEnabled: boolean
+  createdAt: string
+}

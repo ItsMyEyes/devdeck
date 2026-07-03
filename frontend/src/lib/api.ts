@@ -21,6 +21,7 @@ import type {
   Settings,
   TermLine,
   Todo,
+  User,
   Workspace,
   Worktree,
 } from '@/store/types'
@@ -482,4 +483,60 @@ export interface FsListResponse {
 
 export function fetchFsList(path: string): Promise<FsListResponse> {
   return request<FsListResponse>('GET', `/fs/list?path=${encodeURIComponent(path)}`)
+}
+
+// ---- Auth ----
+
+export interface RegisterBody {
+  email: string
+  password: string
+}
+
+export interface LoginBody {
+  email: string
+  password: string
+}
+
+export interface TotpCodeBody {
+  code: string
+}
+
+export interface TotpSetupResponse {
+  otpauthUri: string
+}
+
+export interface TotpVerifySetupResponse {
+  backupCodes: string[]
+}
+
+export interface LoginResponse {
+  status: 'totp_required'
+}
+
+export function register(body: RegisterBody): Promise<User> {
+  return request<User>('POST', '/auth/register', body)
+}
+
+export function login(body: LoginBody): Promise<LoginResponse> {
+  return request<LoginResponse>('POST', '/auth/login', body)
+}
+
+export function setupTotp(): Promise<TotpSetupResponse> {
+  return request<TotpSetupResponse>('POST', '/auth/totp/setup')
+}
+
+export function verifyTotpSetup(body: TotpCodeBody): Promise<TotpVerifySetupResponse> {
+  return request<TotpVerifySetupResponse>('POST', '/auth/totp/verify-setup', body)
+}
+
+export function verifyTotp(body: TotpCodeBody): Promise<User> {
+  return request<User>('POST', '/auth/totp/verify', body)
+}
+
+export function logout(): Promise<void> {
+  return request<void>('POST', '/auth/logout')
+}
+
+export function fetchMe(): Promise<User> {
+  return request<User>('GET', '/auth/me')
 }
