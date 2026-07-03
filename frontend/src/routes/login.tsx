@@ -42,7 +42,7 @@ function LoginPage() {
     )
   }
 
-  const lockedUntilMatch = error?.match(/until (\S+)/)
+  const lockedUntilMatch = error?.match(/until (.+): locked$/)
 
   return (
     <div className="flex h-screen w-full items-center justify-center bg-loom-bg text-loom-fg">
