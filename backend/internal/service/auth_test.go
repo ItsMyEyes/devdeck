@@ -215,3 +215,118 @@ func TestLockoutLevelDecaysAfter24HoursOfNoFailures(t *testing.T) {
 		t.Fatalf("Login after decayed lockout expired = %v, want nil", err)
 	}
 }
+
+func TestFullLoginFlowIssuesWorkingSession(t *testing.T) {
+	svc := newTestAuthService(t)
+	user, _, err := svc.Register("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := svc.BeginTotpEnrollment(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConfirmTotpEnrollment(user.ID, setupCode); err != nil {
+		t.Fatal(err)
+	}
+
+	loginPendingToken, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionToken, loggedInUser, err := svc.VerifyTotp(loginPendingToken, loginCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loggedInUser.Email != "owner@example.com" {
+		t.Errorf("Email = %q, want owner@example.com", loggedInUser.Email)
+	}
+	current, err := svc.CurrentUser(sessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.ID != user.ID {
+		t.Errorf("CurrentUser ID = %q, want %q", current.ID, user.ID)
+	}
+}
+
+func TestBackupCodeLoginIsSingleUse(t *testing.T) {
+	svc := newTestAuthService(t)
+	user, _, err := svc.Register("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := svc.BeginTotpEnrollment(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupCodes, err := svc.ConfirmTotpEnrollment(user.ID, setupCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pendingToken, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.VerifyTotp(pendingToken, backupCodes[0]); err != nil {
+		t.Fatalf("first use of backup code failed: %v", err)
+	}
+
+	pendingToken2, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.VerifyTotp(pendingToken2, backupCodes[0]); !errors.Is(err, ErrValidation) {
+		t.Errorf("second use of the same backup code err = %v, want ErrValidation", err)
+	}
+}
+
+func TestLogoutInvalidatesSession(t *testing.T) {
+	svc := newTestAuthService(t)
+	user, _, err := svc.Register("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := svc.BeginTotpEnrollment(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConfirmTotpEnrollment(user.ID, setupCode); err != nil {
+		t.Fatal(err)
+	}
+	pendingToken, err := svc.Login("owner@example.com", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionToken, _, err := svc.VerifyTotp(pendingToken, loginCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Logout(sessionToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CurrentUser(sessionToken); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("CurrentUser after logout err = %v, want ErrUnauthorized", err)
+	}
+}

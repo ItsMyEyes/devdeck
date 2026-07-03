@@ -277,3 +277,70 @@ func (a *AuthService) Login(email, password string) (string, error) {
 	}
 	return a.issuePendingLogin(user.ID)
 }
+
+const sessionTTL = 30 * 24 * time.Hour
+
+func (a *AuthService) issueSession(userID string) (string, error) {
+	token, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := a.store.CreateSession(userID, hashToken(token), a.now().Add(sessionTTL)); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// VerifyTotp completes a login started by Login (or the pending state left
+// by Register/BeginTotpEnrollment), accepting either a live TOTP code or a
+// single-use backup code, and issues a real session on success.
+func (a *AuthService) VerifyTotp(pendingToken, code string) (string, domain.User, error) {
+	userID, err := a.store.PendingLoginUserID(hashToken(pendingToken), a.now())
+	if err != nil {
+		return "", domain.User{}, fmt.Errorf("invalid or expired login: %w", ErrUnauthorized)
+	}
+	user, err := a.store.UserByID(userID)
+	if err != nil {
+		return "", domain.User{}, err
+	}
+	secret, err := decryptSecret(a.authKey, user.TotpSecretEnc)
+	if err != nil {
+		return "", domain.User{}, err
+	}
+
+	if totp.Validate(code, secret) {
+		return a.completeVerification(pendingToken, userID, user)
+	}
+	if idx := matchBackupCode(user.BackupCodeHashes, code); idx >= 0 {
+		remaining := append(append([]string{}, user.BackupCodeHashes[:idx]...), user.BackupCodeHashes[idx+1:]...)
+		if _, err := a.store.UpdateUser(userID, port.UserPatch{BackupCodeHashes: &remaining}); err != nil {
+			return "", domain.User{}, err
+		}
+		return a.completeVerification(pendingToken, userID, user)
+	}
+	return "", domain.User{}, fmt.Errorf("invalid verification code: %w", ErrValidation)
+}
+
+func (a *AuthService) completeVerification(pendingToken, userID string, user domain.User) (string, domain.User, error) {
+	sessionToken, err := a.issueSession(userID)
+	if err != nil {
+		return "", domain.User{}, err
+	}
+	_ = a.store.DeletePendingLogin(hashToken(pendingToken))
+	return sessionToken, user, nil
+}
+
+// Logout deletes the session row, invalidating the token immediately.
+func (a *AuthService) Logout(sessionToken string) error {
+	return a.store.DeleteSession(hashToken(sessionToken))
+}
+
+// CurrentUser resolves a session token to its user, used by GET /api/auth/me
+// and the RequireAuth middleware.
+func (a *AuthService) CurrentUser(sessionToken string) (domain.User, error) {
+	userID, err := a.store.SessionUserID(hashToken(sessionToken), a.now())
+	if err != nil {
+		return domain.User{}, fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	return a.store.UserByID(userID)
+}
