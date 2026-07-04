@@ -49,6 +49,15 @@ The Go backend accepts flags:
   module shells out to (env `LOOM_PYTHON_BIN` / `LOOM_PANDOC_BIN` /
   `LOOM_MMDC_BIN`). `--python-bin` defaults to `./tools/venv/bin/python3` if
   that venv exists (see Tools module setup below), else `python3` on PATH.
+- `--version` — print the running build's version (embedded at build time
+  from the git tag, see Versioning below) and exit.
+- `--updates` — check the latest GitHub release against the running version
+  and, if newer, download and install it in place, then exit (it does not
+  restart the server — restart it yourself once it prints the new version).
+  Requires `--github-token` / `LOOM_GITHUB_TOKEN` since the release repo is
+  private.
+- `--github-token` — GitHub token used by `--updates` to read releases and
+  download assets from the private repo (env `LOOM_GITHUB_TOKEN`).
 
 ## Tools module setup (markitdown, pandoc, mermaid)
 
@@ -136,6 +145,19 @@ make portable-all
 The executable creates `data/loom.db` beside itself on first launch. Node.js and
 Go are build-time dependencies only; end users still need Git and their selected
 coding-agent CLI installed.
+
+## Versioning / releases
+
+Every build embeds a version string via `-ldflags -X
+loom/backend/internal/version.Version=...`, computed by the `Makefile` from
+`git describe --tags --always --dirty` (falls back to `dev` for an untagged
+build). `--version` prints it; `--updates` uses it to decide whether a newer
+release is available.
+
+To cut a release: push an annotated semver tag (`git tag -a v1.2.3 -m
+v1.2.3 && git push origin v1.2.3`). The `release.yml` GitHub Actions workflow
+then runs the test suite, `make portable-all`, and publishes a GitHub Release
+for that tag with all 6 platform binaries attached.
 
 ## Type checking / linting
 
