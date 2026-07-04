@@ -169,6 +169,17 @@ cd frontend && npm run typecheck
 cd backend && go vet ./...
 ```
 
+`npm run typecheck` always regenerates `routeTree.gen.ts` first (via the
+`pretypecheck` script, which runs a throwaway `vite build`) — it's gitignored
+and otherwise only exists after `vite dev`/`vite build` has run once, which is
+what broke a bare `npm ci && npm run typecheck` in CI.
+
+A pre-commit hook mirrors this locally before every commit. Enable it once
+per clone:
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Testing
 
 - Backend: `go test ./...` (stdlib testing). The Tools module tests

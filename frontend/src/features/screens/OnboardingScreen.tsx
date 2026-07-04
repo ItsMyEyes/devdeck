@@ -1,24 +1,11 @@
-import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { LoomLogo } from '@/features/branding/LoomLogo'
 import { NewWorkspaceDialog } from '@/features/overlays/NewWorkspaceDialog'
-import { useSeed } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 /** Shown when there are no workspaces at all (fresh / everything deleted). */
 export function OnboardingScreen() {
-  const navigate = useNavigate()
   const openNewWorkspace = useLoomStore((s) => s.openNewWorkspace)
-  const seed = useSeed()
-
-  function loadDemo() {
-    seed.mutate(undefined, {
-      onSuccess: (workspaces) => {
-        const first = workspaces[0]
-        if (first) navigate({ to: '/w/$wsId', params: { wsId: first.id } })
-      },
-    })
-  }
 
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center gap-[18px] bg-loom-bg p-6 text-center text-loom-fg">
