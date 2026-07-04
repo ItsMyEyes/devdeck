@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean
+.PHONY: dev dev-web dev-api seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -80,6 +80,16 @@ test:
 # ── Dependencies ─────────────────────────────────────────────
 install:
 	cd frontend && npm install
+
+# ── Release ──────────────────────────────────────────────────
+# Cut a release: creates an annotated semver tag and pushes it, which
+# triggers .github/workflows/release.yml (test, portable-all, GH Release).
+# Usage: make tag VERSION=v1.2.3
+tag:
+	@test -n "$(VERSION)" || (echo "Usage: make tag VERSION=v1.2.3"; exit 1)
+	@echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || (echo "VERSION must match vX.Y.Z, got '$(VERSION)'"; exit 1)
+	git tag -a $(VERSION) -m "$(VERSION)"
+	git push origin $(VERSION)
 
 # ── Clean ────────────────────────────────────────────────────
 clean:
