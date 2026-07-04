@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"log"
 	"os/exec"
 	"sync"
 	"time"
@@ -274,6 +275,7 @@ func (r *registry) pump(sess *ptySession) {
 				// Dead or hopelessly backed-up connection: close it so the
 				// client reconnects and replays from the ring buffer instead
 				// of stalling the pump.
+				log.Printf("terminal: session %s output write failed, closing conn: %v", sess.id, err)
 				_ = conn.CloseNow()
 			}
 		}

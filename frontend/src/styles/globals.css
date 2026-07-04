@@ -5,38 +5,38 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * loom design tokens — dark-only palette lifted 1:1 from the Loom v2 mockup.
+ * loom design tokens - dark-only, neutral developer-workspace palette.
  * Raw palette is exposed as --loom-* for pixel-faithful spots; semantic tokens
  * (--background, --primary, …) drive the shadcn/base-ui component layer.
  */
 :root {
   /* raw loom palette */
-  --loom-bg: #0c0d10;
-  --loom-surface: #0e0f13; /* header / sidebar */
-  --loom-surface-2: #101217; /* drawer / sidebar cards */
-  --loom-card: #13151a;
-  --loom-terminal: #08090c;
-  --loom-popover: #15171c;
-  --loom-elevated: #1a1d23;
+  --loom-bg: #191a1c;
+  --loom-surface: #161719; /* header / sidebar */
+  --loom-surface-2: #1d1e21; /* drawer / sidebar cards */
+  --loom-card: #202124;
+  --loom-terminal: #111214;
+  --loom-popover: #242629;
+  --loom-elevated: #2a2c30;
 
-  --loom-border: #181b21; /* hairline */
-  --loom-border-strong: #23272f; /* inputs */
-  --loom-border-card: #1d2027;
-  --loom-border-menu: #2a2f39;
-  --loom-border-accent: #2c3550;
+  --loom-border: #292b2f; /* hairline */
+  --loom-border-strong: #35383d; /* inputs */
+  --loom-border-card: #303237;
+  --loom-border-menu: #3b3f45;
+  --loom-border-accent: #315b59;
 
-  --loom-fg: #e8eaed;
-  --loom-fg-2: #cdd2da;
-  --loom-muted: #9aa0aa;
-  --loom-muted-2: #7f8794;
-  --loom-dim: #5f6672;
-  --loom-dim-2: #4c525d;
-  --loom-dim-3: #3a3f49;
+  --loom-fg: #eeeeeb;
+  --loom-fg-2: #d4d6d3;
+  --loom-muted: #a4a8aa;
+  --loom-muted-2: #83898d;
+  --loom-dim: #686e73;
+  --loom-dim-2: #555b60;
+  --loom-dim-3: #42474c;
 
-  --loom-accent: #6d8bff;
-  --loom-accent-hover: #86a0ff;
-  --loom-accent-soft: #9db1ff;
-  --loom-accent-ink: #0a0b0e;
+  --loom-accent: #39c6bd;
+  --loom-accent-hover: #55d2ca;
+  --loom-accent-soft: #7fd9d3;
+  --loom-accent-ink: #0d1717;
 
   --loom-green: #56d58a;
   --loom-green-soft: #8fd99f;
@@ -50,8 +50,8 @@
   /* tint tokens — background/border/text colours for soft, warning, success,
      destructive, and ghost surface variants (button cva + feature-level alerts).
      Hoisted from raw hexes so a single source drives every tint. */
-  --loom-accent-tint: #1d2230;
-  --loom-accent-tint-hover: #242b3d;
+  --loom-accent-tint: #18302f;
+  --loom-accent-tint-hover: #1e3b39;
   --loom-warning-ink: #1a1606;
   --loom-green-tint: #1a1f17;
   --loom-green-tint-border: #2c3a29;
@@ -66,9 +66,9 @@
   --loom-yellow-tint-border: #3d331a;
   --loom-yellow-tint-text: #d1a52c;
   --loom-yellow-ink: #1e1604;
-  --loom-hover-wash: rgba(255, 255, 255, 0.03);
-  --loom-hover-wash-menu: rgba(255, 255, 255, 0.05);
-  --loom-accent-gradient: linear-gradient(135deg, var(--loom-accent), #3a4ea8);
+  --loom-hover-wash: rgba(255, 255, 255, 0.035);
+  --loom-hover-wash-menu: rgba(255, 255, 255, 0.06);
+  --loom-accent-gradient: linear-gradient(135deg, var(--loom-accent), #238d87);
 
   /* semantic (shadcn-style) */
   --background: var(--loom-bg);
@@ -91,7 +91,7 @@
   --input: var(--loom-border-strong);
   --ring: var(--loom-border-accent);
 
-  --radius: 0.6rem;
+  --radius: 0.45rem;
 }
 
 @theme inline {

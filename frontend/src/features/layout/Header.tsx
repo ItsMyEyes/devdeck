@@ -61,11 +61,11 @@ export function Header() {
       {agents && (
         <div className="ml-1 hidden items-center gap-3.5 font-mono text-[11.5px] text-loom-muted md:flex">
           <span className="flex items-center gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full bg-loom-green shadow-[0_0_7px_#56d58a88]" />
+            <span className="h-[7px] w-[7px] rounded-full bg-loom-green" />
             {running} running
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full bg-loom-yellow shadow-[0_0_7px_#f5c45188]" />
+            <span className="h-[7px] w-[7px] rounded-full bg-loom-yellow" />
             {waiting} waiting
           </span>
           <span className="flex items-center gap-1.5">

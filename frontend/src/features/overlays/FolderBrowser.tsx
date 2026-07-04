@@ -16,7 +16,7 @@ export function FolderBrowser() {
 
   const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
   const { data, isLoading, error, refetch } = useFsList(pathLabel)
-  const folders = data?.entries ?? []
+  const folders = data?.entries.filter((entry) => entry.isDir) ?? []
   const currentGit = data?.git ?? false
   const crumbs = ['~', ...browse.path]
 

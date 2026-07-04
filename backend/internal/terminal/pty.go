@@ -90,9 +90,11 @@ func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session st
 	go keepalive(ctx, conn)
 
 	// WebSocket -> PTY (user stdin / resize), until this connection closes.
+	var readErr error
 	for {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
+			readErr = err
 			break
 		}
 		var f frame
@@ -107,6 +109,13 @@ func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session st
 			sess.resize(newCols, newRows)
 		}
 	}
+
+	// Close status says who ended the connection and why: 1000/1001 is a
+	// deliberate client close, -1 with a net error is a transport drop
+	// (proxy/tunnel/mobile network), 1002/1007/1009 is a protocol or data
+	// complaint from the peer.
+	log.Printf("terminal: session %s read loop ended: closeStatus=%d err=%v",
+		session, websocket.CloseStatus(readErr), readErr)
 
 	if s.registry.detach(session, conn) {
 		log.Printf("terminal: session %s detached (process continues in background)", session)

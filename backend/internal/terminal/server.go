@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"loom/backend/internal/detect"
+	gitpkg "loom/backend/internal/git"
 	"loom/backend/internal/port"
 
 	"nhooyr.io/websocket"
@@ -125,10 +126,10 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 	// workDir is computed regardless of whether an agent resolves below, so a
 	// root-mode session with no agent (plain shell) still opens in the
 	// project root rather than falling back to the user's home directory.
-	workDir = proj.Path
+	workDir = gitpkg.ExpandHome(proj.Path)
 	// For branch mode, use the worktree directory
 	if !wt.Root && wt.Branch != "" {
-		workDir = filepath.Join(proj.Path, ".wt", session)
+		workDir = filepath.Join(workDir, ".wt", session)
 	}
 
 	// wt.Agent is the agent ID chosen at worktree creation (e.g. "codex"),
@@ -241,6 +242,9 @@ func keepalive(ctx context.Context, conn *websocket.Conn) {
 			return
 		case <-ticker.C:
 			if err := conn.Ping(ctx); err != nil {
+				if ctx.Err() == nil {
+					log.Printf("terminal: keepalive ping failed: %v", err)
+				}
 				return
 			}
 		}

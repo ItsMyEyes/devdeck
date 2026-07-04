@@ -9,7 +9,6 @@ interface NavDef {
   key: ModuleView
   label: string
   Icon: LucideIcon
-  color: string
   badge: number
 }
 
@@ -23,9 +22,9 @@ export function SidebarNav() {
   const openInvoices = ws ? ws.invoices.filter((iv) => iv.status === 'sent' || iv.status === 'overdue').length : 0
 
   const items: NavDef[] = [
-    { key: 'agents', label: 'Agents', Icon: LayoutGrid, color: '#56d58a', badge: running },
-    { key: 'invoices', label: 'Invoices', Icon: Receipt, color: '#c7a3ff', badge: openInvoices },
-    { key: 'tools', label: 'Tools', Icon: Wrench, color: '#ffb454', badge: 0 },
+    { key: 'agents', label: 'Agents', Icon: LayoutGrid, badge: running },
+    { key: 'invoices', label: 'Invoices', Icon: Receipt, badge: openInvoices },
+    { key: 'tools', label: 'Tools', Icon: Wrench, badge: 0 },
   ]
 
   function goto(key: ModuleView) {
@@ -44,21 +43,20 @@ export function SidebarNav() {
             onClick={() => goto(n.key)}
             className={cn(
               'flex h-[34px] cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               active
                 ? 'bg-loom-accent/10 text-loom-fg shadow-[inset_2px_0_0_var(--loom-accent)]'
                 : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
             )}
           >
-            <n.Icon size={14} className="flex-none" style={{ color: active ? n.color : undefined }} />
+            <n.Icon size={14} className={cn('flex-none', active && 'text-loom-accent')} />
             <span className="min-w-0 flex-1 text-left">{n.label}</span>
             {n.badge > 0 && (
               <span
-                className="min-w-[16px] rounded-md text-center font-mono text-[9.5px] font-semibold"
-                style={{
-                  color: active ? 'var(--loom-accent-ink)' : n.color,
-                  background: active ? n.color : `${n.color}22`,
-                  padding: '1px 5px',
-                }}
+                className={cn(
+                  'min-w-[16px] rounded-md px-[5px] py-px text-center font-mono text-[9.5px] font-semibold',
+                  active ? 'bg-loom-accent text-loom-accent-ink' : 'bg-loom-accent/15 text-loom-accent-soft',
+                )}
               >
                 {n.badge}
               </span>

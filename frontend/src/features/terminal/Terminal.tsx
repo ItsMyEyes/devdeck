@@ -11,27 +11,27 @@ export interface TerminalHandle {
 }
 
 const THEME = {
-  background: '#08090c',
-  foreground: '#b6bcc6',
-  cursor: '#6d8bff',
-  cursorAccent: '#08090c',
-  selectionBackground: '#2c355080',
-  black: '#0c0d10',
+  background: '#111214',
+  foreground: '#c9ccca',
+  cursor: '#39c6bd',
+  cursorAccent: '#111214',
+  selectionBackground: '#315b5980',
+  black: '#191a1c',
   red: '#f87171',
   green: '#56d58a',
   yellow: '#f5c451',
-  blue: '#6d8bff',
+  blue: '#39c6bd',
   magenta: '#c7a3ff',
   cyan: '#8fd99f',
-  white: '#cdd2da',
-  brightBlack: '#5f6672',
+  white: '#d4d6d3',
+  brightBlack: '#686e73',
   brightRed: '#f08a8a',
   brightGreen: '#8fd99f',
   brightYellow: '#ffd66a',
-  brightBlue: '#9db1ff',
+  brightBlue: '#7fd9d3',
   brightMagenta: '#c7a3ff',
   brightCyan: '#8fd99f',
-  brightWhite: '#e8eaed',
+  brightWhite: '#eeeeeb',
 }
 
 interface TerminalProps {
@@ -91,24 +91,83 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     fit.fit()
     termRef.current = term
 
-    const cols = term.cols
-    const rows = term.rows
-    const ws = new WebSocket(terminalWsUrl(session, cols, rows))
-    ws.binaryType = 'arraybuffer'
-    wsRef.current = ws
+    // The session's PTY survives disconnects server-side (grace period +
+    // history replay on reattach), so any close we didn't initiate is treated
+    // as transient and reconnected with backoff. Mobile browsers drop sockets
+    // constantly (tab freeze on app switch / screen lock, Wi-Fi <-> cellular
+    // handoff) — without this the terminal dies on the first hiccup.
+    let disposed = false
+    let everOpened = false
+    let attempts = 0
+    let retryTimer: number | undefined
 
-    ws.onopen = () => {
-      // flush queued frames + sync current size
-      ws.send(resizeFrame(term.cols, term.rows))
-      for (const f of outbox.current) ws.send(f)
-      outbox.current = []
+    const connect = () => {
+      if (disposed) return
+      const ws = new WebSocket(terminalWsUrl(session, term.cols, term.rows))
+      ws.binaryType = 'arraybuffer'
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        everOpened = true
+        attempts = 0
+        // flush queued frames + sync current size
+        ws.send(resizeFrame(term.cols, term.rows))
+        for (const f of outbox.current) ws.send(f)
+        outbox.current = []
+      }
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') term.write(ev.data)
+        else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
+      }
+      ws.onclose = () => scheduleReconnect()
+      ws.onerror = () => {
+        if (!everOpened) {
+          term.write('\r\n\x1b[38;5;210m[connection error — is the terminal server running?]\x1b[0m\r\n')
+        }
+      }
     }
-    ws.onmessage = (ev) => {
-      if (typeof ev.data === 'string') term.write(ev.data)
-      else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
+
+    const scheduleReconnect = () => {
+      if (disposed || retryTimer !== undefined) return
+      const delay = Math.min(500 * 2 ** attempts, 8000)
+      attempts++
+      term.write('\r\n\x1b[38;5;102m[connection lost — reconnecting…]\x1b[0m\r\n')
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined
+        // The server replays banner + buffered history on reattach; reset so
+        // the replay doesn't duplicate what's already on screen.
+        term.reset()
+        connect()
+      }, delay)
     }
-    ws.onclose = () => term.write('\r\n\x1b[38;5;102m[connection closed]\x1b[0m\r\n')
-    ws.onerror = () => term.write('\r\n\x1b[38;5;210m[connection error — is the terminal server running?]\x1b[0m\r\n')
+
+    // Reconnect immediately when the tab returns to the foreground or the
+    // network comes back, instead of waiting out the backoff timer.
+    const kick = () => {
+      if (disposed) return
+      const ws = wsRef.current
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        // A socket that survived a tab freeze may claim OPEN while the peer
+        // is long gone; a no-op frame forces the dead TCP path to surface as
+        // a close event, which reconnects via scheduleReconnect.
+        if (ws.readyState === WebSocket.OPEN) ws.send(resizeFrame(term.cols, term.rows))
+        return
+      }
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer)
+        retryTimer = undefined
+      }
+      attempts = 0
+      term.reset()
+      connect()
+    }
+    const onVisible = () => {
+      if (!document.hidden) kick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', kick)
+
+    connect()
 
     const onData = term.onData((data) => {
       // Sticky Ctrl (armed from the mobile key toolbar): fold the next single
@@ -136,14 +195,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     term.focus()
 
     return () => {
+      disposed = true
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', kick)
       ro.disconnect()
       onData.dispose()
       onResize.dispose()
-      ws.onclose = null
-      ws.onmessage = null
-      ws.onerror = null
-      ws.onopen = null
-      ws.close()
+      const ws = wsRef.current
+      if (ws) {
+        ws.onclose = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onopen = null
+        ws.close()
+      }
       term.dispose()
       termRef.current = null
       wsRef.current = null

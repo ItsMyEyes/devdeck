@@ -9,14 +9,15 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"loom/backend/internal/codeserver"
 	"loom/backend/internal/config"
 	"loom/backend/internal/handler"
+	"loom/backend/internal/lsp"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
 	"loom/backend/internal/service"
@@ -35,9 +36,12 @@ func main() {
 	trustedProxies := flag.String("trusted-proxies", envOr("LOOM_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
 	clientIPHeader := flag.String("client-ip-header", envOr("LOOM_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
 	twoFA := flag.Bool("2fa", envBool("LOOM_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
+	turnstileSiteKey := flag.String("turnstile-site-key", envOr("LOOM_TURNSTILE_SITE_KEY", ""), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge")
+	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("LOOM_TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify login challenges server-side")
 	pythonBin := flag.String("python-bin", envOr("LOOM_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
 	pandocBin := flag.String("pandoc-bin", envOr("LOOM_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
 	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
+	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
 	flag.Parse()
 
 	if applied, err := config.LoadDotEnv(*envFile); err != nil {
@@ -76,6 +80,13 @@ func main() {
 		log.Printf("auth: warning: TOTP two-factor authentication disabled (--2fa=false); logins complete with password only")
 	}
 	authH := handler.NewAuthHandler(authSvc)
+	if (*turnstileSiteKey == "") != (*turnstileSecretKey == "") {
+		log.Fatalf("turnstile: --turnstile-site-key and --turnstile-secret-key must be set together")
+	}
+	if *turnstileSiteKey != "" {
+		authH.SetTurnstile(service.NewTurnstileVerifier(*turnstileSiteKey, *turnstileSecretKey), proxyNets, *clientIPHeader)
+		log.Printf("auth: Cloudflare Turnstile enabled for login")
+	}
 
 	if generated, err := st.RunDueRecurringInvoices(); err != nil {
 		log.Printf("recurring invoices: startup check failed: %v", err)
@@ -105,23 +116,21 @@ func main() {
 	}
 	agentReg := registry.NewLocalRegistry(baseReg)
 
-	csManager := codeserver.NewManager()
 	wsSvc := service.NewWorkspaceService(st)
-	pSvc := service.NewProjectService(st, csManager.Stop)
-	wtSvc := service.NewWorktreeService(st, func(id string) error {
-		_ = csManager.Stop(id)
-		return terminal.KillSession(id)
-	})
+	pSvc := service.NewProjectService(st)
+	wtSvc := service.NewWorktreeService(st, terminal.KillSession)
 	agentSvc := service.NewAgentService(agentReg)
 	seedSvc := service.NewSeedService(st)
-	csSvc := service.NewCodeServerService(st, csManager)
+	fileSvc := service.NewWorktreeFileService(st)
+	gitSvc := service.NewWorktreeGitService(st)
 
 	healthH := handler.NewHealthHandler()
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
 	agentH := handler.NewAgentHandler(agentSvc)
-	csH := handler.NewCodeServerHandler(csSvc)
+	fileH := handler.NewWorktreeFileHandler(fileSvc)
+	gitH := handler.NewWorktreeGitHandler(gitSvc)
 	todoH := handler.NewTodoHandler(st)
 	invH := handler.NewInvoiceHandler(st)
 	companyH := handler.NewCompanyHandler(st)
@@ -136,6 +145,7 @@ func main() {
 	seedH := handler.NewSeedHandler(seedSvc)
 
 	termSrv := terminal.NewServer(st)
+	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
@@ -175,17 +185,25 @@ func main() {
 	mux.HandleFunc("DELETE /api/projects/{id}", pH.DeleteProject)
 	mux.HandleFunc("GET /api/projects/{id}/branches", pH.GetProjectBranches)
 
-	mux.HandleFunc("POST /api/projects/{id}/code-server", csH.PostProjectCodeServer)
-	mux.HandleFunc("GET /api/projects/{id}/code-server", csH.GetProjectCodeServer)
-	mux.HandleFunc("DELETE /api/projects/{id}/code-server", csH.DeleteProjectCodeServer)
-
 	mux.HandleFunc("POST /api/projects/{projectId}/worktrees", wtH.PostWorktree)
 	mux.HandleFunc("PATCH /api/worktrees/{id}", wtH.PatchWorktree)
 	mux.HandleFunc("DELETE /api/worktrees/{id}", wtH.DeleteWorktree)
 
-	mux.HandleFunc("POST /api/worktrees/{id}/code-server", csH.PostCodeServer)
-	mux.HandleFunc("GET /api/worktrees/{id}/code-server", csH.GetCodeServer)
-	mux.HandleFunc("DELETE /api/worktrees/{id}/code-server", csH.DeleteCodeServer)
+	mux.HandleFunc("GET /api/worktrees/{id}/files", fileH.List)
+	mux.HandleFunc("GET /api/worktrees/{id}/files/search", fileH.Search)
+	mux.HandleFunc("GET /api/worktrees/{id}/file", fileH.Read)
+	mux.HandleFunc("PUT /api/worktrees/{id}/file", fileH.Write)
+	mux.HandleFunc("DELETE /api/worktrees/{id}/file", fileH.Delete)
+
+	mux.HandleFunc("GET /api/worktrees/{id}/git/status", gitH.Status)
+	mux.HandleFunc("GET /api/worktrees/{id}/git/diff", gitH.Diff)
+	mux.HandleFunc("GET /api/worktrees/{id}/git/log", gitH.Log)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/stage", gitH.Stage)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/unstage", gitH.Unstage)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/discard", gitH.Discard)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/commit", gitH.Commit)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/push", gitH.Push)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/pull", gitH.Pull)
 
 	mux.HandleFunc("POST /api/projects/{projectId}/issues", issueH.PostIssue)
 	mux.HandleFunc("PATCH /api/issues/{id}", issueH.PatchIssue)
@@ -242,6 +260,7 @@ func main() {
 	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
+	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
 
 	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc)(mux)))
@@ -273,12 +292,48 @@ func main() {
 		log.Fatalf("resolve UI URL: %v", err)
 	}
 	log.Printf("loom listening on %s (db: %s)", uiURL, *dbPath)
+	if *tailscaleServe {
+		if err := startTailscaleServe(listener.Addr()); err != nil {
+			log.Fatalf("--enable-tailscale-serve: %v", err)
+		}
+	}
 	if *openUI && webui.Available() {
 		openBrowserSoon(uiURL)
 	}
 	if err := http.Serve(listener, root); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// startTailscaleServe runs `tailscale serve <port>` as a foreground child
+// process: the serve config exists only while the child runs, so tailscaled
+// is left clean when loom exits, and ctrl-c reaches both through the shared
+// process group. The port comes from the bound listener, not --addr, so it
+// is correct even for ":0".
+func startTailscaleServe(addr net.Addr) error {
+	_, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return fmt.Errorf("resolve listen port from %s: %w", addr, err)
+	}
+	bin, err := exec.LookPath("tailscale")
+	if err != nil {
+		return fmt.Errorf("tailscale CLI not found in PATH; install it or drop the flag")
+	}
+	cmd := exec.Command(bin, "serve", port)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start tailscale serve: %w", err)
+	}
+	log.Printf("tailscale: serving port %s on your tailnet (pid %d)", port, cmd.Process.Pid)
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("tailscale serve exited: %v (loom keeps serving locally)", err)
+			return
+		}
+		log.Printf("tailscale serve exited")
+	}()
+	return nil
 }
 
 func defaultDBPath() string {

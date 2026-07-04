@@ -21,11 +21,11 @@ func validRef(name string) bool {
 	return name != "" && !strings.HasPrefix(name, "-") && refNamePattern.MatchString(name)
 }
 
-// expandHome expands a leading ~ to the user's home directory. git -C (and
+// ExpandHome expands a leading ~ to the user's home directory. git -C (and
 // os/exec generally) never does shell-style tilde expansion, so a project
 // path stored verbatim as "~/code/foo" would otherwise fail with "cannot
 // change to '~/code/foo': No such file or directory".
-func expandHome(path string) string {
+func ExpandHome(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}
@@ -53,7 +53,7 @@ func run(args ...string) (string, error) {
 
 // ListBranches returns the local branch names of the repository at repoPath.
 func ListBranches(repoPath string) ([]string, error) {
-	out, err := run("-C", expandHome(repoPath), "branch", "--format=%(refname:short)")
+	out, err := run("-C", ExpandHome(repoPath), "branch", "--format=%(refname:short)")
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func AddWorktree(repoPath, worktreePath, branch, base string) error {
 	if !validRef(base) {
 		return fmt.Errorf("invalid base branch name %q", base)
 	}
-	_, err := run("-C", expandHome(repoPath), "worktree", "add", "-b", branch, expandHome(worktreePath), base)
+	_, err := run("-C", ExpandHome(repoPath), "worktree", "add", "-b", branch, ExpandHome(worktreePath), base)
 	return err
 }
 
@@ -88,7 +88,7 @@ func AddWorktree(repoPath, worktreePath, branch, base string) error {
 // worktree's DB row, so a leftover dirty working tree must not block that;
 // it would otherwise leave the database and disk out of sync.
 func RemoveWorktree(repoPath, worktreePath string) error {
-	_, err := run("-C", expandHome(repoPath), "worktree", "remove", "--force", expandHome(worktreePath))
+	_, err := run("-C", ExpandHome(repoPath), "worktree", "remove", "--force", ExpandHome(worktreePath))
 	if err != nil && strings.Contains(err.Error(), "is not a working tree") {
 		return nil
 	}
@@ -101,6 +101,6 @@ func Checkout(worktreePath, branch string) error {
 	if !validRef(branch) {
 		return fmt.Errorf("invalid branch name %q", branch)
 	}
-	_, err := run("-C", expandHome(worktreePath), "checkout", branch)
+	_, err := run("-C", ExpandHome(worktreePath), "checkout", branch)
 	return err
 }

@@ -179,3 +179,44 @@ func TestLoginLockoutReturns423(t *testing.T) {
 		t.Fatalf("status = %d, want 423, body=%s", lockedRec.Code, lockedRec.Body)
 	}
 }
+
+func TestLoginRequiresTurnstileWhenConfigured(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.SetTurnstile(service.NewTurnstileVerifier("site-key", "secret-key"), nil, "")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", jsonBody(t, map[string]string{
+		"email": "owner@example.com", "password": "correct horse battery staple",
+	}))
+	h.PostLogin(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("login without turnstile token status = %d, want 400, body=%s", rec.Code, rec.Body)
+	}
+
+	cfgRec := httptest.NewRecorder()
+	h.GetConfig(cfgRec, httptest.NewRequest(http.MethodGet, "/api/auth/config", nil))
+	var cfg struct {
+		TurnstileSiteKey string `json:"turnstileSiteKey"`
+	}
+	if err := json.Unmarshal(cfgRec.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TurnstileSiteKey != "site-key" {
+		t.Errorf("config turnstileSiteKey = %q, want %q", cfg.TurnstileSiteKey, "site-key")
+	}
+}
+
+func TestConfigOmitsTurnstileWhenDisabled(t *testing.T) {
+	h := newTestAuthHandler(t)
+	rec := httptest.NewRecorder()
+	h.GetConfig(rec, httptest.NewRequest(http.MethodGet, "/api/auth/config", nil))
+	var cfg struct {
+		TurnstileSiteKey string `json:"turnstileSiteKey"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TurnstileSiteKey != "" {
+		t.Errorf("config turnstileSiteKey = %q, want empty when disabled", cfg.TurnstileSiteKey)
+	}
+}

@@ -17,7 +17,8 @@ type FsHandler struct{}
 func NewFsHandler() *FsHandler { return &FsHandler{} }
 
 // ListDir handles GET /api/fs/list?path=<path>.
-// It returns subdirectories of the requested path with git-repo indicators.
+// It returns the requested directory's visible folders and files, with
+// git-repo indicators on folders.
 func (h *FsHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("path")
 	if raw == "" {
@@ -73,23 +74,27 @@ func (h *FsHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response: directories only, sorted alphabetically
+	// Build response: visible directories and files, with directories first.
 	result := make([]domain.FsEntry, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		// Skip hidden directories (except .git which we check)
+		// Hidden entries make the project explorer noisy. The current
+		// directory's .git marker is still checked separately below.
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		git := false
-		if _, err := os.Stat(filepath.Join(resolved, e.Name(), ".git")); err == nil {
-			git = true
+		if e.IsDir() {
+			_, err := os.Stat(filepath.Join(resolved, e.Name(), ".git"))
+			git = err == nil
 		}
-		result = append(result, domain.FsEntry{Name: e.Name(), IsDir: true, Git: git})
+		result = append(result, domain.FsEntry{Name: e.Name(), IsDir: e.IsDir(), Git: git})
 	}
-	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
 
 	// Check if the listed directory itself is a git repo (for footer indicator)
 	currentGit := false

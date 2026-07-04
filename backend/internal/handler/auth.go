@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net"
 	"net/http"
 	"time"
 
@@ -15,12 +16,24 @@ const (
 // AuthHandler handles registration, login, TOTP enrollment/verification,
 // logout, and the current-user endpoint.
 type AuthHandler struct {
-	svc *service.AuthService
+	svc            *service.AuthService
+	turnstile      *service.TurnstileVerifier
+	trustedProxies []*net.IPNet
+	clientIPHeader string
 }
 
 // NewAuthHandler creates an auth handler.
 func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 	return &AuthHandler{svc: svc}
+}
+
+// SetTurnstile enables Cloudflare Turnstile verification on login. The proxy
+// settings mirror the access middleware so the remote IP forwarded to
+// siteverify is the real client, not the tunnel.
+func (h *AuthHandler) SetTurnstile(v *service.TurnstileVerifier, trustedProxies []*net.IPNet, clientIPHeader string) {
+	h.turnstile = v
+	h.trustedProxies = trustedProxies
+	h.clientIPHeader = clientIPHeader
 }
 
 func setAuthCookie(w http.ResponseWriter, name, value string, maxAge time.Duration) {
@@ -85,18 +98,32 @@ func (h *AuthHandler) PostRegister(w http.ResponseWriter, r *http.Request) {
 // GetConfig handles GET /api/auth/config — public flow flags the SPA needs
 // before a session exists (e.g. whether login/registration includes TOTP).
 func (h *AuthHandler) GetConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"totpRequired": h.svc.TOTPRequired()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"totpRequired":     h.svc.TOTPRequired(),
+		"turnstileSiteKey": h.turnstile.SiteKey(),
+	})
 }
 
 // PostLogin handles POST /api/auth/login.
 func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email          string `json:"email"`
+		Password       string `json:"password"`
+		TurnstileToken string `json:"turnstileToken"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
+	}
+	if h.turnstile.Enabled() {
+		var remoteIP string
+		if ip := ClientIP(r, h.trustedProxies, h.clientIPHeader); ip != nil {
+			remoteIP = ip.String()
+		}
+		if err := h.turnstile.Verify(r.Context(), body.TurnstileToken, remoteIP); err != nil {
+			handleStoreErr(w, err)
+			return
+		}
 	}
 	pendingToken, err := h.svc.Login(body.Email, body.Password)
 	if handleStoreErr(w, err) {

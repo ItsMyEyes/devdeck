@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError } from '@/lib/api'
-import { useLogin, useVerifyTotp } from '@/features/data/authQueries'
+import { useAuthConfig, useLogin, useVerifyTotp } from '@/features/data/authQueries'
+import { TurnstileWidget } from '@/features/auth/TurnstileWidget'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -14,22 +15,34 @@ function LoginPage() {
   const navigate = useNavigate()
   const login = useLogin()
   const verifyTotp = useVerifyTotp()
+  const authConfig = useAuthConfig()
+  const turnstileSiteKey = authConfig.data?.turnstileSiteKey ?? ''
   const [step, setStep] = useState<'credentials' | 'totp'>('credentials')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  // Turnstile tokens are single-use; bump the key to remount the widget
+  // after a failed login consumed the token server-side.
+  const [turnstileKey, setTurnstileKey] = useState(0)
 
   function submitCredentials() {
     setError(null)
     login.mutate(
-      { email, password },
+      { email, password, turnstileToken: turnstileToken ?? undefined },
       {
         // status 'ok' means the server runs with --2fa=false and the
         // session cookie is already set; there is no TOTP step.
         onSuccess: (data) =>
           data.status === 'ok' ? navigate({ to: '/' }) : setStep('totp'),
-        onError: (err) => setError(err instanceof ApiError ? err.message : 'Login failed'),
+        onError: (err) => {
+          setError(err instanceof ApiError ? err.message : 'Login failed')
+          if (turnstileSiteKey) {
+            setTurnstileToken(null)
+            setTurnstileKey((k) => k + 1)
+          }
+        },
       },
     )
   }
@@ -70,12 +83,19 @@ function LoginPage() {
               onKeyDown={(e) => e.key === 'Enter' && submitCredentials()}
               className="mb-5"
             />
+            {turnstileSiteKey && (
+              <TurnstileWidget key={turnstileKey} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+            )}
             {error && (
               <p className="mb-4 text-[12px] text-loom-red-soft">
                 {lockedUntilMatch ? `Too many attempts. Try again after ${lockedUntilMatch[1]}.` : error}
               </p>
             )}
-            <Button onClick={submitCredentials} disabled={login.isPending} className="w-full">
+            <Button
+              onClick={submitCredentials}
+              disabled={login.isPending || (!!turnstileSiteKey && !turnstileToken)}
+              className="w-full"
+            >
               {login.isPending ? 'Signing in…' : 'Continue →'}
             </Button>
             <p className="mt-4 text-center text-[12px] text-loom-muted">

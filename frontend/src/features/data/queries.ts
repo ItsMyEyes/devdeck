@@ -28,6 +28,7 @@ import {
   deleteTodo,
   deleteWorkspace,
   deleteWorktree,
+  deleteWorktreeFile,
   fetchAgentModels,
   fetchAgentSkills,
   fetchAgents,
@@ -36,14 +37,24 @@ import {
   fetchComments,
   fetchCompanies,
   fetchFsList,
+  fetchGitDiff,
+  fetchGitLog,
+  fetchGitStatus,
   fetchIssueEvents,
   fetchProjectBranches,
   fetchSettings,
+  fetchWorktreeFile,
+  fetchWorktreeFiles,
   fetchWorkspaces,
+  gitCommit,
+  gitDiscard,
+  gitPull,
+  gitPush,
+  gitStage,
+  gitUnstage,
   markAllNewsRead,
+  searchWorktreeFiles,
   seed,
-  startCodeServer,
-  startProjectCodeServer,
   uploadAttachment,
   updateBank,
   updateComment,
@@ -57,6 +68,7 @@ import {
   updateTodo,
   updateWorkspace,
   updateWorktree,
+  writeWorktreeFile,
 } from '@/lib/api'
 import type {
   CreateBankBody,
@@ -199,20 +211,6 @@ export function useDeleteWorktree() {
   return useMutation({
     mutationFn: (id: string) => deleteWorktree(id),
     onSuccess: () => invalidate(),
-  })
-}
-
-/** Starts (or reuses) a worktree's code-server instance; no cache to invalidate. */
-export function useStartCodeServer() {
-  return useMutation({
-    mutationFn: (worktreeId: string) => startCodeServer(worktreeId),
-  })
-}
-
-/** Starts (or reuses) a code-server instance rooted at a project's own directory. */
-export function useStartProjectCodeServer() {
-  return useMutation({
-    mutationFn: (projectId: string) => startProjectCodeServer(projectId),
   })
 }
 
@@ -554,3 +552,134 @@ export function useFsList(path: string) {
   })
 }
 
+export function useWorktreeFiles(worktreeId: string, path: string) {
+  return useQuery({
+    queryKey: qk.worktreeFiles(worktreeId, path),
+    queryFn: () => fetchWorktreeFiles(worktreeId, path),
+    enabled: worktreeId.length > 0,
+  })
+}
+
+// ---- Worktree git (source control) ----
+
+export function useGitStatus(worktreeId: string, active: boolean) {
+  return useQuery({
+    queryKey: qk.gitStatus(worktreeId),
+    queryFn: () => fetchGitStatus(worktreeId),
+    enabled: worktreeId.length > 0,
+    refetchInterval: active ? 5000 : false,
+  })
+}
+
+export function useGitLog(worktreeId: string, active: boolean) {
+  return useQuery({
+    queryKey: qk.gitLog(worktreeId),
+    queryFn: () => fetchGitLog(worktreeId),
+    enabled: worktreeId.length > 0 && active,
+  })
+}
+
+export function useGitDiff(
+  worktreeId: string,
+  target: { path: string; staged: boolean; untracked: boolean } | { commit: string } | null,
+) {
+  const targetKey =
+    target === null
+      ? ''
+      : 'commit' in target
+        ? `commit:${target.commit}`
+        : `${target.staged ? 'staged' : 'work'}:${target.untracked ? 'new' : 'mod'}:${target.path}`
+  return useQuery({
+    queryKey: qk.gitDiff(worktreeId, targetKey),
+    queryFn: () => fetchGitDiff(worktreeId, target!),
+    enabled: worktreeId.length > 0 && target !== null,
+    staleTime: 5000,
+  })
+}
+
+/** Mutation over git state; invalidates status + log + cached diffs on settle. */
+function useGitMutation<TVars>(worktreeId: string, mutationFn: (vars: TVars) => Promise<void>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.gitRoot(worktreeId) }),
+  })
+}
+
+export function useGitStage(worktreeId: string) {
+  return useGitMutation(worktreeId, (paths: string[]) => gitStage(worktreeId, paths))
+}
+
+export function useGitUnstage(worktreeId: string) {
+  return useGitMutation(worktreeId, (paths: string[]) => gitUnstage(worktreeId, paths))
+}
+
+/**
+ * Discard reverts files on disk, so beyond git state this also invalidates
+ * the file tree and any open file contents under the worktree.
+ */
+export function useGitDiscard(worktreeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (paths: string[]) => gitDiscard(worktreeId, paths),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['worktrees', worktreeId] }),
+  })
+}
+
+export function useGitCommit(worktreeId: string) {
+  return useGitMutation(worktreeId, (message: string) => gitCommit(worktreeId, message))
+}
+
+export function useGitPush(worktreeId: string) {
+  return useGitMutation(worktreeId, (_: void) => gitPush(worktreeId))
+}
+
+export function useGitPull(worktreeId: string) {
+  return useGitMutation(worktreeId, (_: void) => gitPull(worktreeId))
+}
+
+/** Refetch every loaded folder level of a worktree's file tree. */
+export function useInvalidateWorktreeFiles(worktreeId: string) {
+  const queryClient = useQueryClient()
+  return () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+}
+
+export function useWorktreeFile(worktreeId: string, path: string) {
+  return useQuery({
+    queryKey: qk.worktreeFile(worktreeId, path),
+    queryFn: () => fetchWorktreeFile(worktreeId, path),
+    enabled: worktreeId.length > 0 && path.length > 0,
+    staleTime: 0,
+  })
+}
+
+export function useWorktreeFileSearch(worktreeId: string, pattern: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.worktreeFileSearch(worktreeId, pattern),
+    queryFn: () => searchWorktreeFiles(worktreeId, pattern),
+    enabled: enabled && worktreeId.length > 0,
+    staleTime: 0,
+  })
+}
+
+export function useWriteWorktreeFile(worktreeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { path: string; content: string }) => writeWorktreeFile(worktreeId, body),
+    onSuccess: (content) => {
+      queryClient.setQueryData(qk.worktreeFile(worktreeId, content.path), content)
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+    },
+  })
+}
+
+export function useDeleteWorktreeFile(worktreeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (path: string) => deleteWorktreeFile(worktreeId, path),
+    onSuccess: (_result, path) => {
+      queryClient.removeQueries({ queryKey: qk.worktreeFile(worktreeId, path) })
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+    },
+  })
+}

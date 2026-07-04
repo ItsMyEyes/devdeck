@@ -322,25 +322,128 @@ export function deleteWorktree(id: string): Promise<void> {
   return request<void>('DELETE', `/worktrees/${id}`)
 }
 
-export interface CodeServerStatus {
-  url: string
-  running: boolean
+export interface WorktreeFileEntry {
+  name: string
+  path: string
+  isDir: boolean
+  size: number
 }
 
-export function startCodeServer(worktreeId: string): Promise<CodeServerStatus> {
-  return request<CodeServerStatus>('POST', `/worktrees/${worktreeId}/code-server`)
+export interface WorktreeFileContent {
+  path: string
+  content: string
 }
 
-export function stopCodeServer(worktreeId: string): Promise<void> {
-  return request<void>('DELETE', `/worktrees/${worktreeId}/code-server`)
+export function fetchWorktreeFiles(worktreeId: string, path = ''): Promise<WorktreeFileEntry[]> {
+  return request<WorktreeFileEntry[]>(
+    'GET',
+    `/worktrees/${worktreeId}/files?path=${encodeURIComponent(path)}`,
+  )
 }
 
-export function startProjectCodeServer(projectId: string): Promise<CodeServerStatus> {
-  return request<CodeServerStatus>('POST', `/projects/${projectId}/code-server`)
+export function fetchWorktreeFile(worktreeId: string, path: string): Promise<WorktreeFileContent> {
+  return request<WorktreeFileContent>(
+    'GET',
+    `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`,
+  )
 }
 
-export function stopProjectCodeServer(projectId: string): Promise<void> {
-  return request<void>('DELETE', `/projects/${projectId}/code-server`)
+export function writeWorktreeFile(
+  worktreeId: string,
+  body: WorktreeFileContent,
+): Promise<WorktreeFileContent> {
+  return request<WorktreeFileContent>('PUT', `/worktrees/${worktreeId}/file`, body)
+}
+
+export function deleteWorktreeFile(worktreeId: string, path: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`,
+  )
+}
+
+export function searchWorktreeFiles(worktreeId: string, pattern: string): Promise<string[]> {
+  return request<string[]>(
+    'GET',
+    `/worktrees/${worktreeId}/files/search?pattern=${encodeURIComponent(pattern)}`,
+  )
+}
+
+// ---- Worktree git (source control) ----
+
+export interface GitStatusFile {
+  path: string
+  origPath?: string
+  /** Staged status letter: "M", "A", "D", "R", "U", or "." when clean. */
+  index: string
+  /** Unstaged status letter: "M", "D", "?", "U", or "." when clean. */
+  worktree: string
+}
+
+export interface GitStatus {
+  branch: string
+  upstream: string
+  ahead: number
+  behind: number
+  files: GitStatusFile[]
+}
+
+export interface GitCommit {
+  hash: string
+  short: string
+  author: string
+  date: string
+  subject: string
+  refs: string[]
+}
+
+export interface GitDiff {
+  path: string
+  diff: string
+}
+
+export function fetchGitStatus(worktreeId: string): Promise<GitStatus> {
+  return request<GitStatus>('GET', `/worktrees/${worktreeId}/git/status`)
+}
+
+export function fetchGitDiff(
+  worktreeId: string,
+  target: { path: string; staged: boolean; untracked: boolean } | { commit: string },
+): Promise<GitDiff> {
+  const query =
+    'commit' in target
+      ? `commit=${encodeURIComponent(target.commit)}`
+      : `path=${encodeURIComponent(target.path)}&staged=${target.staged}&untracked=${target.untracked}`
+  return request<GitDiff>('GET', `/worktrees/${worktreeId}/git/diff?${query}`)
+}
+
+export function fetchGitLog(worktreeId: string, limit = 50): Promise<GitCommit[]> {
+  return request<GitCommit[]>('GET', `/worktrees/${worktreeId}/git/log?limit=${limit}`)
+}
+
+export function gitStage(worktreeId: string, paths: string[]): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/stage`, { paths })
+}
+
+export function gitUnstage(worktreeId: string, paths: string[]): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/unstage`, { paths })
+}
+
+/** Discard unstaged changes: tracked files revert, untracked files are deleted. */
+export function gitDiscard(worktreeId: string, paths: string[]): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/discard`, { paths })
+}
+
+export function gitCommit(worktreeId: string, message: string): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/commit`, { message })
+}
+
+export function gitPush(worktreeId: string): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/push`)
+}
+
+export function gitPull(worktreeId: string): Promise<void> {
+  return request<void>('POST', `/worktrees/${worktreeId}/git/pull`)
 }
 
 // ---- Todos ----
@@ -560,6 +663,8 @@ export interface RegisterBody {
 export interface LoginBody {
   email: string
   password: string
+  /** Cloudflare Turnstile token; required when the server has Turnstile configured. */
+  turnstileToken?: string
 }
 
 export interface TotpCodeBody {
@@ -581,6 +686,8 @@ export interface LoginResponse {
 
 export interface AuthConfig {
   totpRequired: boolean
+  /** Non-empty when login requires a Cloudflare Turnstile challenge. */
+  turnstileSiteKey: string
 }
 
 export function fetchAuthConfig(): Promise<AuthConfig> {

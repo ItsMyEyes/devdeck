@@ -114,6 +114,20 @@ func TestRequireAuthBlocksTerminalWebsocketPathWithoutCookie(t *testing.T) {
 	}
 }
 
+func TestRequireAuthBlocksLSPWebsocketPathWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws/lsp", nil))
+	if called {
+		t.Error("RequireAuth let /ws/lsp through without a session cookie")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
 func TestRequireAuthAllowsProtectedPathWithValidCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	user, _, err := svc.Register("owner@example.com", "correct horse battery staple")

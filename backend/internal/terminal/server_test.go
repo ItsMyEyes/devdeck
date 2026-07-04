@@ -9,6 +9,8 @@ import (
 )
 
 func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +22,7 @@ func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", "~/core", "acme/core")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +37,9 @@ func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
 	if agentBin != "" {
 		t.Errorf("resolveCommand agentBin = %q for empty-model root session, want empty (must fall back to a plain shell)", agentBin)
 	}
-	if workDir != proj.Path {
-		t.Errorf("resolveCommand workDir = %q, want project root %q", workDir, proj.Path)
+	wantWorkDir := filepath.Join(home, "core")
+	if workDir != wantWorkDir {
+		t.Errorf("resolveCommand workDir = %q, want expanded project root %q", workDir, wantWorkDir)
 	}
 }
 

@@ -78,7 +78,7 @@ func decodeBody(r *http.Request, dst any) (map[string]json.RawMessage, error) {
 
 // RequireAuth returns middleware requiring a valid session cookie for every
 // request except a small public-path allowlist. It protects both the JSON
-// API and the /ws/terminal WebSocket upgrade (arbitrary shell access) since
+// API and every /ws/ WebSocket upgrade (terminal and LSP process access) since
 // both are registered on the same mux.
 func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 	publicPaths := map[string]bool{
@@ -96,7 +96,7 @@ func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if !strings.HasPrefix(r.URL.Path, "/api") && r.URL.Path != "/ws/terminal" {
+			if !strings.HasPrefix(r.URL.Path, "/api") && !strings.HasPrefix(r.URL.Path, "/ws/") {
 				next.ServeHTTP(w, r) // static SPA assets stay public
 				return
 			}
@@ -119,7 +119,7 @@ func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 func CorsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
