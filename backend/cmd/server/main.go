@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"flag"
@@ -20,6 +21,7 @@ import (
 	"loom/backend/internal/lsp"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
+	"loom/backend/internal/selfupdate"
 	"loom/backend/internal/service"
 	"loom/backend/internal/store"
 	"loom/backend/internal/terminal"
@@ -29,6 +31,8 @@ import (
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the loom version and exit")
+	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server (requires -github-token / LOOM_GITHUB_TOKEN)")
+	githubToken := flag.String("github-token", envOr("LOOM_GITHUB_TOKEN", ""), "GitHub token used to check for and download updates from the private release repo")
 	envFile := flag.String("env", envOr("LOOM_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
 	addr := flag.String("addr", envOr("LOOM_ADDR", "127.0.0.1:8989"), "listen address")
 	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path")
@@ -48,6 +52,28 @@ func main() {
 
 	if *showVersion {
 		fmt.Println(version.Version)
+		return
+	}
+
+	if *updates {
+		if *githubToken == "" {
+			log.Fatalf("--updates requires --github-token or LOOM_GITHUB_TOKEN")
+		}
+		execPath, err := os.Executable()
+		if err != nil {
+			log.Fatalf("--updates: resolve current executable path: %v", err)
+		}
+		client := &selfupdate.Client{
+			Owner: selfupdate.Owner,
+			Repo:  selfupdate.Repo,
+			Token: *githubToken,
+		}
+		if err := selfupdate.Run(context.Background(), client, selfupdate.Options{
+			CurrentVersion: version.Version,
+			ExecPath:       execPath,
+		}); err != nil {
+			log.Fatalf("--updates: %v", err)
+		}
 		return
 	}
 
