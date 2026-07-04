@@ -7,6 +7,7 @@ require (
 	github.com/mark3labs/mcp-go v0.41.1
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.51.0
+	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.53.0
 	nhooyr.io/websocket v1.8.17
