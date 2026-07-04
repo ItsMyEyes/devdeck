@@ -5,6 +5,8 @@ GOARCH ?= $(shell go env GOARCH)
 DIST_DIR := dist
 WEBUI_DIR := backend/internal/webui/dist
 WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X loom/backend/internal/version.Version=$(VERSION)
 
 # ── Development ──────────────────────────────────────────────
 # Start both frontend (Vite :5173) and backend (Go :8989)
@@ -35,7 +37,7 @@ prepare-webui: build-web
 	cp -R frontend/dist/. $(WEBUI_DIR)/
 
 build-api: prepare-webui
-	cd backend && go build -o loom-api ./cmd/server
+	cd backend && go build -ldflags "$(LDFLAGS)" -o loom-api ./cmd/server
 
 # MCP stdio server exposing the issue tracker to coding agents (list_projects,
 # create_issue, upload_attachment, mark_issue_done). Reads the same --db file
@@ -48,17 +50,17 @@ portable: portable-current
 
 portable-current: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -o ../$(DIST_DIR)/loom-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
 
 # Release matrix: macOS, Linux, and Windows on Intel/AMD and ARM64.
 portable-all: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -o ../$(DIST_DIR)/loom-darwin-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o ../$(DIST_DIR)/loom-darwin-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../$(DIST_DIR)/loom-linux-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o ../$(DIST_DIR)/loom-linux-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o ../$(DIST_DIR)/loom-windows-amd64.exe ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -o ../$(DIST_DIR)/loom-windows-arm64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-darwin-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-darwin-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-linux-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-linux-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-amd64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-arm64.exe ./cmd/server
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check

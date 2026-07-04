@@ -23,10 +23,12 @@ import (
 	"loom/backend/internal/service"
 	"loom/backend/internal/store"
 	"loom/backend/internal/terminal"
+	"loom/backend/internal/version"
 	"loom/backend/internal/webui"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print the loom version and exit")
 	envFile := flag.String("env", envOr("LOOM_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
 	addr := flag.String("addr", envOr("LOOM_ADDR", "127.0.0.1:8989"), "listen address")
 	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path")
@@ -43,6 +45,11 @@ func main() {
 	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.Version)
+		return
+	}
 
 	if applied, err := config.LoadDotEnv(*envFile); err != nil {
 		log.Fatalf("--env %s: %v", *envFile, err)
