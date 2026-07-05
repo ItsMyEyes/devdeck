@@ -100,6 +100,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let everOpened = false
     let attempts = 0
     let retryTimer: number | undefined
+    // Set when reconnecting to a screen that already has content. The reset
+    // happens together with the first frame of the new connection (which is
+    // always the server's banner + history replay), so the stale screen stays
+    // visible through the outage and repaints in a single frame — resetting
+    // up front instead blanks the terminal for the whole backoff + replay
+    // round-trip, which reads as a "refresh" on every mobile socket drop.
+    let resetOnNextFrame = false
 
     const connect = () => {
       if (disposed) return
@@ -116,6 +123,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         outbox.current = []
       }
       ws.onmessage = (ev) => {
+        if (resetOnNextFrame) {
+          resetOnNextFrame = false
+          term.reset()
+        }
         if (typeof ev.data === 'string') term.write(ev.data)
         else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
       }
@@ -130,13 +141,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const scheduleReconnect = () => {
       if (disposed || retryTimer !== undefined) return
       const delay = Math.min(500 * 2 ** attempts, 8000)
+      // A single quick blip (cell tower handoff, brief Wi-Fi drop) recovers on
+      // the first retry and doesn't need to alarm the user; only surface the
+      // message once a retry has already failed, i.e. the drop is sustained.
+      if (attempts > 0) {
+        term.write('\r\n\x1b[38;5;102m[connection lost — reconnecting…]\x1b[0m\r\n')
+      }
       attempts++
-      term.write('\r\n\x1b[38;5;102m[connection lost — reconnecting…]\x1b[0m\r\n')
       retryTimer = window.setTimeout(() => {
         retryTimer = undefined
-        // The server replays banner + buffered history on reattach; reset so
-        // the replay doesn't duplicate what's already on screen.
-        term.reset()
+        // The server replays banner + buffered history on reattach; reset
+        // when it arrives so the replay doesn't duplicate what's on screen.
+        resetOnNextFrame = true
         connect()
       }, delay)
     }
@@ -158,7 +174,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         retryTimer = undefined
       }
       attempts = 0
-      term.reset()
+      resetOnNextFrame = true
       connect()
     }
     const onVisible = () => {
@@ -184,12 +200,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     })
     const onResize = term.onResize(({ cols, rows }) => send(resizeFrame(cols, rows)))
 
+    // Debounced: a mobile keyboard opening (or the visual viewport jittering
+    // while it animates) resizes the host many times over ~300ms, and every
+    // fit() that changes rows reflows xterm and SIGWINCHes the shell — a
+    // visible repaint storm right as the user starts typing. Trailing-edge
+    // debounce folds the burst into a single resize.
+    let fitTimer: number | undefined
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit()
-      } catch {
-        /* host detached */
-      }
+      if (fitTimer !== undefined) window.clearTimeout(fitTimer)
+      fitTimer = window.setTimeout(() => {
+        fitTimer = undefined
+        try {
+          fit.fit()
+        } catch {
+          /* host detached */
+        }
+      }, 150)
     })
     ro.observe(host)
     term.focus()
@@ -197,6 +223,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return () => {
       disposed = true
       if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+      if (fitTimer !== undefined) window.clearTimeout(fitTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', kick)
       ro.disconnect()

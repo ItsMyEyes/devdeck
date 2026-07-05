@@ -258,6 +258,11 @@ func main() {
 	mux.HandleFunc("GET /api/agents/{agentId}", agentH.GetAgent)
 	mux.HandleFunc("GET /api/agents/{agentId}/models", agentH.ListModels)
 	mux.HandleFunc("GET /api/agents/{agentId}/skills", agentH.ListSkills)
+	mux.HandleFunc("POST /api/agents/{agentId}/skills/{skillName}", agentH.InstallSkill)
+	mux.HandleFunc("DELETE /api/agents/{agentId}/skills/{skillName}", agentH.RemoveSkill)
+	mux.HandleFunc("GET /api/agents/{agentId}/mcp-servers", agentH.ListMCPServers)
+	mux.HandleFunc("POST /api/agents/{agentId}/mcp-servers", agentH.AddMCPServer)
+	mux.HandleFunc("DELETE /api/agents/{agentId}/mcp-servers/{serverName}", agentH.RemoveMCPServer)
 
 	mux.HandleFunc("POST /api/workspaces/{wsId}/todos", todoH.PostTodo)
 	mux.HandleFunc("POST /api/workspaces/{wsId}/todos/clear-done", todoH.ClearDoneTodos)

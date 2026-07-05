@@ -52,21 +52,21 @@ function WorkspaceLayout() {
 
   if (workspaces.isPending) {
     return (
-      <div className="flex h-screen w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-loom-bg text-loom-fg">
         <DataLoading label="loading workspace…" />
       </div>
     )
   }
   if (workspaces.isError) {
     return (
-      <div className="flex h-screen w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-loom-bg text-loom-fg">
         <DataError error={workspaces.error} onRetry={() => workspaces.refetch()} />
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
+    <div className="flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
       <Header />
       <div className="relative flex min-h-0 flex-1">
         <Sidebar />

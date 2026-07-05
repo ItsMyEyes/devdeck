@@ -33,6 +33,11 @@ func (r *LocalRegistry) ListAgents() ([]domain.AgentSummary, error) {
 	}
 	for i := range agents {
 		agents[i].Installed = r.installed[agents[i].ID]
+		if agents[i].Installed {
+			if skills := detect.ReadSkills(agents[i].ID); skills != nil {
+				agents[i].SkillCount = len(skills)
+			}
+		}
 	}
 	return agents, nil
 }
@@ -52,6 +57,8 @@ func (r *LocalRegistry) GetAgent(agentID string) (*domain.Agent, error) {
 	if agent.Installed {
 		if skills := detect.ReadSkills(agentID); skills != nil {
 			agent.Skills = skills
+		} else {
+			markSkillsReadOnly(agent.Skills)
 		}
 		if localModels := detect.ReadModels(agentID); localModels != nil {
 			agent.Models = mergeModels(localModels, agent.Models)
@@ -85,7 +92,57 @@ func (r *LocalRegistry) ListSkills(agentID string) ([]domain.Skill, error) {
 			return skills, nil
 		}
 	}
-	return r.inner.ListSkills(agentID)
+	skills, err := r.inner.ListSkills(agentID)
+	if err == nil {
+		markSkillsReadOnly(skills)
+	}
+	return skills, err
+}
+
+func markSkillsReadOnly(skills []domain.Skill) {
+	for index := range skills {
+		skills[index].ReadOnly = true
+	}
+}
+
+// InstallSkill links an existing local skill into another installed agent.
+func (r *LocalRegistry) InstallSkill(agentID, skillName string) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.InstallSkill(agentID, skillName)
+}
+
+// RemoveSkill removes a skill from one installed agent's writable skill root.
+func (r *LocalRegistry) RemoveSkill(agentID, skillName string) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.RemoveSkill(agentID, skillName)
+}
+
+// ListMCPServers reads redacted MCP configuration through the agent's CLI.
+func (r *LocalRegistry) ListMCPServers(agentID string) ([]domain.MCPServer, error) {
+	if !r.installed[agentID] {
+		return nil, port.ErrAgentManagementUnsupported
+	}
+	return detect.ReadMCPServers(agentID)
+}
+
+// AddMCPServer writes MCP configuration through the agent's native CLI.
+func (r *LocalRegistry) AddMCPServer(agentID string, input port.MCPServerInput) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.AddMCPServer(agentID, input)
+}
+
+// RemoveMCPServer removes MCP configuration through the agent's native CLI.
+func (r *LocalRegistry) RemoveMCPServer(agentID, serverName string) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.RemoveMCPServer(agentID, serverName)
 }
 
 // mergeModels prepends local models not already in the static list.
@@ -106,3 +163,4 @@ func mergeModels(local, static []domain.Model) []domain.Model {
 
 // Ensure LocalRegistry implements port.AgentRegistry.
 var _ port.AgentRegistry = (*LocalRegistry)(nil)
+var _ port.AgentManager = (*LocalRegistry)(nil)

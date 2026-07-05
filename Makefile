@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
+.PHONY: dev dev-web dev-api free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -8,9 +8,17 @@ WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X loom/backend/internal/version.Version=$(VERSION)
 
+# Mac App Store Tailscale.app doesn't put `tailscale` on PATH; fall back to
+# its bundled binary if a standalone install isn't found.
+TAILSCALE := $(shell command -v tailscale 2>/dev/null || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale)
+
 # ── Development ──────────────────────────────────────────────
-# Start both frontend (Vite :5173) and backend (Go :8989)
+# Start both frontend (Vite :5173) and backend (Go :8989). Also registers
+# port 5173 with `tailscale serve`, so the dev UI is reachable from another
+# device on your tailnet (e.g. testing the terminal WS from a phone) at
+# https://<this-machine>.<tailnet>.ts.net — see allowedHosts in vite.config.ts.
 dev:
+	$(TAILSCALE) serve --bg 5173
 	cd frontend && npm run dev
 
 # Frontend only (Vite :5173)
@@ -20,6 +28,14 @@ dev-web:
 # Backend only (Go :8989)
 dev-api:
 	cd backend && go run ./cmd/server --db loom.db --open=false --env .env
+
+# Kill whatever's listening on the dev ports (stuck `make dev` from a previous run, etc).
+free-ports:
+	@lsof -ti:8989,5173 2>/dev/null | xargs -r kill -TERM
+	@sleep 1
+	@lsof -ti:8989,5173 2>/dev/null | xargs -r kill -KILL
+	@sleep 1
+	@if [ -z "$$(lsof -ti:8989,5173 2>/dev/null)" ]; then echo "ports 8989 and 5173 are free"; else echo "still in use:"; lsof -i:8989,5173; fi
 
 # Delete the dev database (wipes seed/demo data used by `make dev-api`)
 seed-clean:

@@ -16,6 +16,7 @@ import type {
   Issue,
   IssueComment,
   IssueEvent,
+  MCPServer,
   NewsItem,
   Priority,
   Project,
@@ -640,6 +641,44 @@ export function fetchAgentModels(agentId: string): Promise<AgentModel[]> {
 
 export function fetchAgentSkills(agentId: string): Promise<AgentSkill[]> {
   return request<AgentSkill[]>('GET', `/agents/${agentId}/skills`)
+}
+
+export function installAgentSkill(agentId: string, skillName: string): Promise<void> {
+  return request<void>(
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
+  )
+}
+
+export function removeAgentSkill(agentId: string, skillName: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
+  )
+}
+
+export interface AddMCPServerBody {
+  name: string
+  transport: 'stdio' | 'http'
+  command?: string
+  args?: string[]
+  url?: string
+  env?: Record<string, string>
+}
+
+export function fetchAgentMCPServers(agentId: string): Promise<MCPServer[]> {
+  return request<MCPServer[]>('GET', `/agents/${encodeURIComponent(agentId)}/mcp-servers`)
+}
+
+export function addAgentMCPServer(agentId: string, body: AddMCPServerBody): Promise<void> {
+  return request<void>('POST', `/agents/${encodeURIComponent(agentId)}/mcp-servers`, body)
+}
+
+export function removeAgentMCPServer(agentId: string, serverName: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/mcp-servers/${encodeURIComponent(serverName)}`,
+  )
 }
 
 // ---- Filesystem ----

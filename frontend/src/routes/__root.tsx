@@ -2,6 +2,7 @@ import { createRootRouteWithContext, Outlet, redirect } from '@tanstack/react-ro
 import type { QueryClient } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { meQueryOptions } from '@/features/data/authQueries'
+import { useViewportHeight } from '@/features/useViewportHeight'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -22,6 +23,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 })
 
 function RootComponent() {
+  useViewportHeight()
   return (
     <>
       <Outlet />

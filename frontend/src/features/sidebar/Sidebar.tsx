@@ -39,7 +39,7 @@ export function Sidebar() {
 function SidebarBody() {
   const { view } = useScope()
   if (view === 'agents') return <ProjectTree />
-  if (view === 'tools') return <div className="flex-1" />
+  if (view === 'tools' || view === 'management') return <div className="flex-1" />
   return <ModuleAside />
 }
 

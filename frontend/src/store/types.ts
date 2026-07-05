@@ -174,7 +174,7 @@ export interface Workspace {
   recurringTemplates: RecurringInvoiceTemplate[]
 }
 
-export type ModuleView = 'agents' | 'news' | 'todos' | 'invoices' | 'tools'
+export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {
@@ -197,6 +197,18 @@ export interface AgentSkill {
   name: string
   description: string
   category: string
+  readOnly: boolean
+}
+
+export interface MCPServer {
+  name: string
+  agentId: string
+  transport: 'stdio' | 'http' | string
+  target: string
+  argCount: number
+  envKeys: string[]
+  enabled: boolean
+  status: string
 }
 
 export interface Agent {

@@ -95,7 +95,7 @@ interface PrimaryActionProps {
 }
 
 function PrimaryAction({ view, newsCount, onWorktree, onMarkRead }: PrimaryActionProps) {
-  if (view === 'todos') return null
+  if (view === 'todos' || view === 'management' || view === 'tools') return null
   // Invoice creation is owned by the invoices module (local form state), so the
   // top header exposes no primary action on that view.
   if (view === 'invoices') return null

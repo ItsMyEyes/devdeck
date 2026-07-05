@@ -59,3 +59,52 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, skills)
 }
+
+// InstallSkill installs an existing local skill into one agent.
+func (h *AgentHandler) InstallSkill(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.InstallSkill(r.PathValue("agentId"), r.PathValue("skillName"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RemoveSkill removes a skill from one agent.
+func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.RemoveSkill(r.PathValue("agentId"), r.PathValue("skillName"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListMCPServers returns redacted native MCP configuration for one agent.
+func (h *AgentHandler) ListMCPServers(w http.ResponseWriter, r *http.Request) {
+	servers, err := h.svc.ListMCPServers(r.PathValue("agentId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, servers)
+}
+
+// AddMCPServer configures an MCP server through the native agent CLI.
+func (h *AgentHandler) AddMCPServer(w http.ResponseWriter, r *http.Request) {
+	var body service.AddMCPServerInput
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := h.svc.AddMCPServer(r.PathValue("agentId"), body); handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RemoveMCPServer removes an MCP server through the native agent CLI.
+func (h *AgentHandler) RemoveMCPServer(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.RemoveMCPServer(r.PathValue("agentId"), r.PathValue("serverName"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

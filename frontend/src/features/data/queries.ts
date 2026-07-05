@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Workspace } from '@/store/types'
 import {
+  addAgentMCPServer,
   clearDoneTodos,
   createBank,
   createCompany,
@@ -30,6 +31,7 @@ import {
   deleteWorktree,
   deleteWorktreeFile,
   fetchAgentModels,
+  fetchAgentMCPServers,
   fetchAgentSkills,
   fetchAgents,
   fetchAttachments,
@@ -52,7 +54,10 @@ import {
   gitPush,
   gitStage,
   gitUnstage,
+  installAgentSkill,
   markAllNewsRead,
+  removeAgentMCPServer,
+  removeAgentSkill,
   searchWorktreeFiles,
   seed,
   uploadAttachment,
@@ -71,6 +76,7 @@ import {
   writeWorktreeFile,
 } from '@/lib/api'
 import type {
+  AddMCPServerBody,
   CreateBankBody,
   CreateCommentBody,
   CreateCompanyBody,
@@ -527,6 +533,62 @@ export function useAgentSkills(agentId: string | undefined) {
     queryFn: () => fetchAgentSkills(agentId!),
     enabled: !!agentId,
     staleTime: 300_000,
+  })
+}
+
+export function useAgentMCPServers(agentId: string | undefined) {
+  return useQuery({
+    queryKey: qk.agentMCPServers(agentId ?? ''),
+    queryFn: () => fetchAgentMCPServers(agentId!),
+    enabled: !!agentId,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useInstallAgentSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, skillName }: { agentId: string; skillName: string }) =>
+      installAgentSkill(agentId, skillName),
+    onSettled: (_data, _error, variables) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.agents }),
+        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.agentId) }),
+      ]),
+  })
+}
+
+export function useRemoveAgentSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, skillName }: { agentId: string; skillName: string }) =>
+      removeAgentSkill(agentId, skillName),
+    onSettled: (_data, _error, variables) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.agents }),
+        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.agentId) }),
+      ]),
+  })
+}
+
+export function useAddAgentMCPServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, body }: { agentId: string; body: AddMCPServerBody }) =>
+      addAgentMCPServer(agentId, body),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.agentId) }),
+  })
+}
+
+export function useRemoveAgentMCPServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, serverName }: { agentId: string; serverName: string }) =>
+      removeAgentMCPServer(agentId, serverName),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.agentId) }),
   })
 }
 

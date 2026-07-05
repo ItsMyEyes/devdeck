@@ -23,6 +23,20 @@ type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
+	ReadOnly    bool   `json:"readOnly"`
+}
+
+// MCPServer is a redacted MCP server configuration discovered from an agent.
+// Environment values are never exposed through the API.
+type MCPServer struct {
+	Name      string   `json:"name"`
+	AgentID   string   `json:"agentId"`
+	Transport string   `json:"transport"`
+	Target    string   `json:"target"`
+	ArgCount  int      `json:"argCount"`
+	EnvKeys   []string `json:"envKeys"`
+	Enabled   bool     `json:"enabled"`
+	Status    string   `json:"status"`
 }
 
 // AgentSummary is a lightweight agent listing (no nested models/skills).

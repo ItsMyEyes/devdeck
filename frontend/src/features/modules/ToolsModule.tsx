@@ -14,7 +14,7 @@ export function ToolsModule() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ModuleHeader title="Tools" meta={`${TOOL_REGISTRY.length} tools`} />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         <ToolsSidebar tools={TOOL_REGISTRY} activeId={active.id} onSelect={setActiveId} query={query} onQueryChange={setQuery} />
         <div className="flex min-h-0 flex-1 flex-col p-3.5">
           <Active />

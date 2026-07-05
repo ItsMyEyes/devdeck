@@ -10,6 +10,13 @@
  * (--background, --primary, …) drive the shadcn/base-ui component layer.
  */
 :root {
+  /* Overwritten by useViewportHeight to window.visualViewport's height, so
+     layouts using h-[var(--app-height)] shrink above the on-screen keyboard
+     instead of the 100vh/100dvh layout viewport, which most mobile browsers
+     don't resize when the keyboard opens. This dvh fallback only covers the
+     brief window before that effect's first run. */
+  --app-height: 100dvh;
+
   /* raw loom palette */
   --loom-bg: #191a1c;
   --loom-surface: #161719; /* header / sidebar */

@@ -22,6 +22,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Lets `tailscale serve` (see `make dev`) front this dev server: Vite
+    // rejects requests whose Host header it doesn't recognize, and a
+    // tailnet-proxied request arrives as `<device>.<tailnet>.ts.net` rather
+    // than `localhost`.
+    allowedHosts: ['.ts.net'],
     proxy: {
       // xterm.js <-> Go PTY terminal gateway
       '/ws/terminal': {

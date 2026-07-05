@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { LayoutGrid, Receipt, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, LayoutGrid, Receipt, Wrench, type LucideIcon } from 'lucide-react'
 import type { ModuleView } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -23,6 +23,7 @@ export function SidebarNav() {
 
   const items: NavDef[] = [
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, badge: running },
+    { key: 'management', label: 'Agent management', Icon: Blocks, badge: 0 },
     { key: 'invoices', label: 'Invoices', Icon: Receipt, badge: openInvoices },
     { key: 'tools', label: 'Tools', Icon: Wrench, badge: 0 },
   ]
@@ -30,6 +31,7 @@ export function SidebarNav() {
   function goto(key: ModuleView) {
     if (!wsId) return
     if (key === 'agents') navigate({ to: '/w/$wsId', params: { wsId } })
+    else if (key === 'management') navigate({ to: '/w/$wsId/management', params: { wsId } })
     else navigate({ to: `/w/$wsId/${key}`, params: { wsId } })
   }
 

@@ -7,6 +7,7 @@ export const qk = {
   agentDetail: (id: string) => ['agents', id] as const,
   agentModels: (id: string) => ['agents', id, 'models'] as const,
   agentSkills: (id: string) => ['agents', id, 'skills'] as const,
+  agentMCPServers: (id: string) => ['agents', id, 'mcp-servers'] as const,
   fsList: (path: string) => ['fs', 'list', path] as const,
   worktreeFilesRoot: (id: string) => ['worktrees', id, 'files'] as const,
   worktreeFiles: (id: string, path: string) => ['worktrees', id, 'files', path] as const,

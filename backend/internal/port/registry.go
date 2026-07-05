@@ -1,6 +1,10 @@
 package port
 
-import "loom/backend/internal/domain"
+import (
+	"errors"
+
+	"loom/backend/internal/domain"
+)
 
 // AgentRegistry resolves which agents, models, and skills are available.
 // Implementations can be static (built-in catalog), dynamic (Jadi backend), or
@@ -17,4 +21,35 @@ type AgentRegistry interface {
 
 	// ListSkills returns skills available for a specific agent.
 	ListSkills(agentID string) ([]domain.Skill, error)
+}
+
+var (
+	// ErrAgentManagementUnsupported indicates an agent does not expose the
+	// requested local-management capability.
+	ErrAgentManagementUnsupported = errors.New("agent management is not supported")
+	// ErrIntegrationNotFound indicates a requested skill or MCP server is absent.
+	ErrIntegrationNotFound = errors.New("agent integration not found")
+	// ErrIntegrationConflict indicates a change would break another integration.
+	ErrIntegrationConflict = errors.New("agent integration conflict")
+)
+
+// MCPServerInput contains the non-redacted values required to configure a
+// server. Values are accepted by the API but never returned by MCPServer.
+type MCPServerInput struct {
+	Name      string
+	Transport string
+	Command   string
+	Args      []string
+	URL       string
+	Env       map[string]string
+}
+
+// AgentManager is the optional mutable layer implemented by a local registry.
+// Remote and static registries can remain read-only AgentRegistry sources.
+type AgentManager interface {
+	InstallSkill(agentID, skillName string) error
+	RemoveSkill(agentID, skillName string) error
+	ListMCPServers(agentID string) ([]domain.MCPServer, error)
+	AddMCPServer(agentID string, input MCPServerInput) error
+	RemoveMCPServer(agentID, serverName string) error
 }

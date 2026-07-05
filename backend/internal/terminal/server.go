@@ -66,11 +66,17 @@ func NewServer(store port.Store) *Server {
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
-		// Terminal output is highly repetitive ANSI text; the shared
-		// sliding window compresses it heavily, which matters most when
-		// production is reached through a tunnel. Clients that don't
-		// support it (e.g. Safari) simply fall back to uncompressed.
-		CompressionMode: websocket.CompressionContextTakeover,
+		// permessage-deflate breaks WebKit's WebSocket client under
+		// sustained output — verified live with Playwright's webkit engine:
+		// both CompressionContextTakeover and CompressionNoContextTakeover
+		// throw a "Protocol error" and drop the connection within a couple
+		// seconds of a command producing continuous output, reproducing the
+		// "read loop ended ... EOF" churn seen from real iPhone Safari and
+		// Chrome-iOS (same WebKit engine) clients. Only fully disabling
+		// compression survived a 60s sustained-output stress test with zero
+		// drops, so we trade the tunnel-compression benefit for a
+		// connection that stays up on iOS.
+		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
 		log.Printf("terminal: websocket accept: %v", err)
@@ -91,6 +97,13 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// Logged alongside reattach/close lines so a fast-EOF drop (see the
+	// closeStatus comment in attachPTY) can be correlated with a specific
+	// mobile browser or a permessage-deflate negotiation, without having to
+	// reproduce the client's network conditions to find out which.
+	log.Printf("terminal: session %s connect ua=%q deflate-requested=%v",
+		session, r.UserAgent(), strings.Contains(r.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate"))
 
 	// Resolve agent command for worktree sessions
 	agentBin, args, workDir := s.resolveCommand(session)
