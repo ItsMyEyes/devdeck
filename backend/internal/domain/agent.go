@@ -49,3 +49,61 @@ type AgentSummary struct {
 	ModelCount  int    `json:"modelCount"`
 	SkillCount  int    `json:"skillCount"`
 }
+
+// EnvProfile is a saved LLM-provider profile: the `env` block of an agent's
+// settings.json (Claude → ~/.claude/ , Codex → ~/.codex/).
+// This is the on-disk / internal form: AuthToken is present so the profile
+// persists to disk, but it is never returned by the API (callers serialize
+// via EnvProfileSummary). The 8 ANTHROPIC_* env keys form the default schema
+// for Claude profiles — always present, non-deletable; ExtraEnv holds custom keys.
+// Codex profiles use Models["model"] for the model name and Codex* fields for
+// provider config; activation writes config.toml + auth.json instead of the env block.
+type EnvProfile struct {
+	ID        string            `json:"id"`
+	AgentID   string            `json:"agentId"`
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"baseUrl"`
+	AuthToken string            `json:"authToken"`
+	Models    map[string]string `json:"models"`   // claude: opus/sonnet/haiku -> model id; codex: "model" -> model name
+	ExtraEnv  map[string]string `json:"extraEnv"` // custom keys beyond the defaults
+
+	// Codex-specific provider config (ignored for Claude)
+	CodexProviderName  string `json:"codexProviderName,omitempty"`
+	CodexWireAPI       string `json:"codexWireAPI,omitempty"`       // "chat" (default) or "responses"
+	CodexEnvKey        string `json:"codexEnvKey,omitempty"`        // e.g. "OPENAI_API_KEY"
+	CodexContextWindow int    `json:"codexContextWindow,omitempty"` // 0 = unset
+	CodexMaxTokens     int    `json:"codexMaxTokens,omitempty"`
+
+	Active    bool   `json:"active"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// EnvProfileSummary is the redacted API view of an EnvProfile: the auth token
+// is exposed only as HasToken (the sole designated secret). Custom ExtraEnv
+// values are returned in full so the operator can edit them — they are the
+// operator's own local provider config, not credentials.
+type EnvProfileSummary struct {
+	ID        string            `json:"id"`
+	AgentID   string            `json:"agentId"`
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"baseUrl"`
+	HasToken  bool              `json:"hasToken"`
+	Models    map[string]string `json:"models"`
+	ExtraEnv  map[string]string `json:"extraEnv"`
+
+	// Codex-specific (see EnvProfile for docs)
+	CodexProviderName  string `json:"codexProviderName,omitempty"`
+	CodexWireAPI       string `json:"codexWireAPI,omitempty"`
+	CodexEnvKey        string `json:"codexEnvKey,omitempty"`
+	CodexContextWindow int    `json:"codexContextWindow,omitempty"`
+	CodexMaxTokens     int    `json:"codexMaxTokens,omitempty"`
+
+	Active    bool   `json:"active"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// EnvModelOption is a single model id advertised by a provider's model catalog.
+type EnvModelOption struct {
+	ID string `json:"id"`
+}

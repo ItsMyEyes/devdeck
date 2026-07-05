@@ -9,6 +9,8 @@ import type {
   Attachment,
   Bank,
   Company,
+  EnvModelOption,
+  EnvProfileSummary,
   FsEntry,
   Invoice,
   InvoiceItem,
@@ -568,6 +570,11 @@ export function attachmentUrl(id: string): string {
   return `${API_BASE}/attachments/${id}`
 }
 
+/** URL loaded by the Browser module; the remote request is made by the Go server. */
+export function browserProxyUrl(targetUrl: string): string {
+  return `${API_BASE}/browser/proxy?url=${encodeURIComponent(targetUrl)}`
+}
+
 export async function uploadAttachment(issueId: string, file: File): Promise<Attachment> {
   const form = new FormData()
   form.append('file', file)
@@ -678,6 +685,129 @@ export function removeAgentMCPServer(agentId: string, serverName: string): Promi
   return request<void>(
     'DELETE',
     `/agents/${encodeURIComponent(agentId)}/mcp-servers/${encodeURIComponent(serverName)}`,
+  )
+}
+
+// ---- Agent env profiles (Claude LLM-environment snapshots) ----
+
+export interface EnvProfileInput {
+  name: string
+  baseUrl: string
+  authToken: string
+  models: Record<string, string>
+  extraEnv: Record<string, string>
+
+  // Codex-specific
+  codexProviderName?: string
+  codexWireAPI?: string
+  codexEnvKey?: string
+  codexContextWindow?: number
+  codexMaxTokens?: number
+}
+
+/** A blank authToken on update means "leave the stored token unchanged." */
+export interface EnvProfilePatch {
+  name: string
+  baseUrl: string
+  authToken?: string
+  models: Record<string, string>
+  extraEnv: Record<string, string>
+
+  // Codex-specific
+  codexProviderName?: string
+  codexWireAPI?: string
+  codexEnvKey?: string
+  codexContextWindow?: number
+  codexMaxTokens?: number
+}
+
+export function fetchAgentEnvProfiles(agentId: string): Promise<EnvProfileSummary[]> {
+  return request<EnvProfileSummary[]>(
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
+  )
+}
+
+export function fetchAgentEnvProfile(
+  agentId: string,
+  profileId: string,
+): Promise<EnvProfileSummary> {
+  return request<EnvProfileSummary>(
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+  )
+}
+
+export function createAgentEnvProfile(
+  agentId: string,
+  body: EnvProfileInput,
+): Promise<EnvProfileSummary> {
+  return request<EnvProfileSummary>(
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
+    body,
+  )
+}
+
+export function updateAgentEnvProfile(
+  agentId: string,
+  profileId: string,
+  body: EnvProfilePatch,
+): Promise<EnvProfileSummary> {
+  return request<EnvProfileSummary>(
+    'PATCH',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+    body,
+  )
+}
+
+export function removeAgentEnvProfile(agentId: string, profileId: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+  )
+}
+
+export function activateAgentEnvProfile(agentId: string, profileId: string): Promise<void> {
+  return request<void>(
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}/activate`,
+  )
+}
+
+export function deactivateAgentEnvProfile(agentId: string): Promise<void> {
+  return request<void>(
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/deactivate`,
+  )
+}
+
+/** When authToken is omitted, the backend uses the stored profile's token. */
+export function fetchAgentEnvModels(
+  agentId: string,
+  body: { profileId?: string; baseUrl: string; authToken?: string },
+): Promise<EnvModelOption[]> {
+  return request<EnvModelOption[]>(
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/fetch-models`,
+    body,
+  )
+}
+
+// ---- Settings file (raw JSON editor) ----
+
+export function fetchAgentSettingsFile(agentId: string): Promise<{ content: string }> {
+  return request<{ content: string }>(
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/settings-file`,
+  )
+}
+
+export function updateAgentSettingsFile(agentId: string, content: string): Promise<void> {
+  return request<void>(
+    'PUT',
+    `/agents/${encodeURIComponent(agentId)}/settings-file`,
+    { content },
   )
 }
 

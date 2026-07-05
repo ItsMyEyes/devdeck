@@ -145,6 +145,68 @@ func (r *LocalRegistry) RemoveMCPServer(agentID, serverName string) error {
 	return detect.RemoveMCPServer(agentID, serverName)
 }
 
+// ---- Env profiles (Claude-only: ANTHROPIC_* env schema + ~/.claude/settings.json) ----
+
+func envProfileSupported(agentID string, installed map[string]bool) bool {
+	return (agentID == "claude" || agentID == "codex") && installed[agentID]
+}
+
+func (r *LocalRegistry) ListEnvProfiles(agentID string) ([]domain.EnvProfile, error) {
+	if !envProfileSupported(agentID, r.installed) {
+		return nil, port.ErrAgentManagementUnsupported
+	}
+	return detect.ListEnvProfiles(agentID)
+}
+
+func (r *LocalRegistry) SaveEnvProfile(agentID string, profile domain.EnvProfile) error {
+	if !envProfileSupported(agentID, r.installed) {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.WriteEnvProfile(profile)
+}
+
+func (r *LocalRegistry) DeleteEnvProfile(agentID, profileID string) error {
+	if !envProfileSupported(agentID, r.installed) {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.DeleteEnvProfile(profileID)
+}
+
+func (r *LocalRegistry) ActivateEnvProfile(agentID, profileID string) error {
+	if !envProfileSupported(agentID, r.installed) {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.ApplyEnvProfile(profileID, agentID)
+}
+
+func (r *LocalRegistry) DeactivateEnvProfile(agentID string) error {
+	if !envProfileSupported(agentID, r.installed) {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.ClearActiveEnvProfile(agentID)
+}
+
+func (r *LocalRegistry) FetchEnvProfileModels(agentID, baseURL, authToken string) ([]string, error) {
+	if !envProfileSupported(agentID, r.installed) {
+		return nil, port.ErrAgentManagementUnsupported
+	}
+	return detect.FetchEnvModels(baseURL, authToken)
+}
+
+func (r *LocalRegistry) GetSettingsFile(agentID string) (string, error) {
+	if !r.installed[agentID] {
+		return "", port.ErrAgentManagementUnsupported
+	}
+	return detect.ReadSettingsFile(agentID)
+}
+
+func (r *LocalRegistry) SetSettingsFile(agentID string, content string) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.WriteSettingsFile(agentID, content)
+}
+
 // mergeModels prepends local models not already in the static list.
 func mergeModels(local, static []domain.Model) []domain.Model {
 	staticIDs := make(map[string]bool, len(static))

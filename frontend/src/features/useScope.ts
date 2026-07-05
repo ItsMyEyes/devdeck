@@ -16,16 +16,12 @@ export function useScope(): Scope {
     wtId?: string
   }
   const pathname = useLocation({ select: (l) => l.pathname })
-  const view: ModuleView = pathname.includes('/management')
-    ? 'management'
-    : pathname.includes('/news')
-      ? 'news'
-      : pathname.includes('/todos')
-        ? 'todos'
-        : pathname.includes('/invoices')
-          ? 'invoices'
-          : pathname.includes('/tools')
-            ? 'tools'
-            : 'agents'
+  let view: ModuleView = 'agents'
+  if (pathname.includes('/management')) view = 'management'
+  else if (pathname.includes('/news')) view = 'news'
+  else if (pathname.includes('/todos')) view = 'todos'
+  else if (pathname.includes('/invoices')) view = 'invoices'
+  else if (pathname.includes('/browser')) view = 'browser'
+  else if (pathname.includes('/tools')) view = 'tools'
   return { wsId: params.wsId, projectId: params.projectId, wtId: params.wtId, view }
 }

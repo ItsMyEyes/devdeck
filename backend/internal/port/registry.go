@@ -52,4 +52,17 @@ type AgentManager interface {
 	ListMCPServers(agentID string) ([]domain.MCPServer, error)
 	AddMCPServer(agentID string, input MCPServerInput) error
 	RemoveMCPServer(agentID, serverName string) error
+
+	// Env profiles are Claude-only LLM-provider snapshots written to
+	// ~/.claude/settings.json's env block.
+	ListEnvProfiles(agentID string) ([]domain.EnvProfile, error)
+	SaveEnvProfile(agentID string, profile domain.EnvProfile) error
+	DeleteEnvProfile(agentID, profileID string) error
+	ActivateEnvProfile(agentID, profileID string) error
+	DeactivateEnvProfile(agentID string) error
+	FetchEnvProfileModels(agentID, baseURL, authToken string) ([]string, error)
+	// GetSettingsFile returns the raw JSON of the agent's settings.json.
+	GetSettingsFile(agentID string) (string, error)
+	// SetSettingsFile atomically writes raw JSON to the agent's settings.json.
+	SetSettingsFile(agentID string, content string) error
 }

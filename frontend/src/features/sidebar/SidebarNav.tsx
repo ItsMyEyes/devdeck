@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Blocks, LayoutGrid, Receipt, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, Globe, LayoutGrid, Receipt, Wrench, type LucideIcon } from 'lucide-react'
 import type { ModuleView } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -25,6 +25,7 @@ export function SidebarNav() {
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, badge: running },
     { key: 'management', label: 'Agent management', Icon: Blocks, badge: 0 },
     { key: 'invoices', label: 'Invoices', Icon: Receipt, badge: openInvoices },
+    { key: 'browser', label: 'Browser', Icon: Globe, badge: 0 },
     { key: 'tools', label: 'Tools', Icon: Wrench, badge: 0 },
   ]
 

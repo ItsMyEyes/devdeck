@@ -108,3 +108,124 @@ func (h *AgentHandler) RemoveMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ---- Env profiles (Claude LLM-provider snapshots) ----
+
+// ListEnvProfiles returns redacted LLM-environment profiles for an agent.
+func (h *AgentHandler) ListEnvProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles, err := h.svc.ListEnvProfiles(r.PathValue("agentId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profiles)
+}
+
+// GetEnvProfile returns one redacted profile.
+func (h *AgentHandler) GetEnvProfile(w http.ResponseWriter, r *http.Request) {
+	profile, err := h.svc.GetEnvProfile(r.PathValue("agentId"), r.PathValue("profileId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+// CreateEnvProfile creates a new LLM-environment profile.
+func (h *AgentHandler) CreateEnvProfile(w http.ResponseWriter, r *http.Request) {
+	var body service.EnvProfileInput
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	profile, err := h.svc.CreateEnvProfile(r.PathValue("agentId"), body)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, profile)
+}
+
+// UpdateEnvProfile updates an existing profile (blank auth token = unchanged).
+func (h *AgentHandler) UpdateEnvProfile(w http.ResponseWriter, r *http.Request) {
+	var body service.EnvProfilePatch
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	profile, err := h.svc.UpdateEnvProfile(r.PathValue("agentId"), r.PathValue("profileId"), body)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+// DeleteEnvProfile removes a profile (and clears settings.json env if active).
+func (h *AgentHandler) DeleteEnvProfile(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.DeleteEnvProfile(r.PathValue("agentId"), r.PathValue("profileId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ActivateEnvProfile sets a profile active and writes its env to settings.json.
+func (h *AgentHandler) ActivateEnvProfile(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.ActivateEnvProfile(r.PathValue("agentId"), r.PathValue("profileId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeactivateEnvProfile clears the active profile and removes settings.json env.
+func (h *AgentHandler) DeactivateEnvProfile(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.DeactivateEnvProfile(r.PathValue("agentId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetSettingsFile returns the raw JSON content of settings.json.
+func (h *AgentHandler) GetSettingsFile(w http.ResponseWriter, r *http.Request) {
+	content, err := h.svc.GetSettingsFile(r.PathValue("agentId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"content": content})
+}
+
+// UpdateSettingsFile writes raw JSON to settings.json.
+func (h *AgentHandler) UpdateSettingsFile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := h.svc.UpdateSettingsFile(r.PathValue("agentId"), body.Content); handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// envModelsQuery is the body for FetchEnvProfileModels.
+type envModelsQuery struct {
+	ProfileID string `json:"profileId"`
+	BaseURL   string `json:"baseUrl"`
+	AuthToken string `json:"authToken"`
+}
+
+// FetchEnvProfileModels queries a provider's model catalog server-side using
+// either the supplied credentials or, when omitted, the stored profile's.
+func (h *AgentHandler) FetchEnvProfileModels(w http.ResponseWriter, r *http.Request) {
+	var body envModelsQuery
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	models, err := h.svc.FetchEnvProfileModels(r.PathValue("agentId"), body.ProfileID, body.BaseURL, body.AuthToken)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}

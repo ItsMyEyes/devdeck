@@ -5,6 +5,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Workspace } from '@/store/types'
 import {
   addAgentMCPServer,
+  activateAgentEnvProfile,
+  createAgentEnvProfile,
+  deactivateAgentEnvProfile,
+  fetchAgentEnvModels,
+  fetchAgentEnvProfiles,
+  fetchAgentSettingsFile,
+  removeAgentEnvProfile,
+  updateAgentEnvProfile,
+  updateAgentSettingsFile,
   clearDoneTodos,
   createBank,
   createCompany,
@@ -78,6 +87,8 @@ import {
 import type {
   AddMCPServerBody,
   CreateBankBody,
+  EnvProfileInput,
+  EnvProfilePatch,
   CreateCommentBody,
   CreateCompanyBody,
   CreateInvoiceBody,
@@ -589,6 +600,108 @@ export function useRemoveAgentMCPServer() {
       removeAgentMCPServer(agentId, serverName),
     onSettled: (_data, _error, variables) =>
       queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.agentId) }),
+  })
+}
+
+// ---- Agent env profiles (Claude LLM-environment snapshots) ----
+
+export function useAgentEnvProfiles(agentId: string | undefined) {
+  return useQuery({
+    queryKey: qk.agentEnvProfiles(agentId ?? ''),
+    queryFn: () => fetchAgentEnvProfiles(agentId!),
+    enabled: !!agentId,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useCreateAgentEnvProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, body }: { agentId: string; body: EnvProfileInput }) =>
+      createAgentEnvProfile(agentId, body),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+  })
+}
+
+export function useUpdateAgentEnvProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      profileId,
+      body,
+    }: {
+      agentId: string
+      profileId: string
+      body: EnvProfilePatch
+    }) => updateAgentEnvProfile(agentId, profileId, body),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+  })
+}
+
+export function useRemoveAgentEnvProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, profileId }: { agentId: string; profileId: string }) =>
+      removeAgentEnvProfile(agentId, profileId),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+  })
+}
+
+export function useActivateAgentEnvProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, profileId }: { agentId: string; profileId: string }) =>
+      activateAgentEnvProfile(agentId, profileId),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+  })
+}
+
+export function useDeactivateAgentEnvProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (agentId: string) => deactivateAgentEnvProfile(agentId),
+    onSettled: (_data, _error, agentId) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(agentId) }),
+  })
+}
+
+export function useFetchAgentEnvModels() {
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      body,
+    }: {
+      agentId: string
+      body: { profileId?: string; baseUrl: string; authToken?: string }
+    }) => fetchAgentEnvModels(agentId, body),
+  })
+}
+
+// ---- Settings file (raw JSON editor) ----
+
+export function useAgentSettingsFile(agentId: string | undefined) {
+  return useQuery({
+    queryKey: qk.agentSettingsFile(agentId ?? ''),
+    queryFn: () => fetchAgentSettingsFile(agentId!),
+    enabled: !!agentId,
+    staleTime: 10_000,
+    retry: false,
+  })
+}
+
+export function useUpdateAgentSettingsFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ agentId, content }: { agentId: string; content: string }) =>
+      updateAgentSettingsFile(agentId, content),
+    onSettled: (_data, _error, { agentId }) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentSettingsFile(agentId) }),
   })
 }
 

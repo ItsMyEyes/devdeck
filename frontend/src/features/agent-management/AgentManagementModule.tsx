@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
-import { Blocks, RefreshCw, ServerCog } from 'lucide-react'
+import { Blocks, RefreshCw, ServerCog, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { qk } from '@/features/data/keys'
 import { useAgents } from '@/features/data/queries'
@@ -8,14 +8,15 @@ import { ModuleHeader } from '@/features/modules/ModuleHeader'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { EmptyState } from '@/features/screens/EmptyState'
-import { fetchAgentMCPServers, fetchAgentSkills } from '@/lib/api'
+import { fetchAgentEnvProfiles, fetchAgentMCPServers, fetchAgentSkills } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { AgentMark } from './AgentMark'
+import { EnvProfileManagement } from './EnvProfileManagement'
 import { MCPManagement } from './MCPManagement'
 import { SkillsManagement } from './SkillsManagement'
+import type { EnvProfileSummary } from '@/store/types'
 import type { AgentMCPInventory, AgentSkillInventory } from './types'
 
-type ManagementTab = 'skills' | 'mcp'
+type ManagementTab = 'skills' | 'mcp' | 'settings'
 
 export function AgentManagementModule() {
   const [tab, setTab] = useState<ManagementTab>('skills')
@@ -29,6 +30,11 @@ export function AgentManagementModule() {
     () => installedAgents.filter((agent) => agent.id === 'claude' || agent.id === 'codex'),
     [installedAgents],
   )
+  const settingsAgents = useMemo(
+    () => installedAgents.filter((agent) => agent.id === 'claude' || agent.id === 'codex'),
+    [installedAgents],
+  )
+  const [activeSettingsAgentId, setActiveSettingsAgentId] = useState<string | null>(null)
 
   const skillQueries = useQueries({
     queries: installedAgents.map((agent) => ({
@@ -45,6 +51,25 @@ export function AgentManagementModule() {
       retry: false,
     })),
   })
+  // Default to claude when settings agents load; keep current selection if already set.
+  useEffect(() => {
+    if (!activeSettingsAgentId && settingsAgents.length > 0) {
+      const preferred = settingsAgents.find((a) => a.id === 'claude') ?? settingsAgents[0]
+      setActiveSettingsAgentId(preferred.id)
+    }
+  }, [activeSettingsAgentId, settingsAgents])
+
+  const envProfileQueries = useQueries({
+    queries: [
+      {
+        queryKey: qk.agentEnvProfiles(activeSettingsAgentId ?? 'claude'),
+        queryFn: () => fetchAgentEnvProfiles(activeSettingsAgentId!),
+        enabled: !!activeSettingsAgentId,
+        staleTime: 30_000,
+        retry: false,
+      },
+    ],
+  })
 
   const skillInventory: AgentSkillInventory[] = installedAgents.map((agent, index) => ({
     agent,
@@ -58,10 +83,14 @@ export function AgentManagementModule() {
   }))
   const skillCount = new Set(skillInventory.flatMap((item) => item.skills.map((skill) => skill.name))).size
   const mcpCount = mcpInventory.reduce((total, item) => total + item.servers.length, 0)
+  const envProfiles: EnvProfileSummary[] = envProfileQueries[0]?.data ?? []
+  const envProfileCount = envProfiles.length
+  const envProfilesLoading = envProfileQueries.some((query) => query.isPending)
   const refreshing =
     agentsQuery.isFetching ||
     skillQueries.some((query) => query.isFetching) ||
-    mcpQueries.some((query) => query.isFetching)
+    mcpQueries.some((query) => query.isFetching) ||
+    envProfileQueries.some((query) => query.isFetching)
 
   async function refresh() {
     await Promise.all([
@@ -96,7 +125,7 @@ export function AgentManagementModule() {
         />
       ) : (
         <>
-          <section className="flex-none border-b border-loom-border bg-loom-surface/35 px-3 py-3 sm:px-4 sm:py-4">
+          {/* <section className="flex-none border-b border-loom-border bg-loom-surface/35 px-3 py-3 sm:px-4 sm:py-4">
             <div className="mx-auto grid w-full max-w-[1180px] gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
               <div className="min-w-0 py-0.5">
                 <h2 className="text-[13px] font-semibold text-loom-fg-2">Connected agents</h2>
@@ -125,7 +154,7 @@ export function AgentManagementModule() {
                 ))}
               </div>
             </div>
-          </section>
+          </section> */}
 
           <div
             className="grid flex-none grid-cols-2 gap-1 border-b border-loom-border bg-loom-bg px-3 py-2 sm:flex sm:px-4"
@@ -166,6 +195,25 @@ export function AgentManagementModule() {
               <span>MCP<span className="hidden sm:inline"> management</span></span>
               <span className="font-mono text-[10px] text-loom-dim">{mcpCount}</span>
             </button>
+            {settingsAgents.length > 0 ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'settings'}
+                onClick={() => setTab('settings')}
+                className={cn(
+                  'flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-medium transition-colors sm:h-8',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                  tab === 'settings'
+                    ? 'border border-loom-border-accent bg-loom-accent-tint text-loom-fg'
+                    : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+                )}
+              >
+                <SlidersHorizontal size={14} />
+                <span>Settings</span>
+                <span className="font-mono text-[10px] text-loom-dim">{envProfileCount}</span>
+              </button>
+            ) : null}
           </div>
 
           {tab === 'skills' ? (
@@ -173,6 +221,20 @@ export function AgentManagementModule() {
               agents={installedAgents}
               inventory={skillInventory}
               loading={skillQueries.some((query) => query.isPending)}
+            />
+          ) : tab === 'mcp' ? (
+            <MCPManagement
+              agents={mcpAgents}
+              inventory={mcpInventory}
+              loading={mcpQueries.some((query) => query.isPending)}
+            />
+          ) : activeSettingsAgentId ? (
+            <EnvProfileManagement
+              agentId={activeSettingsAgentId}
+              allSettingsAgents={settingsAgents}
+              profiles={envProfiles}
+              loading={envProfilesLoading}
+              onSelectAgent={setActiveSettingsAgentId}
             />
           ) : (
             <MCPManagement

@@ -174,7 +174,7 @@ export interface Workspace {
   recurringTemplates: RecurringInvoiceTemplate[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools'
+export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {
@@ -219,6 +219,36 @@ export interface Agent {
   installed: boolean
   models: AgentModel[]
   skills: AgentSkill[]
+}
+
+/**
+ * Redacted view of a Claude Code LLM-environment profile (the `env` block of
+ * ~/.claude/settings.json). The auth token is never sent to the client — only
+ * HasToken. Models maps the alias slot (opus/sonnet/haiku) to a model id.
+ */
+export interface EnvProfileSummary {
+  id: string
+  agentId: string
+  name: string
+  baseUrl: string
+  hasToken: boolean
+  models: Record<string, string>
+  extraEnv: Record<string, string>
+
+  // Codex-specific (ignored for Claude)
+  codexProviderName?: string
+  codexWireAPI?: string
+  codexEnvKey?: string
+  codexContextWindow?: number
+  codexMaxTokens?: number
+
+  active: boolean
+  updatedAt: string
+}
+
+/** A single model id advertised by a provider's model catalog. */
+export interface EnvModelOption {
+  id: string
 }
 
 export interface Settings {

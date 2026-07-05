@@ -180,6 +180,7 @@ func main() {
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
+	browserH := handler.NewBrowserProxyHandler()
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
@@ -264,6 +265,17 @@ func main() {
 	mux.HandleFunc("POST /api/agents/{agentId}/mcp-servers", agentH.AddMCPServer)
 	mux.HandleFunc("DELETE /api/agents/{agentId}/mcp-servers/{serverName}", agentH.RemoveMCPServer)
 
+	mux.HandleFunc("GET /api/agents/{agentId}/env-profiles", agentH.ListEnvProfiles)
+	mux.HandleFunc("POST /api/agents/{agentId}/env-profiles", agentH.CreateEnvProfile)
+	mux.HandleFunc("GET /api/agents/{agentId}/env-profiles/{profileId}", agentH.GetEnvProfile)
+	mux.HandleFunc("PATCH /api/agents/{agentId}/env-profiles/{profileId}", agentH.UpdateEnvProfile)
+	mux.HandleFunc("DELETE /api/agents/{agentId}/env-profiles/{profileId}", agentH.DeleteEnvProfile)
+	mux.HandleFunc("POST /api/agents/{agentId}/env-profiles/{profileId}/activate", agentH.ActivateEnvProfile)
+	mux.HandleFunc("POST /api/agents/{agentId}/env-profiles/deactivate", agentH.DeactivateEnvProfile)
+	mux.HandleFunc("POST /api/agents/{agentId}/env-profiles/fetch-models", agentH.FetchEnvProfileModels)
+	mux.HandleFunc("GET /api/agents/{agentId}/settings-file", agentH.GetSettingsFile)
+	mux.HandleFunc("PUT /api/agents/{agentId}/settings-file", agentH.UpdateSettingsFile)
+
 	mux.HandleFunc("POST /api/workspaces/{wsId}/todos", todoH.PostTodo)
 	mux.HandleFunc("POST /api/workspaces/{wsId}/todos/clear-done", todoH.ClearDoneTodos)
 	mux.HandleFunc("PATCH /api/todos/{id}", todoH.PatchTodo)
@@ -296,6 +308,7 @@ func main() {
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
 	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)
+	mux.HandleFunc("/api/browser/proxy", browserH.Proxy)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
