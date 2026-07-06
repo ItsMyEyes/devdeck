@@ -71,11 +71,11 @@ func TestAttachDeliversBannerAndBufferedReplay(t *testing.T) {
 	}
 }
 
-// TestHandleWSNegotiatesCompression verifies the server offers
-// permessage-deflate: terminal output is highly repetitive ANSI text, and
-// without compression it crosses slow links (e.g. production behind a
-// tunnel) uncompressed.
-func TestHandleWSNegotiatesCompression(t *testing.T) {
+// TestHandleWSDisablesCompression verifies the server refuses
+// permessage-deflate even when the client requests it. Compression caused
+// WebKit/iOS terminal clients to drop sustained-output sessions with EOF
+// frame-header errors, so the stable behavior is no negotiated extension.
+func TestHandleWSDisablesCompression(t *testing.T) {
 	srv := NewServer(nil)
 	session := testSessionID(t)
 	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
@@ -92,7 +92,7 @@ func TestHandleWSNegotiatesCompression(t *testing.T) {
 	defer conn.CloseNow()
 
 	ext := resp.Header.Get("Sec-WebSocket-Extensions")
-	if !strings.Contains(ext, "permessage-deflate") {
-		t.Fatalf("compression not negotiated; Sec-WebSocket-Extensions=%q", ext)
+	if strings.Contains(ext, "permessage-deflate") {
+		t.Fatalf("compression unexpectedly negotiated; Sec-WebSocket-Extensions=%q", ext)
 	}
 }
