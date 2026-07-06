@@ -15,9 +15,11 @@ import {
   updateAgentEnvProfile,
   updateAgentSettingsFile,
   clearDoneTodos,
+  cloneProject,
   createBank,
   createCompany,
   createComment,
+  createFsFolder,
   createInvoice,
   createIssue,
   createNews,
@@ -86,11 +88,13 @@ import {
 } from '@/lib/api'
 import type {
   AddMCPServerBody,
+  CloneProjectBody,
   CreateBankBody,
   EnvProfileInput,
   EnvProfilePatch,
   CreateCommentBody,
   CreateCompanyBody,
+  CreateFsFolderBody,
   CreateInvoiceBody,
   CreateIssueBody,
   CreateNewsBody,
@@ -186,6 +190,14 @@ export function useCreateProject() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
     mutationFn: ({ wsId, body }: { wsId: string; body?: CreateProjectBody }) => createProject(wsId, body),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useCloneProject() {
+  const invalidate = useInvalidateWorkspaces()
+  return useMutation({
+    mutationFn: ({ wsId, body }: { wsId: string; body: CloneProjectBody }) => cloneProject(wsId, body),
     onSuccess: () => invalidate(),
   })
 }
@@ -724,6 +736,14 @@ export function useFsList(path: string) {
     queryFn: () => fetchFsList(path),
     enabled: path.length > 0,
     staleTime: 30_000,
+  })
+}
+
+export function useCreateFsFolder() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateFsFolderBody) => createFsFolder(body),
+    onSuccess: (_created, body) => queryClient.invalidateQueries({ queryKey: qk.fsList(body.path) }),
   })
 }
 

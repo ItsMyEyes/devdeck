@@ -180,7 +180,7 @@ func main() {
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
-	browserH := handler.NewBrowserProxyHandler()
+	browserH := handler.NewBrowserProxyHandler(authSvc)
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
@@ -205,6 +205,7 @@ func main() {
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
+	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 
 	mux.HandleFunc("GET /api/settings", settingsH.GetSettings)
 	mux.HandleFunc("PUT /api/settings", settingsH.PutSettings)
@@ -215,6 +216,7 @@ func main() {
 	mux.HandleFunc("DELETE /api/workspaces/{id}", wsH.DeleteWorkspace)
 
 	mux.HandleFunc("POST /api/workspaces/{wsId}/projects", pH.PostProject)
+	mux.HandleFunc("POST /api/workspaces/{wsId}/projects/clone", pH.PostCloneProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", pH.PatchProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", pH.DeleteProject)
 	mux.HandleFunc("GET /api/projects/{id}/branches", pH.GetProjectBranches)
@@ -308,6 +310,7 @@ func main() {
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
 	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)
+	mux.HandleFunc("GET /api/browser/session", browserH.GetSession)
 	mux.HandleFunc("/api/browser/proxy", browserH.Proxy)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)

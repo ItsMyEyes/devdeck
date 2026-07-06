@@ -67,6 +67,24 @@ func ListBranches(repoPath string) ([]string, error) {
 	return branches, nil
 }
 
+// Clone clones repoURL into targetPath. Arguments are passed directly to the git
+// binary without a shell, so even SSH-style URLs are not shell-interpreted.
+func Clone(repoURL, targetPath string) error {
+	repoURL = strings.TrimSpace(repoURL)
+	targetPath = strings.TrimSpace(targetPath)
+	if repoURL == "" {
+		return fmt.Errorf("repo url is required")
+	}
+	if strings.HasPrefix(repoURL, "-") {
+		return fmt.Errorf("repo url must not start with '-'")
+	}
+	if targetPath == "" {
+		return fmt.Errorf("target path is required")
+	}
+	_, err := run("clone", repoURL, ExpandHome(targetPath))
+	return err
+}
+
 // AddWorktree creates a new git worktree at worktreePath, checking out a new
 // branch named branch created from base.
 func AddWorktree(repoPath, worktreePath, branch, base string) error {

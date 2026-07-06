@@ -21,28 +21,10 @@ func NewFsHandler() *FsHandler { return &FsHandler{} }
 // git-repo indicators on folders.
 func (h *FsHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("path")
-	if raw == "" {
-		writeErr(w, http.StatusBadRequest, "missing path query parameter")
+	resolved, ok := resolveFsPath(w, raw, "missing path query parameter")
+	if !ok {
 		return
 	}
-
-	// Reject path traversal attempts
-	if strings.Contains(raw, "..") {
-		writeErr(w, http.StatusBadRequest, "path traversal not allowed")
-		return
-	}
-
-	// Expand ~ to home directory
-	home, err := os.UserHomeDir()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "cannot resolve home directory")
-		return
-	}
-	resolved := raw
-	if strings.HasPrefix(resolved, "~") {
-		resolved = filepath.Join(home, strings.TrimPrefix(resolved, "~"))
-	}
-	resolved = filepath.Clean(resolved)
 
 	// Ensure the path exists and is a directory
 	info, err := os.Stat(resolved)
@@ -106,4 +88,76 @@ func (h *FsHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		"entries": result,
 		"git":     currentGit,
 	})
+}
+
+// Mkdir handles POST /api/fs/mkdir. It creates one child folder in the selected
+// directory; nested paths and traversal in the name are intentionally rejected.
+func (h *FsHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	resolved, ok := resolveFsPath(w, body.Path, "path is required")
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, "folder name is required")
+		return
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, '\x00') {
+		writeErr(w, http.StatusBadRequest, "invalid folder name")
+		return
+	}
+	target := filepath.Join(resolved, name)
+	if err := os.Mkdir(target, 0o755); err != nil {
+		if os.IsExist(err) {
+			writeErr(w, http.StatusConflict, "folder already exists")
+			return
+		}
+		if os.IsPermission(err) {
+			writeErr(w, http.StatusForbidden, "permission denied")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"path": filepath.Clean(target)})
+}
+
+func resolveFsPath(w http.ResponseWriter, raw, missingMessage string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		writeErr(w, http.StatusBadRequest, missingMessage)
+		return "", false
+	}
+	if hasPathTraversal(raw) {
+		writeErr(w, http.StatusBadRequest, "path traversal not allowed")
+		return "", false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot resolve home directory")
+		return "", false
+	}
+	resolved := raw
+	if strings.HasPrefix(resolved, "~") {
+		resolved = filepath.Join(home, strings.TrimPrefix(resolved, "~"))
+	}
+	return filepath.Clean(resolved), true
+}
+
+func hasPathTraversal(raw string) bool {
+	normalized := strings.ReplaceAll(raw, "\\", "/")
+	for _, part := range strings.Split(normalized, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }

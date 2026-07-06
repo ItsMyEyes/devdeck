@@ -11,6 +11,8 @@ import type {
 
 export type EditKind = 'worktree' | 'project' | 'workspace'
 export type TodoFilter = 'all' | 'active' | 'done'
+export type NewProjectMode = 'local' | 'clone'
+export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
 
 interface SpawnState {
   open: boolean
@@ -28,6 +30,15 @@ interface EditState {
   b: string
   model: string
 }
+interface NewProjectState {
+  open: boolean
+  mode: NewProjectMode
+  name: string
+  path: string
+  repo: string
+  cloneParent: string
+  cloneFolder: string
+}
 /**
  * Transient UI-only state.
  *
@@ -43,9 +54,9 @@ interface LoomState {
   sidebarOpen: boolean
   wsMenuOpen: boolean
   spawn: SpawnState
-  newProject: { open: boolean; name: string; path: string }
+  newProject: NewProjectState
   newWorkspace: { open: boolean; name: string }
-  browse: { open: boolean; target: 'new' | 'edit'; path: string[] }
+  browse: { open: boolean; target: BrowseTarget; path: string[] }
   edit: EditState
   confirmDelete: { kind: EditKind; id: string; name: string } | null
   todoDraft: { text: string; pri: Priority }
@@ -65,7 +76,7 @@ interface LoomState {
   // new project
   openNewProject: () => void
   closeNewProject: () => void
-  setNewProject: (patch: Partial<{ name: string; path: string }>) => void
+  setNewProject: (patch: Partial<Omit<NewProjectState, 'open'>>) => void
 
   // new workspace
   openNewWorkspace: () => void
@@ -80,7 +91,7 @@ interface LoomState {
   cancelConfirm: () => void
 
   // folder browser
-  openBrowse: (target: 'new' | 'edit') => void
+  openBrowse: (target: BrowseTarget, initialPath?: string) => void
   closeBrowse: () => void
   enterFolder: (name: string) => void
   browseUp: () => void
@@ -118,15 +129,27 @@ function projectOfWorktree(list: Workspace[], wtId: string): Project | null {
   }
   return null
 }
+
+function browsePathSegments(path: string | undefined) {
+  const trimmed = path?.trim() ?? ''
+  if (!trimmed || trimmed === '~') return []
+  if (!trimmed.startsWith('~/')) return []
+  return trimmed
+    .slice(2)
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
 export const useLoomStore = create<LoomState>()(
   persist(
     immer((set) => ({
       sidebarOpen: false,
       wsMenuOpen: false,
       spawn: { open: false, projectId: null, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
-      newProject: { open: false, name: '', path: '' },
+      newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '' },
       newWorkspace: { open: false, name: '' },
-      browse: { open: false, target: 'new', path: [] },
+      browse: { open: false, target: 'newPath', path: [] },
       edit: { kind: null, id: null, a: '', b: '', model: '' },
       confirmDelete: null,
       todoDraft: { text: '', pri: 'normal' },
@@ -157,7 +180,7 @@ export const useLoomStore = create<LoomState>()(
 
       openNewProject: () =>
         set((s) => {
-          s.newProject = { open: true, name: '', path: '' }
+          s.newProject = { open: true, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '' }
           s.browse.path = []
           s.wsMenuOpen = false
         }),
@@ -182,7 +205,8 @@ export const useLoomStore = create<LoomState>()(
       askDelete: (kind, id, name) => set((s) => void (s.confirmDelete = { kind, id, name })),
       cancelConfirm: () => set((s) => void (s.confirmDelete = null)),
 
-      openBrowse: (target) => set((s) => void (s.browse = { open: true, target, path: [] })),
+      openBrowse: (target, initialPath) =>
+        set((s) => void (s.browse = { open: true, target, path: browsePathSegments(initialPath) })),
       closeBrowse: () => set((s) => void (s.browse.open = false)),
       enterFolder: (name) => set((s) => void s.browse.path.push(name)),
       browseUp: () => set((s) => void s.browse.path.pop()),
@@ -195,6 +219,9 @@ export const useLoomStore = create<LoomState>()(
           if (s.browse.target === 'edit') {
             s.browse.open = false
             s.edit.b = path
+          } else if (s.browse.target === 'cloneParent') {
+            s.browse.open = false
+            s.newProject.cloneParent = path
           } else {
             s.browse.open = false
             s.newProject.path = path

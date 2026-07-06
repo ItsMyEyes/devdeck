@@ -1,11 +1,14 @@
 package service
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -288,6 +291,11 @@ func (a *AuthService) Login(email, password string) (string, error) {
 
 const sessionTTL = 30 * 24 * time.Hour
 
+const (
+	browserProxyTokenTTL     = 12 * time.Hour
+	browserProxyTokenPurpose = "loom/browser-proxy/v1"
+)
+
 func (a *AuthService) issueSession(userID string) (string, error) {
 	token, err := randomToken()
 	if err != nil {
@@ -369,4 +377,53 @@ func (a *AuthService) CurrentUser(sessionToken string) (domain.User, error) {
 		return domain.User{}, fmt.Errorf("unauthorized: %w", ErrUnauthorized)
 	}
 	return a.store.UserByID(userID)
+}
+
+// IssueBrowserProxyToken creates a short-lived bearer token for sandboxed
+// browser iframe requests. The iframe cannot safely use the app's session
+// cookie because allowing same-origin scripts in the sandbox would let remote
+// pages call Loom APIs directly.
+func (a *AuthService) IssueBrowserProxyToken(sessionToken string) (string, error) {
+	if _, err := a.CurrentUser(sessionToken); err != nil {
+		return "", err
+	}
+	sessionHash := hashToken(sessionToken)
+	expiresAt := a.now().Add(browserProxyTokenTTL).Unix()
+	payload := strconv.FormatInt(expiresAt, 10) + "." + sessionHash
+	signature := base64.RawURLEncoding.EncodeToString(a.browserProxySignature(payload))
+	return payload + "." + signature, nil
+}
+
+// ValidateBrowserProxyToken verifies that a browser proxy request came from an
+// authenticated Loom session without exposing the full session cookie to the
+// sandboxed remote document.
+func (a *AuthService) ValidateBrowserProxyToken(token string) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	payload := parts[0] + "." + parts[1]
+	got, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	if !hmac.Equal(got, a.browserProxySignature(payload)) {
+		return fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	expiresAt, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || !a.now().Before(time.Unix(expiresAt, 0)) {
+		return fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	if _, err := a.store.SessionUserID(parts[1], a.now()); err != nil {
+		return fmt.Errorf("unauthorized: %w", ErrUnauthorized)
+	}
+	return nil
+}
+
+func (a *AuthService) browserProxySignature(payload string) []byte {
+	mac := hmac.New(sha256.New, a.authKey)
+	_, _ = mac.Write([]byte(browserProxyTokenPurpose))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(payload))
+	return mac.Sum(nil)
 }

@@ -113,6 +113,12 @@ export interface CreateProjectBody {
   repo?: string
 }
 
+export interface CloneProjectBody {
+  name?: string
+  path: string
+  repo: string
+}
+
 export interface UpdateProjectBody {
   name?: string
   path?: string
@@ -297,6 +303,10 @@ export function deleteWorkspace(id: string): Promise<void> {
 
 export function createProject(wsId: string, body: CreateProjectBody = {}): Promise<Project> {
   return request<Project>('POST', `/workspaces/${wsId}/projects`, body)
+}
+
+export function cloneProject(wsId: string, body: CloneProjectBody): Promise<Project> {
+  return request<Project>('POST', `/workspaces/${wsId}/projects/clone`, body)
 }
 
 export function updateProject(id: string, patch: UpdateProjectBody): Promise<Project> {
@@ -570,9 +580,20 @@ export function attachmentUrl(id: string): string {
   return `${API_BASE}/attachments/${id}`
 }
 
+export interface BrowserProxySession {
+  token: string
+}
+
+/** Authenticated bootstrap for sandboxed Browser module requests. */
+export function fetchBrowserProxySession(): Promise<BrowserProxySession> {
+  return request<BrowserProxySession>('GET', '/browser/session')
+}
+
 /** URL loaded by the Browser module; the remote request is made by the Go server. */
-export function browserProxyUrl(targetUrl: string): string {
-  return `${API_BASE}/browser/proxy?url=${encodeURIComponent(targetUrl)}`
+export function browserProxyUrl(targetUrl: string, token?: string): string {
+  const params = new URLSearchParams({ url: targetUrl })
+  if (token) params.set('token', token)
+  return `${API_BASE}/browser/proxy?${params.toString()}`
 }
 
 export async function uploadAttachment(issueId: string, file: File): Promise<Attachment> {
@@ -820,6 +841,19 @@ export interface FsListResponse {
 
 export function fetchFsList(path: string): Promise<FsListResponse> {
   return request<FsListResponse>('GET', `/fs/list?path=${encodeURIComponent(path)}`)
+}
+
+export interface CreateFsFolderBody {
+  path: string
+  name: string
+}
+
+export interface CreateFsFolderResponse {
+  path: string
+}
+
+export function createFsFolder(body: CreateFsFolderBody): Promise<CreateFsFolderResponse> {
+  return request<CreateFsFolderResponse>('POST', '/fs/mkdir', body)
 }
 
 // ---- Auth ----

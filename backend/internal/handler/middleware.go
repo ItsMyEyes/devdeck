@@ -89,6 +89,7 @@ func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 		"/api/auth/totp/setup":        true,
 		"/api/auth/totp/verify-setup": true,
 		"/api/auth/totp/verify":       true,
+		browserProxyPath:              true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

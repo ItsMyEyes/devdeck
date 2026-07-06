@@ -1,12 +1,17 @@
-import { ChevronRight, CornerLeftUp, Folder, FolderTree, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { Check, ChevronRight, CornerLeftUp, Folder, FolderPlus, FolderTree, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogTitle } from '@/components/ui/dialog'
-import { useFsList } from '@/features/data/queries'
+import { Input } from '@/components/ui/input'
+import { useCreateFsFolder, useFsList } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function FolderBrowser() {
+  const [creating, setCreating] = useState(false)
+  const [folderName, setFolderName] = useState('')
+  const [createError, setCreateError] = useState('')
   const browse = useLoomStore((s) => s.browse)
   const closeBrowse = useLoomStore((s) => s.closeBrowse)
   const enterFolder = useLoomStore((s) => s.enterFolder)
@@ -16,9 +21,47 @@ export function FolderBrowser() {
 
   const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
   const { data, isLoading, error, refetch } = useFsList(pathLabel)
+  const createFolder = useCreateFsFolder()
   const folders = data?.entries.filter((entry) => entry.isDir) ?? []
   const currentGit = data?.git ?? false
   const crumbs = ['~', ...browse.path]
+  const title = browse.target === 'cloneParent' ? 'Choose clone location' : 'Choose a folder'
+
+  function cancelCreate() {
+    setCreating(false)
+    setFolderName('')
+    setCreateError('')
+  }
+
+  function close() {
+    cancelCreate()
+    closeBrowse()
+  }
+
+  function selectFolder() {
+    cancelCreate()
+    useFolder()
+  }
+
+  function createFolderHere() {
+    const name = folderName.trim()
+    if (!name || createFolder.isPending) return
+    setCreateError('')
+    createFolder.mutate(
+      { path: pathLabel, name },
+      {
+        onSuccess: () => {
+          setFolderName('')
+          setCreating(false)
+          enterFolder(name)
+        },
+        onError: (err) => {
+          const msg = err instanceof ApiError ? err.message : 'Failed to create folder'
+          setCreateError(msg)
+        },
+      },
+    )
+  }
 
   function renderContent() {
     if (isLoading) {
@@ -80,7 +123,7 @@ export function FolderBrowser() {
   return (
     <Dialog
       open={browse.open}
-      onOpenChange={(o) => !o && closeBrowse()}
+      onOpenChange={(o) => !o && close()}
       width={520}
       z={65}
       className="flex h-[min(540px,86vh)] flex-col overflow-hidden !p-0"
@@ -89,7 +132,14 @@ export function FolderBrowser() {
       <div className="flex-none border-b border-loom-border px-[18px] pb-3 pt-[17px]">
         <div className="mb-3 flex items-center gap-2.5">
           <FolderTree size={16} className="text-loom-muted" />
-          <DialogTitle className="text-[14.5px]">Choose a folder</DialogTitle>
+          <DialogTitle className="text-[14.5px]">{title}</DialogTitle>
+          <div className="flex-1" />
+          {!creating && (
+            <Button variant="secondary" size="sm" onClick={() => setCreating(true)}>
+              <FolderPlus size={13} />
+              New folder
+            </Button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-[3px] font-mono text-xs">
           {crumbs.map((name, i) => {
@@ -108,6 +158,37 @@ export function FolderBrowser() {
             )
           })}
         </div>
+        {creating && (
+          <div className="mt-3">
+            <div className="flex gap-2">
+              <Input
+                autoFocus
+                value={folderName}
+                onChange={(e) => setFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    createFolderHere()
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    cancelCreate()
+                  }
+                }}
+                placeholder="folder-name"
+                className="h-8 font-mono"
+              />
+              <Button size="sm" onClick={createFolderHere} disabled={!folderName.trim() || createFolder.isPending}>
+                {createFolder.isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Create
+              </Button>
+              <Button variant="secondary" size="icon-sm" aria-label="Cancel create folder" onClick={cancelCreate}>
+                <X size={13} />
+              </Button>
+            </div>
+            {createError && <div className="mt-1.5 font-mono text-[10.5px] text-loom-red-soft">{createError}</div>}
+          </div>
+        )}
       </div>
 
       {/* list */}
@@ -121,10 +202,10 @@ export function FolderBrowser() {
           {pathLabel}
           {currentGit && <span className="text-loom-green-soft"> · git repo</span>}
         </div>
-        <Button variant="secondary" onClick={closeBrowse}>
+        <Button variant="secondary" onClick={close}>
           Cancel
         </Button>
-        <Button onClick={useFolder}>Use this folder</Button>
+        <Button onClick={selectFolder}>Use this folder</Button>
       </div>
     </Dialog>
   )

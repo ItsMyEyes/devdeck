@@ -37,6 +37,24 @@ func (h *ProjectHandler) PostProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// PostCloneProject clones a git repository, then creates a project for it.
+func (h *ProjectHandler) PostCloneProject(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name *string `json:"name"`
+		Path *string `json:"path"`
+		Repo *string `json:"repo"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	p, err := h.svc.Clone(r.PathValue("wsId"), str(body.Name), str(body.Path), str(body.Repo))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
 // PatchProject updates a project's fields.
 func (h *ProjectHandler) PatchProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {

@@ -89,6 +89,17 @@ func TestRequireAuthAllowsPublicPathWithoutCookie(t *testing.T) {
 	}
 }
 
+func TestRequireAuthAllowsBrowserProxyPathWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, browserProxyPath, nil))
+	if !called {
+		t.Error("RequireAuth blocked browser proxy path before token validation")
+	}
+}
+
 func TestRequireAuthBlocksProtectedPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
