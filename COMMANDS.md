@@ -25,6 +25,14 @@ The Go backend accepts flags:
   (default `hub`, env `LOOM_ROLE`).
 - `--key` — static API key; required for `--role runtime`, optional bearer
   auth for `--role hub` (desktop clients) (env `LOOM_KEY`).
+- `--hub-url` — hub base URL this runtime should self-register with on
+  startup (env `LOOM_HUB_URL`, empty = self-registration disabled).
+- `--hub-key` — hub's bearer key, used to authenticate this runtime's
+  self-registration call; required if `--hub-url` is set (env `LOOM_HUB_KEY`).
+- `--public-url` — this runtime's own reachable URL, advertised to the hub
+  during self-registration (env `LOOM_PUBLIC_URL`, default `http://<--addr>`).
+- `--name` — display name for this machine in the hub's Machines UI during
+  self-registration (env `LOOM_MACHINE_NAME`, default: OS hostname).
 - `--addr` — listen address (default `127.0.0.1:8989`, env `LOOM_ADDR`)
 - `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
@@ -82,6 +90,13 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9199/api/workspaces     
 curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer rtk' \
   http://127.0.0.1:9199/api/workspaces                                            # 200
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9199/api/auth/config       # 404 (route absent on runtime)
+
+# Start a runtime that self-registers with a hub instead of being added
+# manually through the Machines UI:
+cd backend && go run ./cmd/server --role runtime --key rtk --addr 127.0.0.1:9199 --db /tmp/rt.db --open=false \
+  --hub-url http://127.0.0.1:9198 --hub-key hubk --public-url http://127.0.0.1:9199 --name my-laptop
+
+curl -s -H 'Authorization: Bearer hubk' http://127.0.0.1:9198/api/machines  # already includes "my-laptop"
 
 # Start a hub with dual auth (session cookie OR bearer key):
 cd backend && go run ./cmd/server --role hub --key hubk --addr 127.0.0.1:9198 --db /tmp/hub.db --open=false

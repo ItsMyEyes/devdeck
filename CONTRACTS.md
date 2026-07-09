@@ -117,6 +117,19 @@ type Machine struct {
   - Unknown machine id → standard 404 `{"error":...}` envelope. Unreachable
     runtime → `502 {"error":"machine unreachable"}`.
 
+### Runtime self-registration
+
+A `--role runtime` process with `--hub-url`/`--hub-key` set upserts itself
+into the hub's registry on startup instead of requiring a manual `POST
+/api/machines` — see
+`docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md`.
+It's implemented entirely client-side (`machineclient.SelfRegister`),
+reusing the endpoints above unchanged: `GET /api/machines` to find an
+existing entry whose `url` matches this runtime's `--public-url`, then
+`PATCH` (if found and `name`/`key` differ) or `POST` (if not found).
+Failure is logged and retried every 30s in the background; it never blocks
+or fails runtime startup.
+
 ## Project.machineId
 
 `domain.Project` has `MachineID string` (`json:"machineId"`), linking a

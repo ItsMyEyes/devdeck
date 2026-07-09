@@ -46,7 +46,10 @@ reverse proxy (`/api/machines/{id}/proxy/{rest...}`) as fallback for both
 REST and WebSocket. `--role runtime` requires a static `--key` and serves
 key-only auth (no session cookies, no embedded SPA, no auth/browser/seed
 routes); `--role hub` keeps session-cookie auth and additionally accepts
-that same style of bearer key for desktop (Tauri) clients. See
+that same style of bearer key for desktop (Tauri) clients. A runtime can
+also self-register with its hub on startup via `--hub-url`/`--hub-key`
+instead of being added by hand through the Machines UI — see
+`docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md`. See
 `docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md` for the full
 design and `CONTRACTS.md` for the machines API and key-auth rules.
 
