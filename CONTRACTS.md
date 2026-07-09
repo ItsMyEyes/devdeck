@@ -62,6 +62,70 @@ All data access goes through `port.Store` (defined in `backend/internal/port/sto
 - Store methods return `(domain.X, error)`, never `(*domain.X, error)`.
 - `Seed()` wipes all data and inserts a fresh demo dataset.
 
+## Key auth (hub/runtime roles)
+
+- `--role runtime` (key-only auth): every path except `GET /api/health`
+  requires the static key. It is presented as `Authorization: Bearer <key>`,
+  compared with `crypto/subtle.ConstantTimeCompare`.
+- The `?key=` query param is accepted **only** when the request is a
+  WebSocket upgrade (`Upgrade: websocket` header present) — the browser
+  WebSocket API cannot set headers. A plain (non-upgrade) request with
+  `?key=` is rejected with 401; keys must not otherwise travel in URLs.
+- `--role hub` (dual auth): the existing session cookie continues to work
+  unchanged; `Authorization: Bearer <hubKey>` is accepted as an alternate
+  credential when `--key`/`LOOM_KEY` is configured. An empty configured hub
+  key never matches any bearer token (cookie-only behavior is preserved).
+
+## Machines API (hub role only — runtime registry)
+
+```go
+type Machine struct {
+    ID   string `json:"id"`
+    Name string `json:"name"`
+    URL  string `json:"url"`
+    // Key is the runtime's static API key. Deliberately serialized: the hub
+    // distributes it to authenticated clients for direct-first connections.
+    Key string `json:"key"`
+}
+```
+
+- `GET /api/machines` — lists machines **including keys**; this is the
+  key-distribution endpoint for direct-first clients. Reachable only behind
+  hub auth.
+- `POST /api/machines` — body `{"name","url","key"}`, all required; `url`
+  must be an absolute `http(s)` URL (400 otherwise).
+- `PATCH /api/machines/{id}` — body is a `port.MachinePatch` (`Name *string`,
+  `URL *string`, `Key *string`); `url`, if present, is validated the same way.
+- `DELETE /api/machines/{id}` — 204 on success.
+- `GET /api/machines/{id}/health` — pings the runtime's public
+  `/api/health` with a 3s timeout. Always `200`: `{"status":"online","latencyMs":<int>}`
+  or `{"status":"offline"}` — offline is data, not an error. 404 only for an
+  unknown machine id. The frontend polls this to drive online/offline badges
+  and the direct-vs-proxy switch.
+- `/api/machines/{id}/proxy/{rest...}` — method-less fallback reverse proxy
+  (REST + WebSocket) to the registered runtime; clients connect direct-first
+  over the tailnet and fall back to this route. Contract:
+  - Forwards to `machine.URL + "/" + rest` plus the original query string,
+    with the `key` query param stripped (the hub key must never reach a
+    runtime).
+  - Injects `Authorization: Bearer <machine.Key>` server-side; drops the
+    inbound `Cookie` and `Authorization` headers (hub credentials must not
+    reach runtimes).
+  - Strips `Access-Control-Allow-*` headers from the runtime's response — the
+    hub's own `CorsMiddleware` sets them; forwarding both duplicates the
+    header.
+  - Unknown machine id → standard 404 `{"error":...}` envelope. Unreachable
+    runtime → `502 {"error":"machine unreachable"}`.
+
+## Project.machineId
+
+`domain.Project` has `MachineID string` (`json:"machineId"`), linking a
+project to a registered runtime machine. Empty string means
+local/unassigned; pre-existing rows default to it via
+`migrateProjectColumns`. `CreateProject`/`UpdateProject` thread it through
+like `path`/`repo`; the create/update request bodies use the `machineId`
+JSON key.
+
 ## Domain type mirroring
 
 `frontend/src/store/types.ts` and `backend/internal/domain/models.go` define the

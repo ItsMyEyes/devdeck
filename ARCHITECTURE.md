@@ -35,6 +35,21 @@ Browser (fetch)    ──HTTP──────→ Vite proxy (:5173) → Go bac
 - Terminal sessions use native Unix PTYs on macOS/Linux and ConPTY on Windows
   10 version 1809 or newer.
 
+## Hub / runtime roles
+
+Loom is split into a **hub** (organizational source of truth: workspaces,
+projects, invoices, …, machine registry) and per-machine **runtime**
+backends (execution: git, worktrees, PTY) — one Go binary, selected at
+startup via `--role hub|runtime` (see `COMMANDS.md`). All traffic rides one
+Tailscale tailnet; clients connect direct-first to runtimes, with a hub
+reverse proxy (`/api/machines/{id}/proxy/{rest...}`) as fallback for both
+REST and WebSocket. `--role runtime` requires a static `--key` and serves
+key-only auth (no session cookies, no embedded SPA, no auth/browser/seed
+routes); `--role hub` keeps session-cookie auth and additionally accepts
+that same style of bearer key for desktop (Tauri) clients. See
+`docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md` for the full
+design and `CONTRACTS.md` for the machines API and key-auth rules.
+
 ## Dependency wiring
 
 - `backend/cmd/server/main.go` wires everything manually (no DI framework).

@@ -20,6 +20,11 @@ cd backend && go run ./cmd/server --db loom.db --open=false
 ```
 
 The Go backend accepts flags:
+- `--role` — server role: `hub` (organizational data + machine registry +
+  proxy + web UI) or `runtime` (headless execution daemon, key auth only)
+  (default `hub`, env `LOOM_ROLE`).
+- `--key` — static API key; required for `--role runtime`, optional bearer
+  auth for `--role hub` (desktop clients) (env `LOOM_KEY`).
 - `--addr` — listen address (default `127.0.0.1:8989`, env `LOOM_ADDR`)
 - `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
 - `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
@@ -58,6 +63,35 @@ The Go backend accepts flags:
   private.
 - `--github-token` — GitHub token used by `--updates` to read releases and
   download assets from the private repo (env `LOOM_GITHUB_TOKEN`).
+
+## Hub / runtime roles
+
+One binary, two roles. `--role runtime` requires `--key` (fails fast at
+startup otherwise) and serves only `GET /api/health` publicly — every other
+route needs the key via `Authorization: Bearer <key>` (or `?key=` on
+WebSocket upgrade requests only). `--role hub` (the default) keeps existing
+session-cookie auth and additionally accepts `Authorization: Bearer <key>`
+as an alternate credential (e.g. for a Tauri desktop client).
+
+```bash
+# Start a headless runtime daemon:
+cd backend && go run ./cmd/server --role runtime --key rtk --addr 127.0.0.1:9199 --db /tmp/rt.db --open=false
+
+curl -s http://127.0.0.1:9199/api/health                                          # 200 (public)
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9199/api/workspaces        # 401 (no key)
+curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer rtk' \
+  http://127.0.0.1:9199/api/workspaces                                            # 200
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9199/api/auth/config       # 404 (route absent on runtime)
+
+# Start a hub with dual auth (session cookie OR bearer key):
+cd backend && go run ./cmd/server --role hub --key hubk --addr 127.0.0.1:9198 --db /tmp/hub.db --open=false
+
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9198/api/workspaces        # 401 (no cookie, no key)
+curl -s -H 'Authorization: Bearer hubk' http://127.0.0.1:9198/api/workspaces       # 200 []
+```
+
+See `ARCHITECTURE.md` for the roles paragraph and `CONTRACTS.md` for the
+key-auth rules and the machines registry/proxy API shapes.
 
 ## Tools module setup (markitdown, pandoc, mermaid)
 
