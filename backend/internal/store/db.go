@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS recurring_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_templates_ws ON recurring_templates(workspace_id);
 
+CREATE TABLE IF NOT EXISTS machines (
+  id   TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  url  TEXT NOT NULL DEFAULT '',
+  key  TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),
   active_workspace_id TEXT,

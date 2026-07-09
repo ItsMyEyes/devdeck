@@ -75,6 +75,13 @@ type Store interface {
 	UpdateBank(id string, p BankPatch) (domain.Bank, error)
 	DeleteBank(id string) error
 
+	// Machines (runtime registry, hub role only)
+	Machines() ([]domain.Machine, error)
+	CreateMachine(name, url, key string) (domain.Machine, error)
+	UpdateMachine(id string, p MachinePatch) (domain.Machine, error)
+	DeleteMachine(id string) error
+	MachineByID(id string) (domain.Machine, error)
+
 	// Recurring invoice templates (workspace-scoped; auto-generate draft Invoices on schedule)
 	CreateRecurringTemplate(wsID, companyName, companyAddress string, items []domain.InvoiceItem, bankName, bankAccountName, bankAccountNumber string, dayOfMonth, paymentTermDays int, createdAt string) (domain.RecurringInvoiceTemplate, error)
 	UpdateRecurringTemplate(id string, p RecurringTemplatePatch) (domain.RecurringInvoiceTemplate, error)
@@ -163,6 +170,13 @@ type BankPatch struct {
 	BankName      *string
 	AccountName   *string
 	AccountNumber *string
+}
+
+// MachinePatch carries optional fields for a partial machine update.
+type MachinePatch struct {
+	Name *string
+	URL  *string
+	Key  *string
 }
 
 // RecurringTemplatePatch carries optional fields for a partial recurring-template update.

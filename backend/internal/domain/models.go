@@ -185,6 +185,18 @@ type Settings struct {
 	DefaultModel      string  `json:"defaultModel"`
 }
 
+// Machine mirrors the frontend Machine type — a registered runtime machine
+// in the hub's machine registry.
+type Machine struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	// Key is the runtime's static API key. Deliberately serialized: the hub
+	// distributes it to authenticated clients for direct-first connections
+	// (spec: docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md).
+	Key string `json:"key"`
+}
+
 // FsEntry describes a single directory entry returned by the filesystem browser.
 type FsEntry struct {
 	Name  string `json:"name"`

@@ -130,6 +130,14 @@ export interface Bank {
   accountNumber: string
 }
 
+/** A registered runtime machine (hub registry). */
+export interface Machine {
+  id: string
+  name: string
+  url: string
+  key: string
+}
+
 export interface InvoiceItem {
   description: string
   quantity: number
