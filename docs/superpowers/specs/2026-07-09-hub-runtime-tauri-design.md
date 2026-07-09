@@ -184,7 +184,12 @@ Each sub-project gets its own implementation plan; #1 first.
 
 ## Out of scope
 
-- Runtime self-registration to the hub.
+- ~~Runtime self-registration to the hub.~~ **Superseded** — see
+  `docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md`.
+  The solo-operator trust model here doesn't need the stricter boundary
+  this bullet assumed: the same operator already holds the hub key before
+  they can start a runtime with it, so opt-in self-registration doesn't
+  introduce a new discovery/trust boundary.
 - Sync/replication between hub instances.
 - Mobile app.
 - Changing terminal WS framing/compression behavior.
