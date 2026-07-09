@@ -1,7 +1,12 @@
 package service
 
 import (
+	"context"
+	"log"
+	"sync"
+
 	"loom/backend/internal/domain"
+	"loom/backend/internal/machineclient"
 	"loom/backend/internal/port"
 )
 
@@ -15,9 +20,46 @@ func NewWorkspaceService(s port.Store) *WorkspaceService {
 	return &WorkspaceService{store: s}
 }
 
-// List returns all workspaces with their full nested trees.
+// List returns all workspaces with their full nested trees. Worktrees are
+// runtime-owned (see docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md),
+// so for every project assigned to a machine, this replaces the store's
+// (always-empty, since the hub never holds real worktree rows) local result
+// with a live fetch from that machine, concurrently and best-effort — an
+// unreachable machine just leaves that project's worktrees empty, it does
+// not fail the whole request.
 func (svc *WorkspaceService) List() ([]domain.Workspace, error) {
-	return svc.store.Workspaces()
+	workspaces, err := svc.store.Workspaces()
+	if err != nil {
+		return nil, err
+	}
+
+	var wg sync.WaitGroup
+	for wi := range workspaces {
+		for pi := range workspaces[wi].Projects {
+			proj := &workspaces[wi].Projects[pi]
+			if proj.MachineID == "" {
+				continue
+			}
+			wg.Add(1)
+			go func(proj *domain.Project) {
+				defer wg.Done()
+				machine, err := svc.store.MachineByID(proj.MachineID)
+				if err != nil {
+					log.Printf("workspaces: project %s: machine %s: %v", proj.ID, proj.MachineID, err)
+					return
+				}
+				worktrees, err := machineclient.FetchWorktrees(context.Background(), machine, proj.ID)
+				if err != nil {
+					log.Printf("workspaces: project %s: %v", proj.ID, err)
+					return
+				}
+				proj.Worktrees = worktrees
+			}(proj)
+		}
+	}
+	wg.Wait()
+
+	return workspaces, nil
 }
 
 // Create creates a workspace.
