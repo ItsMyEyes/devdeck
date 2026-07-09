@@ -14,7 +14,7 @@ import (
 func (s *Store) worktreesOf(projectID string) ([]domain.Worktree, error) {
 	rows, err := s.db.Query(`
 		SELECT id, project_id, root, branch, base, ahead, behind, model, agent, state, task,
-		       tokens, elapsed, added, removed, files, lines, pending
+		       tokens, elapsed, added, removed, files, lines, pending, path
 		FROM worktrees WHERE project_id = ? ORDER BY rowid ASC`, projectID)
 	if err != nil {
 		return nil, err
@@ -31,10 +31,17 @@ func (s *Store) worktreesOf(projectID string) ([]domain.Worktree, error) {
 	return out, rows.Err()
 }
 
+// WorktreesByProjectID lists a project's worktrees. Used by the runtime's
+// list endpoint that the hub calls to federate live worktree data into
+// its workspace tree (see service/workspace.go).
+func (s *Store) WorktreesByProjectID(projectID string) ([]domain.Worktree, error) {
+	return s.worktreesOf(projectID)
+}
+
 func (s *Store) WorktreeByID(id string) (domain.Worktree, error) {
 	row := s.db.QueryRow(`
 		SELECT id, project_id, root, branch, base, ahead, behind, model, agent, state, task,
-		       tokens, elapsed, added, removed, files, lines, pending
+		       tokens, elapsed, added, removed, files, lines, pending, path
 		FROM worktrees WHERE id = ?`, id)
 	w, err := scanWorktree(row)
 	if err == sql.ErrNoRows {
@@ -53,10 +60,10 @@ func (s *Store) insertWorktree(w domain.Worktree, projectID string) (domain.Work
 	_, err = s.db.Exec(`
 		INSERT INTO worktrees
 			(id, project_id, root, branch, base, ahead, behind, model, agent, state, task,
-			 tokens, elapsed, added, removed, files, lines, pending)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 tokens, elapsed, added, removed, files, lines, pending, path)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, projectID, boolInt(w.Root), w.Branch, w.Base, w.Ahead, w.Behind, w.Model, w.Agent,
-		w.State, w.Task, w.Tokens, w.Elapsed, w.Added, w.Removed, w.Files, string(linesJSON), w.Pending)
+		w.State, w.Task, w.Tokens, w.Elapsed, w.Added, w.Removed, w.Files, string(linesJSON), w.Pending, w.Path)
 	if err != nil {
 		return domain.Worktree{}, err
 	}
@@ -66,23 +73,19 @@ func (s *Store) insertWorktree(w domain.Worktree, projectID string) (domain.Work
 // ── CRUD ───────────────────────────────────────────────────────────────────
 
 // CreateWorktree creates a worktree entry. mode must be "branch" or "root".
-func (s *Store) CreateWorktree(projectID, mode, branch, base, model, agent, task string) (domain.Worktree, error) {
-	p, err := s.ProjectByID(projectID)
-	if err != nil {
-		return domain.Worktree{}, err
-	}
+func (s *Store) CreateWorktree(projectID, mode, branch, base, model, agent, task, path string) (domain.Worktree, error) {
 	id := idGen("w-")
 	task = strings.TrimSpace(task)
 	w := domain.Worktree{
-		ID: id, Model: model, Agent: agent, State: "running", Task: task, Base: "main",
+		ID: id, Model: model, Agent: agent, State: "running", Task: task, Base: "main", Path: path,
 	}
 	if mode == "root" {
 		w.Root = true
 		w.Branch = ""
 		w.Base = "main"
 		w.Lines = []domain.TermLine{
-			{K: "cmd", T: "$ cd " + p.Path},
-			{K: "ok", T: "✓ terminal attached · " + p.Path + " (no worktree)"},
+			{K: "cmd", T: "$ cd " + path},
+			{K: "ok", T: "✓ terminal attached · " + path + " (no worktree)"},
 			{K: "sys", T: "✓ shell ready"},
 		}
 	} else {
@@ -97,7 +100,7 @@ func (s *Store) CreateWorktree(projectID, mode, branch, base, model, agent, task
 		w.Branch = b
 		w.Base = ba
 		w.Lines = []domain.TermLine{
-			{K: "cmd", T: "$ git worktree add -b " + b + " " + p.Path + "/.wt/" + id + " " + ba},
+			{K: "cmd", T: "$ git worktree add -b " + b + " " + path + "/.wt/" + id + " " + ba},
 			{K: "ok", T: "✓ worktree created on " + b},
 			{K: "sys", T: "● starting agent…"},
 			{K: "out", T: "reading task context…"},

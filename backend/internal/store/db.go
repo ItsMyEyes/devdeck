@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
 
 CREATE TABLE IF NOT EXISTS worktrees (
   id         TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
   root       INTEGER NOT NULL DEFAULT 0,
   branch     TEXT NOT NULL DEFAULT '',
   base       TEXT NOT NULL DEFAULT 'main',
@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS worktrees (
   removed    INTEGER NOT NULL DEFAULT 0,
   files      INTEGER NOT NULL DEFAULT 0,
   lines      TEXT NOT NULL DEFAULT '[]',
-  pending    TEXT
+  pending    TEXT,
+  path       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id);
 
@@ -237,6 +238,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateWorktreeIndependence(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := migrateInvoiceItemsColumns(db); err != nil {
 		db.Close()
 		return nil, err
@@ -317,4 +322,95 @@ func migrateProjectColumns(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// migrateWorktreeIndependence adds worktrees.path (backfilling it from the
+// owning project's path where one still exists locally) and rebuilds the
+// worktrees table without the project_id foreign key, so a runtime can hold
+// worktree rows whose project lives only on the hub. SQLite can't ALTER a
+// column's constraints in place, hence the rename-recreate-copy-drop dance.
+// Idempotent: skipped if the table's stored SQL no longer references
+// projects(id).
+func migrateWorktreeIndependence(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE worktrees ADD COLUMN path TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+
+	var createSQL string
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'worktrees'`).Scan(&createSQL)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(createSQL, "REFERENCES projects") {
+		return nil // already migrated
+	}
+
+	// Backfill path from the still-locally-joinable project, for any
+	// pre-existing worktree row that predates this migration.
+	if _, err := db.Exec(`
+		UPDATE worktrees SET path = (SELECT path FROM projects WHERE projects.id = worktrees.project_id)
+		WHERE path = '' AND EXISTS (SELECT 1 FROM projects WHERE projects.id = worktrees.project_id)
+	`); err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE worktrees RENAME TO worktrees_old_fk`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		CREATE TABLE worktrees (
+		  id         TEXT PRIMARY KEY,
+		  project_id TEXT NOT NULL,
+		  root       INTEGER NOT NULL DEFAULT 0,
+		  branch     TEXT NOT NULL DEFAULT '',
+		  base       TEXT NOT NULL DEFAULT 'main',
+		  ahead      INTEGER NOT NULL DEFAULT 0,
+		  behind     INTEGER NOT NULL DEFAULT 0,
+		  model      TEXT NOT NULL DEFAULT '',
+		  agent      TEXT NOT NULL DEFAULT '',
+		  state      TEXT NOT NULL DEFAULT 'running',
+		  task       TEXT NOT NULL DEFAULT '',
+		  tokens     INTEGER NOT NULL DEFAULT 0,
+		  elapsed    INTEGER NOT NULL DEFAULT 0,
+		  added      INTEGER NOT NULL DEFAULT 0,
+		  removed    INTEGER NOT NULL DEFAULT 0,
+		  files      INTEGER NOT NULL DEFAULT 0,
+		  lines      TEXT NOT NULL DEFAULT '[]',
+		  pending    TEXT,
+		  path       TEXT NOT NULL DEFAULT ''
+		)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO worktrees (id, project_id, root, branch, base, ahead, behind, model, agent,
+		                        state, task, tokens, elapsed, added, removed, files, lines, pending, path)
+		SELECT id, project_id, root, branch, base, ahead, behind, model, agent,
+		       state, task, tokens, elapsed, added, removed, files, lines, pending, path
+		FROM worktrees_old_fk
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE worktrees_old_fk`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id)`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`PRAGMA foreign_keys = ON`)
+	return err
 }

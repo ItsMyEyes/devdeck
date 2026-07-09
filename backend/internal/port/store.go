@@ -27,10 +27,11 @@ type Store interface {
 	ProjectByID(id string) (domain.Project, error)
 
 	// Worktrees
-	CreateWorktree(projectID, mode, branch, base, model, agent, task string) (domain.Worktree, error)
+	CreateWorktree(projectID, mode, branch, base, model, agent, task, path string) (domain.Worktree, error)
 	UpdateWorktree(id string, p WorktreePatch) (domain.Worktree, error)
 	DeleteWorktree(id string) error
 	WorktreeByID(id string) (domain.Worktree, error)
+	WorktreesByProjectID(projectID string) ([]domain.Worktree, error)
 
 	// Issues
 	CreateIssue(projectID, title, status, createdAt string) (domain.Issue, error)

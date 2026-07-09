@@ -26,6 +26,7 @@ type Worktree struct {
 	Lines     []TermLine `json:"lines"`
 	Pending   *string    `json:"pending"`
 	ProjectID string     `json:"-"` // internal use, not exposed to frontend
+	Path      string     `json:"-"`
 }
 
 // Project mirrors the frontend Project type.

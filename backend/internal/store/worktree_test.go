@@ -27,7 +27,7 @@ func TestCreateWorktreeLeavesEmptyTaskEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wt, err := s.CreateWorktree(proj.ID, "root", "", "", "claude-sonnet-5", "claude", "")
+	wt, err := s.CreateWorktree(proj.ID, "root", "", "", "claude-sonnet-5", "claude", "", proj.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestCreateWorktreeRootModeSeedsShellNotAgentLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wt, err := s.CreateWorktree(proj.ID, "root", "", "", "", "", "")
+	wt, err := s.CreateWorktree(proj.ID, "root", "", "", "", "", "", proj.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,5 +62,18 @@ func TestCreateWorktreeRootModeSeedsShellNotAgentLines(t *testing.T) {
 	}
 	if len(wt.Lines) != 3 {
 		t.Errorf("root-mode Lines = %d entries, want 3: %+v", len(wt.Lines), wt.Lines)
+	}
+}
+
+func TestWorktreeInsertWithUnknownProjectIDSucceeds(t *testing.T) {
+	s := newTestStore(t)
+	// No workspace/project created at all — this project_id matches nothing
+	// locally, simulating a runtime that has never heard of this project.
+	w, err := s.CreateWorktree("p-doesnotexist", "root", "", "main", "", "", "", "/tmp/some/repo")
+	if err != nil {
+		t.Fatalf("CreateWorktree with unknown project_id should succeed (no local FK): %v", err)
+	}
+	if w.Path != "/tmp/some/repo" {
+		t.Errorf("Path = %q, want /tmp/some/repo", w.Path)
 	}
 }

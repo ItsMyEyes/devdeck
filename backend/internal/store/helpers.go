@@ -44,7 +44,7 @@ func scanWorktree(sc scanner) (domain.Worktree, error) {
 	var pending sql.NullString
 	err := sc.Scan(&w.ID, &w.ProjectID, &w.Root, &w.Branch, &w.Base, &w.Ahead, &w.Behind, &w.Model, &w.Agent,
 		&w.State, &w.Task, &w.Tokens, &w.Elapsed, &w.Added, &w.Removed, &w.Files,
-		&linesJSON, &pending)
+		&linesJSON, &pending, &w.Path)
 	if err != nil {
 		return w, err
 	}
