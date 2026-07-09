@@ -21,11 +21,15 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
   const updateWorktree = useUpdateWorktree()
   const openEdit = useLoomStore((s) => s.openEdit)
   const askDelete = useLoomStore((s) => s.askDelete)
+  const showToast = useLoomStore((s) => s.showToast)
   const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
   const machine = useMachines().data?.find((m) => m.id === project?.machineId)
 
   function approve(ok: boolean) {
-    if (!machine) return
+    if (!machine) {
+      showToast("Could not resolve this worktree's machine")
+      return
+    }
     updateWorktree.mutate({
       machine,
       id: w.id,
@@ -35,7 +39,10 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
     })
   }
   function retry() {
-    if (!machine) return
+    if (!machine) {
+      showToast("Could not resolve this worktree's machine")
+      return
+    }
     updateWorktree.mutate({
       machine,
       id: w.id,
@@ -43,7 +50,10 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
     })
   }
   function pauseToggle() {
-    if (!machine) return
+    if (!machine) {
+      showToast("Could not resolve this worktree's machine")
+      return
+    }
     const active = w.state === 'running' || w.state === 'waiting'
     updateWorktree.mutate({
       machine,
