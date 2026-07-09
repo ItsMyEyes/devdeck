@@ -19,6 +19,7 @@ import (
 	"loom/backend/internal/config"
 	"loom/backend/internal/handler"
 	"loom/backend/internal/lsp"
+	"loom/backend/internal/machineclient"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
 	"loom/backend/internal/selfupdate"
@@ -50,6 +51,10 @@ func main() {
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
 	role := flag.String("role", envOr("LOOM_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI) or runtime (headless execution daemon, key auth only)")
 	apiKey := flag.String("key", envOr("LOOM_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
+	hubURL := flag.String("hub-url", envOr("LOOM_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
+	hubKey := flag.String("hub-key", envOr("LOOM_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
+	publicURL := flag.String("public-url", envOr("LOOM_PUBLIC_URL", ""), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>)")
+	machineName := flag.String("name", envOr("LOOM_MACHINE_NAME", ""), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname)")
 	flag.Parse()
 
 	if *showVersion {
@@ -85,7 +90,21 @@ func main() {
 	if *role == "runtime" && *apiKey == "" {
 		log.Fatalf("--role runtime requires --key (or LOOM_KEY)")
 	}
+	if *hubURL != "" && *hubKey == "" {
+		log.Fatalf("--hub-url requires --hub-key (or LOOM_HUB_KEY) to authenticate self-registration")
+	}
 	isRuntime := *role == "runtime"
+
+	if *publicURL == "" {
+		*publicURL = "http://" + *addr
+	}
+	if *machineName == "" {
+		if hostname, err := os.Hostname(); err == nil {
+			*machineName = hostname
+		} else {
+			*machineName = "runtime"
+		}
+	}
 
 	if applied, err := config.LoadDotEnv(*envFile); err != nil {
 		log.Fatalf("--env %s: %v", *envFile, err)
@@ -388,6 +407,16 @@ func main() {
 		if err := startTailscaleServe(listener.Addr()); err != nil {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
 		}
+	}
+	if isRuntime && *hubURL != "" {
+		go machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
+			HubURL:    *hubURL,
+			HubKey:    *hubKey,
+			PublicURL: *publicURL,
+			Name:      *machineName,
+			Key:       *apiKey,
+		}, 30*time.Second)
+		log.Printf("self-register: will register with hub %s as %q (%s)", *hubURL, *machineName, *publicURL)
 	}
 	if !isRuntime && *openUI && webui.Available() {
 		openBrowserSoon(uiURL)
