@@ -188,6 +188,7 @@ func main() {
 	eventH := handler.NewEventHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
+	machineH := handler.NewMachineHandler(st)
 
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
@@ -321,6 +322,13 @@ func main() {
 
 	if !isRuntime {
 		mux.HandleFunc("POST /api/seed", seedH.PostSeed)
+	}
+
+	if !isRuntime {
+		mux.HandleFunc("GET /api/machines", machineH.GetMachines)
+		mux.HandleFunc("POST /api/machines", machineH.PostMachine)
+		mux.HandleFunc("PATCH /api/machines/{id}", machineH.PatchMachine)
+		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
 	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
