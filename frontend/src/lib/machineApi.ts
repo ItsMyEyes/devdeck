@@ -16,6 +16,7 @@ export interface CreateWorktreeBody {
   model: string
   agent: string
   task?: string
+  path: string
 }
 
 export interface UpdateWorktreeBody {
@@ -175,8 +176,8 @@ export function gitPull(machine: Machine, worktreeId: string): Promise<void> {
 
 // ---- Project branches (the repo lives on this machine's disk) ----
 
-export function fetchProjectBranches(machine: Machine, projectId: string): Promise<string[]> {
-  return machineRequest<string[]>(machine, 'GET', `/projects/${projectId}/branches`)
+export function fetchProjectBranches(machine: Machine, projectId: string, path: string): Promise<string[]> {
+  return machineRequest<string[]>(machine, 'GET', `/projects/${projectId}/branches?path=${encodeURIComponent(path)}`)
 }
 
 // ---- Filesystem (browsing a path on this machine, e.g. for new-project setup) ----

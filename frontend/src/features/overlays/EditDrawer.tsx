@@ -59,7 +59,7 @@ export function EditDrawer() {
         : undefined
   const machines = useMachines().data
   const editMachine = machines?.find((m) => m.id === editProject?.machineId)
-  const branches = useProjectBranches(editMachine, editProject?.id).data ?? []
+  const branches = useProjectBranches(editMachine, editProject?.id, editProject?.path).data ?? []
   const branchOptions = branches.map((b) => ({ value: b, label: b }))
   const branchLocked = editWorktree?.state === 'running' || editWorktree?.state === 'waiting'
 

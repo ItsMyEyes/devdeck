@@ -769,11 +769,11 @@ export function useUpdateAgentSettingsFile() {
 
 // ---- Projects (branches live on the machine that owns the repo) ----
 
-export function useProjectBranches(machine: Machine | undefined, projectId: string | undefined) {
+export function useProjectBranches(machine: Machine | undefined, projectId: string | undefined, path: string | undefined) {
   return useQuery({
     queryKey: qk.projectBranches(machine?.id ?? '', projectId ?? ''),
-    queryFn: () => fetchProjectBranches(machine!, projectId!),
-    enabled: !!machine && !!projectId,
+    queryFn: () => fetchProjectBranches(machine!, projectId!, path!),
+    enabled: !!machine && !!projectId && !!path,
     staleTime: 30_000,
   })
 }

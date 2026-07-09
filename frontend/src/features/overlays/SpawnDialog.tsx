@@ -28,7 +28,7 @@ export function SpawnDialog() {
   const createWorktree = useCreateWorktree()
   const project = workspaces.flatMap((w) => w.projects).find((p) => p.id === spawn.projectId)
   const machine = useMachines().data?.find((m) => m.id === project?.machineId)
-  const branches = useProjectBranches(machine, project?.id).data ?? []
+  const branches = useProjectBranches(machine, project?.id, project?.path).data ?? []
   const baseOptions = branches.map((b) => ({ value: b, label: b }))
 
   // Dynamic agent/model data from backend
@@ -53,7 +53,7 @@ export function SpawnDialog() {
 
   function submit() {
     const projectId = spawn.projectId
-    if (!projectId || !machine) return
+    if (!projectId || !machine || !project) return
     createWorktree.mutate(
       {
         machine,
@@ -68,6 +68,7 @@ export function SpawnDialog() {
           model: branchMode ? spawn.model : '',
           agent: branchMode ? agentId : '',
           task: branchMode ? spawn.task : '',
+          path: project.path,
         },
       },
       {
