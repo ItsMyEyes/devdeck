@@ -9,7 +9,7 @@ import type {
   Worktree,
 } from './types'
 
-export type EditKind = 'worktree' | 'project' | 'workspace'
+export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine'
 export type TodoFilter = 'all' | 'active' | 'done'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
@@ -39,6 +39,13 @@ interface NewProjectState {
   cloneParent: string
   cloneFolder: string
 }
+interface MachineDialogState {
+  open: boolean
+  editingId: string | null
+  name: string
+  url: string
+  key: string
+}
 /**
  * Transient UI-only state.
  *
@@ -61,6 +68,7 @@ interface LoomState {
   confirmDelete: { kind: EditKind; id: string; name: string } | null
   todoDraft: { text: string; pri: Priority }
   todoFilter: TodoFilter
+  machineDialog: MachineDialogState
 
   // ---- actions ----
   showToast: (msg: string) => void
@@ -101,6 +109,12 @@ interface LoomState {
   // todos (draft only — mutations live in the module UI)
   setTodoDraft: (patch: Partial<{ text: string; pri: Priority }>) => void
   setTodoFilter: (f: TodoFilter) => void
+
+  // machine dialog
+  openAddMachine: () => void
+  openEditMachine: (id: string, name: string, url: string, key: string) => void
+  closeMachineDialog: () => void
+  setMachineDialog: (patch: Partial<Omit<MachineDialogState, 'open' | 'editingId'>>) => void
 }
 
 // ---------- pure lookup helpers (operate on a workspaces array) ----------
@@ -154,6 +168,7 @@ export const useLoomStore = create<LoomState>()(
       confirmDelete: null,
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
+      machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -231,6 +246,13 @@ export const useLoomStore = create<LoomState>()(
 
       setTodoDraft: (patch) => set((s) => void Object.assign(s.todoDraft, patch)),
       setTodoFilter: (f) => set((s) => void (s.todoFilter = f)),
+
+      openAddMachine: () =>
+        set((s) => void (s.machineDialog = { open: true, editingId: null, name: '', url: '', key: '' })),
+      openEditMachine: (id, name, url, key) =>
+        set((s) => void (s.machineDialog = { open: true, editingId: id, name, url, key })),
+      closeMachineDialog: () => set((s) => void (s.machineDialog.open = false)),
+      setMachineDialog: (patch) => set((s) => void Object.assign(s.machineDialog, patch)),
     })),
     {
       name: 'loom-ui-v2',

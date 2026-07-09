@@ -23,6 +23,7 @@ import {
   createInvoice,
   createIssue,
   createNews,
+  createMachine,
   createProject,
   createRecurringTemplate,
   createTodo,
@@ -34,6 +35,7 @@ import {
   deleteCompany,
   deleteInvoice,
   deleteIssue,
+  deleteMachine,
   deleteNews,
   deleteProject,
   deleteRecurringTemplate,
@@ -54,6 +56,8 @@ import {
   fetchGitLog,
   fetchGitStatus,
   fetchIssueEvents,
+  fetchMachineHealth,
+  fetchMachines,
   fetchProjectBranches,
   fetchSettings,
   fetchWorktreeFile,
@@ -77,6 +81,7 @@ import {
   updateCompany,
   updateInvoice,
   updateIssue,
+  updateMachine,
   updateNews,
   updateProject,
   updateRecurringTemplate,
@@ -97,6 +102,7 @@ import type {
   CreateFsFolderBody,
   CreateInvoiceBody,
   CreateIssueBody,
+  CreateMachineBody,
   CreateNewsBody,
   CreateProjectBody,
   CreateRecurringTemplateBody,
@@ -109,6 +115,7 @@ import type {
   UpdateCompanyBody,
   UpdateInvoiceBody,
   UpdateIssueBody,
+  UpdateMachineBody,
   UpdateNewsBody,
   UpdateProjectBody,
   UpdateRecurringTemplateBody,
@@ -135,6 +142,46 @@ export function useWorkspace(wsId: string | null | undefined) {
 
 export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: fetchSettings })
+}
+
+// ---- Machines ----
+
+export function useMachines() {
+  return useQuery({ queryKey: qk.machines, queryFn: fetchMachines, staleTime: 10_000 })
+}
+
+export function useCreateMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateMachineBody) => createMachine(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.machines }),
+  })
+}
+
+export function useUpdateMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateMachineBody }) => updateMachine(id, patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.machines }),
+  })
+}
+
+export function useDeleteMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteMachine(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.machines }),
+  })
+}
+
+export function useMachineHealth(id: string | undefined) {
+  return useQuery({
+    queryKey: qk.machineHealth(id ?? ''),
+    queryFn: () => fetchMachineHealth(id!),
+    enabled: !!id,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  })
 }
 
 // ---- Mutations ----

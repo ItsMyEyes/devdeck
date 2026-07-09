@@ -3,7 +3,13 @@ import { TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useScope } from '@/features/useScope'
-import { useDeleteProject, useDeleteWorkspace, useDeleteWorktree, useWorkspaces } from '@/features/data/queries'
+import {
+  useDeleteMachine,
+  useDeleteProject,
+  useDeleteWorkspace,
+  useDeleteWorktree,
+  useWorkspaces,
+} from '@/features/data/queries'
 import { projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
 
 function bodyFor(kind: string, name: string) {
@@ -11,6 +17,8 @@ function bodyFor(kind: string, name: string) {
     return `This removes the worktree, kills its terminal session and deletes the local working copy for branch "${name}". The branch itself is kept.`
   if (kind === 'workspace')
     return `This removes workspace "${name}" and every project inside it from loom. Your files on disk are not touched.`
+  if (kind === 'machine')
+    return `This removes machine "${name}" from the registry. Projects still pointing at it will show as unreachable until reassigned.`
   return `This removes project "${name}" and all of its worktrees from loom. Your files on disk are not touched.`
 }
 
@@ -24,6 +32,7 @@ export function ConfirmDeleteDialog() {
   const deleteWorktree = useDeleteWorktree()
   const deleteProject = useDeleteProject()
   const deleteWorkspace = useDeleteWorkspace()
+  const deleteMachine = useDeleteMachine()
 
   const open = !!confirm
 
@@ -56,6 +65,13 @@ export function ConfirmDeleteDialog() {
           toast()
           // The workspace index route redirects to the next project (or AgentsEmpty).
           if (affectsCurrent && ws) navigate({ to: '/w/$wsId', params: { wsId: ws.id } })
+        },
+      })
+    } else if (kind === 'machine') {
+      deleteMachine.mutate(id, {
+        onSuccess: () => {
+          cancelConfirm()
+          toast()
         },
       })
     } else {

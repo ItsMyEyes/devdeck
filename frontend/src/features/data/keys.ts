@@ -28,4 +28,6 @@ export const qk = {
   issueEvents: (issueId: string) => ['issues', issueId, 'events'] as const,
   me: ['me'] as const,
   authConfig: ['authConfig'] as const,
+  machines: ['machines'] as const,
+  machineHealth: (id: string) => ['machines', id, 'health'] as const,
 }

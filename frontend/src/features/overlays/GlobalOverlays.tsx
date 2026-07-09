@@ -4,6 +4,7 @@ import { NewWorkspaceDialog } from './NewWorkspaceDialog'
 import { FolderBrowser } from './FolderBrowser'
 import { EditDrawer } from './EditDrawer'
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog'
+import { MachineDialog } from '@/features/machines/MachineDialog'
 
 /** All portal-rendered overlays, driven by the store's UI state. */
 export function GlobalOverlays() {
@@ -15,6 +16,7 @@ export function GlobalOverlays() {
       <FolderBrowser />
       <EditDrawer />
       <ConfirmDeleteDialog />
+      <MachineDialog />
     </>
   )
 }

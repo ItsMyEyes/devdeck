@@ -19,6 +19,7 @@ import type {
   IssueComment,
   IssueEvent,
   MCPServer,
+  Machine,
   NewsItem,
   Priority,
   Project,
@@ -979,4 +980,43 @@ export async function exportMarkdown(
   }
 
   return res.blob()
+}
+
+// ---- Machines (hub registry of runtime machines) ----
+
+export interface CreateMachineBody {
+  name: string
+  url: string
+  key: string
+}
+
+export interface UpdateMachineBody {
+  name?: string
+  url?: string
+  key?: string
+}
+
+export interface MachineHealth {
+  status: 'online' | 'offline'
+  latencyMs?: number
+}
+
+export function fetchMachines(): Promise<Machine[]> {
+  return request<Machine[]>('GET', '/machines')
+}
+
+export function createMachine(body: CreateMachineBody): Promise<Machine> {
+  return request<Machine>('POST', '/machines', body)
+}
+
+export function updateMachine(id: string, patch: UpdateMachineBody): Promise<Machine> {
+  return request<Machine>('PATCH', `/machines/${id}`, patch)
+}
+
+export function deleteMachine(id: string): Promise<void> {
+  return request<void>('DELETE', `/machines/${id}`)
+}
+
+export function fetchMachineHealth(id: string): Promise<MachineHealth> {
+  return request<MachineHealth>('GET', `/machines/${id}/health`)
 }

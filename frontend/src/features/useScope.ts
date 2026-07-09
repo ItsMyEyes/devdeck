@@ -23,5 +23,6 @@ export function useScope(): Scope {
   else if (pathname.includes('/invoices')) view = 'invoices'
   else if (pathname.includes('/browser')) view = 'browser'
   else if (pathname.includes('/tools')) view = 'tools'
+  else if (pathname.includes('/machines')) view = 'machines'
   return { wsId: params.wsId, projectId: params.projectId, wtId: params.wtId, view }
 }
