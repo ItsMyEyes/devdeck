@@ -50,7 +50,7 @@ func TestWorktreeFileServiceCRUDAndRegexSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "")
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", "~/repo")
 	if err != nil {
 		t.Fatal(err)
 	}

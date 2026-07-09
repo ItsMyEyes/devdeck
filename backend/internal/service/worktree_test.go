@@ -57,7 +57,7 @@ func mustCreateWorktree(t *testing.T, st port.Store) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := st.CreateWorktree(proj.ID, "root", "", "", "claude-sonnet-5", "claude", "")
+	wt, err := st.CreateWorktree(proj.ID, "root", "", "", "claude-sonnet-5", "claude", "", "/tmp/core")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestCreateDefaultsModelOnlyForBranchMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := svc.Create(proj.ID, "root", "", "", "", "", "")
+	root, err := svc.Create(proj.ID, repoPath, "root", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("Create (root): %v", err)
 	}
@@ -84,7 +84,7 @@ func TestCreateDefaultsModelOnlyForBranchMode(t *testing.T) {
 		t.Errorf("root mode Model = %q, want empty (no agent should be assumed)", root.Model)
 	}
 
-	branch, err := svc.Create(proj.ID, "branch", "", "", "", "", "")
+	branch, err := svc.Create(proj.ID, repoPath, "branch", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("Create (branch): %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCreateBranchModeMakesRealWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wt, err := svc.Create(proj.ID, "branch", "feat/real-thing", "main", "", "", "")
+	wt, err := svc.Create(proj.ID, repoPath, "branch", "feat/real-thing", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestCreateRejectsUnknownBaseBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = svc.Create(proj.ID, "branch", "feat/x", "does-not-exist", "", "", "")
+	_, err = svc.Create(proj.ID, repoPath, "branch", "feat/x", "does-not-exist", "", "", "")
 	if err == nil {
 		t.Fatal("expected error for unknown base branch, got nil")
 	}
@@ -144,11 +144,11 @@ func TestCreateRejectsBranchAlreadyUsedByAnotherWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Create(proj.ID, "branch", "feat/taken", "main", "", "", ""); err != nil {
+	if _, err := svc.Create(proj.ID, repoPath, "branch", "feat/taken", "main", "", "", ""); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	_, err = svc.Create(proj.ID, "branch", "feat/taken", "main", "", "", "")
+	_, err = svc.Create(proj.ID, repoPath, "branch", "feat/taken", "main", "", "", "")
 	if err == nil {
 		t.Fatal("expected conflict error for a branch already used by another worktree, got nil")
 	}
@@ -174,7 +174,7 @@ func TestCreateRollsBackRowWhenGitAddFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Create(proj.ID, "branch", "feat/exists", "main", "", "", "")
+	_, err = svc.Create(proj.ID, repoPath, "branch", "feat/exists", "main", "", "", "")
 	if err == nil {
 		t.Fatal("expected git worktree add to fail for a branch name that already exists, got nil")
 	}
@@ -198,7 +198,7 @@ func TestDeleteRemovesRealGitWorktreeDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := svc.Create(proj.ID, "branch", "feat/to-delete", "main", "", "", "")
+	wt, err := svc.Create(proj.ID, repoPath, "branch", "feat/to-delete", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestUpdateChecksOutExistingBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := svc.Create(proj.ID, "branch", "feat/start", "main", "", "", "")
+	wt, err := svc.Create(proj.ID, repoPath, "branch", "feat/start", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestUpdateRejectsBranchChangeWhileRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := svc.Create(proj.ID, "branch", "feat/start", "main", "", "", "")
+	wt, err := svc.Create(proj.ID, repoPath, "branch", "feat/start", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -304,11 +304,11 @@ func TestUpdateRejectsConflictingBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := svc.Create(proj.ID, "branch", "feat/a", "main", "", "", "")
+	a, err := svc.Create(proj.ID, repoPath, "branch", "feat/a", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create a: %v", err)
 	}
-	b, err := svc.Create(proj.ID, "branch", "feat/b", "main", "", "", "")
+	b, err := svc.Create(proj.ID, repoPath, "branch", "feat/b", "main", "", "", "")
 	if err != nil {
 		t.Fatalf("Create b: %v", err)
 	}

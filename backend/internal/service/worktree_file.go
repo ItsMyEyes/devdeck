@@ -288,11 +288,7 @@ func (svc *WorktreeFileService) worktreeRoot(worktreeID string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	project, err := svc.store.ProjectByID(worktree.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	projectRoot := gitpkg.ExpandHome(project.Path)
+	projectRoot := gitpkg.ExpandHome(worktree.Path)
 	if worktree.Root {
 		return projectRoot, nil
 	}

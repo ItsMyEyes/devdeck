@@ -36,11 +36,12 @@ func NewWorktreeService(s port.Store, kill func(sessionID string) error) *Worktr
 // worktree in the project, creates the DB row, then runs `git worktree add`.
 // If the git command fails, the DB row is rolled back so the database never
 // points at a worktree that doesn't exist on disk.
-func (svc *WorktreeService) Create(projectID, mode, branch, base, model, agent, task string) (domain.Worktree, error) {
+func (svc *WorktreeService) Create(projectID, path, mode, branch, base, model, agent, task string) (domain.Worktree, error) {
 	branch = strings.TrimSpace(branch)
 	base = strings.TrimSpace(base)
 	model = strings.TrimSpace(model)
 	agent = strings.TrimSpace(agent)
+	path = gitpkg.ExpandHome(strings.TrimSpace(path))
 	if mode == "branch" {
 		if model == "" {
 			model = "claude-sonnet-5"
@@ -50,17 +51,13 @@ func (svc *WorktreeService) Create(projectID, mode, branch, base, model, agent, 
 		}
 	}
 	if mode != "branch" {
-		return svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task)
+		return svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task, path)
 	}
 
-	proj, err := svc.store.ProjectByID(projectID)
-	if err != nil {
-		return domain.Worktree{}, err
-	}
 	if base == "" {
 		base = "main"
 	}
-	branches, err := gitpkg.ListBranches(proj.Path)
+	branches, err := gitpkg.ListBranches(path)
 	if err != nil {
 		return domain.Worktree{}, fmt.Errorf("list branches: %w", err)
 	}
@@ -68,20 +65,24 @@ func (svc *WorktreeService) Create(projectID, mode, branch, base, model, agent, 
 		return domain.Worktree{}, fmt.Errorf("base branch %q not found in repository: %w", base, ErrValidation)
 	}
 	if branch != "" {
-		for _, w := range proj.Worktrees {
+		siblings, err := svc.store.WorktreesByProjectID(projectID)
+		if err != nil {
+			return domain.Worktree{}, err
+		}
+		for _, w := range siblings {
 			if w.Branch == branch {
 				return domain.Worktree{}, fmt.Errorf("branch %q is already checked out by another worktree: %w", branch, ErrConflict)
 			}
 		}
 	}
 
-	wt, err := svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task)
+	wt, err := svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task, path)
 	if err != nil {
 		return domain.Worktree{}, err
 	}
 
-	worktreePath := filepath.Join(proj.Path, ".wt", wt.ID)
-	if err := gitpkg.AddWorktree(proj.Path, worktreePath, wt.Branch, base); err != nil {
+	worktreePath := filepath.Join(path, ".wt", wt.ID)
+	if err := gitpkg.AddWorktree(path, worktreePath, wt.Branch, base); err != nil {
 		_ = svc.store.DeleteWorktree(wt.ID)
 		return domain.Worktree{}, fmt.Errorf("git worktree add: %w", err)
 	}
@@ -113,18 +114,18 @@ func (svc *WorktreeService) Update(id string, p port.WorktreePatch) (domain.Work
 			if wt.State == "running" || wt.State == "waiting" {
 				return domain.Worktree{}, fmt.Errorf("pause the worktree before changing its branch: %w", ErrConflict)
 			}
-			proj, err := svc.store.ProjectByID(wt.ProjectID)
+			siblings, err := svc.store.WorktreesByProjectID(wt.ProjectID)
 			if err != nil {
 				return domain.Worktree{}, err
 			}
-			for _, sibling := range proj.Worktrees {
+			for _, sibling := range siblings {
 				if sibling.ID != id && sibling.Branch == newBranch {
 					return domain.Worktree{}, fmt.Errorf("branch %q is already checked out by another worktree: %w", newBranch, ErrConflict)
 				}
 			}
-			worktreePath := proj.Path
+			worktreePath := wt.Path
 			if !wt.Root {
-				worktreePath = filepath.Join(proj.Path, ".wt", id)
+				worktreePath = filepath.Join(wt.Path, ".wt", id)
 			}
 			if err := gitpkg.Checkout(worktreePath, newBranch); err != nil {
 				return domain.Worktree{}, fmt.Errorf("git checkout: %w", err)
@@ -148,12 +149,8 @@ func (svc *WorktreeService) Delete(id string) error {
 		}
 	}
 	if !wt.Root {
-		proj, err := svc.store.ProjectByID(wt.ProjectID)
-		if err != nil {
-			return err
-		}
-		worktreePath := filepath.Join(proj.Path, ".wt", id)
-		if err := gitpkg.RemoveWorktree(proj.Path, worktreePath); err != nil {
+		worktreePath := filepath.Join(wt.Path, ".wt", id)
+		if err := gitpkg.RemoveWorktree(wt.Path, worktreePath); err != nil {
 			return fmt.Errorf("git worktree remove: %w", err)
 		}
 	}
