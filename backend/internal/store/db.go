@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS projects (
   name         TEXT NOT NULL,
   repo         TEXT NOT NULL DEFAULT '',
   path         TEXT NOT NULL DEFAULT '',
-  expanded     INTEGER NOT NULL DEFAULT 1
+  expanded     INTEGER NOT NULL DEFAULT 1,
+  machine_id   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
 
@@ -240,6 +241,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateProjectColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -295,6 +300,18 @@ func migrateInvoiceItemsColumns(db *sql.DB) error {
 // instead of launching the chosen agent CLI.
 func migrateWorktreeColumns(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE worktrees ADD COLUMN agent TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateProjectColumns adds machine_id (introduced with the hub/runtime
+// split) to pre-existing databases. Existing projects default to '' =
+// local/unassigned.
+func migrateProjectColumns(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}

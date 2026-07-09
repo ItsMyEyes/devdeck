@@ -55,6 +55,8 @@ export interface Project {
   repo: string
   path: string
   expanded: boolean
+  /** Registered runtime machine this project runs on; empty = local/unassigned. */
+  machineId: string
   worktrees: Worktree[]
   issues: Issue[]
 }

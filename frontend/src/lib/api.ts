@@ -111,6 +111,7 @@ export interface CreateProjectBody {
   name?: string
   path?: string
   repo?: string
+  machineId?: string
 }
 
 export interface CloneProjectBody {
@@ -123,6 +124,7 @@ export interface UpdateProjectBody {
   name?: string
   path?: string
   repo?: string
+  machineId?: string
   expanded?: boolean
 }
 

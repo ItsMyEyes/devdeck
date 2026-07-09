@@ -22,7 +22,7 @@ func NewProjectService(s port.Store) *ProjectService {
 }
 
 // Create creates a project under a workspace.
-func (svc *ProjectService) Create(wsID, name, path, repo string) (domain.Project, error) {
+func (svc *ProjectService) Create(wsID, name, path, repo, machineID string) (domain.Project, error) {
 	name = strings.TrimSpace(name)
 	path = strings.TrimSpace(path)
 	if name == "" {
@@ -34,7 +34,7 @@ func (svc *ProjectService) Create(wsID, name, path, repo string) (domain.Project
 	if path == "" {
 		path = "~/dev/" + name
 	}
-	return svc.store.CreateProject(wsID, name, path, repo)
+	return svc.store.CreateProject(wsID, name, path, repo, machineID)
 }
 
 // Clone clones a git repository into path, then creates a project for the
@@ -97,7 +97,7 @@ func (svc *ProjectService) Clone(wsID, name, path, repo string) (domain.Project,
 		_ = os.RemoveAll(resolved)
 		return domain.Project{}, fmt.Errorf("%s: %w", err.Error(), ErrValidation)
 	}
-	project, err := svc.store.CreateProject(wsID, name, path, repo)
+	project, err := svc.store.CreateProject(wsID, name, path, repo, "")
 	if err != nil {
 		_ = os.RemoveAll(resolved)
 		return domain.Project{}, err
@@ -106,8 +106,8 @@ func (svc *ProjectService) Clone(wsID, name, path, repo string) (domain.Project,
 }
 
 // Update patches a project's fields.
-func (svc *ProjectService) Update(id string, name, path, repo *string, expanded *bool) (domain.Project, error) {
-	return svc.store.UpdateProject(id, name, path, repo, expanded)
+func (svc *ProjectService) Update(id string, name, path, repo, machineID *string, expanded *bool) (domain.Project, error) {
+	return svc.store.UpdateProject(id, name, path, repo, machineID, expanded)
 }
 
 // Delete deletes a project and its worktrees.

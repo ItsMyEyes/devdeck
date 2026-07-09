@@ -53,7 +53,7 @@ func mustCreateWorktree(t *testing.T, st port.Store) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCreateDefaultsModelOnlyForBranchMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestCreateBranchModeMakesRealWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCreateRejectsUnknownBaseBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestCreateRejectsBranchAlreadyUsedByAnotherWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestCreateRollsBackRowWhenGitAddFails(t *testing.T) {
 	// our conflict pre-check passes, but `git worktree add -b` itself must
 	// fail because the branch name already exists.
 	runGit(t, repoPath, "branch", "feat/exists")
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestDeleteRemovesRealGitWorktreeDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestUpdateChecksOutExistingBranch(t *testing.T) {
 	}
 	repoPath := mustInitGitRepo(t)
 	runGit(t, repoPath, "branch", "feat/other")
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestUpdateRejectsBranchChangeWhileRunning(t *testing.T) {
 	}
 	repoPath := mustInitGitRepo(t)
 	runGit(t, repoPath, "branch", "feat/other")
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestUpdateRejectsConflictingBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoPath := mustInitGitRepo(t)
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}

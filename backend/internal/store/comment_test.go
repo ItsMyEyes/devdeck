@@ -9,7 +9,7 @@ import (
 func TestCreateIssueCommentTopLevelAndReply(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 
 	root, err := s.CreateIssueComment(iss.ID, nil, "You", "Looking into this now.", "2026-07-02T10:05:00Z")
@@ -43,7 +43,7 @@ func TestCreateIssueCommentTopLevelAndReply(t *testing.T) {
 func TestCreateIssueCommentRejectsUnknownParent(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 
 	bogus := "cm-doesnotexist"
@@ -55,7 +55,7 @@ func TestCreateIssueCommentRejectsUnknownParent(t *testing.T) {
 func TestUpdateAndDeleteIssueComment(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 	c, _ := s.CreateIssueComment(iss.ID, nil, "You", "first draft", "2026-07-02T10:05:00Z")
 
@@ -85,7 +85,7 @@ func TestUpdateAndDeleteIssueComment(t *testing.T) {
 func TestDeleteRootCommentCascadesToReplies(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 	root, _ := s.CreateIssueComment(iss.ID, nil, "You", "root", "2026-07-02T10:05:00Z")
 	if _, err := s.CreateIssueComment(iss.ID, &root.ID, "You", "reply", "2026-07-02T10:06:00Z"); err != nil {
@@ -107,7 +107,7 @@ func TestDeleteRootCommentCascadesToReplies(t *testing.T) {
 func TestUpdateIssueRecordsTimelineEvents(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 
 	events, err := s.ListIssueEvents(iss.ID)

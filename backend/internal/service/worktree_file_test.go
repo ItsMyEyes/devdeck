@@ -46,7 +46,7 @@ func TestWorktreeFileServiceCRUDAndRegexSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := st.CreateProject(workspace.ID, "Project", "~/repo", "")
+	project, err := st.CreateProject(workspace.ID, "Project", "~/repo", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

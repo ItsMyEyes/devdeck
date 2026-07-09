@@ -22,7 +22,7 @@ func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := st.CreateProject(ws.ID, "core", "~/core", "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", "~/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestResolveCommandReturnsAgentForBranchModeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestResolveCommandUsesStoredAgentNotModelPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}

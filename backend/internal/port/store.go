@@ -21,8 +21,8 @@ type Store interface {
 	DeleteWorkspace(id string) error
 
 	// Projects
-	CreateProject(wsID, name, path, repo string) (domain.Project, error)
-	UpdateProject(id string, name, path, repo *string, expanded *bool) (domain.Project, error)
+	CreateProject(wsID, name, path, repo, machineID string) (domain.Project, error)
+	UpdateProject(id string, name, path, repo, machineID *string, expanded *bool) (domain.Project, error)
 	DeleteProject(id string) error
 	ProjectByID(id string) (domain.Project, error)
 

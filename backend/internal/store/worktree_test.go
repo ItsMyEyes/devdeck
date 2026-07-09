@@ -22,7 +22,7 @@ func TestCreateWorktreeLeavesEmptyTaskEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestCreateWorktreeRootModeSeedsShellNotAgentLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}

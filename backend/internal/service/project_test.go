@@ -24,7 +24,7 @@ func TestProjectListBranchesReturnsRealBranches(t *testing.T) {
 	repoPath := mustInitGitRepo(t)
 	runGit(t, repoPath, "branch", "feat/x")
 
-	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core")
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}

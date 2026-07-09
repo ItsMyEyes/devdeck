@@ -35,6 +35,9 @@ type Project struct {
 	Repo      string     `json:"repo"`
 	Path      string     `json:"path"`
 	Expanded  bool       `json:"expanded"`
+	// MachineID links the project to a registered runtime machine (hub
+	// registry). Empty string = local/unassigned; existing rows default to it.
+	MachineID string     `json:"machineId"`
 	Worktrees []Worktree `json:"worktrees"`
 	Issues    []Issue    `json:"issues"`
 }

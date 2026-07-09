@@ -7,7 +7,7 @@ import (
 // ── Child queries ──────────────────────────────────────────────────────────
 
 func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
-	rows, err := s.db.Query(`SELECT id, name, repo, path, expanded FROM projects WHERE workspace_id = ? ORDER BY rowid ASC`, wsID)
+	rows, err := s.db.Query(`SELECT id, name, repo, path, expanded, machine_id FROM projects WHERE workspace_id = ? ORDER BY rowid ASC`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -15,7 +15,7 @@ func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
 	out := []domain.Project{}
 	for rows.Next() {
 		var p domain.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -40,8 +40,8 @@ func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
 
 func (s *Store) ProjectByID(id string) (domain.Project, error) {
 	var p domain.Project
-	err := s.db.QueryRow(`SELECT id, name, repo, path, expanded FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded)
+	err := s.db.QueryRow(`SELECT id, name, repo, path, expanded, machine_id FROM projects WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID)
 	if err != nil {
 		return domain.Project{}, mapNotFound(err)
 	}
@@ -66,7 +66,7 @@ func (s *Store) projectWorkspaceID(projectID string) (string, error) {
 // ── CRUD ───────────────────────────────────────────────────────────────────
 
 // CreateProject creates a project under a workspace.
-func (s *Store) CreateProject(wsID, name, path, repo string) (domain.Project, error) {
+func (s *Store) CreateProject(wsID, name, path, repo, machineID string) (domain.Project, error) {
 	ok, err := s.workspaceExists(wsID)
 	if err != nil {
 		return domain.Project{}, err
@@ -75,8 +75,8 @@ func (s *Store) CreateProject(wsID, name, path, repo string) (domain.Project, er
 		return domain.Project{}, ErrNotFound
 	}
 	id := idGen("p-")
-	_, err = s.db.Exec(`INSERT INTO projects (id, workspace_id, name, repo, path, expanded) VALUES (?, ?, ?, ?, ?, 1)`,
-		id, wsID, name, repo, path)
+	_, err = s.db.Exec(`INSERT INTO projects (id, workspace_id, name, repo, path, expanded, machine_id) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+		id, wsID, name, repo, path, machineID)
 	if err != nil {
 		return domain.Project{}, err
 	}
@@ -84,7 +84,7 @@ func (s *Store) CreateProject(wsID, name, path, repo string) (domain.Project, er
 }
 
 // UpdateProject patches a project's fields.
-func (s *Store) UpdateProject(id string, name, path, repo *string, expanded *bool) (domain.Project, error) {
+func (s *Store) UpdateProject(id string, name, path, repo, machineID *string, expanded *bool) (domain.Project, error) {
 	if _, err := s.ProjectByID(id); err != nil {
 		return domain.Project{}, err
 	}
@@ -100,6 +100,11 @@ func (s *Store) UpdateProject(id string, name, path, repo *string, expanded *boo
 	}
 	if repo != nil {
 		if _, err := s.db.Exec(`UPDATE projects SET repo = ? WHERE id = ?`, *repo, id); err != nil {
+			return domain.Project{}, err
+		}
+	}
+	if machineID != nil {
+		if _, err := s.db.Exec(`UPDATE projects SET machine_id = ? WHERE id = ?`, *machineID, id); err != nil {
 			return domain.Project{}, err
 		}
 	}

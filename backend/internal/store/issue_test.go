@@ -12,7 +12,7 @@ func TestCreateIssueDefaultsStatusAndPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, err := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestCreateIssueDefaultsStatusAndPosition(t *testing.T) {
 func TestUpdateIssueMovesColumnAndPosition(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, err := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestUpdateIssueMovesColumnAndPosition(t *testing.T) {
 func TestUpdateIssueAssigneeNullableClear(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 
 	name := "kiyora"
@@ -116,7 +116,7 @@ func TestUpdateIssueAssigneeNullableClear(t *testing.T) {
 func TestDeleteIssueRemovesIt(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("Acme")
-	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core")
+	proj, _ := s.CreateProject(ws.ID, "core", "/tmp/core", "acme/core", "")
 	iss, _ := s.CreateIssue(proj.ID, "Fix login bug", "", "2026-07-02T10:00:00Z")
 
 	if err := s.DeleteIssue(iss.ID); err != nil {

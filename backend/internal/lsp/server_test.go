@@ -95,7 +95,7 @@ func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := st.CreateProject(workspace.ID, "project", projectPath, "")
+	project, err := st.CreateProject(workspace.ID, "project", projectPath, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

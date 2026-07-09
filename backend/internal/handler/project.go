@@ -19,9 +19,10 @@ func NewProjectHandler(svc *service.ProjectService) *ProjectHandler {
 // PostProject creates a project under a workspace.
 func (h *ProjectHandler) PostProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name *string `json:"name"`
-		Path *string `json:"path"`
-		Repo *string `json:"repo"`
+		Name      *string `json:"name"`
+		Path      *string `json:"path"`
+		Repo      *string `json:"repo"`
+		MachineID *string `json:"machineId"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
@@ -30,7 +31,8 @@ func (h *ProjectHandler) PostProject(w http.ResponseWriter, r *http.Request) {
 	name := str(body.Name)
 	path := str(body.Path)
 	repo := str(body.Repo)
-	p, err := h.svc.Create(r.PathValue("wsId"), name, path, repo)
+	machineID := str(body.MachineID)
+	p, err := h.svc.Create(r.PathValue("wsId"), name, path, repo, machineID)
 	if handleStoreErr(w, err) {
 		return
 	}
@@ -58,16 +60,17 @@ func (h *ProjectHandler) PostCloneProject(w http.ResponseWriter, r *http.Request
 // PatchProject updates a project's fields.
 func (h *ProjectHandler) PatchProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string `json:"name"`
-		Path     *string `json:"path"`
-		Repo     *string `json:"repo"`
-		Expanded *bool   `json:"expanded"`
+		Name      *string `json:"name"`
+		Path      *string `json:"path"`
+		Repo      *string `json:"repo"`
+		MachineID *string `json:"machineId"`
+		Expanded  *bool   `json:"expanded"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	p, err := h.svc.Update(r.PathValue("id"), body.Name, body.Path, body.Repo, body.Expanded)
+	p, err := h.svc.Update(r.PathValue("id"), body.Name, body.Path, body.Repo, body.MachineID, body.Expanded)
 	if handleStoreErr(w, err) {
 		return
 	}
