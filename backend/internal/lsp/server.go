@@ -152,11 +152,7 @@ func (s *Server) worktreeRoot(worktreeID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("worktree %q was not found", worktreeID)
 	}
-	project, err := s.store.ProjectByID(worktree.ProjectID)
-	if err != nil {
-		return "", fmt.Errorf("project for worktree %q was not found", worktreeID)
-	}
-	return resolveWorktreeRoot(project.Path, worktreeID, worktree.Root, worktree.Branch)
+	return resolveWorktreeRoot(worktree.Path, worktreeID, worktree.Root, worktree.Branch)
 }
 
 func resolveWorktreeRoot(projectPath, worktreeID string, root bool, branch string) (string, error) {

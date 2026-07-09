@@ -131,15 +131,10 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 		return "", nil, ""
 	}
 
-	proj, err := s.store.ProjectByID(wt.ProjectID)
-	if err != nil {
-		return "", nil, ""
-	}
-
 	// workDir is computed regardless of whether an agent resolves below, so a
 	// root-mode session with no agent (plain shell) still opens in the
 	// project root rather than falling back to the user's home directory.
-	workDir = gitpkg.ExpandHome(proj.Path)
+	workDir = gitpkg.ExpandHome(wt.Path)
 	// For branch mode, use the worktree directory
 	if !wt.Root && wt.Branch != "" {
 		workDir = filepath.Join(workDir, ".wt", session)
