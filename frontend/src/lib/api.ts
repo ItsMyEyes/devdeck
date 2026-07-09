@@ -130,6 +130,7 @@ export interface CloneProjectBody {
   name?: string
   path: string
   repo: string
+  machineId?: string
 }
 
 export interface UpdateProjectBody {

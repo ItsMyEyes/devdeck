@@ -5,7 +5,7 @@ import { ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { useCreateFsFolder, useFsList } from '@/features/data/queries'
+import { useCreateFsFolder, useFsList, useMachines } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function FolderBrowser() {
@@ -20,11 +20,10 @@ export function FolderBrowser() {
   const useFolder = useLoomStore((s) => s.useFolder)
 
   const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
-  // TODO(sub-project #2, Task 5): resolve the machine being browsed from
-  // `browse.machineId` once the machine picker lands (NewProjectDialog/
-  // EditDrawer) — for now fs browsing has no machine selected.
-  const { data, isLoading, error, refetch } = useFsList(undefined, pathLabel)
-  const createFolder = useCreateFsFolder(undefined)
+  const machines = useMachines().data
+  const machine = machines?.find((m) => m.id === browse.machineId)
+  const { data, isLoading, error, refetch } = useFsList(machine, pathLabel)
+  const createFolder = useCreateFsFolder(machine)
   const folders = data?.entries.filter((entry) => entry.isDir) ?? []
   const currentGit = data?.git ?? false
   const crumbs = ['~', ...browse.path]
@@ -67,6 +66,14 @@ export function FolderBrowser() {
   }
 
   function renderContent() {
+    if (!machine) {
+      return (
+        <div className="flex h-[120px] items-center justify-center font-mono text-xs text-loom-dim-2">
+          select a machine first
+        </div>
+      )
+    }
+
     if (isLoading) {
       return (
         <div className="flex h-[120px] items-center justify-center">

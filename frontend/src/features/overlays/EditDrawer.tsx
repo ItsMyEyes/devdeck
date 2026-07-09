@@ -178,7 +178,12 @@ export function EditDrawer() {
                 <Label>Local path</Label>
                 <div className="flex gap-2">
                   <Input value={edit.b} onChange={(e) => setEdit({ b: e.target.value })} className="font-mono" />
-                  <Button variant="secondary" size="lg" className="flex-none bg-loom-elevated" onClick={() => openBrowse('edit', edit.b)}>
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    className="flex-none bg-loom-elevated"
+                    onClick={() => openBrowse('edit', edit.b, editProject?.machineId)}
+                  >
                     Browse…
                   </Button>
                 </div>

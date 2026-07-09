@@ -38,6 +38,7 @@ interface NewProjectState {
   repo: string
   cloneParent: string
   cloneFolder: string
+  machineId: string
 }
 interface MachineDialogState {
   open: boolean
@@ -63,7 +64,7 @@ interface LoomState {
   spawn: SpawnState
   newProject: NewProjectState
   newWorkspace: { open: boolean; name: string }
-  browse: { open: boolean; target: BrowseTarget; path: string[] }
+  browse: { open: boolean; target: BrowseTarget; path: string[]; machineId: string }
   edit: EditState
   confirmDelete: { kind: EditKind; id: string; name: string } | null
   todoDraft: { text: string; pri: Priority }
@@ -99,7 +100,7 @@ interface LoomState {
   cancelConfirm: () => void
 
   // folder browser
-  openBrowse: (target: BrowseTarget, initialPath?: string) => void
+  openBrowse: (target: BrowseTarget, initialPath?: string, machineId?: string) => void
   closeBrowse: () => void
   enterFolder: (name: string) => void
   browseUp: () => void
@@ -161,9 +162,9 @@ export const useLoomStore = create<LoomState>()(
       sidebarOpen: false,
       wsMenuOpen: false,
       spawn: { open: false, projectId: null, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
-      newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '' },
+      newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
-      browse: { open: false, target: 'newPath', path: [] },
+      browse: { open: false, target: 'newPath', path: [], machineId: '' },
       edit: { kind: null, id: null, a: '', b: '', model: '' },
       confirmDelete: null,
       todoDraft: { text: '', pri: 'normal' },
@@ -195,7 +196,16 @@ export const useLoomStore = create<LoomState>()(
 
       openNewProject: () =>
         set((s) => {
-          s.newProject = { open: true, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '' }
+          s.newProject = {
+            open: true,
+            mode: 'local',
+            name: '',
+            path: '',
+            repo: '',
+            cloneParent: '~',
+            cloneFolder: '',
+            machineId: '',
+          }
           s.browse.path = []
           s.wsMenuOpen = false
         }),
@@ -220,8 +230,11 @@ export const useLoomStore = create<LoomState>()(
       askDelete: (kind, id, name) => set((s) => void (s.confirmDelete = { kind, id, name })),
       cancelConfirm: () => set((s) => void (s.confirmDelete = null)),
 
-      openBrowse: (target, initialPath) =>
-        set((s) => void (s.browse = { open: true, target, path: browsePathSegments(initialPath) })),
+      openBrowse: (target, initialPath, machineId) =>
+        set(
+          (s) =>
+            void (s.browse = { open: true, target, path: browsePathSegments(initialPath), machineId: machineId ?? '' }),
+        ),
       closeBrowse: () => set((s) => void (s.browse.open = false)),
       enterFolder: (name) => set((s) => void s.browse.path.push(name)),
       browseUp: () => set((s) => void s.browse.path.pop()),

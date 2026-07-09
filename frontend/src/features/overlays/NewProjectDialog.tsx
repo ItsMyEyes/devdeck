@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
-import { useCloneProject, useCreateProject, useWorkspace } from '@/features/data/queries'
+import { useCloneProject, useCreateProject, useMachines, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 function repoFolderName(repo: string) {
@@ -34,6 +34,7 @@ export function NewProjectDialog() {
   const showToast = useLoomStore((s) => s.showToast)
   const openBrowse = useLoomStore((s) => s.openBrowse)
   const ws = useWorkspace(wsId).data
+  const machines = useMachines().data ?? []
   const createProject = useCreateProject()
   const cloneProject = useCloneProject()
 
@@ -44,6 +45,7 @@ export function NewProjectDialog() {
   const canSubmit =
     !!wsId &&
     !busy &&
+    np.machineId.length > 0 &&
     (mode === 'local' ? np.path.trim().length > 0 : np.repo.trim().length > 0 && cloneFolder.length > 0)
   const localHint = np.path ? `loom will scan ${np.path} for a .git directory` : 'pick a folder that contains a git repository'
   const cloneHint =
@@ -66,7 +68,7 @@ export function NewProjectDialog() {
     if (!wsId || !canSubmit) return
     if (mode === 'clone') {
       cloneProject.mutate(
-        { wsId, body: { name: np.name.trim() || cloneFolder, path: cloneTarget, repo: np.repo } },
+        { wsId, body: { name: np.name.trim() || cloneFolder, path: cloneTarget, repo: np.repo, machineId: np.machineId } },
         {
           onSuccess: (project) => onCreated(project, 'Cloned'),
           onError: (err) => onError(err, 'Failed to clone project'),
@@ -75,7 +77,7 @@ export function NewProjectDialog() {
       return
     }
     createProject.mutate(
-      { wsId, body: { name: np.name, path: np.path } },
+      { wsId, body: { name: np.name, path: np.path, machineId: np.machineId } },
       {
         onSuccess: (project) => onCreated(project, 'Added'),
         onError: (err) => onError(err, 'Failed to add project'),
@@ -116,6 +118,21 @@ export function NewProjectDialog() {
         </button>
       </div>
 
+      <Label>Machine</Label>
+      <select
+        value={np.machineId}
+        disabled={busy}
+        onChange={(e) => setNewProject({ machineId: e.target.value })}
+        className="mb-3.5 h-9 w-full rounded-lg border border-loom-border-strong bg-loom-bg px-2.5 font-mono text-[12.5px] text-loom-fg-2"
+      >
+        <option value="">Select a machine…</option>
+        {machines.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+
       {mode === 'local' ? (
         <>
           <Label>Local folder</Label>
@@ -138,7 +155,7 @@ export function NewProjectDialog() {
               size="lg"
               disabled={busy}
               className="flex-none bg-loom-elevated"
-              onClick={() => openBrowse('newPath', np.path)}
+              onClick={() => openBrowse('newPath', np.path, np.machineId)}
             >
               Browse…
             </Button>
@@ -176,7 +193,7 @@ export function NewProjectDialog() {
               size="lg"
               disabled={busy}
               className="flex-none bg-loom-elevated"
-              onClick={() => openBrowse('cloneParent', np.cloneParent)}
+              onClick={() => openBrowse('cloneParent', np.cloneParent, np.machineId)}
             >
               Browse…
             </Button>
