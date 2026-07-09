@@ -48,6 +48,8 @@ func main() {
 	pandocBin := flag.String("pandoc-bin", envOr("LOOM_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
 	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
+	role := flag.String("role", envOr("LOOM_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI) or runtime (headless execution daemon, key auth only)")
+	apiKey := flag.String("key", envOr("LOOM_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
 	flag.Parse()
 
 	if *showVersion {
@@ -76,6 +78,14 @@ func main() {
 		}
 		return
 	}
+
+	if *role != "hub" && *role != "runtime" {
+		log.Fatalf("--role must be \"hub\" or \"runtime\", got %q", *role)
+	}
+	if *role == "runtime" && *apiKey == "" {
+		log.Fatalf("--role runtime requires --key (or LOOM_KEY)")
+	}
+	isRuntime := *role == "runtime"
 
 	if applied, err := config.LoadDotEnv(*envFile); err != nil {
 		log.Fatalf("--env %s: %v", *envFile, err)
@@ -121,23 +131,25 @@ func main() {
 		log.Printf("auth: Cloudflare Turnstile enabled for login")
 	}
 
-	if generated, err := st.RunDueRecurringInvoices(); err != nil {
-		log.Printf("recurring invoices: startup check failed: %v", err)
-	} else if len(generated) > 0 {
-		log.Printf("recurring invoices: generated %d draft invoice(s) on startup", len(generated))
-	}
-
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			if generated, err := st.RunDueRecurringInvoices(); err != nil {
-				log.Printf("recurring invoices: daily check failed: %v", err)
-			} else if len(generated) > 0 {
-				log.Printf("recurring invoices: generated %d draft invoice(s)", len(generated))
-			}
+	if !isRuntime {
+		if generated, err := st.RunDueRecurringInvoices(); err != nil {
+			log.Printf("recurring invoices: startup check failed: %v", err)
+		} else if len(generated) > 0 {
+			log.Printf("recurring invoices: generated %d draft invoice(s) on startup", len(generated))
 		}
-	}()
+
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				if generated, err := st.RunDueRecurringInvoices(); err != nil {
+					log.Printf("recurring invoices: daily check failed: %v", err)
+				} else if len(generated) > 0 {
+					log.Printf("recurring invoices: generated %d draft invoice(s)", len(generated))
+				}
+			}
+		}()
+	}
 
 	var baseReg port.AgentRegistry
 	if *jadiURL != "" {
@@ -180,7 +192,6 @@ func main() {
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
-	browserH := handler.NewBrowserProxyHandler(authSvc)
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
@@ -194,14 +205,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/auth/config", authH.GetConfig)
-	mux.HandleFunc("POST /api/auth/register", authH.PostRegister)
-	mux.HandleFunc("POST /api/auth/login", authH.PostLogin)
-	mux.HandleFunc("POST /api/auth/totp/setup", authH.PostTotpSetup)
-	mux.HandleFunc("POST /api/auth/totp/verify-setup", authH.PostTotpVerifySetup)
-	mux.HandleFunc("POST /api/auth/totp/verify", authH.PostTotpVerify)
-	mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
-	mux.HandleFunc("GET /api/auth/me", authH.GetMe)
+	if !isRuntime {
+		mux.HandleFunc("GET /api/auth/config", authH.GetConfig)
+		mux.HandleFunc("POST /api/auth/register", authH.PostRegister)
+		mux.HandleFunc("POST /api/auth/login", authH.PostLogin)
+		mux.HandleFunc("POST /api/auth/totp/setup", authH.PostTotpSetup)
+		mux.HandleFunc("POST /api/auth/totp/verify-setup", authH.PostTotpVerifySetup)
+		mux.HandleFunc("POST /api/auth/totp/verify", authH.PostTotpVerify)
+		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
+		mux.HandleFunc("GET /api/auth/me", authH.GetMe)
+	}
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
@@ -306,18 +319,32 @@ func main() {
 	mux.HandleFunc("PATCH /api/news/{id}", newsH.PatchNews)
 	mux.HandleFunc("DELETE /api/news/{id}", newsH.DeleteNews)
 
-	mux.HandleFunc("POST /api/seed", seedH.PostSeed)
+	if !isRuntime {
+		mux.HandleFunc("POST /api/seed", seedH.PostSeed)
+	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
 	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)
-	mux.HandleFunc("GET /api/browser/session", browserH.GetSession)
-	mux.HandleFunc("/api/browser/proxy", browserH.Proxy)
+	if !isRuntime {
+		browserH := handler.NewBrowserProxyHandler(authSvc)
+		mux.HandleFunc("GET /api/browser/session", browserH.GetSession)
+		mux.HandleFunc("/api/browser/proxy", browserH.Proxy)
+	}
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
-	mux.Handle("/", webui.Handler())
+	if !isRuntime {
+		mux.Handle("/", webui.Handler())
+	}
 
-	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc, "")(mux)))
+	var authMW func(http.Handler) http.Handler
+	if isRuntime {
+		authMW = handler.RequireKey(*apiKey)
+	} else {
+		authMW = handler.RequireAuth(authSvc, *apiKey)
+	}
+	log.Printf("loom role: %s", *role)
+	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(authMW(mux)))
 	if len(allowNets) > 0 {
 		root = handler.OnlyFrom(allowNets, proxyNets, *clientIPHeader)(root)
 		log.Printf("access: restricted to %s (--only-from)", *onlyFrom)
@@ -351,7 +378,7 @@ func main() {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
 		}
 	}
-	if *openUI && webui.Available() {
+	if !isRuntime && *openUI && webui.Available() {
 		openBrowserSoon(uiURL)
 	}
 	if err := http.Serve(listener, root); err != nil {
