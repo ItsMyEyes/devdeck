@@ -54,3 +54,37 @@ func TestMachineCRUDRoundtrip(t *testing.T) {
 		t.Errorf("GET /api/machines must distribute keys, body = %s", rec.Body.String())
 	}
 }
+
+func TestMachineHealthOnline(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("rt", backend.URL, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/health", h.GetMachineHealth)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/health", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"online"`) {
+		t.Errorf("status=%d body=%s, want 200 online", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMachineHealthOffline(t *testing.T) {
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("dead", "http://127.0.0.1:1", "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/health", h.GetMachineHealth)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/health", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"offline"`) {
+		t.Errorf("status=%d body=%s, want 200 offline", rec.Code, rec.Body.String())
+	}
+}

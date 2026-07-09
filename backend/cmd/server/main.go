@@ -329,6 +329,7 @@ func main() {
 		mux.HandleFunc("POST /api/machines", machineH.PostMachine)
 		mux.HandleFunc("PATCH /api/machines/{id}", machineH.PatchMachine)
 		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
+		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 	}
 
