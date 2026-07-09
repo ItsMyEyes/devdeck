@@ -26,6 +26,7 @@ func (h *WorktreeHandler) PostWorktree(w http.ResponseWriter, r *http.Request) {
 		Model  string  `json:"model"`
 		Agent  string  `json:"agent"`
 		Task   *string `json:"task"`
+		Path   string  `json:"path"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
@@ -35,7 +36,11 @@ func (h *WorktreeHandler) PostWorktree(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "mode must be \"branch\" or \"root\"")
 		return
 	}
-	wt, err := h.svc.Create(r.PathValue("projectId"), body.Mode, str(body.Branch), str(body.Base), body.Model, body.Agent, str(body.Task))
+	if body.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	wt, err := h.svc.Create(r.PathValue("projectId"), body.Path, body.Mode, str(body.Branch), str(body.Base), body.Model, body.Agent, str(body.Task))
 	if handleStoreErr(w, err) {
 		return
 	}
@@ -66,4 +71,15 @@ func (h *WorktreeHandler) DeleteWorktree(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListWorktrees returns a project's worktrees. Called by the hub to
+// federate live worktree data from the runtime that owns the project (see
+// service/workspace.go); harmless to expose on any role.
+func (h *WorktreeHandler) ListWorktrees(w http.ResponseWriter, r *http.Request) {
+	list, err := h.svc.ListByProject(r.PathValue("projectId"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }

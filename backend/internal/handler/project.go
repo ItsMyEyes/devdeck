@@ -87,7 +87,12 @@ func (h *ProjectHandler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 
 // GetProjectBranches returns the real git branches of a project's repository.
 func (h *ProjectHandler) GetProjectBranches(w http.ResponseWriter, r *http.Request) {
-	branches, err := h.svc.ListBranches(r.PathValue("id"))
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	branches, err := h.svc.ListBranches(path)
 	if handleStoreErr(w, err) {
 		return
 	}

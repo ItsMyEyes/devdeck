@@ -115,13 +115,9 @@ func (svc *ProjectService) Delete(id string) error {
 	return svc.store.DeleteProject(id)
 }
 
-// ListBranches returns the real git branches of a project's repository.
-func (svc *ProjectService) ListBranches(id string) ([]string, error) {
-	p, err := svc.store.ProjectByID(id)
-	if err != nil {
-		return nil, err
-	}
-	return gitpkg.ListBranches(p.Path)
+// ListBranches returns the real git branches of a repository at path.
+func (svc *ProjectService) ListBranches(path string) ([]string, error) {
+	return gitpkg.ListBranches(gitpkg.ExpandHome(path))
 }
 
 func lastSegment(p string) string {

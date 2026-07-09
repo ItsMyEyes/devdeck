@@ -236,6 +236,7 @@ func main() {
 	mux.HandleFunc("GET /api/projects/{id}/branches", pH.GetProjectBranches)
 
 	mux.HandleFunc("POST /api/projects/{projectId}/worktrees", wtH.PostWorktree)
+	mux.HandleFunc("GET /api/projects/{projectId}/worktrees", wtH.ListWorktrees)
 	mux.HandleFunc("PATCH /api/worktrees/{id}", wtH.PatchWorktree)
 	mux.HandleFunc("DELETE /api/worktrees/{id}", wtH.DeleteWorktree)
 

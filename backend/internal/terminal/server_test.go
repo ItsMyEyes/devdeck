@@ -26,7 +26,7 @@ func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := st.CreateWorktree(proj.ID, "root", "", "", "", "", "")
+	wt, err := st.CreateWorktree(proj.ID, "root", "", "", "", "", "", proj.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestResolveCommandReturnsAgentForBranchModeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := st.CreateWorktree(proj.ID, "branch", "feat/x", "main", "claude-sonnet-5", "claude", "")
+	wt, err := st.CreateWorktree(proj.ID, "branch", "feat/x", "main", "claude-sonnet-5", "claude", "", proj.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestResolveCommandUsesStoredAgentNotModelPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := st.CreateWorktree(proj.ID, "branch", "feat/x", "main", "gpt-5", "codex", "")
+	wt, err := st.CreateWorktree(proj.ID, "branch", "feat/x", "main", "gpt-5", "codex", "", proj.Path)
 	if err != nil {
 		t.Fatal(err)
 	}

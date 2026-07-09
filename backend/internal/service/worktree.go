@@ -135,6 +135,11 @@ func (svc *WorktreeService) Update(id string, p port.WorktreePatch) (domain.Work
 	return svc.store.UpdateWorktree(id, p)
 }
 
+// ListByProject returns a project's worktrees from local storage.
+func (svc *WorktreeService) ListByProject(projectID string) ([]domain.Worktree, error) {
+	return svc.store.WorktreesByProjectID(projectID)
+}
+
 // Delete stops the worktree's background agent (if running), removes its
 // real git worktree checkout from disk (unless it's the project root), and
 // deletes the DB row.
