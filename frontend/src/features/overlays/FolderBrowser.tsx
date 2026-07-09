@@ -47,7 +47,7 @@ export function FolderBrowser() {
 
   function createFolderHere() {
     const name = folderName.trim()
-    if (!name || createFolder.isPending) return
+    if (!name || createFolder.isPending || !machine) return
     setCreateError('')
     createFolder.mutate(
       { path: pathLabel, name },
@@ -145,7 +145,7 @@ export function FolderBrowser() {
           <DialogTitle className="text-[14.5px]">{title}</DialogTitle>
           <div className="flex-1" />
           {!creating && (
-            <Button variant="secondary" size="sm" onClick={() => setCreating(true)}>
+            <Button variant="secondary" size="sm" onClick={() => setCreating(true)} disabled={!machine}>
               <FolderPlus size={13} />
               New folder
             </Button>
@@ -188,7 +188,7 @@ export function FolderBrowser() {
                 placeholder="folder-name"
                 className="h-8 font-mono"
               />
-              <Button size="sm" onClick={createFolderHere} disabled={!folderName.trim() || createFolder.isPending}>
+              <Button size="sm" onClick={createFolderHere} disabled={!folderName.trim() || createFolder.isPending || !machine}>
                 {createFolder.isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                 Create
               </Button>
