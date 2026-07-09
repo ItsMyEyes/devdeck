@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,6 +137,16 @@ func TestRequireAuthBlocksLSPWebsocketPathWithoutCookie(t *testing.T) {
 	}
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestCorsMiddlewareAllowsAuthorizationHeader(t *testing.T) {
+	h := CorsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/api/machines", nil))
+	got := rec.Header().Get("Access-Control-Allow-Headers")
+	if !strings.Contains(got, "Authorization") {
+		t.Errorf("Access-Control-Allow-Headers = %q, want it to include Authorization", got)
 	}
 }
 
