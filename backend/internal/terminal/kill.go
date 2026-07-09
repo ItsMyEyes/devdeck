@@ -17,3 +17,17 @@ func KillSession(session string) error {
 	activeRegistry.kill(session)
 	return nil
 }
+
+// KillWorktreeSessions terminates every PTY session belonging to a worktree:
+// its primary session (id == worktreeID) plus any extra terminal-pane
+// sessions split off it, which use "<worktreeID>::term-N" as their session
+// id (see frontend/src/features/terminal/paneTree.ts). Without this, extra
+// panes would only ever be reaped by the idle-grace TTL after a worktree
+// delete instead of immediately.
+func KillWorktreeSessions(worktreeID string) error {
+	if activeRegistry == nil {
+		return nil
+	}
+	activeRegistry.killByWorktree(worktreeID)
+	return nil
+}

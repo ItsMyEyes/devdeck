@@ -1,2 +1,0 @@
-- [ ] mcp to connect any agents
-- [ ] integrate kanban to agents automate take tiket

@@ -53,6 +53,236 @@ instead of being added by hand through the Machines UI — see
 `docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md` for the full
 design and `CONTRACTS.md` for the machines API and key-auth rules.
 
+The five diagrams below trace how that split actually behaves at runtime,
+each grounded in the current code (file:line refs point at
+`backend/cmd/server/main.go`, `backend/internal/handler/{middleware,keyauth,
+machine,machine_proxy}.go`, `frontend/src/lib/machineClient.ts`, and
+`backend/internal/service/{worktree,workspace}.go` unless noted).
+
+### System topology
+
+```mermaid
+flowchart LR
+    subgraph Clients
+        Web["Web SPA<br/>(session cookie)"]
+        Desktop["Tauri desktop<br/>(Bearer hub key)"]
+    end
+
+    subgraph Hub["Hub — --role hub"]
+        HubAPI["REST/WS API<br/>workspaces, projects, todos, invoices, …"]
+        Registry[("machines table<br/>id, name, url, key")]
+        Proxy["/api/machines/{id}/proxy/{rest...}<br/>httputil.ReverseProxy"]
+    end
+
+    subgraph RtA["Runtime A — --role runtime --key"]
+        RtAAPI["REST/WS API<br/>git · worktrees · PTY · LSP"]
+    end
+
+    subgraph RtB["Runtime B — --role runtime --key"]
+        RtBAPI["REST/WS API<br/>git · worktrees · PTY · LSP"]
+    end
+
+    Web -- cookie --> HubAPI
+    Desktop -- "Bearer hubKey" --> HubAPI
+    HubAPI --> Registry
+    Web -. "direct-first REST/WS<br/>Bearer or ?key=" .-> RtAAPI
+    Desktop -. "direct-first" .-> RtBAPI
+    Web -. "fallback only" .-> Proxy
+    Proxy -- "Bearer machine.key<br/>(Cookie + inbound Authorization stripped)" --> RtAAPI
+    Proxy -. fallback .-> RtBAPI
+```
+
+Everything rides one Tailscale tailnet (not shown as a separate hop above —
+see the design spec for the ACL/MagicDNS details); the diagram's solid vs.
+dashed edges distinguish "always goes through the hub" from "direct-first,
+proxy is the fallback path."
+
+### Request auth: hub dual auth vs. runtime key-only
+
+Both roles share the same middleware wrapping order, assembled once in
+`main.go:358`: `CorsMiddleware(JSONErrorMiddleware(authMW(mux)))`, with
+`AccessLog` always outermost (`main.go:376`) and `OnlyFrom` (IP allowlist)
+outermost-but-one when `--only-from` is set. `authMW` is the one thing that
+differs by role (`main.go:351-355`):
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant MW as Cors → JSONError
+    participant Auth as RequireAuth (hub)
+    participant H as handler
+
+    C->>MW: request
+    MW->>Auth: (CORS headers set; OPTIONS short-circuits 204)
+    alt path is public (health, auth/config, auth/*, browser/proxy)<br/>or a non-API/non-WS SPA asset
+        Auth->>H: pass through, no check
+    else
+        Auth->>Auth: keyMatches(keyFromRequest(r), hubKey)
+        alt bearer/?key= matches (hubKey non-empty)
+            Auth->>H: authenticated by key
+        else no match, or hubKey unset
+            Auth->>Auth: read session cookie, svc.CurrentUser(cookie)
+            alt valid session
+                Auth->>H: authenticated by cookie
+            else missing/invalid
+                Auth-->>C: 401 {"error":"unauthorized"}
+            end
+        end
+    end
+```
+
+Key check runs **before** the cookie check and short-circuits on match
+(`middleware.go:109-121`); an empty configured `hubKey` never matches
+anything (`keyauth.go:34-36`), so an unset `--key` on the hub is exactly
+today's cookie-only behavior.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant MW as Cors → JSONError
+    participant Key as RequireKey (runtime)
+    participant H as handler
+
+    C->>MW: request
+    MW->>Key: ...
+    alt path == /api/health
+        Key->>H: pass through, no check
+    else
+        Key->>Key: keyFromRequest(r):<br/>Authorization: Bearer, or<br/>?key= ONLY if Upgrade: websocket
+        alt keyMatches(presented, key)
+            Key->>H: authenticated
+        else
+            Key-->>C: 401 {"error":"unauthorized"}
+        end
+    end
+```
+
+Runtime auth is single-factor and has no `/api/auth/*` routes to fall back
+to at all — they're never registered (`main.go:210-217`, gated on
+`!isRuntime`). The `?key=` query-param path exists only for WebSocket
+upgrades (`keyauth.go:27-29`) because the browser `WebSocket` constructor
+can't set an `Authorization` header; every other request must use the
+header, keeping keys out of URLs/logs.
+
+### Direct-first client resolution (with proxy fallback)
+
+`frontend/src/lib/machineClient.ts` decides direct-vs-proxy once per
+machine and caches it for 30s (`MODE_TTL_MS`), so a burst of calls (e.g.
+opening a worktree fires several queries at once) triggers one probe:
+
+```mermaid
+sequenceDiagram
+    participant Call as machineApi.* call
+    participant MC as machineClient.ts
+    participant Cache as modeCache (30s TTL)
+    participant M as Runtime machine
+    participant Hub as Hub proxy (fallback)
+
+    Call->>MC: machineRequest(machine, method, path, body)
+    MC->>Cache: cached mode for machine.id fresher than 30s?
+    alt cache hit
+        Cache-->>MC: 'direct' | 'proxy'
+    else cache miss/stale
+        MC->>M: GET {machine.url}/api/health<br/>Bearer machine.key, 1.5s abort timeout
+        alt res.ok
+            MC->>Cache: store 'direct'
+        else timeout or network error
+            MC->>Cache: store 'proxy'
+        end
+    end
+    alt mode == direct
+        MC->>M: {method} {machine.url}/api{path}<br/>Authorization: Bearer machine.key
+    else mode == proxy
+        MC->>Hub: {method} /api/machines/{machine.id}/proxy/api{path}<br/>(hub session/cookie covers it, no key header)
+        Hub->>M: reverse-proxied; Authorization replaced server-side with Bearer machine.key
+    end
+```
+
+WebSocket URLs (`machineWsUrl`, used by `terminalWsUrl` and the LSP client)
+go through the *same* cached resolution, but attach the key differently
+since a browser `WebSocket` can't set headers: direct mode appends
+`?key=machine.key` to the URL; proxy mode adds no key at all (the hub's own
+session already authenticated the request before the proxy ever injects
+the runtime key server-side).
+
+### Creating a worktree on a runtime
+
+One full request traced from the Spawn dialog to a real `git worktree add`
+on disk:
+
+```mermaid
+sequenceDiagram
+    participant U as SpawnDialog.submit()
+    participant FE as machineApi.createWorktree
+    participant MC as machineClient (direct-first)
+    participant H as Runtime: PostWorktree
+    participant S as WorktreeService.Create
+    participant G as git CLI (gitpkg.AddWorktree)
+    participant DB as Runtime SQLite
+
+    U->>FE: {mode, branch, base, model, agent, task,<br/>path: project.path}<br/>machine resolved from project.machineId
+    FE->>MC: POST /projects/{projectId}/worktrees
+    MC->>H: resolved direct-or-proxy URL, Bearer/session
+    H->>H: validate mode ∈ {root,branch}; path required (400 if missing)
+    H->>S: Create(projectID, path, mode, branch, base, model, agent, task)
+    alt mode == root
+        S->>DB: CreateWorktree(...) — plain row, no git touched
+    else mode == branch
+        S->>G: git branch --format (ListBranches)
+        S->>S: validate base exists; check sibling branch conflicts<br/>via WorktreesByProjectID
+        S->>DB: CreateWorktree(...) first — need the generated id for the path
+        S->>G: git worktree add -b branch path/.wt/id base
+        alt git fails
+            S->>DB: DeleteWorktree(id) — rollback
+            S-->>H: error, DB never points at a nonexistent checkout
+        end
+    end
+    H-->>FE: 200 domain.Worktree
+    FE-->>U: navigate to /w/:wsId/p/:projectId/wt/:wtId
+```
+
+Disk layout convention: root-mode worktrees use the project's path
+verbatim (plain shell terminal, no git checkout); branch-mode worktrees are
+checked out at `<project.path>/.wt/<worktreeID>`, recomputed on demand
+wherever it's needed (update/delete) rather than stored as-is.
+
+### Hub federation of workspace listings
+
+Worktrees are runtime-owned, so the hub's own `worktrees` table is
+structurally empty for any project assigned to a machine. `GET /workspaces`
+fans out concurrently to fetch live data instead of trusting local storage:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant WS as WorkspaceService.List (hub)
+    participant Store as Hub SQLite
+    participant FC as machineclient.FetchWorktrees
+    participant R1 as Runtime A
+    participant R2 as Runtime B
+
+    C->>WS: GET /workspaces
+    WS->>Store: Workspaces() — full tree; worktrees empty for machine-assigned projects
+    par one goroutine per project with machineId != ""
+        WS->>FC: FetchWorktrees(machine A, projectID) [3s timeout]
+        FC->>R1: GET /api/projects/{id}/worktrees, Bearer machine.key
+        R1-->>FC: []Worktree
+        FC-->>WS: proj.Worktrees = worktrees
+    and
+        WS->>FC: FetchWorktrees(machine B, projectID)
+        FC->>R2: GET /api/projects/{id}/worktrees
+        R2--xFC: unreachable / timeout
+        FC-->>WS: error (logged) — proj.Worktrees left empty
+    end
+    WS-->>C: 200 workspaces — one dead machine never fails the whole request
+```
+
+Each goroutine writes into a distinct `*domain.Project` slice element
+(pointers into the already-allocated `workspaces` tree), so no mutex is
+needed — there's no shared mutable state between goroutines, only disjoint
+per-element writes, followed by a single `wg.Wait()` before the response is
+returned.
+
 ## Dependency wiring
 
 - `backend/cmd/server/main.go` wires everything manually (no DI framework).

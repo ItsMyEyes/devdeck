@@ -19,8 +19,8 @@ type WorktreeService struct {
 }
 
 // NewWorktreeService creates a worktree service. kill is called to stop a
-// worktree's background agent process on Kill/Delete; it's typically
-// terminal.KillSession.
+// worktree's background agent process(es) on Kill/Delete; it's typically
+// terminal.KillWorktreeSessions.
 func NewWorktreeService(s port.Store, kill func(sessionID string) error) *WorktreeService {
 	return &WorktreeService{store: s, kill: kill}
 }

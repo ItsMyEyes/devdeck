@@ -126,7 +126,18 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 		return "", nil, ""
 	}
 
-	wt, err := s.store.WorktreeByID(session)
+	// Extra terminal panes split from a worktree's primary pane (see
+	// frontend/src/features/terminal/paneTree.ts) use "<worktreeId>::term-N"
+	// as their session id so each gets its own independent PTY; the worktree
+	// row itself is still keyed by the bare id, so look that up instead of
+	// the raw session — otherwise every extra pane fails the exact-match
+	// lookup below and silently falls back to a plain shell in $HOME.
+	worktreeID := session
+	if idx := strings.Index(session, "::"); idx != -1 {
+		worktreeID = session[:idx]
+	}
+
+	wt, err := s.store.WorktreeByID(worktreeID)
 	if err != nil {
 		return "", nil, ""
 	}
@@ -137,7 +148,7 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 	workDir = gitpkg.ExpandHome(wt.Path)
 	// For branch mode, use the worktree directory
 	if !wt.Root && wt.Branch != "" {
-		workDir = filepath.Join(workDir, ".wt", session)
+		workDir = filepath.Join(workDir, ".wt", worktreeID)
 	}
 
 	// wt.Agent is the agent ID chosen at worktree creation (e.g. "codex"),

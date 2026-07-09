@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -7,6 +7,15 @@ WEBUI_DIR := backend/internal/webui/dist
 WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X loom/backend/internal/version.Version=$(VERSION)
+
+# Shared dev hub bearer key: gives the hub started by `make dev`/`make
+# dev-api` a --key, purely as an additional auth path alongside the
+# existing session-cookie login (see CONTRACTS.md "Key auth") — it changes
+# nothing about the web UI login flow. Only exists so `make dev-runtime`
+# has something to self-register with. Override with e.g.
+# `make dev-runtime DEV_HUB_KEY=...` (and matching for `dev`/`dev-api`) if
+# you want a different value.
+DEV_HUB_KEY ?= dev-hub-key
 
 # Mac App Store Tailscale.app doesn't put `tailscale` on PATH; fall back to
 # its bundled binary if a standalone install isn't found.
@@ -19,27 +28,47 @@ TAILSCALE := $(shell command -v tailscale 2>/dev/null || echo /Applications/Tail
 # https://<this-machine>.<tailnet>.ts.net — see allowedHosts in vite.config.ts.
 dev:
 	$(TAILSCALE) serve --bg 5173
-	cd frontend && npm run dev
+	cd frontend && LOOM_KEY=$(DEV_HUB_KEY) npm run dev
 
 # Frontend only (Vite :5173)
 dev-web:
 	cd frontend && npm run dev:web
 
-# Backend only (Go :8989)
+# Backend only (Go :8989). Runs as --role hub (the default) — add
+# --role runtime --key <key> to run this as a runtime instead; see the
+# "Hub / runtime roles" section in COMMANDS.md for the two-node example.
 dev-api:
-	cd backend && go run ./cmd/server --db loom.db --open=false --env .env
+	cd backend && LOOM_KEY=$(DEV_HUB_KEY) go run ./cmd/server --db loom.db --open=false --env .env
 
-# Kill whatever's listening on the dev ports (stuck `make dev` from a previous run, etc).
+# Same as dev-api, but spells out --role hub --key explicitly instead of
+# relying on the default role + LOOM_KEY env var — pairs by name with
+# dev-runtime for a two-process hub+runtime dev setup. Same port/db as
+# dev-api (:8989, loom.db), so don't run both at once.
+dev-hub:
+	cd backend && go run ./cmd/server --role hub --key $(DEV_HUB_KEY) --db loom.db --open=false --env .env
+
+# Second backend process (Go :9199), --role runtime, self-registering with
+# the hub started by `make dev`/`make dev-api` on :8989 — no manual step in
+# the Machines UI. Requires that hub to already be running. See "Hub /
+# runtime roles" in COMMANDS.md and
+# docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md.
+dev-runtime:
+	cd backend && go run ./cmd/server --role runtime --key dev-runtime-key --addr 127.0.0.1:9199 --db runtime.db --open=false \
+	  --hub-url http://127.0.0.1:8989 --hub-key $(DEV_HUB_KEY) --public-url http://127.0.0.1:9199 --name local-runtime
+
+# Kill whatever's listening on the dev ports (stuck `make dev`/`make dev-runtime` from a previous run, etc).
 free-ports:
-	@lsof -ti:8989,5173 2>/dev/null | xargs -r kill -TERM
+	@lsof -ti:8989,5173,9199 2>/dev/null | xargs -r kill -TERM
 	@sleep 1
-	@lsof -ti:8989,5173 2>/dev/null | xargs -r kill -KILL
+	@lsof -ti:8989,5173,9199 2>/dev/null | xargs -r kill -KILL
 	@sleep 1
-	@if [ -z "$$(lsof -ti:8989,5173 2>/dev/null)" ]; then echo "ports 8989 and 5173 are free"; else echo "still in use:"; lsof -i:8989,5173; fi
+	@if [ -z "$$(lsof -ti:8989,5173,9199 2>/dev/null)" ]; then echo "ports 8989, 5173 and 9199 are free"; else echo "still in use:"; lsof -i:8989,5173,9199; fi
 
-# Delete the dev database (wipes seed/demo data used by `make dev-api`)
+# Delete the dev databases (wipes seed/demo data used by `make dev-api`,
+# plus the `make dev-runtime` runtime db and its self-registered machine row)
 seed-clean:
 	rm -f backend/loom.db backend/loom.db-wal backend/loom.db-shm
+	rm -f backend/runtime.db backend/runtime.db-wal backend/runtime.db-shm
 
 # ── Build ────────────────────────────────────────────────────
 # Production host build — UI is embedded in the Go binary.

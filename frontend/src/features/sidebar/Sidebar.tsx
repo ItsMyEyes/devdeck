@@ -1,15 +1,25 @@
+import { useNavigate } from '@tanstack/react-router'
+import { ArrowLeft } from 'lucide-react'
 import { fmtRupiah } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
 import { useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
+import { Tooltip } from '@/components/ui/tooltip'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { SidebarNav } from './SidebarNav'
 import { ProjectTree } from './ProjectTree'
 
-export function Sidebar() {
+interface SidebarProps {
+  /** Collapses the sidebar to a ~44px icon rail (workspace-mode chrome collapse). */
+  compact?: boolean
+}
+
+export function Sidebar({ compact }: SidebarProps = {}) {
   const sidebarOpen = useLoomStore((s) => s.sidebarOpen)
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
+
+  if (compact) return <SidebarRail />
 
   return (
     <>
@@ -33,6 +43,40 @@ export function Sidebar() {
         <SidebarBody />
       </aside>
     </>
+  )
+}
+
+/**
+ * Collapsed icon rail shown instead of the full sidebar while a worktree is
+ * open (workspace mode). Always visible — desktop and mobile alike — since
+ * it's the only way back once the Header's hamburger is hidden; it does not
+ * use the mobile drawer/`sidebarOpen` mechanism at all.
+ */
+function SidebarRail() {
+  const navigate = useNavigate()
+  const { wsId, projectId } = useScope()
+  const dirtyFileCount = useLoomStore((s) => s.dirtyFileCount)
+
+  function goBack() {
+    if (!wsId || !projectId) return
+    if (dirtyFileCount > 0 && !window.confirm('Leave this terminal with unsaved files?')) return
+    navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId } })
+  }
+
+  return (
+    <aside className="flex w-11 flex-none flex-col items-center gap-1 border-r border-loom-border bg-loom-surface py-2">
+      <Tooltip label="Back to worktrees" side="right">
+        <button
+          onClick={goBack}
+          aria-label="Back to worktrees"
+          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-loom-muted transition-colors hover:bg-loom-hover-wash hover:text-loom-fg"
+        >
+          <ArrowLeft size={16} />
+        </button>
+      </Tooltip>
+      <WorkspaceSwitcher compact />
+      <SidebarNav compact />
+    </aside>
   )
 }
 

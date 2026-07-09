@@ -10,6 +10,9 @@ import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useLoomStore } from '@/store/useLoomStore'
 
+/** Matches only the worktree route, e.g. /w/abc/p/def/wt/ghi (the ExpandedTerminal screen). */
+const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
+
 export const Route = createFileRoute('/w/$wsId')({
   beforeLoad: async ({ context, params }) => {
     const qc = context.queryClient
@@ -31,6 +34,7 @@ function WorkspaceLayout() {
   const { wsId } = Route.useParams()
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
   const pathname = useLocation({ select: (l) => l.pathname })
+  const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
 
   const workspaces = useWorkspaces()
   const settings = useSettings()
@@ -67,9 +71,9 @@ function WorkspaceLayout() {
 
   return (
     <div className="flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
-      <Header />
+      {!workspaceMode && <Header />}
       <div className="relative flex min-h-0 flex-1">
-        <Sidebar />
+        <Sidebar compact={workspaceMode} />
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
           <Outlet />
         </section>

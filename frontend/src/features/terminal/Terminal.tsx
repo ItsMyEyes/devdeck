@@ -1,7 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
 import type { Machine } from '@/store/types'
 
@@ -9,6 +13,8 @@ export interface TerminalHandle {
   /** Write a line to the session's stdin (used by the "send input" box). */
   sendInput: (text: string) => void
   focus: () => void
+  /** Serialize the full scrollback (including off-screen history) to the clipboard. */
+  copyBuffer: () => void
 }
 
 const THEME = {
@@ -54,6 +60,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const outbox = useRef<string[]>([])
   const ctrlArmedRef = useRef(ctrlArmed)
   const onCtrlConsumedRef = useRef(onCtrlConsumed)
+  const searchAddonRef = useRef<SearchAddon | null>(null)
+  const serializeAddonRef = useRef<SerializeAddon | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     ctrlArmedRef.current = ctrlArmed
@@ -61,10 +72,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   useEffect(() => {
     onCtrlConsumedRef.current = onCtrlConsumed
   }, [onCtrlConsumed])
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
+
+  function closeSearch() {
+    setSearchOpen(false)
+    termRef.current?.focus()
+  }
 
   useImperativeHandle(ref, () => ({
     sendInput: (text: string) => send(inputFrame(text)),
     focus: () => termRef.current?.focus(),
+    copyBuffer: () => {
+      const data = serializeAddonRef.current?.serialize()
+      if (data) void navigator.clipboard.writeText(data)
+    },
   }))
 
   function send(frame: string) {
@@ -87,8 +110,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrollback: 5000,
     })
     const fit = new FitAddon()
+    const search = new SearchAddon()
+    const serialize = new SerializeAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon())
+    term.loadAddon(search)
+    term.loadAddon(serialize)
+    searchAddonRef.current = search
+    serializeAddonRef.current = serialize
+    try {
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => webgl.dispose())
+      term.loadAddon(webgl)
+    } catch {
+      // WebGL unavailable (headless env, old GPU driver) — falls back to xterm's default renderer.
+    }
     term.open(host)
     fit.fit()
     termRef.current = term
@@ -186,6 +222,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', kick)
 
+    // Browsers reserve Cmd/Ctrl+F for their own find bar; intercept it while
+    // the terminal is focused so it opens the addon-search bar instead.
+    const onFindShortcut = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && host.contains(e.target as Node)) {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onFindShortcut)
+
     void terminalWsUrl(machine, session, term.cols, term.rows).then((url) => {
       if (disposed) return
       resolvedUrl = url
@@ -233,6 +279,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (fitTimer !== undefined) window.clearTimeout(fitTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', kick)
+      window.removeEventListener('keydown', onFindShortcut)
       ro.disconnect()
       onData.dispose()
       onResize.dispose()
@@ -253,5 +300,54 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [session, machine])
 
-  return <div ref={hostRef} className="h-full w-full" />
+  return (
+    <div className="relative h-full w-full">
+      <div ref={hostRef} className="h-full w-full" />
+      {searchOpen ? (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-loom-border bg-loom-surface px-2 py-1 shadow-lg">
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                if (e.shiftKey) searchAddonRef.current?.findPrevious(searchQuery)
+                else searchAddonRef.current?.findNext(searchQuery)
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                closeSearch()
+              }
+            }}
+            placeholder="Find…"
+            className="w-40 bg-transparent font-mono text-[11px] text-loom-fg outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => searchAddonRef.current?.findPrevious(searchQuery)}
+            aria-label="Previous match"
+            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+          >
+            <ChevronUp size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => searchAddonRef.current?.findNext(searchQuery)}
+            aria-label="Next match"
+            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+          >
+            <ChevronDown size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={closeSearch}
+            aria-label="Close search"
+            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 })

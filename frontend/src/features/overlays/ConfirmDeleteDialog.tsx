@@ -11,7 +11,7 @@ import {
   useMachines,
   useWorkspaces,
 } from '@/features/data/queries'
-import { projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
+import { findProject, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
 
 function bodyFor(kind: string, name: string) {
   if (kind === 'worktree')
@@ -29,6 +29,7 @@ export function ConfirmDeleteDialog() {
   const confirm = useLoomStore((s) => s.confirmDelete)
   const cancelConfirm = useLoomStore((s) => s.cancelConfirm)
   const showToast = useLoomStore((s) => s.showToast)
+  const removeWorktreeLayout = useLoomStore((s) => s.removeWorktreeLayout)
   const workspaces = useWorkspaces().data ?? []
   const machines = useMachines().data
   const deleteWorktree = useDeleteWorktree()
@@ -59,6 +60,7 @@ export function ConfirmDeleteDialog() {
         onSuccess: () => {
           cancelConfirm()
           toast()
+          removeWorktreeLayout(id)
           if (affectsCurrent && parent && parentWs) {
             navigate({ to: '/w/$wsId/p/$projectId', params: { wsId: parentWs.id, projectId: parent.id } })
           }
@@ -66,10 +68,15 @@ export function ConfirmDeleteDialog() {
       })
     } else if (kind === 'project') {
       const ws = wsOfProject(workspaces, id)
+      // Cascade-deletes all of this project's worktrees — their persisted layouts
+      // would otherwise orphan in localStorage forever (captured before the mutation
+      // removes the project from the query cache).
+      const worktreeIds = findProject(workspaces, id)?.worktrees.map((wt) => wt.id) ?? []
       deleteProject.mutate(id, {
         onSuccess: () => {
           cancelConfirm()
           toast()
+          worktreeIds.forEach(removeWorktreeLayout)
           // The workspace index route redirects to the next project (or AgentsEmpty).
           if (affectsCurrent && ws) navigate({ to: '/w/$wsId', params: { wsId: ws.id } })
         },
@@ -82,10 +89,14 @@ export function ConfirmDeleteDialog() {
         },
       })
     } else {
+      // Cascade-deletes every project in this workspace, and with it every worktree —
+      // same layout-orphan concern as the project branch above, just one level higher.
+      const worktreeIds = findWs(workspaces, id)?.projects.flatMap((p) => p.worktrees.map((wt) => wt.id)) ?? []
       deleteWorkspace.mutate(id, {
         onSuccess: () => {
           cancelConfirm()
           toast()
+          worktreeIds.forEach(removeWorktreeLayout)
           if (affectsCurrent) {
             const next = workspaces.find((w) => w.id !== id)
             if (next) navigate({ to: '/w/$wsId', params: { wsId: next.id } })

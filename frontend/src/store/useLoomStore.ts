@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
+import type { WorktreeLayout } from '@/features/terminal/paneTree'
 import type {
   Priority,
   Project,
@@ -70,12 +71,24 @@ interface LoomState {
   todoDraft: { text: string; pri: Priority }
   todoFilter: TodoFilter
   machineDialog: MachineDialogState
+  /** Not persisted — how many files the currently-open worktree (if any) has
+   *  unsaved. `SidebarRail`'s back button lives outside `ExpandedTerminal`
+   *  now, so this is how it gates its own dirty-file confirm. */
+  dirtyFileCount: number
+
+  // ---- persisted UI preference ----
+  /** Each worktree's tiling pane-tree layout (structure, split sizes, open
+   *  tabs, active tab), keyed by worktree id. */
+  worktreeLayouts: Record<string, WorktreeLayout>
 
   // ---- actions ----
   showToast: (msg: string) => void
   setSidebarOpen: (open: boolean) => void
   toggleWsMenu: () => void
   closeWsMenu: () => void
+  setDirtyFileCount: (n: number) => void
+  setWorktreeLayout: (worktreeId: string, layout: WorktreeLayout) => void
+  removeWorktreeLayout: (worktreeId: string) => void
 
   // spawn worktree
   openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
@@ -170,6 +183,8 @@ export const useLoomStore = create<LoomState>()(
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
+      dirtyFileCount: 0,
+      worktreeLayouts: {},
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -177,6 +192,9 @@ export const useLoomStore = create<LoomState>()(
       setSidebarOpen: (open) => set((s) => void (s.sidebarOpen = open)),
       toggleWsMenu: () => set((s) => void (s.wsMenuOpen = !s.wsMenuOpen)),
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
+      setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
+      setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
+      removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {
@@ -270,9 +288,9 @@ export const useLoomStore = create<LoomState>()(
     {
       name: 'loom-ui-v2',
       version: 2,
-      // Persist only a harmless UI preference; no domain data ever touches
+      // Persist only harmless UI preferences; no domain data ever touches
       // localStorage now that the backend is the source of truth.
-      partialize: (s) => ({ sidebarOpen: s.sidebarOpen }),
+      partialize: (s) => ({ sidebarOpen: s.sidebarOpen, worktreeLayouts: s.worktreeLayouts }),
     },
   ),
 )

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +15,11 @@ import (
 const (
 	// ringBufferMaxBytes caps how much recent PTY output is kept in memory
 	// per session, so a reattaching client can replay history it missed.
-	ringBufferMaxBytes = 64 * 1024
+	// Was 64 KiB; bumped to 1 MiB — a session left idle for a while (agent
+	// producing verbose output, user away from the tab) could blow past 64
+	// KiB in seconds and silently evict history the client had never seen,
+	// which read as "messages disappearing" on reattach.
+	ringBufferMaxBytes = 1024 * 1024
 	// sessionGraceTTL is how long a session's PTY stays alive with nobody
 	// attached before it's killed. Mirrors trash/term's SESSION_GRACE_MS.
 	sessionGraceTTL = 10 * time.Minute
@@ -381,4 +386,23 @@ func (r *registry) kill(id string) {
 	// signals the process group; Windows kills the attached process directly.
 	sess.close()
 	terminateProcess(sess.cmd)
+}
+
+// killByWorktree kills every session belonging to worktreeID: the primary
+// session (id == worktreeID) plus any extra terminal-pane sessions using the
+// "<worktreeID>::term-N" suffix scheme. Sessions to kill are snapshotted
+// under the lock, then killed individually — kill() takes the lock itself.
+func (r *registry) killByWorktree(worktreeID string) {
+	r.mu.Lock()
+	prefix := worktreeID + "::"
+	var ids []string
+	for id := range r.sessions {
+		if id == worktreeID || strings.HasPrefix(id, prefix) {
+			ids = append(ids, id)
+		}
+	}
+	r.mu.Unlock()
+	for _, id := range ids {
+		r.kill(id)
+	}
 }

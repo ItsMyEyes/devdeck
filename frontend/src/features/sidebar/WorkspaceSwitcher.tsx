@@ -6,7 +6,12 @@ import { useScope } from '@/features/useScope'
 import { useWorkspaces } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
-export function WorkspaceSwitcher() {
+interface WorkspaceSwitcherProps {
+  /** Icon-only, non-interactive badge for the collapsed sidebar rail. */
+  compact?: boolean
+}
+
+export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
   const navigate = useNavigate()
   const { wsId } = useScope()
   const workspaces = useWorkspaces().data ?? []
@@ -25,6 +30,14 @@ export function WorkspaceSwitcher() {
     // The WorkspaceLayout effect keeps the server's active workspace in sync with
     // the URL, so navigation alone is enough — no explicit settings PATCH here.
     navigate({ to: '/w/$wsId', params: { wsId: id } })
+  }
+
+  if (compact) {
+    return (
+      <div className="flex flex-none items-center justify-center border-b border-loom-border py-2.5">
+        <WorkspaceBadge name={active?.name ?? '?'} active small />
+      </div>
+    )
   }
 
   return (

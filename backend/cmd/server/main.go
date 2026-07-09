@@ -182,7 +182,7 @@ func main() {
 
 	wsSvc := service.NewWorkspaceService(st)
 	pSvc := service.NewProjectService(st)
-	wtSvc := service.NewWorktreeService(st, terminal.KillSession)
+	wtSvc := service.NewWorktreeService(st, terminal.KillWorktreeSessions)
 	agentSvc := service.NewAgentService(agentReg)
 	seedSvc := service.NewSeedService(st)
 	fileSvc := service.NewWorktreeFileService(st)
