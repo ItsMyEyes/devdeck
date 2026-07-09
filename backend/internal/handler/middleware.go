@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -180,6 +183,19 @@ func (e *errRecorder) Write(b []byte) (int, error) {
 		return len(b), nil
 	}
 	return e.ResponseWriter.Write(b)
+}
+
+// Hijack lets WebSocket upgrades (e.g. the machine reverse proxy relaying a
+// runtime's 101 Switching Protocols response) pass through the recorder;
+// without it httputil.ReverseProxy cannot hijack the connection and the
+// upgrade fails with "can't switch protocols using non-Hijacker
+// ResponseWriter type". Mirrors statusRecorder.Hijack in access.go.
+func (e *errRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := e.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	}
+	return h.Hijack()
 }
 
 func (e *errRecorder) flush() {
