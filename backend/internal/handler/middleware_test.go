@@ -82,7 +82,7 @@ func newTestAuthServiceForMiddleware(t *testing.T) *service.AuthService {
 func TestRequireAuthAllowsPublicPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", nil))
 	if !called {
@@ -93,7 +93,7 @@ func TestRequireAuthAllowsPublicPathWithoutCookie(t *testing.T) {
 func TestRequireAuthAllowsBrowserProxyPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, browserProxyPath, nil))
 	if !called {
@@ -104,7 +104,7 @@ func TestRequireAuthAllowsBrowserProxyPathWithoutCookie(t *testing.T) {
 func TestRequireAuthBlocksProtectedPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
 	if called {
@@ -118,7 +118,7 @@ func TestRequireAuthBlocksProtectedPathWithoutCookie(t *testing.T) {
 func TestRequireAuthBlocksTerminalWebsocketPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws/terminal", nil))
 	if called {
@@ -129,7 +129,7 @@ func TestRequireAuthBlocksTerminalWebsocketPathWithoutCookie(t *testing.T) {
 func TestRequireAuthBlocksLSPWebsocketPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws/lsp", nil))
 	if called {
@@ -181,12 +181,60 @@ func TestRequireAuthAllowsProtectedPathWithValidCookie(t *testing.T) {
 	}
 
 	called := false
-	mw := RequireAuth(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
 	mw.ServeHTTP(rec, req)
 	if !called {
 		t.Errorf("RequireAuth blocked a valid session, status = %d, body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestRequireAuthAcceptsBearerHubKey(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	svc := service.NewAuthService(store.New(db), make([]byte, 32))
+
+	h := RequireAuth(svc, "hubkey")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set("Authorization", "Bearer hubkey")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("bearer hub key: status = %d, want 200", rec.Code)
+	}
+
+	// wrong key still falls through to cookie auth → 401 (no cookie)
+	req = httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong bearer key: status = %d, want 401", rec.Code)
+	}
+}
+
+func TestRequireAuthEmptyHubKeyNeverMatchesBearer(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	svc := service.NewAuthService(store.New(db), make([]byte, 32))
+
+	h := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set("Authorization", "Bearer ")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("empty configured key: status = %d, want 401", rec.Code)
 	}
 }

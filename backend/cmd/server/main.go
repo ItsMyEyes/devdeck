@@ -317,7 +317,7 @@ func main() {
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
 
-	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc)(mux)))
+	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(handler.RequireAuth(authSvc, "")(mux)))
 	if len(allowNets) > 0 {
 		root = handler.OnlyFrom(allowNets, proxyNets, *clientIPHeader)(root)
 		log.Printf("access: restricted to %s (--only-from)", *onlyFrom)

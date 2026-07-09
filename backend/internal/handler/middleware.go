@@ -76,11 +76,13 @@ func decodeBody(r *http.Request, dst any) (map[string]json.RawMessage, error) {
 	return raw, nil
 }
 
-// RequireAuth returns middleware requiring a valid session cookie for every
-// request except a small public-path allowlist. It protects both the JSON
-// API and every /ws/ WebSocket upgrade (terminal and LSP process access) since
-// both are registered on the same mux.
-func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
+// RequireAuth returns middleware requiring a valid session cookie, or the
+// bearer hub key when non-empty, for every request except a small
+// public-path allowlist. It protects both the JSON API and every /ws/
+// WebSocket upgrade (terminal and LSP process access) since both are
+// registered on the same mux. An empty hubKey means cookie-only auth
+// (current behavior).
+func RequireAuth(svc *service.AuthService, hubKey string) func(http.Handler) http.Handler {
 	publicPaths := map[string]bool{
 		"/api/health":                 true,
 		"/api/auth/config":            true,
@@ -99,6 +101,10 @@ func RequireAuth(svc *service.AuthService) func(http.Handler) http.Handler {
 			}
 			if !strings.HasPrefix(r.URL.Path, "/api") && !strings.HasPrefix(r.URL.Path, "/ws/") {
 				next.ServeHTTP(w, r) // static SPA assets stay public
+				return
+			}
+			if keyMatches(keyFromRequest(r), hubKey) {
+				next.ServeHTTP(w, r)
 				return
 			}
 			cookie, err := r.Cookie(sessionCookieName)
