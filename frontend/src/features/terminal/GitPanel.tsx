@@ -15,8 +15,10 @@ import {
   Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { ApiError, type GitCommit, type GitStatusFile } from '@/lib/api'
+import { ApiError } from '@/lib/api'
+import type { GitCommit, GitStatusFile } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
+import type { Machine } from '@/store/types'
 import {
   useGitCommit,
   useGitDiff,
@@ -33,6 +35,7 @@ import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface GitPanelProps {
   worktreeId: string
+  machine: Machine
   active: boolean
 }
 
@@ -64,21 +67,21 @@ function dirname(path: string) {
   return index === -1 ? '' : path.slice(0, index)
 }
 
-export function GitPanel({ worktreeId, active }: GitPanelProps) {
+export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
   const [view, setView] = useState<'changes' | 'history'>('changes')
   const [message, setMessage] = useState('')
   const [target, setTarget] = useState<DiffTarget>(null)
   const [diffMode, setDiffMode] = useState<DiffMode>('split')
 
-  const status = useGitStatus(worktreeId, active)
-  const log = useGitLog(worktreeId, active && view === 'history')
-  const diff = useGitDiff(worktreeId, target)
-  const stage = useGitStage(worktreeId)
-  const unstage = useGitUnstage(worktreeId)
-  const discard = useGitDiscard(worktreeId)
-  const commit = useGitCommit(worktreeId)
-  const push = useGitPush(worktreeId)
-  const pull = useGitPull(worktreeId)
+  const status = useGitStatus(machine, worktreeId, active)
+  const log = useGitLog(machine, worktreeId, active && view === 'history')
+  const diff = useGitDiff(machine, worktreeId, target)
+  const stage = useGitStage(machine, worktreeId)
+  const unstage = useGitUnstage(machine, worktreeId)
+  const discard = useGitDiscard(machine, worktreeId)
+  const commit = useGitCommit(machine, worktreeId)
+  const push = useGitPush(machine, worktreeId)
+  const pull = useGitPull(machine, worktreeId)
 
   const files = status.data?.files ?? []
   const stagedFiles = files.filter((f) => f.index !== '.' && f.index !== '?')

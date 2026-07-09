@@ -25,7 +25,8 @@ import CodeMirror, {
   type ReactCodeMirrorRef,
 } from '@uiw/react-codemirror'
 import { toast } from 'sonner'
-import { searchWorktreeFiles } from '@/lib/api'
+import { searchWorktreeFiles } from '@/lib/machineApi'
+import type { Machine } from '@/store/types'
 import {
   acquireLspClient,
   languageIdForPath,
@@ -252,6 +253,7 @@ function resolveImportBase(currentPath: string, source: string) {
 }
 
 async function resolveImportFile(
+  machine: Machine,
   worktreeId: string,
   currentPath: string,
   source: string,
@@ -269,7 +271,7 @@ async function resolveImportFile(
         ...candidateExtensions.map((extension) => `${base}/index.${extension}`),
       ]
   const pattern = `^(?:${candidates.map(escapeRegex).join('|')})$`
-  const matches = await searchWorktreeFiles(worktreeId, pattern)
+  const matches = await searchWorktreeFiles(machine, worktreeId, pattern)
   return (
     candidates.find((candidate) => matches.includes(candidate)) ??
     matches[0] ??
@@ -492,6 +494,7 @@ function useFileLanguage(path: string) {
 
 export function CodeFileEditor({
   worktreeId,
+  machine,
   path,
   value,
   onChange,
@@ -499,6 +502,7 @@ export function CodeFileEditor({
   reveal,
 }: {
   worktreeId: string
+  machine: Machine
   path: string
   value: string
   onChange: (value: string) => void
@@ -513,10 +517,21 @@ export function CodeFileEditor({
   useEffect(() => {
     setLspClient(null)
     if (!languageId) return
-    const acquired = acquireLspClient(worktreeId, languageId)
-    setLspClient(acquired.client)
-    return acquired.release
-  }, [languageId, worktreeId])
+    let cancelled = false
+    let releaseFn: (() => void) | null = null
+    void acquireLspClient(machine, worktreeId, languageId).then((acquired) => {
+      if (cancelled) {
+        acquired.release()
+        return
+      }
+      releaseFn = acquired.release
+      setLspClient(acquired.client)
+    })
+    return () => {
+      cancelled = true
+      releaseFn?.()
+    }
+  }, [languageId, worktreeId, machine])
 
   useEffect(() => {
     if (!lspClient || !languageId) return
@@ -599,7 +614,7 @@ export function CodeFileEditor({
               return
             }
 
-            void resolveImportFile(worktreeId, path, targetSource)
+            void resolveImportFile(machine, worktreeId, path, targetSource)
               .then((targetPath) => {
                 if (!targetPath) {
                   toast.error(`Local file ${targetSource} was not found`)
@@ -646,7 +661,7 @@ export function CodeFileEditor({
           return true
         },
       }),
-    [lspClient, onOpenDefinition, path, worktreeId],
+    [lspClient, onOpenDefinition, path, worktreeId, machine],
   )
 
   useEffect(() => {

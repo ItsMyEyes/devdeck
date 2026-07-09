@@ -4,6 +4,7 @@ import { ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2 } from 'luc
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
 import {
   useDeleteWorktreeFile,
@@ -15,6 +16,7 @@ import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface TerminalExplorerProps {
   worktreeId: string
+  machine: Machine
   rootLabel: string
   onOpenFile: (path: string) => void
   onFileDeleted: (path: string) => void
@@ -23,17 +25,18 @@ interface TerminalExplorerProps {
 
 export function TerminalExplorer({
   worktreeId,
+  machine,
   rootLabel,
   onOpenFile,
   onFileDeleted,
   onRequestQuickOpen,
 }: TerminalExplorerProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
-  const root = useWorktreeFiles(worktreeId, '')
-  const writeFile = useWriteWorktreeFile(worktreeId)
-  const deleteFile = useDeleteWorktreeFile(worktreeId)
-  const invalidateFiles = useInvalidateWorktreeFiles(worktreeId)
-  const isFetching = useIsFetching({ queryKey: qk.worktreeFilesRoot(worktreeId) }) > 0
+  const root = useWorktreeFiles(machine, worktreeId, '')
+  const writeFile = useWriteWorktreeFile(machine, worktreeId)
+  const deleteFile = useDeleteWorktreeFile(machine, worktreeId)
+  const invalidateFiles = useInvalidateWorktreeFiles(machine, worktreeId)
+  const isFetching = useIsFetching({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }) > 0
 
   function toggleDir(path: string) {
     setExpanded((current) => {
@@ -97,6 +100,7 @@ export function TerminalExplorer({
       <div className="min-h-0 flex-1 overflow-auto py-1">
         <TreeLevel
           worktreeId={worktreeId}
+          machine={machine}
           path=""
           depth={0}
           expanded={expanded}
@@ -124,6 +128,7 @@ export function TerminalExplorer({
 
 interface TreeLevelProps {
   worktreeId: string
+  machine: Machine
   path: string
   depth: number
   expanded: ReadonlySet<string>
@@ -133,8 +138,8 @@ interface TreeLevelProps {
   deletePending: boolean
 }
 
-function TreeLevel({ worktreeId, path, depth, ...rest }: TreeLevelProps) {
-  const { data, error, isLoading, refetch } = useWorktreeFiles(worktreeId, path)
+function TreeLevel({ worktreeId, machine, path, depth, ...rest }: TreeLevelProps) {
+  const { data, error, isLoading, refetch } = useWorktreeFiles(machine, worktreeId, path)
   const indent = 8 + depth * 14
   const entries = data ?? []
 
@@ -235,7 +240,7 @@ function TreeLevel({ worktreeId, path, depth, ...rest }: TreeLevelProps) {
               ) : null}
             </div>
             {isOpen && (
-              <TreeLevel worktreeId={worktreeId} path={entry.path} depth={depth + 1} {...rest} />
+              <TreeLevel worktreeId={worktreeId} machine={machine} path={entry.path} depth={depth + 1} {...rest} />
             )}
           </div>
         )

@@ -10,7 +10,16 @@ import { SideDrawer } from '@/components/ui/drawer'
 import { StatusDot } from '@/components/ui/status-dot'
 import { Textarea } from '@/components/ui/textarea'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
-import { useAgents, useAgentModels, useProjectBranches, useUpdateProject, useUpdateWorkspace, useUpdateWorktree, useWorkspaces } from '@/features/data/queries'
+import {
+  useAgents,
+  useAgentModels,
+  useMachines,
+  useProjectBranches,
+  useUpdateProject,
+  useUpdateWorkspace,
+  useUpdateWorktree,
+  useWorkspaces,
+} from '@/features/data/queries'
 import { findProject, findWorktree, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
 
 interface EditView {
@@ -42,8 +51,15 @@ export function EditDrawer() {
   const modelOptions = models.map((m) => ({ value: m.id, label: m.name }))
 
   const editWorktree = edit.kind === 'worktree' && edit.id ? findWorktree(workspaces, edit.id) : null
-  const editProjectId = edit.kind === 'worktree' && edit.id ? projectOfWorktree(workspaces, edit.id)?.id : undefined
-  const branches = useProjectBranches(editProjectId).data ?? []
+  const editProject =
+    edit.kind === 'worktree' && edit.id
+      ? projectOfWorktree(workspaces, edit.id)
+      : edit.kind === 'project' && edit.id
+        ? findProject(workspaces, edit.id)
+        : undefined
+  const machines = useMachines().data
+  const editMachine = machines?.find((m) => m.id === editProject?.machineId)
+  const branches = useProjectBranches(editMachine, editProject?.id).data ?? []
   const branchOptions = branches.map((b) => ({ value: b, label: b }))
   const branchLocked = editWorktree?.state === 'running' || editWorktree?.state === 'waiting'
 
@@ -55,10 +71,14 @@ export function EditDrawer() {
     const { kind, id } = edit
     if (!kind || !id) return
     if (kind === 'worktree') {
+      if (!editMachine) {
+        showToast("Could not resolve this worktree's machine")
+        return
+      }
       const w = findWorktree(workspaces, id)
       const branch = edit.a.trim() || (w?.branch ?? '')
       updateWorktree.mutate(
-        { id, patch: { branch, task: edit.b, model: edit.model } },
+        { machine: editMachine, id, patch: { branch, task: edit.b, model: edit.model } },
         { onSuccess: () => {
           closeEdit()
           showToast('Updated ⎇ ' + branch)

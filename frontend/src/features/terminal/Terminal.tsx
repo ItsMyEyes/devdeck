@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
+import type { Machine } from '@/store/types'
 
 export interface TerminalHandle {
   /** Write a line to the session's stdin (used by the "send input" box). */
@@ -36,6 +37,7 @@ const THEME = {
 
 interface TerminalProps {
   session: string
+  machine: Machine
   /** When true, the next single keystroke is sent as its Ctrl+key control code. */
   ctrlArmed?: boolean
   onCtrlConsumed?: () => void
@@ -43,7 +45,7 @@ interface TerminalProps {
 
 /** xterm.js terminal wired to the loom WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
-  { session, ctrlArmed = false, onCtrlConsumed },
+  { session, machine, ctrlArmed = false, onCtrlConsumed },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -107,10 +109,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // up front instead blanks the terminal for the whole backoff + replay
     // round-trip, which reads as a "refresh" on every mobile socket drop.
     let resetOnNextFrame = false
+    let resolvedUrl: string | null = null
 
     const connect = () => {
-      if (disposed) return
-      const ws = new WebSocket(terminalWsUrl(session, term.cols, term.rows))
+      if (disposed || !resolvedUrl) return
+      const ws = new WebSocket(resolvedUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
@@ -183,7 +186,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', kick)
 
-    connect()
+    void terminalWsUrl(machine, session, term.cols, term.rows).then((url) => {
+      if (disposed) return
+      resolvedUrl = url
+      connect()
+    })
 
     const onData = term.onData((data) => {
       // Sticky Ctrl (armed from the mobile key toolbar): fold the next single
@@ -244,7 +251,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // flushed into a different session on the next connect.
       outbox.current = []
     }
-  }, [session])
+  }, [session, machine])
 
   return <div ref={hostRef} className="h-full w-full" />
 })

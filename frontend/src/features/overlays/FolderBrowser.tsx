@@ -20,8 +20,11 @@ export function FolderBrowser() {
   const useFolder = useLoomStore((s) => s.useFolder)
 
   const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
-  const { data, isLoading, error, refetch } = useFsList(pathLabel)
-  const createFolder = useCreateFsFolder()
+  // TODO(sub-project #2, Task 5): resolve the machine being browsed from
+  // `browse.machineId` once the machine picker lands (NewProjectDialog/
+  // EditDrawer) — for now fs browsing has no machine selected.
+  const { data, isLoading, error, refetch } = useFsList(undefined, pathLabel)
+  const createFolder = useCreateFsFolder(undefined)
   const folders = data?.entries.filter((entry) => entry.isDir) ?? []
   const currentGit = data?.git ?? false
   const crumbs = ['~', ...browse.path]

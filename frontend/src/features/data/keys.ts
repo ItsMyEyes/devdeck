@@ -10,17 +10,21 @@ export const qk = {
   agentMCPServers: (id: string) => ['agents', id, 'mcp-servers'] as const,
   agentEnvProfiles: (id: string) => ['agents', id, 'env-profiles'] as const,
   agentSettingsFile: (id: string) => ['agents', id, 'settings-file'] as const,
-  fsList: (path: string) => ['fs', 'list', path] as const,
-  worktreeFilesRoot: (id: string) => ['worktrees', id, 'files'] as const,
-  worktreeFiles: (id: string, path: string) => ['worktrees', id, 'files', path] as const,
-  worktreeFile: (id: string, path: string) => ['worktrees', id, 'file', path] as const,
-  worktreeFileSearch: (id: string, pattern: string) =>
-    ['worktrees', id, 'file-search', pattern] as const,
-  gitRoot: (id: string) => ['worktrees', id, 'git'] as const,
-  gitStatus: (id: string) => ['worktrees', id, 'git', 'status'] as const,
-  gitLog: (id: string) => ['worktrees', id, 'git', 'log'] as const,
-  gitDiff: (id: string, target: string) => ['worktrees', id, 'git', 'diff', target] as const,
-  projectBranches: (id: string) => ['projects', id, 'branches'] as const,
+  fsList: (machineId: string, path: string) => ['machines', machineId, 'fs', 'list', path] as const,
+  worktreeFilesRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'files'] as const,
+  worktreeFiles: (machineId: string, id: string, path: string) =>
+    ['machines', machineId, 'worktrees', id, 'files', path] as const,
+  worktreeFile: (machineId: string, id: string, path: string) =>
+    ['machines', machineId, 'worktrees', id, 'file', path] as const,
+  worktreeFileSearch: (machineId: string, id: string, pattern: string) =>
+    ['machines', machineId, 'worktrees', id, 'file-search', pattern] as const,
+  gitRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git'] as const,
+  gitStatus: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'status'] as const,
+  gitLog: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'log'] as const,
+  gitDiff: (machineId: string, id: string, target: string) =>
+    ['machines', machineId, 'worktrees', id, 'git', 'diff', target] as const,
+  projectBranches: (machineId: string, id: string) =>
+    ['machines', machineId, 'projects', id, 'branches'] as const,
   companies: ['companies'] as const,
   banks: ['banks'] as const,
   issueAttachments: (issueId: string) => ['issues', issueId, 'attachments'] as const,

@@ -11,7 +11,6 @@ import type {
   Company,
   EnvModelOption,
   EnvProfileSummary,
-  FsEntry,
   Invoice,
   InvoiceItem,
   InvoiceStatus,
@@ -25,11 +24,9 @@ import type {
   Project,
   RecurringInvoiceTemplate,
   Settings,
-  TermLine,
   Todo,
   User,
   Workspace,
-  Worktree,
 } from '@/store/types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
@@ -67,16 +64,30 @@ async function toApiError(res: Response): Promise<ApiError> {
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
-async function request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
+export interface RequestOpts {
+  /** Overrides API_BASE — used by machineClient.ts to target a runtime machine directly or via the hub proxy. */
+  base?: string
+  /** Extra headers merged in alongside Content-Type (e.g. a runtime's bearer key). */
+  headers?: Record<string, string>
+}
+
+export async function request<T>(
+  method: HttpMethod,
+  path: string,
+  body?: unknown,
+  opts?: RequestOpts,
+): Promise<T> {
   const init: RequestInit = { method }
+  const headers: Record<string, string> = { ...opts?.headers }
   if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' }
+    headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
+  if (Object.keys(headers).length > 0) init.headers = headers
 
   let res: Response
   try {
-    res = await fetch(`${API_BASE}${path}`, init)
+    res = await fetch(`${opts?.base ?? API_BASE}${path}`, init)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network request failed'
     throw new ApiError(message, 0)
@@ -127,32 +138,6 @@ export interface UpdateProjectBody {
   repo?: string
   machineId?: string
   expanded?: boolean
-}
-
-export interface CreateWorktreeBody {
-  mode: 'branch' | 'root'
-  branch?: string
-  base?: string
-  model: string
-  agent: string
-  task?: string
-}
-
-export interface UpdateWorktreeBody {
-  branch?: string
-  base?: string
-  model?: string
-  task?: string
-  state?: Worktree['state']
-  pending?: string | null
-  ahead?: number
-  behind?: number
-  tokens?: number
-  elapsed?: number
-  added?: number
-  removed?: number
-  files?: number
-  appendLine?: TermLine
 }
 
 export interface CreateTodoBody {
@@ -318,148 +303,6 @@ export function updateProject(id: string, patch: UpdateProjectBody): Promise<Pro
 
 export function deleteProject(id: string): Promise<void> {
   return request<void>('DELETE', `/projects/${id}`)
-}
-
-export function fetchProjectBranches(id: string): Promise<string[]> {
-  return request<string[]>('GET', `/projects/${id}/branches`)
-}
-
-// ---- Worktrees ----
-
-export function createWorktree(projectId: string, body: CreateWorktreeBody): Promise<Worktree> {
-  return request<Worktree>('POST', `/projects/${projectId}/worktrees`, body)
-}
-
-export function updateWorktree(id: string, patch: UpdateWorktreeBody): Promise<Worktree> {
-  return request<Worktree>('PATCH', `/worktrees/${id}`, patch)
-}
-
-export function deleteWorktree(id: string): Promise<void> {
-  return request<void>('DELETE', `/worktrees/${id}`)
-}
-
-export interface WorktreeFileEntry {
-  name: string
-  path: string
-  isDir: boolean
-  size: number
-}
-
-export interface WorktreeFileContent {
-  path: string
-  content: string
-}
-
-export function fetchWorktreeFiles(worktreeId: string, path = ''): Promise<WorktreeFileEntry[]> {
-  return request<WorktreeFileEntry[]>(
-    'GET',
-    `/worktrees/${worktreeId}/files?path=${encodeURIComponent(path)}`,
-  )
-}
-
-export function fetchWorktreeFile(worktreeId: string, path: string): Promise<WorktreeFileContent> {
-  return request<WorktreeFileContent>(
-    'GET',
-    `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`,
-  )
-}
-
-export function writeWorktreeFile(
-  worktreeId: string,
-  body: WorktreeFileContent,
-): Promise<WorktreeFileContent> {
-  return request<WorktreeFileContent>('PUT', `/worktrees/${worktreeId}/file`, body)
-}
-
-export function deleteWorktreeFile(worktreeId: string, path: string): Promise<void> {
-  return request<void>(
-    'DELETE',
-    `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`,
-  )
-}
-
-export function searchWorktreeFiles(worktreeId: string, pattern: string): Promise<string[]> {
-  return request<string[]>(
-    'GET',
-    `/worktrees/${worktreeId}/files/search?pattern=${encodeURIComponent(pattern)}`,
-  )
-}
-
-// ---- Worktree git (source control) ----
-
-export interface GitStatusFile {
-  path: string
-  origPath?: string
-  /** Staged status letter: "M", "A", "D", "R", "U", or "." when clean. */
-  index: string
-  /** Unstaged status letter: "M", "D", "?", "U", or "." when clean. */
-  worktree: string
-}
-
-export interface GitStatus {
-  branch: string
-  upstream: string
-  ahead: number
-  behind: number
-  files: GitStatusFile[]
-}
-
-export interface GitCommit {
-  hash: string
-  short: string
-  author: string
-  date: string
-  subject: string
-  refs: string[]
-}
-
-export interface GitDiff {
-  path: string
-  diff: string
-}
-
-export function fetchGitStatus(worktreeId: string): Promise<GitStatus> {
-  return request<GitStatus>('GET', `/worktrees/${worktreeId}/git/status`)
-}
-
-export function fetchGitDiff(
-  worktreeId: string,
-  target: { path: string; staged: boolean; untracked: boolean } | { commit: string },
-): Promise<GitDiff> {
-  const query =
-    'commit' in target
-      ? `commit=${encodeURIComponent(target.commit)}`
-      : `path=${encodeURIComponent(target.path)}&staged=${target.staged}&untracked=${target.untracked}`
-  return request<GitDiff>('GET', `/worktrees/${worktreeId}/git/diff?${query}`)
-}
-
-export function fetchGitLog(worktreeId: string, limit = 50): Promise<GitCommit[]> {
-  return request<GitCommit[]>('GET', `/worktrees/${worktreeId}/git/log?limit=${limit}`)
-}
-
-export function gitStage(worktreeId: string, paths: string[]): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/stage`, { paths })
-}
-
-export function gitUnstage(worktreeId: string, paths: string[]): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/unstage`, { paths })
-}
-
-/** Discard unstaged changes: tracked files revert, untracked files are deleted. */
-export function gitDiscard(worktreeId: string, paths: string[]): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/discard`, { paths })
-}
-
-export function gitCommit(worktreeId: string, message: string): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/commit`, { message })
-}
-
-export function gitPush(worktreeId: string): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/push`)
-}
-
-export function gitPull(worktreeId: string): Promise<void> {
-  return request<void>('POST', `/worktrees/${worktreeId}/git/pull`)
 }
 
 // ---- Todos ----
@@ -833,30 +676,6 @@ export function updateAgentSettingsFile(agentId: string, content: string): Promi
     `/agents/${encodeURIComponent(agentId)}/settings-file`,
     { content },
   )
-}
-
-// ---- Filesystem ----
-
-export interface FsListResponse {
-  entries: FsEntry[]
-  git: boolean
-}
-
-export function fetchFsList(path: string): Promise<FsListResponse> {
-  return request<FsListResponse>('GET', `/fs/list?path=${encodeURIComponent(path)}`)
-}
-
-export interface CreateFsFolderBody {
-  path: string
-  name: string
-}
-
-export interface CreateFsFolderResponse {
-  path: string
-}
-
-export function createFsFolder(body: CreateFsFolderBody): Promise<CreateFsFolderResponse> {
-  return request<CreateFsFolderResponse>('POST', '/fs/mkdir', body)
 }
 
 // ---- Auth ----

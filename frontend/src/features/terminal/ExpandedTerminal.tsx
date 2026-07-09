@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Pill } from '@/components/ui/pill'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
-import { useUpdateWorktree, useWorkspace } from '@/features/data/queries'
+import { useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 import type {
   DefinitionReveal,
@@ -62,6 +62,8 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
   const project = useWorkspace(wsId).data?.projects.find(
     (candidate) => candidate.id === projectId,
   )
+  const machines = useMachines().data
+  const machine = machines?.find((m) => m.id === project?.machineId)
   const askDelete = useLoomStore((s) => s.askDelete)
 
   function sendKey(data: string) {
@@ -70,7 +72,9 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
   }
 
   function approve(ok: boolean) {
+    if (!machine) return
     updateWorktree.mutate({
+      machine,
       id: w.id,
       patch: ok
         ? {
@@ -184,6 +188,14 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
 
   const st = STATE[w.state]
   const label = w.root ? 'project root' : w.branch
+
+  if (!machine) {
+    return (
+      <div className="flex flex-1 items-center justify-center font-mono text-sm text-loom-dim">
+        no machine assigned to this project — add one from the Machines page
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-loom-terminal">
@@ -341,6 +353,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
                 key={w.id}
                 ref={termRef}
                 session={w.id}
+                machine={machine}
                 ctrlArmed={ctrlArmed}
                 onCtrlConsumed={() => setCtrlArmed(false)}
               />
@@ -358,13 +371,14 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
               activeTab === GIT_TAB ? 'flex' : 'hidden',
             )}
           >
-            <GitPanel worktreeId={w.id} active={activeTab === GIT_TAB} />
+            <GitPanel worktreeId={w.id} machine={machine} active={activeTab === GIT_TAB} />
           </div>
 
           {openFiles.map((path) => (
             <FileEditor
               key={path}
               worktreeId={w.id}
+              machine={machine}
               path={path}
               active={activeTab === path}
               onDirtyChange={handleDirtyChange}
@@ -384,6 +398,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
           <TerminalExplorer
             key={w.id}
             worktreeId={w.id}
+            machine={machine}
             rootLabel={project?.name ?? label}
             onOpenFile={openFile}
             onFileDeleted={removeOpenedFile}
@@ -395,6 +410,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
       <FileQuickOpen
         open={quickOpen}
         worktreeId={w.id}
+        machine={machine}
         onClose={() => setQuickOpen(false)}
         onOpenFile={openFile}
       />

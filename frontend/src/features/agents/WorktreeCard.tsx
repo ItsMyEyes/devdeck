@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Pill } from '@/components/ui/pill'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from './WorktreeGlyph'
-import { useUpdateWorktree } from '@/features/data/queries'
+import { useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 interface WorktreeCardProps {
@@ -21,9 +21,13 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
   const updateWorktree = useUpdateWorktree()
   const openEdit = useLoomStore((s) => s.openEdit)
   const askDelete = useLoomStore((s) => s.askDelete)
+  const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
+  const machine = useMachines().data?.find((m) => m.id === project?.machineId)
 
   function approve(ok: boolean) {
+    if (!machine) return
     updateWorktree.mutate({
+      machine,
       id: w.id,
       patch: ok
         ? { state: 'running', pending: null, appendLine: { k: 'ok', t: '✓ approved — continuing' } }
@@ -31,11 +35,18 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
     })
   }
   function retry() {
-    updateWorktree.mutate({ id: w.id, patch: { state: 'running', appendLine: { k: 'sys', t: '↻ retrying with patched config…' } } })
+    if (!machine) return
+    updateWorktree.mutate({
+      machine,
+      id: w.id,
+      patch: { state: 'running', appendLine: { k: 'sys', t: '↻ retrying with patched config…' } },
+    })
   }
   function pauseToggle() {
+    if (!machine) return
     const active = w.state === 'running' || w.state === 'waiting'
     updateWorktree.mutate({
+      machine,
       id: w.id,
       patch: active
         ? { state: 'stopped', pending: null, appendLine: { k: 'sys', t: '⏸ paused by user' } }

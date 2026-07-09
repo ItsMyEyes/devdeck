@@ -8,6 +8,7 @@ import {
   useDeleteProject,
   useDeleteWorkspace,
   useDeleteWorktree,
+  useMachines,
   useWorkspaces,
 } from '@/features/data/queries'
 import { projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
@@ -29,6 +30,7 @@ export function ConfirmDeleteDialog() {
   const cancelConfirm = useLoomStore((s) => s.cancelConfirm)
   const showToast = useLoomStore((s) => s.showToast)
   const workspaces = useWorkspaces().data ?? []
+  const machines = useMachines().data
   const deleteWorktree = useDeleteWorktree()
   const deleteProject = useDeleteProject()
   const deleteWorkspace = useDeleteWorkspace()
@@ -48,7 +50,12 @@ export function ConfirmDeleteDialog() {
     if (kind === 'worktree') {
       const parent = projectOfWorktree(workspaces, id)
       const parentWs = parent ? wsOfProject(workspaces, parent.id) : null
-      deleteWorktree.mutate(id, {
+      const machine = machines?.find((m) => m.id === parent?.machineId)
+      if (!machine) {
+        showToast("Could not resolve this worktree's machine")
+        return
+      }
+      deleteWorktree.mutate({ machine, id }, {
         onSuccess: () => {
           cancelConfirm()
           toast()

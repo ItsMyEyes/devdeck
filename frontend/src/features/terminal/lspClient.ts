@@ -1,3 +1,6 @@
+import type { Machine } from '@/store/types'
+import { machineWsUrl } from '@/lib/machineClient'
+
 export interface LspPosition {
   line: number
   character: number
@@ -80,13 +83,7 @@ interface LocationLink {
   targetSelectionRange?: LspRange
 }
 
-const clients = new Map<string, { client: LspClient; refs: number }>()
-
-function websocketURL(worktreeId: string, language: string) {
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const params = new URLSearchParams({ worktree: worktreeId, language })
-  return `${protocol}://${window.location.host}/ws/lsp?${params.toString()}`
-}
+const clients = new Map<string, { clientPromise: Promise<LspClient>; refs: number }>()
 
 export function languageIdForPath(path: string): string | null {
   const extension = path.split('.').pop()?.toLowerCase()
@@ -125,19 +122,25 @@ function serverLanguage(languageId: string) {
   return languageId
 }
 
-export function acquireLspClient(worktreeId: string, languageId: string) {
+async function createLspClient(machine: Machine, worktreeId: string, language: string): Promise<LspClient> {
+  const url = await machineWsUrl(machine, '/lsp', { worktree: worktreeId, language })
+  return new LspClient(url)
+}
+
+export async function acquireLspClient(machine: Machine, worktreeId: string, languageId: string) {
   const language = serverLanguage(languageId)
-  const key = `${worktreeId}:${language}`
+  const key = `${machine.id}:${worktreeId}:${language}`
   let entry = clients.get(key)
   if (!entry) {
-    entry = { client: new LspClient(worktreeId, language), refs: 0 }
+    entry = { clientPromise: createLspClient(machine, worktreeId, language), refs: 0 }
     clients.set(key, entry)
   }
   entry.refs += 1
   let released = false
+  const client = await entry.clientPromise
 
   return {
-    client: entry.client,
+    client,
     release() {
       if (released) return
       released = true
@@ -146,7 +149,7 @@ export function acquireLspClient(worktreeId: string, languageId: string) {
       current.refs -= 1
       if (current.refs <= 0) {
         clients.delete(key)
-        current.client.dispose()
+        void current.clientPromise.then((c) => c.dispose())
       }
     },
   }
@@ -170,13 +173,13 @@ export class LspClient {
   private rejectReady!: (reason: Error) => void
   private readonly ready: Promise<void>
 
-  constructor(worktreeId: string, language: string) {
+  constructor(url: string) {
     this.ready = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
     })
     this.ready.catch(() => undefined)
-    this.socket = new WebSocket(websocketURL(worktreeId, language))
+    this.socket = new WebSocket(url)
     this.socket.addEventListener('message', (event) => this.handleMessage(event))
     this.socket.addEventListener('close', () => {
       if (!this.disposed && !this.initialized) {

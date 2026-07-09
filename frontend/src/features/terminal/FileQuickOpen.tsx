@@ -1,12 +1,14 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { FileSearch, Loader2, Search, X } from 'lucide-react'
 import { ApiError } from '@/lib/api'
+import type { Machine } from '@/store/types'
 import { useWorktreeFileSearch } from '@/features/data/queries'
 import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface FileQuickOpenProps {
   open: boolean
   worktreeId: string
+  machine: Machine
   onClose: () => void
   onOpenFile: (path: string) => void
 }
@@ -18,6 +20,7 @@ function basename(path: string) {
 export function FileQuickOpen({
   open,
   worktreeId,
+  machine,
   onClose,
   onOpenFile,
 }: FileQuickOpenProps) {
@@ -25,7 +28,7 @@ export function FileQuickOpen({
   const [pattern, setPattern] = useState('')
   const [selected, setSelected] = useState(0)
   const deferredPattern = useDeferredValue(pattern)
-  const search = useWorktreeFileSearch(worktreeId, deferredPattern, open)
+  const search = useWorktreeFileSearch(machine, worktreeId, deferredPattern, open)
   const results = search.data ?? []
 
   useEffect(() => {

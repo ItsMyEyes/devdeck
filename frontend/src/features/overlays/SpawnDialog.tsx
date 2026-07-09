@@ -8,7 +8,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { useAgents, useAgentModels, useCreateWorktree, useProjectBranches, useWorkspaces } from '@/features/data/queries'
+import {
+  useAgents,
+  useAgentModels,
+  useCreateWorktree,
+  useMachines,
+  useProjectBranches,
+  useWorkspaces,
+} from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function SpawnDialog() {
@@ -20,7 +27,8 @@ export function SpawnDialog() {
   const workspaces = useWorkspaces().data ?? []
   const createWorktree = useCreateWorktree()
   const project = workspaces.flatMap((w) => w.projects).find((p) => p.id === spawn.projectId)
-  const branches = useProjectBranches(project?.id).data ?? []
+  const machine = useMachines().data?.find((m) => m.id === project?.machineId)
+  const branches = useProjectBranches(machine, project?.id).data ?? []
   const baseOptions = branches.map((b) => ({ value: b, label: b }))
 
   // Dynamic agent/model data from backend
@@ -45,9 +53,10 @@ export function SpawnDialog() {
 
   function submit() {
     const projectId = spawn.projectId
-    if (!projectId) return
+    if (!projectId || !machine) return
     createWorktree.mutate(
       {
+        machine,
         projectId,
         body: {
           mode: spawn.mode,
@@ -152,7 +161,7 @@ export function SpawnDialog() {
         <Button variant="secondary" onClick={closeSpawn}>
           Cancel
         </Button>
-        <Button onClick={submit} disabled={createWorktree.isPending}>
+        <Button onClick={submit} disabled={createWorktree.isPending || !machine}>
           {createWorktree.isPending ? 'Creating…' : 'Create →'}
         </Button>
       </div>

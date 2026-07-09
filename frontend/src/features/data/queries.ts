@@ -2,7 +2,7 @@
 // Queries read the full nested workspace tree + settings; mutations invalidate on success.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Workspace } from '@/store/types'
+import type { Machine, Workspace } from '@/store/types'
 import {
   addAgentMCPServer,
   activateAgentEnvProfile,
@@ -19,7 +19,6 @@ import {
   createBank,
   createCompany,
   createComment,
-  createFsFolder,
   createInvoice,
   createIssue,
   createNews,
@@ -28,7 +27,6 @@ import {
   createRecurringTemplate,
   createTodo,
   createWorkspace,
-  createWorktree,
   deleteAttachment,
   deleteBank,
   deleteComment,
@@ -41,8 +39,6 @@ import {
   deleteRecurringTemplate,
   deleteTodo,
   deleteWorkspace,
-  deleteWorktree,
-  deleteWorktreeFile,
   fetchAgentModels,
   fetchAgentMCPServers,
   fetchAgentSkills,
@@ -51,29 +47,15 @@ import {
   fetchBanks,
   fetchComments,
   fetchCompanies,
-  fetchFsList,
-  fetchGitDiff,
-  fetchGitLog,
-  fetchGitStatus,
   fetchIssueEvents,
   fetchMachineHealth,
   fetchMachines,
-  fetchProjectBranches,
   fetchSettings,
-  fetchWorktreeFile,
-  fetchWorktreeFiles,
   fetchWorkspaces,
-  gitCommit,
-  gitDiscard,
-  gitPull,
-  gitPush,
-  gitStage,
-  gitUnstage,
   installAgentSkill,
   markAllNewsRead,
   removeAgentMCPServer,
   removeAgentSkill,
-  searchWorktreeFiles,
   seed,
   uploadAttachment,
   updateBank,
@@ -88,8 +70,6 @@ import {
   updateSettings,
   updateTodo,
   updateWorkspace,
-  updateWorktree,
-  writeWorktreeFile,
 } from '@/lib/api'
 import type {
   AddMCPServerBody,
@@ -99,7 +79,6 @@ import type {
   EnvProfilePatch,
   CreateCommentBody,
   CreateCompanyBody,
-  CreateFsFolderBody,
   CreateInvoiceBody,
   CreateIssueBody,
   CreateMachineBody,
@@ -108,7 +87,6 @@ import type {
   CreateRecurringTemplateBody,
   CreateTodoBody,
   CreateWorkspaceBody,
-  CreateWorktreeBody,
   SettingsPatch,
   UpdateBankBody,
   UpdateCommentBody,
@@ -121,8 +99,32 @@ import type {
   UpdateRecurringTemplateBody,
   UpdateTodoBody,
   UpdateWorkspaceBody,
-  UpdateWorktreeBody,
 } from '@/lib/api'
+import {
+  createWorktree,
+  deleteWorktree,
+  deleteWorktreeFile,
+  fetchFsList,
+  fetchGitDiff,
+  fetchGitLog,
+  fetchGitStatus,
+  fetchProjectBranches,
+  fetchWorktreeFile,
+  fetchWorktreeFiles,
+  gitCommit,
+  gitDiscard,
+  gitPull,
+  gitPush,
+  gitStage,
+  gitUnstage,
+  searchWorktreeFiles,
+  updateWorktree,
+  writeWorktreeFile,
+  createFsFolder,
+  type CreateFsFolderBody,
+  type CreateWorktreeBody,
+  type UpdateWorktreeBody,
+} from '@/lib/machineApi'
 import { qk } from './keys'
 
 // ---- Queries ----
@@ -268,8 +270,8 @@ export function useDeleteProject() {
 export function useCreateWorktree() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
-    mutationFn: ({ projectId, body }: { projectId: string; body: CreateWorktreeBody }) =>
-      createWorktree(projectId, body),
+    mutationFn: ({ machine, projectId, body }: { machine: Machine; projectId: string; body: CreateWorktreeBody }) =>
+      createWorktree(machine, projectId, body),
     onSuccess: () => invalidate(),
   })
 }
@@ -277,7 +279,8 @@ export function useCreateWorktree() {
 export function useUpdateWorktree() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: UpdateWorktreeBody }) => updateWorktree(id, patch),
+    mutationFn: ({ machine, id, patch }: { machine: Machine; id: string; patch: UpdateWorktreeBody }) =>
+      updateWorktree(machine, id, patch),
     onSuccess: () => invalidate(),
   })
 }
@@ -285,7 +288,7 @@ export function useUpdateWorktree() {
 export function useDeleteWorktree() {
   const invalidate = useInvalidateWorkspaces()
   return useMutation({
-    mutationFn: (id: string) => deleteWorktree(id),
+    mutationFn: ({ machine, id }: { machine: Machine; id: string }) => deleteWorktree(machine, id),
     onSuccess: () => invalidate(),
   })
 }
@@ -764,64 +767,65 @@ export function useUpdateAgentSettingsFile() {
   })
 }
 
-// ---- Projects ----
+// ---- Projects (branches live on the machine that owns the repo) ----
 
-export function useProjectBranches(projectId: string | undefined) {
+export function useProjectBranches(machine: Machine | undefined, projectId: string | undefined) {
   return useQuery({
-    queryKey: qk.projectBranches(projectId ?? ''),
-    queryFn: () => fetchProjectBranches(projectId!),
-    enabled: !!projectId,
+    queryKey: qk.projectBranches(machine?.id ?? '', projectId ?? ''),
+    queryFn: () => fetchProjectBranches(machine!, projectId!),
+    enabled: !!machine && !!projectId,
     staleTime: 30_000,
   })
 }
 
-// ---- Filesystem ----
+// ---- Filesystem (browsing a path on a specific machine) ----
 
-export function useFsList(path: string) {
+export function useFsList(machine: Machine | undefined, path: string) {
   return useQuery({
-    queryKey: qk.fsList(path),
-    queryFn: () => fetchFsList(path),
-    enabled: path.length > 0,
+    queryKey: qk.fsList(machine?.id ?? '', path),
+    queryFn: () => fetchFsList(machine!, path),
+    enabled: !!machine && path.length > 0,
     staleTime: 30_000,
   })
 }
 
-export function useCreateFsFolder() {
+export function useCreateFsFolder(machine: Machine | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: CreateFsFolderBody) => createFsFolder(body),
-    onSuccess: (_created, body) => queryClient.invalidateQueries({ queryKey: qk.fsList(body.path) }),
+    mutationFn: (body: CreateFsFolderBody) => createFsFolder(machine!, body),
+    onSuccess: (_created, body) => queryClient.invalidateQueries({ queryKey: qk.fsList(machine?.id ?? '', body.path) }),
   })
 }
 
-export function useWorktreeFiles(worktreeId: string, path: string) {
+export function useWorktreeFiles(machine: Machine, worktreeId: string, path: string) {
   return useQuery({
-    queryKey: qk.worktreeFiles(worktreeId, path),
-    queryFn: () => fetchWorktreeFiles(worktreeId, path),
+    queryKey: qk.worktreeFiles(machine.id, worktreeId, path),
+    queryFn: () => fetchWorktreeFiles(machine, worktreeId, path),
     enabled: worktreeId.length > 0,
   })
 }
 
 // ---- Worktree git (source control) ----
 
-export function useGitStatus(worktreeId: string, active: boolean) {
+export function useGitStatus(machine: Machine, worktreeId: string, active: boolean) {
   return useQuery({
-    queryKey: qk.gitStatus(worktreeId),
-    queryFn: () => fetchGitStatus(worktreeId),
+    queryKey: qk.gitStatus(machine.id, worktreeId),
+    queryFn: () => fetchGitStatus(machine, worktreeId),
     enabled: worktreeId.length > 0,
     refetchInterval: active ? 5000 : false,
   })
 }
 
-export function useGitLog(worktreeId: string, active: boolean) {
+export function useGitLog(machine: Machine, worktreeId: string, active: boolean) {
   return useQuery({
-    queryKey: qk.gitLog(worktreeId),
-    queryFn: () => fetchGitLog(worktreeId),
+    queryKey: qk.gitLog(machine.id, worktreeId),
+    queryFn: () => fetchGitLog(machine, worktreeId),
     enabled: worktreeId.length > 0 && active,
   })
 }
 
 export function useGitDiff(
+  machine: Machine,
   worktreeId: string,
   target: { path: string; staged: boolean; untracked: boolean } | { commit: string } | null,
 ) {
@@ -832,96 +836,96 @@ export function useGitDiff(
         ? `commit:${target.commit}`
         : `${target.staged ? 'staged' : 'work'}:${target.untracked ? 'new' : 'mod'}:${target.path}`
   return useQuery({
-    queryKey: qk.gitDiff(worktreeId, targetKey),
-    queryFn: () => fetchGitDiff(worktreeId, target!),
+    queryKey: qk.gitDiff(machine.id, worktreeId, targetKey),
+    queryFn: () => fetchGitDiff(machine, worktreeId, target!),
     enabled: worktreeId.length > 0 && target !== null,
     staleTime: 5000,
   })
 }
 
 /** Mutation over git state; invalidates status + log + cached diffs on settle. */
-function useGitMutation<TVars>(worktreeId: string, mutationFn: (vars: TVars) => Promise<void>) {
+function useGitMutation<TVars>(machine: Machine, worktreeId: string, mutationFn: (vars: TVars) => Promise<void>) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.gitRoot(worktreeId) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.gitRoot(machine.id, worktreeId) }),
   })
 }
 
-export function useGitStage(worktreeId: string) {
-  return useGitMutation(worktreeId, (paths: string[]) => gitStage(worktreeId, paths))
+export function useGitStage(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (paths: string[]) => gitStage(machine, worktreeId, paths))
 }
 
-export function useGitUnstage(worktreeId: string) {
-  return useGitMutation(worktreeId, (paths: string[]) => gitUnstage(worktreeId, paths))
+export function useGitUnstage(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (paths: string[]) => gitUnstage(machine, worktreeId, paths))
 }
 
 /**
  * Discard reverts files on disk, so beyond git state this also invalidates
  * the file tree and any open file contents under the worktree.
  */
-export function useGitDiscard(worktreeId: string) {
+export function useGitDiscard(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (paths: string[]) => gitDiscard(worktreeId, paths),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['worktrees', worktreeId] }),
+    mutationFn: (paths: string[]) => gitDiscard(machine, worktreeId, paths),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }),
   })
 }
 
-export function useGitCommit(worktreeId: string) {
-  return useGitMutation(worktreeId, (message: string) => gitCommit(worktreeId, message))
+export function useGitCommit(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (message: string) => gitCommit(machine, worktreeId, message))
 }
 
-export function useGitPush(worktreeId: string) {
-  return useGitMutation(worktreeId, (_: void) => gitPush(worktreeId))
+export function useGitPush(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (_: void) => gitPush(machine, worktreeId))
 }
 
-export function useGitPull(worktreeId: string) {
-  return useGitMutation(worktreeId, (_: void) => gitPull(worktreeId))
+export function useGitPull(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (_: void) => gitPull(machine, worktreeId))
 }
 
 /** Refetch every loaded folder level of a worktree's file tree. */
-export function useInvalidateWorktreeFiles(worktreeId: string) {
+export function useInvalidateWorktreeFiles(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+  return () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
 }
 
-export function useWorktreeFile(worktreeId: string, path: string) {
+export function useWorktreeFile(machine: Machine, worktreeId: string, path: string) {
   return useQuery({
-    queryKey: qk.worktreeFile(worktreeId, path),
-    queryFn: () => fetchWorktreeFile(worktreeId, path),
+    queryKey: qk.worktreeFile(machine.id, worktreeId, path),
+    queryFn: () => fetchWorktreeFile(machine, worktreeId, path),
     enabled: worktreeId.length > 0 && path.length > 0,
     staleTime: 0,
   })
 }
 
-export function useWorktreeFileSearch(worktreeId: string, pattern: string, enabled: boolean) {
+export function useWorktreeFileSearch(machine: Machine, worktreeId: string, pattern: string, enabled: boolean) {
   return useQuery({
-    queryKey: qk.worktreeFileSearch(worktreeId, pattern),
-    queryFn: () => searchWorktreeFiles(worktreeId, pattern),
+    queryKey: qk.worktreeFileSearch(machine.id, worktreeId, pattern),
+    queryFn: () => searchWorktreeFiles(machine, worktreeId, pattern),
     enabled: enabled && worktreeId.length > 0,
     staleTime: 0,
   })
 }
 
-export function useWriteWorktreeFile(worktreeId: string) {
+export function useWriteWorktreeFile(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: { path: string; content: string }) => writeWorktreeFile(worktreeId, body),
+    mutationFn: (body: { path: string; content: string }) => writeWorktreeFile(machine, worktreeId, body),
     onSuccess: (content) => {
-      queryClient.setQueryData(qk.worktreeFile(worktreeId, content.path), content)
-      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+      queryClient.setQueryData(qk.worktreeFile(machine.id, worktreeId, content.path), content)
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
     },
   })
 }
 
-export function useDeleteWorktreeFile(worktreeId: string) {
+export function useDeleteWorktreeFile(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (path: string) => deleteWorktreeFile(worktreeId, path),
+    mutationFn: (path: string) => deleteWorktreeFile(machine, worktreeId, path),
     onSuccess: (_result, path) => {
-      queryClient.removeQueries({ queryKey: qk.worktreeFile(worktreeId, path) })
-      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(worktreeId) })
+      queryClient.removeQueries({ queryKey: qk.worktreeFile(machine.id, worktreeId, path) })
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
     },
   })
 }

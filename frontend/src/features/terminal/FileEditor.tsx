@@ -3,6 +3,7 @@ import { FileWarning, Loader2, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { Machine } from '@/store/types'
 import {
   useDeleteWorktreeFile,
   useWorktreeFile,
@@ -23,6 +24,7 @@ const CodeFileEditor = lazy(() =>
 
 interface FileEditorProps {
   worktreeId: string
+  machine: Machine
   path: string
   active: boolean
   onDirtyChange: (path: string, dirty: boolean) => void
@@ -41,6 +43,7 @@ function isMarkdownPath(path: string) {
 
 export function FileEditor({
   worktreeId,
+  machine,
   path,
   active,
   onDirtyChange,
@@ -50,9 +53,9 @@ export function FileEditor({
 }: FileEditorProps) {
   const [draft, setDraft] = useState('')
   const [initialized, setInitialized] = useState(false)
-  const file = useWorktreeFile(worktreeId, path)
-  const writeFile = useWriteWorktreeFile(worktreeId)
-  const deleteFile = useDeleteWorktreeFile(worktreeId)
+  const file = useWorktreeFile(machine, worktreeId, path)
+  const writeFile = useWriteWorktreeFile(machine, worktreeId)
+  const deleteFile = useDeleteWorktreeFile(machine, worktreeId)
   const dirty = initialized && file.data ? draft !== file.data.content : false
 
   useEffect(() => {
@@ -191,6 +194,7 @@ export function FileEditor({
         >
           <CodeFileEditor
             worktreeId={worktreeId}
+            machine={machine}
             path={path}
             value={draft}
             onChange={setDraft}
