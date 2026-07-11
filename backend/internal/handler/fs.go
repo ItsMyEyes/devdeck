@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"loom/backend/internal/domain"
+	gitpkg "loom/backend/internal/git"
 )
 
 // FsHandler handles filesystem-browsing endpoints.
@@ -128,6 +129,66 @@ func (h *FsHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"path": filepath.Clean(target)})
+}
+
+// Clone handles POST /api/fs/clone. It clones a git repository into path on
+// this machine — the hub calls this on a runtime (via
+// machineclient.CloneOnMachine) when "Clone from GitHub" targets a project
+// assigned to that machine, instead of cloning onto the hub's own
+// filesystem (see service/project.go Clone).
+func (h *FsHandler) Clone(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Repo string `json:"repo"`
+		Path string `json:"path"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	repo := strings.TrimSpace(body.Repo)
+	if repo == "" {
+		writeErr(w, http.StatusBadRequest, "repo is required")
+		return
+	}
+	if strings.ContainsAny(repo, "\x00\r\n") || strings.HasPrefix(repo, "-") {
+		writeErr(w, http.StatusBadRequest, "invalid repository url")
+		return
+	}
+	resolved, ok := resolveFsPath(w, body.Path, "path is required")
+	if !ok {
+		return
+	}
+	if !filepath.IsAbs(resolved) {
+		writeErr(w, http.StatusBadRequest, "clone destination must be an absolute path or start with ~")
+		return
+	}
+	parent := filepath.Dir(resolved)
+	info, err := os.Stat(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusBadRequest, "clone parent folder does not exist")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !info.IsDir() {
+		writeErr(w, http.StatusBadRequest, "clone parent is not a folder")
+		return
+	}
+	if _, err := os.Stat(resolved); err == nil {
+		writeErr(w, http.StatusConflict, "clone destination already exists")
+		return
+	} else if !os.IsNotExist(err) {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := gitpkg.Clone(repo, resolved); err != nil {
+		_ = os.RemoveAll(resolved)
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"path": resolved})
 }
 
 func resolveFsPath(w http.ResponseWriter, raw, missingMessage string) (string, bool) {

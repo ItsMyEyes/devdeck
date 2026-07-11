@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -115,5 +116,112 @@ func TestFsMkdirRejectsNestedOrTraversalNames(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestFsCloneClonesRealRepo(t *testing.T) {
+	origin := mustInitGitRepoForFsTest(t)
+	target := filepath.Join(t.TempDir(), "checkout")
+
+	body, err := json.Marshal(map[string]string{"repo": origin, "path": target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/clone", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewFsHandler().Clone(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatalf("cloned README missing: %v", err)
+	}
+}
+
+func TestFsCloneRejectsMissingRepo(t *testing.T) {
+	body, err := json.Marshal(map[string]string{"path": filepath.Join(t.TempDir(), "checkout")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/clone", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewFsHandler().Clone(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestFsCloneRejectsDestinationThatAlreadyExists(t *testing.T) {
+	origin := mustInitGitRepoForFsTest(t)
+	target := t.TempDir() // already exists
+
+	body, err := json.Marshal(map[string]string{"repo": origin, "path": target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/clone", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewFsHandler().Clone(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+}
+
+func TestFsCloneRejectsRelativePath(t *testing.T) {
+	origin := mustInitGitRepoForFsTest(t)
+	body, err := json.Marshal(map[string]string{"repo": origin, "path": "relative/checkout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/clone", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewFsHandler().Clone(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestFsCloneRemovesPartialCheckoutOnFailure(t *testing.T) {
+	missingOrigin := filepath.Join(t.TempDir(), "does-not-exist")
+	target := filepath.Join(t.TempDir(), "checkout")
+
+	body, err := json.Marshal(map[string]string{"repo": missingOrigin, "path": target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/clone", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewFsHandler().Clone(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target stat = %v, want not exist", err)
+	}
+}
+
+// mustInitGitRepoForFsTest mirrors internal/service/worktree_test.go's
+// mustInitGitRepo/runGit — duplicated here because internal/handler can't
+// import internal/service's test-only helpers across packages.
+func mustInitGitRepoForFsTest(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGitForFsTest(t, dir, "init", "-b", "main")
+	runGitForFsTest(t, dir, "config", "user.email", "test@example.com")
+	runGitForFsTest(t, dir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForFsTest(t, dir, "add", "README.md")
+	runGitForFsTest(t, dir, "commit", "-m", "initial")
+	return dir
+}
+
+func runGitForFsTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
