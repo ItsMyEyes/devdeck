@@ -239,6 +239,7 @@ func main() {
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
+	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
 
 	mux.HandleFunc("GET /api/settings", settingsH.GetSettings)
 	mux.HandleFunc("PUT /api/settings", settingsH.PutSettings)
