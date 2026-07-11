@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +57,7 @@ func TestProjectCloneClonesRepoThenCreatesProject(t *testing.T) {
 	origin := mustInitGitRepo(t)
 	target := filepath.Join(t.TempDir(), "checkout")
 
-	proj, err := svc.Clone(ws.ID, "", target, origin)
+	proj, err := svc.Clone(ws.ID, "", target, origin, "")
 	if err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestProjectCloneFailureDoesNotCreateProjectOrLeaveTarget(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "checkout")
 	missingOrigin := filepath.Join(t.TempDir(), "missing-origin")
 
-	if _, err := svc.Clone(ws.ID, "broken", target, missingOrigin); err == nil {
+	if _, err := svc.Clone(ws.ID, "broken", target, missingOrigin, ""); err == nil {
 		t.Fatal("Clone succeeded, want an error")
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
@@ -108,5 +111,119 @@ func TestProjectCloneFailureDoesNotCreateProjectOrLeaveTarget(t *testing.T) {
 	}
 	if len(workspaces[0].Projects) != 0 {
 		t.Fatalf("projects = %#v, want none", workspaces[0].Projects)
+	}
+}
+
+func TestProjectCloneWithEmptyMachineIDStaysLocal(t *testing.T) {
+	// This is the existing local-clone path, just calling Clone with the
+	// new trailing machineID argument set to "" — must behave identically
+	// to before this change.
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+	svc := NewProjectService(st)
+
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := mustInitGitRepo(t)
+	target := filepath.Join(t.TempDir(), "checkout")
+
+	proj, err := svc.Clone(ws.ID, "", target, origin, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if proj.MachineID != "" {
+		t.Fatalf("MachineID = %q, want empty (local)", proj.MachineID)
+	}
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatalf("cloned README missing: %v", err)
+	}
+}
+
+func TestProjectCloneWithMachineIDDispatchesToMachineAndPersistsIt(t *testing.T) {
+	var gotRepo, gotPath string
+	fakeMachine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotRepo, gotPath = body["repo"], body["path"]
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"path": gotPath})
+	}))
+	t.Cleanup(fakeMachine.Close)
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+	svc := NewProjectService(st)
+
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.CreateMachine("builder", fakeMachine.URL, "rt-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proj, err := svc.Clone(ws.ID, "myproj", "/home/dev/myproj", "https://github.com/org/repo.git", m.ID)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if proj.MachineID != m.ID {
+		t.Fatalf("MachineID = %q, want %q", proj.MachineID, m.ID)
+	}
+	if proj.Path != "/home/dev/myproj" {
+		t.Fatalf("Path = %q, want /home/dev/myproj", proj.Path)
+	}
+	if gotRepo != "https://github.com/org/repo.git" || gotPath != "/home/dev/myproj" {
+		t.Fatalf("machine received repo=%q path=%q", gotRepo, gotPath)
+	}
+	// The hub's own filesystem must NOT have been touched.
+	if _, err := os.Stat("/home/dev/myproj"); !os.IsNotExist(err) {
+		t.Fatalf("hub-local path should not exist, stat = %v", err)
+	}
+}
+
+func TestProjectCloneWithMachineIDFailureDoesNotCreateProject(t *testing.T) {
+	deadMachine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "clone destination already exists"})
+	}))
+	deadMachine.Close() // close immediately: guarantees an unreachable machine
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+	svc := NewProjectService(st)
+
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.CreateMachine("builder", deadMachine.URL, "rt-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Clone(ws.ID, "myproj", "/home/dev/myproj", "https://github.com/org/repo.git", m.ID); err == nil {
+		t.Fatal("Clone succeeded, want an error for an unreachable machine")
+	}
+	workspaces, err := st.Workspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces[0].Projects) != 0 {
+		t.Fatalf("projects = %#v, want none created on failure", workspaces[0].Projects)
 	}
 }

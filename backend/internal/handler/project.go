@@ -42,15 +42,16 @@ func (h *ProjectHandler) PostProject(w http.ResponseWriter, r *http.Request) {
 // PostCloneProject clones a git repository, then creates a project for it.
 func (h *ProjectHandler) PostCloneProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name *string `json:"name"`
-		Path *string `json:"path"`
-		Repo *string `json:"repo"`
+		Name      *string `json:"name"`
+		Path      *string `json:"path"`
+		Repo      *string `json:"repo"`
+		MachineID *string `json:"machineId"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	p, err := h.svc.Clone(r.PathValue("wsId"), str(body.Name), str(body.Path), str(body.Repo))
+	p, err := h.svc.Clone(r.PathValue("wsId"), str(body.Name), str(body.Path), str(body.Repo), str(body.MachineID))
 	if handleStoreErr(w, err) {
 		return
 	}

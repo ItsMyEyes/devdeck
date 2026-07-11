@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"loom/backend/internal/domain"
 	gitpkg "loom/backend/internal/git"
+	"loom/backend/internal/machineclient"
 	"loom/backend/internal/port"
 )
 
@@ -38,8 +40,14 @@ func (svc *ProjectService) Create(wsID, name, path, repo, machineID string) (dom
 }
 
 // Clone clones a git repository into path, then creates a project for the
-// completed checkout. The DB row is not written until git clone succeeds.
-func (svc *ProjectService) Clone(wsID, name, path, repo string) (domain.Project, error) {
+// completed checkout. The DB row is not written until the clone succeeds.
+//
+// If machineID is empty, the clone happens locally on the hub's own
+// filesystem (this branch's behavior is unchanged from before machine
+// dispatch existed). If machineID is set, the clone is dispatched to that
+// machine via machineclient.CloneOnMachine instead — the hub's own
+// filesystem is never touched in that case.
+func (svc *ProjectService) Clone(wsID, name, path, repo, machineID string) (domain.Project, error) {
 	name = strings.TrimSpace(name)
 	path = strings.TrimSpace(path)
 	repo = strings.TrimSpace(repo)
@@ -70,6 +78,17 @@ func (svc *ProjectService) Clone(wsID, name, path, repo string) (domain.Project,
 	}
 	if name == "" {
 		name = "new-project"
+	}
+
+	if machineID != "" {
+		machine, err := svc.store.MachineByID(machineID)
+		if err != nil {
+			return domain.Project{}, err
+		}
+		if err := machineclient.CloneOnMachine(context.Background(), machine, repo, path); err != nil {
+			return domain.Project{}, fmt.Errorf("%s: %w", err.Error(), ErrValidation)
+		}
+		return svc.store.CreateProject(wsID, name, path, repo, machineID)
 	}
 
 	resolved := gitpkg.ExpandHome(path)
