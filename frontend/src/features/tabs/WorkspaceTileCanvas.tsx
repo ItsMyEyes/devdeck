@@ -2,7 +2,7 @@ import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
-import { LayoutGrid, Plus, X } from 'lucide-react'
+import { Globe, LayoutGrid, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/status-dot'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
@@ -16,12 +16,14 @@ const MIN_PANE_SIZE = 0.08
 const TRAFFIC_LIGHT_GUTTER = 76
 
 export type WorktreeTileTab = Extract<TileTab, { kind: 'worktree' }>
+export type BrowserTileTab = Extract<TileTab, { kind: 'browser' }>
 
 export interface WorkspaceTileCanvasProps {
   root: TileNode
   renderers: {
     agents: (ctx: { leafId: string }) => ReactNode
     worktree: (ctx: { leafId: string; tab: WorktreeTileTab }) => ReactNode
+    browser: (ctx: { leafId: string; tab: BrowserTileTab }) => ReactNode
   }
   /** Fired for every structural change this component makes itself: drag-and-drop commits and divider-resize commits. */
   onTreeChange: (root: TileNode) => void
@@ -36,6 +38,10 @@ export interface WorkspaceTileCanvasProps {
    *  `short` is "project name · machine host" (machine omitted when local),
    *  used only for the computed workspace title, not the tab pill itself. */
   resolveWorktreeTab: (tab: WorktreeTileTab) => { label: string; color: string; pulse: boolean; short: string } | undefined
+  /** Live title for a browser tab, resolved from the store's `browserTiles`
+   *  slice (not stored in the tile tree itself). `undefined` hides the tab
+   *  (mirrors `resolveWorktreeTab`'s contract). */
+  resolveBrowserTab: (tab: BrowserTileTab) => { label: string } | undefined
   /** When `false`, only the top-left leaf's pinned header renders — no
    *  leaf bodies, no other leaves. Used on non-tiled workspace routes
    *  (Machines, Tools, Invoices, ...) so the tab strip stays up as
@@ -57,6 +63,7 @@ interface TileRenderContext {
   onNewTab: (leafId: string) => void
   onResizeSplit: (splitId: string, sizes: number[]) => void
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']
+  resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
   hoverZone: { leafId: string; zone: TileDropZone } | null
 }
 
@@ -67,10 +74,15 @@ function collectLeaves(node: TileNode): TileLeaf[] {
 /** Short display name for whichever tab is active in a leaf — 'Agents' for
  *  the pinned home tab, otherwise the worktree's `short` (project ·
  *  machine). Used to build the "Workspace (A + B)" summary title. */
-function leafShortTitle(leaf: TileLeaf, resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']): string {
+function leafShortTitle(
+  leaf: TileLeaf,
+  resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab'],
+  resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab'],
+): string {
   const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0]
   if (!tab) return ''
   if (tab.kind === 'agents') return 'Agents'
+  if (tab.kind === 'browser') return resolveBrowserTab(tab)?.label ?? 'Browser'
   return resolveWorktreeTab(tab)?.short ?? tab.wtId
 }
 
@@ -217,6 +229,7 @@ function TileTabButton({
   active,
   compact,
   resolveWorktreeTab,
+  resolveBrowserTab,
   onSelect,
   onClose,
 }: {
@@ -227,6 +240,7 @@ function TileTabButton({
    *  reads as "two full tab strips stacked" — see TileLeafView. */
   compact: boolean
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']
+  resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
   onSelect: () => void
   onClose?: () => void
 }) {
@@ -243,6 +257,21 @@ function TileTabButton({
       dragging && 'opacity-40',
     )
 
+  const closeButton = (label: string) =>
+    onClose ? (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose()
+        }}
+        aria-label={`Close ${label}`}
+        className="flex-none rounded p-0.5 text-loom-dim opacity-0 hover:bg-loom-hover-wash hover:text-loom-fg group-hover:opacity-100"
+      >
+        <X size={11} />
+      </button>
+    ) : null
+
   if (tab.kind === 'worktree') {
     const info = resolveWorktreeTab(tab)
     if (!info) return null
@@ -252,19 +281,21 @@ function TileTabButton({
           <StatusDot color={info.color} pulse={info.pulse} />
           <span className="truncate">{info.label}</span>
         </button>
-        {onClose ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onClose()
-            }}
-            aria-label={`Close ${info.label}`}
-            className="flex-none rounded p-0.5 text-loom-dim opacity-0 hover:bg-loom-hover-wash hover:text-loom-fg group-hover:opacity-100"
-          >
-            <X size={11} />
-          </button>
-        ) : null}
+        {closeButton(info.label)}
+      </div>
+    )
+  }
+
+  if (tab.kind === 'browser') {
+    const info = resolveBrowserTab(tab)
+    if (!info) return null
+    return (
+      <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
+        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
+          <Globe size={12} />
+          <span className="truncate">{info.label}</span>
+        </button>
+        {closeButton(info.label)}
       </div>
     )
   }
@@ -317,8 +348,9 @@ function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: b
             active={tab.id === leaf.activeTabId}
             compact={!isTopLeft}
             resolveWorktreeTab={ctx.resolveWorktreeTab}
+            resolveBrowserTab={ctx.resolveBrowserTab}
             onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
-            onClose={tab.kind === 'worktree' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
+            onClose={tab.kind !== 'agents' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
           />
           {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
           {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
@@ -359,7 +391,11 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {leaf.tabs.map((tab) => (
           <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
-            {tab.kind === 'agents' ? ctx.renderers.agents({ leafId: leaf.id }) : ctx.renderers.worktree({ leafId: leaf.id, tab })}
+            {tab.kind === 'agents'
+              ? ctx.renderers.agents({ leafId: leaf.id })
+              : tab.kind === 'worktree'
+                ? ctx.renderers.worktree({ leafId: leaf.id, tab })
+                : ctx.renderers.browser({ leafId: leaf.id, tab })}
           </div>
         ))}
         {hoverZone ? (
@@ -389,6 +425,7 @@ export function WorkspaceTileCanvas({
   onCloseTab,
   onNewTab,
   resolveWorktreeTab,
+  resolveBrowserTab,
   showContent = true,
   className,
 }: WorkspaceTileCanvasProps) {
@@ -407,10 +444,10 @@ export function WorkspaceTileCanvas({
   const workspaceTitle = useMemo(() => {
     if (root.type !== 'split') return null
     const titles = collectLeaves(root)
-      .map((leaf) => leafShortTitle(leaf, resolveWorktreeTab))
+      .map((leaf) => leafShortTitle(leaf, resolveWorktreeTab, resolveBrowserTab))
       .filter(Boolean)
     return titles.length > 1 ? `Workspace (${titles.join(' + ')})` : null
-  }, [root, resolveWorktreeTab])
+  }, [root, resolveWorktreeTab, resolveBrowserTab])
 
   const handleResizeSplit = useCallback(
     (splitId: string, sizes: number[]) => {
@@ -464,6 +501,7 @@ export function WorkspaceTileCanvas({
     onNewTab,
     onResizeSplit: handleResizeSplit,
     resolveWorktreeTab,
+    resolveBrowserTab,
     hoverZone,
   }
 
@@ -487,11 +525,17 @@ export function WorkspaceTileCanvas({
           <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-loom-border bg-loom-terminal px-3 font-mono text-[11px] text-loom-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
             {dragTab.kind === 'agents' ? (
               <LayoutGrid size={12} />
-            ) : (
+            ) : dragTab.kind === 'worktree' ? (
               <StatusDot color={resolveWorktreeTab(dragTab)?.color ?? '#6b7280'} />
+            ) : (
+              <Globe size={12} />
             )}
             <span className="truncate">
-              {dragTab.kind === 'agents' ? 'Agents' : (resolveWorktreeTab(dragTab)?.label ?? dragTab.wtId)}
+              {dragTab.kind === 'agents'
+                ? 'Agents'
+                : dragTab.kind === 'worktree'
+                  ? (resolveWorktreeTab(dragTab)?.label ?? dragTab.wtId)
+                  : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
             </span>
           </div>
         ) : null}
