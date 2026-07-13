@@ -35,13 +35,40 @@ declare module '@tanstack/react-router' {
   }
 }
 
-const rootEl = document.getElementById('root')
-if (!rootEl) throw new Error('#root not found')
+/**
+ * Desktop (Tauri) bootstrap: the shell launches the SPA at /?key=<hub key>.
+ * Exchange it for a normal session cookie before the router's auth guard
+ * runs, then scrub the key from the URL. No-op on the web (no ?key=).
+ */
+async function bootstrapDesktopSession(): Promise<void> {
+  const params = new URLSearchParams(window.location.search)
+  const key = params.get('key')
+  if (!key) return
+  params.delete('key')
+  const query = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+  try {
+    const res = await fetch('/api/auth/key-session', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+    })
+    if (!res.ok) console.error(`desktop key-session bootstrap failed: ${res.status}`)
+  } catch (err) {
+    console.error('desktop key-session bootstrap failed', err)
+  }
+}
 
-createRoot(rootEl).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </StrictMode>,
-)
+function renderApp() {
+  const rootEl = document.getElementById('root')
+  if (!rootEl) throw new Error('#root not found')
+
+  createRoot(rootEl).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </StrictMode>,
+  )
+}
+
+void bootstrapDesktopSession().finally(renderApp)
