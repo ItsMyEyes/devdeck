@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
-import { useWorkspace } from '@/features/data/queries'
+import { useMachines, useWorkspace } from '@/features/data/queries'
 import { STATE } from '@/lib/constants'
 import { useLoomStore } from '@/store/useLoomStore'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
@@ -29,6 +29,9 @@ export function WorkspaceTileArea({ wsId }: WorkspaceTileAreaProps) {
   const showToast = useLoomStore((s) => s.showToast)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
+  const machines = useMachines().data ?? []
+  const machinesById = new Map(machines.map((m) => [m.id, m]))
+  const projectsById = new Map(workspace ? workspace.projects.map((p) => [p.id, p]) : [])
 
   function commit(next: WorkspaceTileLayout) {
     setWorkspaceTileLayout(wsId, next)
@@ -102,10 +105,14 @@ export function WorkspaceTileArea({ wsId }: WorkspaceTileAreaProps) {
     const worktree = worktrees.find((w) => w.id === tab.wtId)
     if (!worktree) return undefined
     const st = STATE[worktree.state]
+    const project = projectsById.get(tab.projectId)
+    const machine = project?.machineId ? machinesById.get(project.machineId) : undefined
+    const short = machine && !machine.isLocal ? `${project?.name ?? 'project'} · ${machine.name}` : (project?.name ?? 'project')
     return {
       label: worktree.root ? 'project root' : worktree.branch,
       color: st.color,
       pulse: worktree.state === 'running' || worktree.state === 'waiting',
+      short,
     }
   }
 
