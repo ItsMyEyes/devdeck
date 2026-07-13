@@ -1,3 +1,4 @@
+mod browser_tiles;
 mod hubapi;
 mod sidecar;
 
@@ -6,7 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, RunEvent};
+use browser_tiles::BrowserTiles;
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -27,6 +29,30 @@ enum LaunchEnd {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(BrowserTiles::new())
+        .on_page_load(|webview, payload| {
+            // Global hook (fires for every webview in the app, including
+            // the main UI) filtered to just the Browser tab's own child
+            // webviews, so the React address bar can react to in-page
+            // navigation (the user clicking a link inside the native
+            // webview) instead of only explicit typed-URL navigation.
+            if !webview.label().starts_with("browser-") {
+                return;
+            }
+            let _ = webview.emit(
+                "browser-tile-page-load",
+                serde_json::json!({ "label": webview.label(), "url": payload.url().to_string() }),
+            );
+        })
+        .invoke_handler(tauri::generate_handler![
+            browser_tiles::browser_tile_open,
+            browser_tiles::browser_tile_navigate,
+            browser_tiles::browser_tile_reload,
+            browser_tiles::browser_tile_set_bounds,
+            browser_tiles::browser_tile_hide,
+            browser_tiles::browser_tile_show,
+            browser_tiles::browser_tile_close,
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 // `tauri dev`: window already points at the Vite dev server

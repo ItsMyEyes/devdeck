@@ -293,6 +293,21 @@ embedded UI with `?key=`, which `main.tsx` exchanges for a session cookie via
 `POST /api/auth/key-session`. Spec:
 `docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md`.
 
+### Forward proxy — reaching a runtime's loopback-only services
+
+The diagrams above cover REST/WS traffic between clients and a runtime's own
+API, but a worktree's dev server (e.g. `npm run dev`) binds to that
+runtime's `127.0.0.1` — invisible to a browser running anywhere else, direct
+or proxied. `backend/internal/netproxy` adds a fourth path, orthogonal to
+the machine registry entirely: a plain SOCKS5 (`socks5.go`) and/or HTTP
+(`httpproxy.go`) forward proxy, started opt-in via `--socks5-addr`/
+`--http-proxy-addr` (+ `--proxy-key`) on *any* role — hub, runtime, or the
+desktop sidecar — and dialing upstream from wherever that process runs.
+Point a browser's proxy settings at a runtime's listener and it dials the
+runtime's own loopback address, the same trick `ssh -D` plays for a remote
+shell. See `COMMANDS.md`'s "Forward proxy for remote dev servers" for flags
+and a worked example.
+
 ## Dependency wiring
 
 - `backend/cmd/server/main.go` wires everything manually (no DI framework).

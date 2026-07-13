@@ -222,11 +222,12 @@ export function createFsFolder(machine: Machine, body: CreateFsFolderBody): Prom
 export interface ProxyStartResponse {
   socks5Addr: string
   httpProxyAddr: string
-  proxyKey: string
 }
 
 /** Idempotently starts this machine's SOCKS5+HTTP forward proxy. A second
- *  call while already running returns the same bound addresses/key. */
+ *  call while already running returns the same bound addresses. Unauthenticated
+ *  by design — see the comment on the Go service's `Start()`: no Tauri-backed
+ *  webview proxy_url on any platform can carry credentials. */
 export function startProxy(machine: Machine): Promise<ProxyStartResponse> {
   return machineRequest<ProxyStartResponse>(machine, 'POST', '/proxy/start')
 }

@@ -22,12 +22,11 @@ func TestProxyHandlerPostStartReturnsBoundAddresses(t *testing.T) {
 	var body struct {
 		SOCKS5Addr    string `json:"socks5Addr"`
 		HTTPProxyAddr string `json:"httpProxyAddr"`
-		ProxyKey      string `json:"proxyKey"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.SOCKS5Addr == "" || body.HTTPProxyAddr == "" || body.ProxyKey == "" {
+	if body.SOCKS5Addr == "" || body.HTTPProxyAddr == "" {
 		t.Fatalf("response missing fields: %+v", body)
 	}
 }

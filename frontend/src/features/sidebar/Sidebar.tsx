@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { fmtRupiah } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -11,51 +11,27 @@ import { SidebarNav } from './SidebarNav'
 import { ProjectTree } from './ProjectTree'
 
 interface SidebarProps {
-  /** Collapses the sidebar to a ~44px icon rail (workspace-mode chrome collapse). */
-  compact?: boolean
-}
-
-export function Sidebar({ compact }: SidebarProps = {}) {
-  const sidebarOpen = useLoomStore((s) => s.sidebarOpen)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-
-  if (compact) return <SidebarRail />
-
-  return (
-    <>
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-[rgba(6,7,9,0.55)] md:hidden"
-        />
-      )}
-      <aside
-        className={cn(
-          'flex flex-col border-r border-loom-border bg-loom-surface',
-          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[45] max-md:w-[298px] max-md:max-w-[86vw]',
-          'max-md:shadow-[8px_0_40px_rgba(0,0,0,0.55)] max-md:transition-transform max-md:duration-200',
-          sidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
-          'md:w-[298px] md:flex-none md:translate-x-0',
-        )}
-      >
-        <WorkspaceSwitcher />
-        <SidebarNav />
-        <SidebarBody />
-      </aside>
-    </>
-  )
+  /** Whether mobile shows the sidebar as a Header-hamburger-triggered overlay drawer
+   *  (hidden until `sidebarOpen`). False in workspace mode, which hides the Header
+   *  entirely — there the rail has no other way to be revealed, so it stays
+   *  permanently visible on mobile too, same as desktop. */
+  mobileDrawer?: boolean
 }
 
 /**
- * Collapsed icon rail shown instead of the full sidebar while a worktree is
- * open (workspace mode). Always visible — desktop and mobile alike — since
- * it's the only way back once the Header's hamburger is hidden; it does not
- * use the mobile drawer/`sidebarOpen` mechanism at all.
+ * Left sidebar, global across every route: an icon-only rail by default
+ * (`railExpanded` false) that widens to the full labeled sidebar on toggle.
+ * The small/big toggle is independent of `sidebarOpen`, the mobile drawer's
+ * open/close.
  */
-function SidebarRail() {
+export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   const navigate = useNavigate()
-  const { wsId, projectId } = useScope()
+  const sidebarOpen = useLoomStore((s) => s.sidebarOpen)
+  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
+  const railExpanded = useLoomStore((s) => s.railExpanded)
+  const toggleRailExpanded = useLoomStore((s) => s.toggleRailExpanded)
   const dirtyFileCount = useLoomStore((s) => s.dirtyFileCount)
+  const { wsId, projectId, wtId } = useScope()
 
   function goBack() {
     if (!wsId || !projectId) return
@@ -63,20 +39,53 @@ function SidebarRail() {
     navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId } })
   }
 
+  const railButtonClass = cn(
+    'flex h-9 flex-none cursor-pointer items-center rounded-lg text-loom-muted transition-colors hover:bg-loom-hover-wash hover:text-loom-fg',
+    railExpanded ? 'w-full justify-start gap-2.5 px-2.5' : 'w-9 justify-center',
+  )
+
+  const toggleButton = (
+    <button onClick={toggleRailExpanded} aria-label={railExpanded ? 'Collapse sidebar' : 'Expand sidebar'} className={railButtonClass}>
+      {railExpanded ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+      {railExpanded && <span className="text-[12.5px] font-medium">Collapse sidebar</span>}
+    </button>
+  )
+
+  // Only meaningful while a worktree is open — nothing to "go back" to otherwise.
+  const backButton = wtId ? (
+    <button onClick={goBack} aria-label="Back to worktrees" className={railButtonClass}>
+      <ArrowLeft size={16} />
+      {railExpanded && <span className="text-[12.5px] font-medium">Back to worktrees</span>}
+    </button>
+  ) : null
+
   return (
-    <aside className="flex w-11 flex-none flex-col items-center gap-1 border-r border-loom-border bg-loom-surface py-2">
-      <Tooltip label="Back to worktrees" side="right">
-        <button
-          onClick={goBack}
-          aria-label="Back to worktrees"
-          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-loom-muted transition-colors hover:bg-loom-hover-wash hover:text-loom-fg"
-        >
-          <ArrowLeft size={16} />
-        </button>
-      </Tooltip>
-      <WorkspaceSwitcher compact />
-      <SidebarNav compact />
-    </aside>
+    <>
+      {mobileDrawer && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-[rgba(6,7,9,0.55)] md:hidden"
+        />
+      )}
+      <aside
+        className={cn(
+          'flex flex-none flex-col border-r border-loom-border bg-loom-surface py-2',
+          railExpanded ? 'w-[298px] items-stretch gap-1 px-2' : 'w-11 items-center gap-1',
+          mobileDrawer &&
+            cn(
+              'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[45] max-md:max-w-[86vw]',
+              'max-md:shadow-[8px_0_40px_rgba(0,0,0,0.55)] max-md:transition-transform max-md:duration-200',
+              sidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
+            ),
+        )}
+      >
+        {railExpanded ? toggleButton : <Tooltip label="Expand sidebar" side="right">{toggleButton}</Tooltip>}
+        {backButton && (railExpanded ? backButton : <Tooltip label="Back to worktrees" side="right">{backButton}</Tooltip>)}
+        <WorkspaceSwitcher compact={!railExpanded} />
+        <SidebarNav compact={!railExpanded} />
+        {railExpanded && <SidebarBody />}
+      </aside>
+    </>
   )
 }
 

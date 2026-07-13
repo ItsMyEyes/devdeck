@@ -1,0 +1,19 @@
+# frontend/src-tauri/permissions/browser-tiles.toml
+#
+# Grants the frontend permission to call this app's own custom browser-tile
+# commands. Required because this app already ships an ACL manifest
+# (capabilities/default.json) — once an ACL manifest exists, Tauri enforces
+# ACL checks on every command, including custom (non-plugin) ones, not just
+# its built-in `core:*` commands.
+[[permission]]
+identifier = "allow-browser-tiles"
+description = "Allows the browser tile lifecycle commands (open/navigate/reload/bounds/close/hide/show)."
+commands.allow = [
+    "browser_tile_open",
+    "browser_tile_navigate",
+    "browser_tile_reload",
+    "browser_tile_set_bounds",
+    "browser_tile_hide",
+    "browser_tile_show",
+    "browser_tile_close",
+]

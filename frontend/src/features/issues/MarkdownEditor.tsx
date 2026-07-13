@@ -23,6 +23,9 @@ interface SlashMenuState {
  * canvas (no card/border/permanent toolbar) and swaps to a borderless
  * auto-growing textarea — with a formatting toolbar, "/" block-command menu,
  * and file attachment upload (button, drag-drop, or paste) — while focused.
+ * While editing, a live preview pane sits alongside the textarea (wraps to
+ * stacked below it in narrow containers via flex-wrap) so the raw markdown
+ * and its rendered form are visible at the same time.
  * Attachments are stored per issue, so upload UI only appears when an
  * `issueId` is provided; without one (e.g. the Tools page) the editor is
  * text-only.
@@ -207,65 +210,74 @@ export function MarkdownEditor({
   }
 
   return (
-    <div className="relative -mx-1.5 flex flex-col gap-2 rounded-md px-1.5">
-      <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg border border-loom-border-strong bg-loom-popover/60 p-0.5">
-        {TOOLBAR_ACTIONS.map((action) => (
-          <Tooltip key={action.id} label={action.label}>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => applyToolbarAction(action.apply)}
-              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2"
-            >
-              <action.icon size={13} />
-            </button>
-          </Tooltip>
-        ))}
-        {issueId ? (
-          <>
-            <span className="mx-0.5 h-4 w-px bg-loom-border-strong" />
-            <Tooltip label="Attach file">
+    <div className="relative -mx-1.5 flex flex-wrap items-start gap-3 rounded-md px-1.5">
+      <div className="flex min-w-[240px] flex-1 basis-[320px] flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg border border-loom-border-strong bg-loom-popover/60 p-0.5">
+          {TOOLBAR_ACTIONS.map((action) => (
+            <Tooltip key={action.id} label={action.label}>
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => fileInputRef.current?.click()}
-                disabled={upload.isPending}
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
+                onClick={() => applyToolbarAction(action.apply)}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2"
               >
-                {upload.isPending ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
+                <action.icon size={13} />
               </button>
             </Tooltip>
-          </>
-        ) : null}
-      </div>
-      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePick} />
+          ))}
+          {issueId ? (
+            <>
+              <span className="mx-0.5 h-4 w-px bg-loom-border-strong" />
+              <Tooltip label="Attach file">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={upload.isPending}
+                  className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
+                >
+                  {upload.isPending ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
+                </button>
+              </Tooltip>
+            </>
+          ) : null}
+        </div>
+        <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePick} />
 
-      <textarea
-        ref={textareaRef}
-        autoFocus
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onDrop={handleDrop}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setIsDragOver(true)
-        }}
-        onDragLeave={() => setIsDragOver(false)}
-        onPaste={handlePaste}
-        onBlur={() => {
-          setSlashMenu(null)
-          setEditing(false)
-          onBlur?.()
-        }}
-        placeholder={placeholder}
-        rows={1}
-        className={cn(
-          'w-full resize-none overflow-hidden rounded-md border-none bg-transparent px-0 py-0 text-[13px] leading-relaxed text-loom-fg-2',
-          'font-sans placeholder:text-loom-dim-2 focus-visible:outline-none',
-          isDragOver && 'outline-2 outline-dashed outline-loom-border-accent outline-offset-4',
-        )}
-      />
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onDrop={handleDrop}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragOver(true)
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onPaste={handlePaste}
+          onBlur={() => {
+            setSlashMenu(null)
+            setEditing(false)
+            onBlur?.()
+          }}
+          placeholder={placeholder}
+          rows={1}
+          className={cn(
+            'w-full resize-none overflow-hidden rounded-md border-none bg-transparent px-0 py-0 text-[13px] leading-relaxed text-loom-fg-2',
+            'font-sans placeholder:text-loom-dim-2 focus-visible:outline-none',
+            isDragOver && 'outline-2 outline-dashed outline-loom-border-accent outline-offset-4',
+          )}
+        />
+      </div>
+
+      <div className="flex min-w-[240px] flex-1 basis-[320px] flex-col gap-1.5">
+        <span className="text-[10.5px] font-medium uppercase tracking-wide text-loom-dim">Preview</span>
+        <div className="rounded-md border border-loom-border-card bg-loom-bg px-3 py-2.5">
+          <MarkdownPreview source={value} />
+        </div>
+      </div>
 
       {slashMenu && filteredCommands.length > 0 ? (
         <div

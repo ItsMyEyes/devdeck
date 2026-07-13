@@ -58,6 +58,8 @@ export interface PaneCanvasProps {
   paneTitleContent?: (pane: LeafPane) => ReactNode
   /** Rendered inside the "..." popover; only ever shown while the pane is focused. Omit to hide the overflow button. */
   paneOverflowActions?: (pane: LeafPane) => ReactNode
+  /** Rendered inside the "+" new-tab popover next to the tab strip. Omit to hide the "+" button. */
+  paneNewTabActions?: (pane: LeafPane) => ReactNode
   /** Set false below the `md` breakpoint. Disables the DnD sensors entirely, and also
    *  collapses every `SplitPane` to a vertically scroll-snapped stack (one leaf full-bleed
    *  at a time, resize handles hidden) instead of the side-by-side/resizable layout — spec
@@ -79,6 +81,7 @@ interface PaneRenderContext {
   isTabDirty?: (content: PaneContent) => boolean
   paneTitleContent?: (pane: LeafPane) => ReactNode
   paneOverflowActions?: (pane: LeafPane) => ReactNode
+  paneNewTabActions?: (pane: LeafPane) => ReactNode
   hoverZone: { paneId: string; zone: DropZone } | null
   /** Mirrors `PaneCanvasProps.dragEnabled` — `false` below the `md` breakpoint, where
    *  `SplitPaneView` stacks instead of laying out side by side (spec decision 10). */
@@ -103,13 +106,19 @@ function computeDropZone(dx: number, dy: number): DropZone {
 function resolveHover(event: DragMoveEvent | DragEndEvent): { paneId: string; zone: DropZone } | null {
   const { active, over } = event
   if (!over) return null
+  const data = over.data.current as { paneId?: string; forceCenter?: boolean } | undefined
+  const paneId = data?.paneId ?? String(over.id)
+  // A pane's header (its tab strip) is where tabs visually live — dropping directly on it
+  // always means "put this tab here" (merge as a new tab), regardless of pointer position
+  // within the header, rather than running the content-body's 5-zone edge/center math.
+  if (data?.forceCenter) return { paneId, zone: 'center' }
   const translated = active.rect.current.translated
   if (!translated || !over.rect.width || !over.rect.height) return null
   const centerX = translated.left + translated.width / 2
   const centerY = translated.top + translated.height / 2
   const dx = clamp01((centerX - over.rect.left) / over.rect.width)
   const dy = clamp01((centerY - over.rect.top) / over.rect.height)
-  return { paneId: String(over.id), zone: computeDropZone(dx, dy) }
+  return { paneId, zone: computeDropZone(dx, dy) }
 }
 
 function zoneStyle(zone: DropZone): CSSProperties {
@@ -225,6 +234,14 @@ function SplitPaneView({ node, ctx }: { node: SplitPane; ctx: PaneRenderContext 
 
 function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext }) {
   const { setNodeRef } = useDroppable({ id: pane.id, data: { paneId: pane.id } })
+  // The header (tab strip) is where tabs visually live, so it's a natural drop target of its
+  // own — a separate droppable, distinct from the content body's 5-zone id, that always
+  // resolves to "merge as a new tab" (see `resolveHover`'s `forceCenter` handling) regardless
+  // of where within the header the pointer lands.
+  const { setNodeRef: setHeaderDropRef } = useDroppable({
+    id: `${pane.id}::header`,
+    data: { paneId: pane.id, forceCenter: true },
+  })
   const isFocused = ctx.focusedPaneId === pane.id
   const activeContent = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
 
@@ -242,24 +259,27 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       onPointerDownCapture={() => ctx.onFocusPane(pane.id)}
     >
-      <PanelHeader
-        paneId={pane.id}
-        tabs={tabs}
-        activeTabId={pane.activeTabId}
-        onSelectTab={(tabId) => ctx.onSelectTab(pane.id, tabId)}
-        onCloseTab={(tabId) => ctx.onCloseTab(pane.id, tabId)}
-        onSplitRight={() => ctx.onSplitPane(pane.id, 'row')}
-        onSplitDown={() => ctx.onSplitPane(pane.id, 'column')}
-        onClose={() => ctx.onClosePane(pane.id)}
-        isFocused={isFocused}
-        titleContent={activeContent?.kind === 'terminal' ? ctx.paneTitleContent?.(pane) : undefined}
-        overflowActions={isFocused ? ctx.paneOverflowActions?.(pane) : undefined}
-      />
+      <div ref={setHeaderDropRef}>
+        <PanelHeader
+          paneId={pane.id}
+          tabs={tabs}
+          activeTabId={pane.activeTabId}
+          onSelectTab={(tabId) => ctx.onSelectTab(pane.id, tabId)}
+          onCloseTab={(tabId) => ctx.onCloseTab(pane.id, tabId)}
+          onSplitRight={() => ctx.onSplitPane(pane.id, 'row')}
+          onSplitDown={() => ctx.onSplitPane(pane.id, 'column')}
+          onClose={() => ctx.onClosePane(pane.id)}
+          isFocused={isFocused}
+          titleContent={activeContent?.kind === 'terminal' ? ctx.paneTitleContent?.(pane) : undefined}
+          overflowActions={isFocused ? ctx.paneOverflowActions?.(pane) : undefined}
+          newTabActions={ctx.paneNewTabActions?.(pane)}
+        />
+      </div>
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {pane.tabs.map((content) => (
           <div
             key={content.id}
-            className={cn('absolute inset-0', content.id === pane.activeTabId ? 'block' : 'hidden')}
+            className={cn('absolute inset-0', content.id === pane.activeTabId ? 'flex' : 'hidden')}
           >
             {ctx.renderers[content.kind]({ content, paneId: pane.id, isActive: content.id === pane.activeTabId })}
           </div>
@@ -295,6 +315,7 @@ export function PaneCanvas({
   isTabDirty,
   paneTitleContent,
   paneOverflowActions,
+  paneNewTabActions,
   dragEnabled = true,
   className,
 }: PaneCanvasProps) {
@@ -333,8 +354,8 @@ export function PaneCanvas({
       if (!sourcePaneId) return
       const contentId = data?.contentId ?? String(active.id)
       const resolved = resolveHover(event)
-      const zone = resolved?.zone ?? 'center'
-      const next = moveTab(root, sourcePaneId, String(over.id), contentId, zone)
+      if (!resolved) return
+      const next = moveTab(root, sourcePaneId, resolved.paneId, contentId, resolved.zone)
       if (next !== root) onTreeChange(next)
     },
     [root, onTreeChange],
@@ -358,6 +379,7 @@ export function PaneCanvas({
     isTabDirty,
     paneTitleContent,
     paneOverflowActions,
+    paneNewTabActions,
     hoverZone,
     stacked: !dragEnabled,
   }

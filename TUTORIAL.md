@@ -57,14 +57,20 @@ The new worktree shows up as a live card (running / waiting / error, with token 
 
 ## 6. Working inside a worktree
 
-Opening a worktree switches the whole screen into a focused workspace: sidebar collapses to a thin icon rail, and you get:
+Opening a worktree switches the whole screen into a **tiling workspace**: the top header disappears, the sidebar collapses to a ~44px icon rail (back arrow, workspace badge, nav icons — the only way back once the header's gone), and the rest of the viewport becomes a canvas of resizable panes. Every pane can hold one of four content kinds:
 
-- **Terminal** — the real PTY the agent (or shell) is running in, backed by a live WebSocket. Navigate away and back and you reattach to the *same* running process — nothing restarts.
+- **Terminal** — the real PTY the agent (or shell) is running in, backed by a live WebSocket. Navigate away and back and you reattach to the *same* running process — nothing restarts. A worktree always starts with one Terminal pane; splitting a Terminal pane spins up a genuinely independent second PTY (its own shell/agent, no shared echo).
 - **File explorer** — a tree of the worktree's files, with a quick-open search (`Ctrl/Cmd-P`) and new-file/delete actions.
-- **Editor** — click any file to open it in a CodeMirror tab. Every common language gets syntax highlighting; Go, TypeScript/JavaScript, Python, and Rust additionally get real language-server intelligence (autocomplete, inline diagnostics, `Ctrl/Cmd`-click go-to-definition) if `gopls` / `typescript-language-server` / `pyright-langserver` / `rust-analyzer` respectively are on your `$PATH`. `Ctrl/Cmd-S` saves.
+- **Editor** — click any file to open it in a CodeMirror tab. Every common language gets syntax highlighting; Go, TypeScript/JavaScript, Python, and Rust additionally get real language-server intelligence (autocomplete, inline diagnostics, `Ctrl/Cmd`-click go-to-definition) if `gopls` / `typescript-language-server` / `pyright-langserver` / `rust-analyzer` respectively are on your `$PATH`. `Ctrl/Cmd-S` saves; `Ctrl/Cmd-W` closes the active file tab.
 - **Git panel** — status, diff, stage/unstage/discard, commit, push, pull, scoped to this worktree's branch.
 
-Edit the worktree's branch, task, or model later from its card menu; delete it to remove both the DB row and the on-disk `git worktree` (the agent process is stopped first).
+**Splitting and arranging panes:** each pane has a small header with its own tab strip (stack several tabs in one pane without splitting), "split right" / "split down" buttons, and — when the pane is focused — a "..." overflow menu. Drag a tab and drop it near a pane's edge to split in that direction, or onto its center to merge it in as another tab in that pane. Your layout (which panes, which tabs, split sizes) is remembered per worktree, so it reopens exactly as you left it. On phone-width screens, panes stack one full-bleed at a time instead of tiling side by side, and drag-and-drop is disabled.
+
+**The "..." overflow menu** (on the focused pane, when its active tab is a Terminal) has:
+- **Approve** — only shown while the worktree is waiting on you.
+- **Open Git panel** / **Open file explorer** — add or focus that pane kind, since a fresh worktree starts with only a Terminal pane.
+- **Details** — edit the worktree's branch, task, or model (same drawer as the sidebar's edit action).
+- **Delete** — removes both the DB row and the on-disk `git worktree` (the agent process is stopped first).
 
 ## 7. Root-mode terminal
 

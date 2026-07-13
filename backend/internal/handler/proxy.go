@@ -28,6 +28,5 @@ func (h *ProxyHandler) PostStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"socks5Addr":    result.SOCKS5Addr,
 		"httpProxyAddr": result.HTTPProxyAddr,
-		"proxyKey":      result.ProxyKey,
 	})
 }

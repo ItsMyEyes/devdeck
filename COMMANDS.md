@@ -71,6 +71,16 @@ The Go backend accepts flags:
   private.
 - `--github-token` — GitHub token used by `--updates` to read releases and
   download assets from the private repo (env `LOOM_GITHUB_TOKEN`).
+- `--socks5-addr` — listen address for a SOCKS5 forward proxy (env
+  `LOOM_SOCKS5_ADDR`, empty = disabled); point a browser's SOCKS5 setting
+  here to route its traffic through this app.
+- `--http-proxy-addr` — listen address for an HTTP/HTTPS forward proxy (env
+  `LOOM_HTTP_PROXY_ADDR`, empty = disabled); point a browser's HTTP proxy
+  setting here.
+- `--proxy-key` — credential required by `--socks5-addr`/`--http-proxy-addr`
+  (env `LOOM_PROXY_KEY`; SOCKS5 password or HTTP `Proxy-Authorization`
+  password, any username accepted; empty = no auth). See "Forward proxy for
+  remote dev servers" below.
 
 ## Hub / runtime roles
 
@@ -107,6 +117,42 @@ curl -s -H 'Authorization: Bearer hubk' http://127.0.0.1:9198/api/workspaces    
 
 See `ARCHITECTURE.md` for the roles paragraph and `CONTRACTS.md` for the
 key-auth rules and the machines registry/proxy API shapes.
+
+## Forward proxy for remote dev servers (SOCKS5 / HTTP)
+
+A worktree's own dev server (e.g. `npm run dev` inside an agent-spawned
+worktree) binds to `127.0.0.1` on whichever machine it's running on. If
+that's a remote runtime (over Tailscale), your local browser can't reach it
+directly — it's loopback-only on the other end. `backend/internal/netproxy`
+(`socks5.go`, `httpproxy.go`) solves this the same way `ssh -D` does: it runs
+a plain SOCKS5 and/or HTTP forward proxy *on the runtime*, so a browser that
+points its proxy settings at the runtime dials out from the runtime's own
+network namespace — reaching that machine's `127.0.0.1:5173` (or any other
+loopback port) as if the browser were running there. This is unrelated to
+the `/api/machines/.../proxy` REST/WS reverse proxy in "Hub / runtime roles"
+above — that one forwards Loom's own API traffic; this one forwards
+arbitrary browser traffic the user points at it. Neither listener is a
+route on the main API mux — both are separate `net.Listen`/`http.Server`
+TCP listeners, opt-in via empty-string-disables flags, started from
+`startForwardProxies` in `main.go`.
+
+```bash
+# On the runtime machine (or locally, for testing):
+cd backend && go run ./cmd/server --role runtime --key rtk --addr 127.0.0.1:9199 --db /tmp/rt.db --open=false \
+  --socks5-addr 127.0.0.1:1080 --http-proxy-addr 127.0.0.1:8080 --proxy-key pxk
+
+# Point curl (or the browser's proxy settings) at either listener:
+curl --socks5 pxk:pxk@127.0.0.1:1080 http://127.0.0.1:5173/          # via SOCKS5 (any username, proxy-key as password)
+curl -x http://pxk:pxk@127.0.0.1:8080 http://127.0.0.1:5173/         # via HTTP proxy (Proxy-Authorization: Basic)
+curl -x http://pxk:pxk@127.0.0.1:8080 https://example.com/           # HTTPS via CONNECT tunnel
+```
+
+Both proxies are CONNECT-only forwarders (SOCKS5: no BIND/UDP ASSOCIATE) —
+not an anonymization or security tool, just a way to reach a loopback-bound
+service on whichever machine the process is running on. An empty
+`--proxy-key` means no auth at all; set one whenever the listen address is
+reachable beyond your own machine (e.g. `127.0.0.1` bound but exposed over a
+tailnet-forwarded port, or a non-loopback `--socks5-addr`).
 
 ## Tools module setup (markitdown, pandoc, mermaid)
 
@@ -257,10 +303,21 @@ cd frontend && npx @tanstack/router-plugin --target react
 
 ## Desktop app (Tauri)
 
-- `cd frontend && npm run tauri:dev` — desktop shell in dev mode: builds the
-  host-triple sidecar (`make sidecar-host`, required or tauri-build fails),
-  then opens a window on the Vite dev server (normal login; sidecar flow is
-  release-only).
+- `make dev-tauri` (or `cd frontend && npm run tauri:dev`) — desktop shell in
+  dev mode: builds the host-triple sidecar (`make sidecar-host`, required or
+  tauri-build fails), then opens a native window on the Vite dev server
+  (`beforeDevCommand` in `tauri.conf.json` runs `npm run dev`, which also
+  starts the Go backend — no separate `make dev`/`dev-api` needed). This is
+  normal username/password login, not the release sidecar's ephemeral-key
+  bootstrap (`setup()` in `lib.rs` skips spawning the sidecar entirely when
+  `cfg!(debug_assertions)` is true).
+- The dev backend (`dev:api` in `frontend/package.json`, and `make
+  dev-api`/`dev-hub`) always passes `--secure-cookies=false`. Without it,
+  login appears to succeed but every following request 401s: WebKit's
+  WKWebView (used by the Tauri window, unlike Chrome) drops `Secure` cookies
+  set over plain `http://localhost`, silently losing the session. Same root
+  cause as the release sidecar's `--secure-cookies` flag — see "Key auth
+  (hub/runtime roles)" above.
 - `cd frontend && npm run tauri:build` — full release build: web UI →
   embedded into the Go sidecars (`make prepare-sidecar`, 3 target triples) →
   platform bundles under `frontend/src-tauri/target/release/bundle/`.

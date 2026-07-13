@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { useLoomStore } from '@/store/useLoomStore'
 import {
   closeBrowserTile as closeNativeBrowserTile,
+  hideBrowserTile,
   navigateBrowserTile,
   onBrowserTilePageLoad,
   openBrowserTile,
@@ -55,22 +56,56 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   }, [tabId])
 
   const doc = tile?.docs.find((d) => d.id === tile.activeDocId)
+  const openedDocsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     setDraft(doc?.url ?? '')
   }, [doc?.id, doc?.url])
 
-  // Keep the native child webview glued to the placeholder's on-screen rect.
+  // Creates the native webview (once per doc, sized correctly from the
+  // start) and keeps it glued to the placeholder's on-screen rect on every
+  // resize/drag/fullscreen-toggle after that. Opening lives here — not in
+  // `navigate()` — because the placeholder <div> this measures doesn't
+  // exist in the DOM until React re-renders with `doc.url` set; opening
+  // from `navigate()` directly raced this effect's first bounds report
+  // against `browser_tile_open` still creating the webview, leaving it
+  // stuck at its 1x1 placeholder size whenever the resize lost that race.
   useEffect(() => {
     if (!doc?.url || !bodyRef.current) return
     const el = bodyRef.current
     const docId = doc.id
-    const observer = new ResizeObserver(() => {
+    const url = doc.url
+    const proxy = doc.proxy
+
+    function sendBounds() {
       const rect = el.getBoundingClientRect()
       void setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
-    })
+    }
+
+    if (!openedDocsRef.current.has(docId)) {
+      openedDocsRef.current.add(docId)
+      if (proxy) {
+        const rect = el.getBoundingClientRect()
+        void openBrowserTile(tabId, docId, `socks5://${proxy.socks5Addr}`, url).then(() =>
+          setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
+        )
+      }
+    }
+
+    const observer = new ResizeObserver(sendBounds)
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      // This cleanup fires both when switching to a different doc (internal tab
+      // switch) and when the whole tile unmounts (e.g. navigating to a non-tiled
+      // route like Machines/Tools — see WorkspaceTileArea's `showContent: false`).
+      // Either way the native webview is about to stop being this component's
+      // active surface, so it must be hidden — otherwise it keeps rendering at its
+      // last on-screen rect on top of whatever comes next. `browser_tile_open` is
+      // idempotent, so re-showing this doc later doesn't recreate or reload it.
+      if (openedDocsRef.current.has(docId)) void hideBrowserTile(tabId, docId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, doc?.id, doc?.url])
 
   // Sync the address bar/title from real in-page navigation inside the native webview.
@@ -104,7 +139,15 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     if (hadNativeWebview) await closeNativeBrowserTile(tabId, doc.id)
     const proxy = await ensureProxyForMachine(machineId)
     if (hadNativeWebview && proxy && doc.url) {
-      await openBrowserTile(tabId, doc.id, `socks5://x:${proxy.proxyKey}@${proxy.socks5Addr}`, doc.url)
+      await openBrowserTile(tabId, doc.id, `socks5://${proxy.socks5Addr}`, doc.url)
+      // The recreated webview starts at the same 1x1 placeholder size as a
+      // brand-new one — the mount effect won't re-fire here (doc.url/doc.id
+      // are unchanged), so this doc's own already-mounted rect has to be
+      // reasserted explicitly instead of relying on the ResizeObserver.
+      if (bodyRef.current) {
+        const rect = bodyRef.current.getBoundingClientRect()
+        await setBrowserTileBounds(tabId, doc.id, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+      }
     }
   }
 
@@ -116,10 +159,12 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     if (!proxy) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
     setBrowserDocState(tabId, doc.id, { url, loading: true, history, historyIndex: history.length - 1 })
+    // First navigation for this doc (doc.url was still null): the mount
+    // effect below creates the native webview once the placeholder <div>
+    // exists, sized correctly from the start — see that effect's comment
+    // for why opening doesn't happen here.
     if (doc.url) {
       await navigateBrowserTile(tabId, doc.id, url)
-    } else {
-      await openBrowserTile(tabId, doc.id, `socks5://x:${proxy.proxyKey}@${proxy.socks5Addr}`, url)
     }
   }
 
@@ -138,6 +183,9 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
 
   const goHome = async () => {
     if (doc.url) await closeNativeBrowserTile(tabId, doc.id)
+    // Un-mark this doc as opened so the next navigate() re-creates the
+    // webview via the mount effect instead of assuming one still exists.
+    openedDocsRef.current.delete(doc.id)
     setBrowserDocState(tabId, doc.id, { url: null, history: [], historyIndex: -1, title: 'New Tab' })
   }
 
@@ -157,7 +205,13 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   }
 
   const closeInternalTab = async (docId: string) => {
-    if (doc.id === docId && doc.url) await closeNativeBrowserTile(tabId, docId)
+    // Keyed on `openedDocsRef`, not `doc.id === docId` — a *backgrounded* internal
+    // tab (switched away from, now hidden per the bounds effect above) still owns
+    // a live native webview and must be closed too, not just the active one.
+    if (openedDocsRef.current.has(docId)) {
+      openedDocsRef.current.delete(docId)
+      await closeNativeBrowserTile(tabId, docId)
+    }
     closeBrowserDoc(tabId, docId)
   }
 

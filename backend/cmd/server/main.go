@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"loom/backend/internal/handler"
 	"loom/backend/internal/lsp"
 	"loom/backend/internal/machineclient"
+	"loom/backend/internal/netproxy"
 	"loom/backend/internal/port"
 	"loom/backend/internal/registry"
 	"loom/backend/internal/selfupdate"
@@ -56,6 +58,9 @@ func main() {
 	hubKey := flag.String("hub-key", envOr("LOOM_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
 	publicURL := flag.String("public-url", envOr("LOOM_PUBLIC_URL", ""), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>)")
 	machineName := flag.String("name", envOr("LOOM_MACHINE_NAME", ""), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname)")
+	socks5Addr := flag.String("socks5-addr", envOr("LOOM_SOCKS5_ADDR", ""), "listen address for a SOCKS5 forward proxy (empty = disabled); point a browser's SOCKS5 setting here to route its traffic through this app")
+	httpProxyAddr := flag.String("http-proxy-addr", envOr("LOOM_HTTP_PROXY_ADDR", ""), "listen address for an HTTP/HTTPS forward proxy (empty = disabled); point a browser's HTTP proxy setting here")
+	proxyKey := flag.String("proxy-key", envOr("LOOM_PROXY_KEY", ""), "credential required by --socks5-addr/--http-proxy-addr (SOCKS5 password or HTTP Proxy-Authorization password, any username); empty = no auth")
 	flag.Parse()
 
 	if *showVersion {
@@ -225,6 +230,13 @@ func main() {
 	}
 	toolsH := handler.NewToolsHandler(toolsSvc)
 
+	advertiseURL, err := url.Parse(*publicURL)
+	if err != nil {
+		log.Fatalf("--public-url: %v", err)
+	}
+	proxySvc := service.NewProxyService(advertiseURL.Hostname())
+	proxyH := handler.NewProxyHandler(proxySvc)
+
 	mux := http.NewServeMux()
 
 	if !isRuntime {
@@ -368,6 +380,8 @@ func main() {
 		mux.HandleFunc("/api/browser/proxy", browserH.Proxy)
 	}
 
+	mux.HandleFunc("POST /api/proxy/start", proxyH.PostStart)
+
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	if !isRuntime {
@@ -430,8 +444,33 @@ func main() {
 	if !isRuntime && *openUI && webui.Available() {
 		openBrowserSoon(uiURL)
 	}
+	startForwardProxies(*socks5Addr, *httpProxyAddr, *proxyKey)
 	if err := http.Serve(listener, root); err != nil {
 		log.Fatalf("server: %v", err)
+	}
+}
+
+// startForwardProxies optionally starts the SOCKS5 and/or HTTP forward
+// proxy listeners a browser can point its network settings at. Both are
+// opt-in (empty addr = disabled) since they're separate TCP listeners
+// with their own auth, not routes on the main API mux.
+func startForwardProxies(socks5Addr, httpProxyAddr, proxyKey string) {
+	if socks5Addr != "" {
+		go func() {
+			if err := netproxy.NewSOCKS5Server(proxyKey).ListenAndServe(socks5Addr); err != nil {
+				log.Fatalf("socks5 proxy on %s: %v", socks5Addr, err)
+			}
+		}()
+		log.Printf("socks5 proxy listening on %s", socks5Addr)
+	}
+	if httpProxyAddr != "" {
+		go func() {
+			srv := &http.Server{Addr: httpProxyAddr, Handler: netproxy.NewHTTPProxyHandler(proxyKey)}
+			if err := srv.ListenAndServe(); err != nil {
+				log.Fatalf("http proxy on %s: %v", httpProxyAddr, err)
+			}
+		}()
+		log.Printf("http proxy listening on %s", httpProxyAddr)
 	}
 }
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { Popover } from '@base-ui/react/popover'
-import { MoreHorizontal, PanelBottom, PanelRight, X } from 'lucide-react'
+import { MoreHorizontal, PanelBottom, PanelRight, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -37,6 +37,12 @@ export interface PanelHeaderProps {
   titleContent?: ReactNode
   /** Arbitrary actions (Details/Delete/Approve, ...) rendered inside the "..." popover. Omit to hide the overflow button entirely. */
   overflowActions?: ReactNode
+  /** Actions (New Terminal / Open File...) rendered inside the "+" new-tab popover, right next
+   *  to the tab strip — the `Ctrl/Cmd+T` shortcut triggers the same underlying handler on
+   *  whichever pane is focused. Omit to hide the "+" button entirely. Unlike `overflowActions`,
+   *  not gated by `isFocused` — adding a tab to a specific pane makes sense regardless of which
+   *  pane currently owns the "..." menu. */
+  newTabActions?: ReactNode
   className?: string
 }
 
@@ -56,6 +62,7 @@ export function PanelHeader({
   isFocused = true,
   titleContent,
   overflowActions,
+  newTabActions,
   className,
 }: PanelHeaderProps) {
   return (
@@ -76,6 +83,31 @@ export function PanelHeader({
             onCloseTab={() => onCloseTab(tab.id)}
           />
         ))}
+        {newTabActions ? (
+          <Popover.Root>
+            <Popover.Trigger
+              className={cn(iconButtonClass, 'my-1 ml-1 flex-none self-center')}
+              title="New tab (Ctrl+T)"
+              aria-label="New tab"
+            >
+              <Plus size={13} />
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Positioner side="bottom" align="start" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
+                <Popover.Popup
+                  className={cn(
+                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-loom-border-menu bg-loom-popover p-1.5',
+                    'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
+                    'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
+                    'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
+                  )}
+                >
+                  {newTabActions}
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
+        ) : null}
       </div>
 
       {titleContent}
@@ -163,6 +195,14 @@ function PanelHeaderTabButton({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      onMouseDown={(e) => {
+        // Middle-click closes the tab, matching browser/IDE tab-strip convention — a much
+        // bigger target than the small per-tab "x", and doesn't require precise aim.
+        if (e.button === 1) {
+          e.preventDefault()
+          onCloseTab()
+        }
+      }}
       className={cn(
         'group flex h-full max-w-[200px] flex-none touch-none cursor-grab items-center gap-1.5 border-r border-loom-border pl-3 pr-1 font-mono text-[11px] active:cursor-grabbing',
         active

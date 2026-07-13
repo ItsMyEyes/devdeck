@@ -1,0 +1,1 @@
+ada bug jadi ketika command/cntrl + t, backend udah spawn pty tetapi terminal nya eggk muncul

@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -38,14 +38,14 @@ dev-web:
 # --role runtime --key <key> to run this as a runtime instead; see the
 # "Hub / runtime roles" section in COMMANDS.md for the two-node example.
 dev-api:
-	cd backend && LOOM_KEY=$(DEV_HUB_KEY) go run ./cmd/server --db loom.db --open=false --env .env
+	cd backend && LOOM_KEY=$(DEV_HUB_KEY) go run ./cmd/server --db loom.db --open=false --env .env --secure-cookies=false
 
 # Same as dev-api, but spells out --role hub --key explicitly instead of
 # relying on the default role + LOOM_KEY env var — pairs by name with
 # dev-runtime for a two-process hub+runtime dev setup. Same port/db as
 # dev-api (:8989, loom.db), so don't run both at once.
 dev-hub:
-	cd backend && go run ./cmd/server --role hub --key $(DEV_HUB_KEY) --db loom.db --open=false --env .env
+	cd backend && go run ./cmd/server --role hub --key $(DEV_HUB_KEY) --db loom.db --open=false --env .env --secure-cookies=false
 
 # Second backend process (Go :9199), --role runtime, self-registering with
 # the hub started by `make dev`/`make dev-api` on :8989 — no manual step in
@@ -122,6 +122,14 @@ prepare-sidecar: prepare-webui
 sidecar-host: prepare-webui
 	mkdir -p $(TAURI_BIN_DIR)
 	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
+
+# Run the desktop app in dev mode: builds the host-triple sidecar, then
+# `tauri dev` opens a native window against the Vite dev server (:5173) —
+# beforeDevCommand in tauri.conf.json runs `npm run dev`, which also starts
+# the Go backend (:8989), so no separate `make dev`/`dev-api` is needed.
+# Hot-reloads on frontend changes; rerun this target after Go/Rust changes.
+dev-tauri:
+	cd frontend && npm run tauri:dev
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check

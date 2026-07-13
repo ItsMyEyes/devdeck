@@ -100,7 +100,7 @@ function WorkspaceLayout() {
           just duplicate it, so it only renders on the web build. */}
       {!workspaceMode && !isTauri && <Header />}
       <div className="relative flex min-h-0 flex-1">
-        <Sidebar compact={workspaceMode} />
+        <Sidebar mobileDrawer={!workspaceMode && !isTauri} />
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
           {isTauri ? (
             // Always mounted so the pinned strip never disappears; only its

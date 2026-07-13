@@ -12,7 +12,7 @@ func TestProxyServiceStartIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if first.SOCKS5Addr == "" || first.HTTPProxyAddr == "" || first.ProxyKey == "" {
+	if first.SOCKS5Addr == "" || first.HTTPProxyAddr == "" {
 		t.Fatalf("Start returned incomplete result: %+v", first)
 	}
 	if first.SOCKS5Addr == first.HTTPProxyAddr {

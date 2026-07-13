@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
-import { Check, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
+import { Check, FilePlus, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
 import { STATE } from '@/lib/constants'
 import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -34,7 +34,7 @@ import {
   moveTab,
   splitLeaf,
 } from './paneTree'
-import type { DropZone, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
+import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
 import { Terminal, type TerminalHandle } from './Terminal'
 import { TerminalExplorer } from './TerminalExplorer'
 
@@ -162,6 +162,13 @@ function TerminalWorkspace({
 }) {
   const termHandles = useRef(new Map<string, TerminalHandle>())
   const definitionRequest = useRef(0)
+  // `WorkspaceTileCanvas`'s `TileLeafView` keeps every open worktree tab mounted
+  // (CSS `hidden`, not unmounted) so switching tabs doesn't lose PTY/editor state —
+  // meaning every open worktree tab's `TerminalWorkspace` has its own global keydown
+  // listener below live at once. Without checking visibility, Cmd/Ctrl+T pressed while
+  // looking at a *different* tab (another worktree, Agents, Browser) would silently
+  // spawn a new terminal + PTY in a background worktree the user isn't even looking at.
+  const containerRef = useRef<HTMLDivElement>(null)
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(() => new Set())
@@ -362,6 +369,24 @@ function TerminalWorkspace({
     })
   }
 
+  /** "+" new-tab button / `Ctrl+T` — adds a brand-new independent Terminal tab to `paneId`'s
+   *  own tab strip (unlike `handleSplitPane`, this never creates a sibling pane). */
+  function handleNewTerminalTab(paneId: string) {
+    const allocated = allocateTerminalContent(layout, worktree.id)
+    commitLayout({
+      ...allocated.layout,
+      root: addContentToLeaf(allocated.layout.root, paneId, allocated.content),
+      focusedPaneId: paneId,
+    })
+  }
+
+  /** "+" new-tab button's "Open File..." action — focuses `paneId` first so the file quick-open
+   *  (which always targets `layout.focusedPaneId`) lands in the pane the user actually clicked. */
+  function handleNewFileTab(paneId: string) {
+    if (paneId !== layout.focusedPaneId) commitLayout(focusPane(layout, paneId))
+    setQuickOpen(true)
+  }
+
   function approve(ok: boolean) {
     updateWorktree.mutate({
       machine,
@@ -374,9 +399,17 @@ function TerminalWorkspace({
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
+      // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
+      // i.e. some other tab is the one currently on screen. Ignore the shortcut then.
+      if (containerRef.current?.offsetParent === null) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
         event.preventDefault()
         setQuickOpen(true)
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't') {
+        event.preventDefault()
+        handleNewTerminalTab(layout.focusedPaneId)
         return
       }
       if (event.ctrlKey && event.key.toLowerCase() === 'w') {
@@ -463,12 +496,27 @@ function TerminalWorkspace({
     )
   }
 
+  function renderNewTabActions(pane: LeafPane) {
+    return (
+      <div className="flex min-w-[168px] flex-col gap-0.5">
+        <OverflowItem onClick={() => handleNewTerminalTab(pane.id)}>
+          <TerminalSquare size={13} />
+          New Terminal
+        </OverflowItem>
+        <OverflowItem onClick={() => handleNewFileTab(pane.id)}>
+          <FilePlus size={13} />
+          Open File…
+        </OverflowItem>
+      </div>
+    )
+  }
+
   const renderers: PaneContentRendererMap = {
     terminal: ({ content }) => {
       if (content.kind !== 'terminal') return null
       const isFocusedTerminal = content.sessionKey === focusedTerminalSessionKey
       return (
-        <div className="h-full min-h-0 overflow-hidden bg-loom-terminal px-3 py-2">
+        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-loom-terminal px-3 py-2">
           <Terminal
             key={content.sessionKey}
             ref={(handle) => {
@@ -512,7 +560,7 @@ function TerminalWorkspace({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-loom-terminal">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-loom-terminal">
       <PaneCanvas
         root={layout.root}
         focusedPaneId={layout.focusedPaneId}
@@ -527,6 +575,7 @@ function TerminalWorkspace({
         isTabDirty={isTabDirty}
         paneTitleContent={renderTerminalTitle}
         paneOverflowActions={renderOverflowActions}
+        paneNewTabActions={renderNewTabActions}
         dragEnabled={isDesktop}
       />
 

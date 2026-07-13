@@ -1,8 +1,6 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,7 +13,6 @@ import (
 type ProxyStartResult struct {
 	SOCKS5Addr    string
 	HTTPProxyAddr string
-	ProxyKey      string
 }
 
 // ProxyService starts backend/internal/netproxy's SOCKS5 and HTTP forward
@@ -41,19 +38,24 @@ func NewProxyService(advertiseHost string) *ProxyService {
 }
 
 // Start starts (once) the SOCKS5+HTTP forward proxies bound to ephemeral
-// ports, generating a fresh, non-persisted proxy key. A second call while
-// already running returns the existing bound addresses/key rather than
-// starting a duplicate listener pair.
+// ports. A second call while already running returns the existing bound
+// addresses rather than starting a duplicate listener pair.
+//
+// Unauthenticated by design: these proxies exist solely so a Tauri desktop
+// webview's proxy_url can dial out through them, and neither wry's macOS
+// (Network.framework nw_proxy_config_create_socksv5) nor Windows
+// (WebView2 --proxy-server flag) proxy plumbing carries credentials — the
+// URL's userinfo is dropped before it reaches the OS. A per-session key
+// would only ever see "no auth" offered by the client and reject every
+// connection, which is what actually happened before this was removed (see
+// docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md
+// for the original, untested assumption). Safe as long as advertiseHost
+// stays tailnet/loopback-scoped and the listener is ephemeral per process.
 func (s *ProxyService) Start() (ProxyStartResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started {
 		return s.result, nil
-	}
-
-	key, err := generateProxyKey()
-	if err != nil {
-		return ProxyStartResult{}, fmt.Errorf("generate proxy key: %w", err)
 	}
 
 	socks5Ln, err := net.Listen("tcp", ":0")
@@ -79,25 +81,16 @@ func (s *ProxyService) Start() (ProxyStartResult, error) {
 		return ProxyStartResult{}, fmt.Errorf("resolve http proxy port: %w", err)
 	}
 
-	go func() { _ = netproxy.NewSOCKS5Server(key).Serve(socks5Ln) }()
+	go func() { _ = netproxy.NewSOCKS5Server("").Serve(socks5Ln) }()
 	go func() {
-		srv := &http.Server{Handler: netproxy.NewHTTPProxyHandler(key)}
+		srv := &http.Server{Handler: netproxy.NewHTTPProxyHandler("")}
 		_ = srv.Serve(httpLn)
 	}()
 
 	s.result = ProxyStartResult{
 		SOCKS5Addr:    net.JoinHostPort(s.advertiseHost, socks5Port),
 		HTTPProxyAddr: net.JoinHostPort(s.advertiseHost, httpPort),
-		ProxyKey:      key,
 	}
 	s.started = true
 	return s.result, nil
-}
-
-func generateProxyKey() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf), nil
 }

@@ -3,18 +3,22 @@ import type { ReactElement } from 'react'
 import { Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-/** Wraps any single trigger element (e.g. an icon button) with a hover/focus label. */
+/** Wraps any single trigger element (e.g. an icon button) with a hover/focus label.
+ *  `open` is uncontrolled (default: hover/focus, per Base UI) unless the caller passes it
+ *  explicitly — e.g. to force the tooltip open as an "armed" confirmation state. */
 export function Tooltip({
   label,
   side = 'top',
+  open,
   children,
 }: {
   label: string
   side?: 'top' | 'bottom' | 'left' | 'right'
+  open?: boolean
   children: ReactElement
 }) {
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root open={open}>
       <BaseTooltip.Trigger render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 70 }}>

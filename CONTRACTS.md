@@ -125,6 +125,27 @@ type Machine struct {
   - Unknown machine id → standard 404 `{"error":...}` envelope. Unreachable
     runtime → `502 {"error":"machine unreachable"}`.
 
+## On-demand forward proxy API (both roles)
+
+```go
+type ProxyStartResponse struct {
+    SOCKS5Addr    string `json:"socks5Addr"`
+    HTTPProxyAddr string `json:"httpProxyAddr"`
+    ProxyKey      string `json:"proxyKey"`
+}
+```
+
+- `POST /api/proxy/start` — registered on both `--role hub` and `--role runtime`
+  (unlike the Machines CRUD routes, which are hub-only). Idempotently starts
+  `backend/internal/netproxy`'s SOCKS5+HTTP forward proxy pair in-process,
+  bound to ephemeral ports on all interfaces, advertised at the hostname from
+  this machine's own `--public-url`. A fresh `crypto/rand` proxy key is
+  generated on first start and never persisted; a second call while already
+  running returns the exact same response instead of starting a duplicate
+  listener pair. No `port.Store` involvement — this is in-memory process
+  state. See
+  `docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md`.
+
 ### Runtime self-registration
 
 A `--role runtime` process with `--hub-url`/`--hub-key` set upserts itself

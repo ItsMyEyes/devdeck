@@ -62,7 +62,6 @@ interface MachineDialogState {
 export interface BrowserProxyInfo {
   socks5Addr: string
   httpProxyAddr: string
-  proxyKey: string
 }
 
 /** One browsing "document" within a Browser tile — plural because
@@ -131,9 +130,9 @@ interface LoomState {
   /** Each worktree's tiling pane-tree layout (structure, split sizes, open
    *  tabs, active tab), keyed by worktree id. */
   worktreeLayouts: Record<string, WorktreeLayout>
-  /** Widens `SidebarRail` (the icon-only left sidebar shown in workspace/terminal mode) back
-   *  out to the full labeled sidebar width. Independent of `sidebarOpen`, which is the mobile
-   *  drawer's open/close — this is a desktop small/big toggle for the rail itself. */
+  /** Widens the sidebar from its default icon-only rail out to the full labeled width —
+   *  applies globally, on every route. Independent of `sidebarOpen`, which is the mobile
+   *  drawer's open/close — this is a small/big toggle for the rail's own width. */
   railExpanded: boolean
   /** Chrome-style desktop tab bar (Tauri only): each workspace's tiling
    *  tree of open worktree tabs (splits, per-leaf tab strips). Unused by
