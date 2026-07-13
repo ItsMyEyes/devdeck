@@ -3,6 +3,7 @@ package machineclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,6 +54,9 @@ func TestCloneOnMachineReturnsErrorMessageFromMachine(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "clone destination already exists") {
 		t.Errorf("error = %q, want it to contain the machine's error message", err.Error())
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("error = %v, want it to wrap ErrConflict for a 409 response", err)
 	}
 }
 

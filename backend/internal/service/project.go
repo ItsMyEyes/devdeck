@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,6 +87,9 @@ func (svc *ProjectService) Clone(wsID, name, path, repo, machineID string) (doma
 			return domain.Project{}, err
 		}
 		if err := machineclient.CloneOnMachine(context.Background(), machine, repo, path); err != nil {
+			if errors.Is(err, machineclient.ErrConflict) {
+				return domain.Project{}, fmt.Errorf("clone destination already exists: %w", ErrConflict)
+			}
 			return domain.Project{}, fmt.Errorf("%s: %w", err.Error(), ErrValidation)
 		}
 		return svc.store.CreateProject(wsID, name, path, repo, machineID)

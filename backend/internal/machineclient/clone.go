@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +17,14 @@ import (
 // like FetchWorktrees) because a real `git clone` can legitimately take much
 // longer than 3 seconds.
 const cloneTimeout = 2 * time.Minute
+
+// ErrConflict indicates the machine reported (HTTP 409) that the clone
+// destination already exists. Distinguished from other CloneOnMachine
+// failures so ProjectService.Clone can map it to its own ErrConflict
+// (HTTP 409) instead of ErrValidation (HTTP 400) — matching the status
+// code the local (non-machine) clone path already returns for the same
+// condition.
+var ErrConflict = errors.New("clone destination already exists")
 
 // CloneOnMachine asks the machine m to clone repo into path on its own
 // filesystem, via its POST /api/fs/clone endpoint (see
@@ -51,6 +60,9 @@ func CloneOnMachine(ctx context.Context, m domain.Machine, repo, path string) er
 		msg := body.Error
 		if msg == "" {
 			msg = fmt.Sprintf("machine %s returned status %d", m.ID, resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusConflict {
+			return fmt.Errorf("%s: %w", msg, ErrConflict)
 		}
 		return fmt.Errorf("%s", msg)
 	}

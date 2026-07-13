@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -225,5 +226,44 @@ func TestProjectCloneWithMachineIDFailureDoesNotCreateProject(t *testing.T) {
 	}
 	if len(workspaces[0].Projects) != 0 {
 		t.Fatalf("projects = %#v, want none created on failure", workspaces[0].Projects)
+	}
+}
+
+func TestProjectCloneWithMachineIDConflictReturnsErrConflict(t *testing.T) {
+	// A destination-already-exists conflict reported by the machine must map
+	// to ErrConflict (HTTP 409), the same status the local clone path uses
+	// for the identical condition — not ErrValidation (HTTP 400).
+	conflictMachine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "clone destination already exists"})
+	}))
+	t.Cleanup(conflictMachine.Close)
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+	svc := NewProjectService(st)
+
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.CreateMachine("builder", conflictMachine.URL, "rt-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Clone(ws.ID, "myproj", "/home/dev/myproj", "https://github.com/org/repo.git", m.ID)
+	if err == nil {
+		t.Fatal("Clone succeeded, want a conflict error")
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("err = %v, want it to wrap ErrConflict", err)
+	}
+	if errors.Is(err, ErrValidation) {
+		t.Errorf("err = %v, must not also wrap ErrValidation", err)
 	}
 }
