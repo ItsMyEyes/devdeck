@@ -6,14 +6,20 @@ import { useSettings, useUpdateSettings, useWorkspaces } from '@/features/data/q
 import { Header } from '@/features/layout/Header'
 import { Sidebar } from '@/features/sidebar/Sidebar'
 import { GlobalOverlays } from '@/features/overlays/GlobalOverlays'
-import { TabBar } from '@/features/tabs/TabBar'
+import { WorkspaceTileArea } from '@/features/tabs/WorkspaceTileArea'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { cn } from '@/lib/utils'
 import { useLoomStore } from '@/store/useLoomStore'
 
 /** Matches only the worktree route, e.g. /w/abc/p/def/wt/ghi (the ExpandedTerminal screen). */
 const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
+/** Matches the Agents grid or a worktree terminal — the two routes
+ *  `WorkspaceTileArea` renders itself, bypassing `<Outlet/>`, once tiling
+ *  is active. Every other workspace route (Machines, Tools, News, ...)
+ *  keeps rendering via `<Outlet/>` as before. */
+const AGENTS_SCOPE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+(\/wt\/[^/]+)?$/
 
 export const Route = createFileRoute('/w/$wsId')({
   beforeLoad: async ({ context, params }) => {
@@ -38,6 +44,7 @@ function WorkspaceLayout() {
   const pathname = useLocation({ select: (l) => l.pathname })
   const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
   const isTauri = useIsTauri()
+  const inTiledScope = isTauri && AGENTS_SCOPE_PATTERN.test(pathname)
 
   const workspaces = useWorkspaces()
   const settings = useSettings()
@@ -74,12 +81,16 @@ function WorkspaceLayout() {
 
   return (
     <div className="flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
-      {isTauri && <TabBar wsId={wsId} />}
       {!workspaceMode && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar compact={workspaceMode} />
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
-          <Outlet />
+          {isTauri ? (
+            <div className={cn('flex min-h-0 flex-1 flex-col', !inTiledScope && 'hidden')}>
+              <WorkspaceTileArea wsId={wsId} />
+            </div>
+          ) : null}
+          {!inTiledScope ? <Outlet /> : null}
         </section>
       </div>
       <GlobalOverlays />
