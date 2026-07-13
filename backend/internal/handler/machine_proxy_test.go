@@ -26,7 +26,7 @@ func proxyTestEnv(t *testing.T, runtime http.Handler) (*http.ServeMux, *store.St
 	st := store.New(db)
 	backend := httptest.NewServer(runtime)
 	t.Cleanup(backend.Close)
-	if _, err := st.CreateMachine("rt", backend.URL, "rt-key"); err != nil {
+	if _, err := st.CreateMachine("rt", backend.URL, "rt-key", false); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -137,7 +137,7 @@ func TestMachineProxyWebSocketSurvivesFullMiddlewareStack(t *testing.T) {
 	}))
 	t.Cleanup(runtime.Close)
 
-	if _, err := st.CreateMachine("rt", runtime.URL, "rt-key"); err != nil {
+	if _, err := st.CreateMachine("rt", runtime.URL, "rt-key", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestProxyUnreachableRuntimeReturns502(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	if _, err := st.CreateMachine("dead", "http://127.0.0.1:1", "k"); err != nil {
+	if _, err := st.CreateMachine("dead", "http://127.0.0.1:1", "k", false); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()

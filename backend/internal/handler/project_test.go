@@ -36,7 +36,7 @@ func TestPostCloneProjectDecodesMachineID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := st.CreateMachine("builder", fakeMachine.URL, "rt-key")
+	m, err := st.CreateMachine("builder", fakeMachine.URL, "rt-key", false)
 	if err != nil {
 		t.Fatal(err)
 	}

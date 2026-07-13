@@ -61,7 +61,7 @@ func TestMachineHealthOnline(t *testing.T) {
 	}))
 	t.Cleanup(backend.Close)
 	h := newTestMachineHandler(t)
-	m, err := h.st.CreateMachine("rt", backend.URL, "k")
+	m, err := h.st.CreateMachine("rt", backend.URL, "k", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestMachineHealthOnline(t *testing.T) {
 
 func TestMachineHealthOffline(t *testing.T) {
 	h := newTestMachineHandler(t)
-	m, err := h.st.CreateMachine("dead", "http://127.0.0.1:1", "k")
+	m, err := h.st.CreateMachine("dead", "http://127.0.0.1:1", "k", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +86,31 @@ func TestMachineHealthOffline(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/health", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"offline"`) {
 		t.Errorf("status=%d body=%s, want 200 offline", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostMachineAcceptsIsLocal(t *testing.T) {
+	h := newTestMachineHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
+		strings.NewReader(`{"name":"desktop","url":"http://127.0.0.1:9001","key":"k","isLocal":true}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"isLocal":true`) {
+		t.Errorf("body = %s, want isLocal:true", rec.Body.String())
+	}
+}
+
+func TestPostMachineDefaultsIsLocalFalse(t *testing.T) {
+	h := newTestMachineHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
+		strings.NewReader(`{"name":"builder","url":"https://b.ts.net","key":"k"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"isLocal":false`) {
+		t.Errorf("body = %s, want isLocal:false", rec.Body.String())
 	}
 }

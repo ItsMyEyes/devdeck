@@ -138,6 +138,8 @@ export interface Machine {
   name: string
   url: string
   key: string
+  /** True only for the Tauri desktop shell's self-registered embedded runtime. */
+  isLocal: boolean
 }
 
 export interface InvoiceItem {

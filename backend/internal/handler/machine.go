@@ -36,9 +36,10 @@ func (h *MachineHandler) GetMachines(w http.ResponseWriter, r *http.Request) {
 
 func (h *MachineHandler) PostMachine(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name *string `json:"name"`
-		URL  *string `json:"url"`
-		Key  *string `json:"key"`
+		Name    *string `json:"name"`
+		URL     *string `json:"url"`
+		Key     *string `json:"key"`
+		IsLocal *bool   `json:"isLocal"`
 	}
 	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
@@ -52,7 +53,7 @@ func (h *MachineHandler) PostMachine(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "url must be an absolute http(s) URL")
 		return
 	}
-	m, err := h.st.CreateMachine(str(body.Name), str(body.URL), str(body.Key))
+	m, err := h.st.CreateMachine(str(body.Name), str(body.URL), str(body.Key), body.IsLocal != nil && *body.IsLocal)
 	if handleStoreErr(w, err) {
 		return
 	}

@@ -7,13 +7,13 @@ import (
 
 func scanMachine(sc scanner) (domain.Machine, error) {
 	var m domain.Machine
-	err := sc.Scan(&m.ID, &m.Name, &m.URL, &m.Key)
+	err := sc.Scan(&m.ID, &m.Name, &m.URL, &m.Key, &m.IsLocal)
 	return m, err
 }
 
 // Machines returns all registered runtime machines, most recently created first.
 func (s *Store) Machines() ([]domain.Machine, error) {
-	rows, err := s.db.Query(`SELECT id, name, url, key FROM machines ORDER BY rowid DESC`)
+	rows, err := s.db.Query(`SELECT id, name, url, key, is_local FROM machines ORDER BY rowid DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (s *Store) Machines() ([]domain.Machine, error) {
 
 // MachineByID returns a single registered machine, including its key.
 func (s *Store) MachineByID(id string) (domain.Machine, error) {
-	m, err := scanMachine(s.db.QueryRow(`SELECT id, name, url, key FROM machines WHERE id = ?`, id))
+	m, err := scanMachine(s.db.QueryRow(`SELECT id, name, url, key, is_local FROM machines WHERE id = ?`, id))
 	if err != nil {
 		return domain.Machine{}, mapNotFound(err)
 	}
@@ -39,9 +39,9 @@ func (s *Store) MachineByID(id string) (domain.Machine, error) {
 }
 
 // CreateMachine registers a new runtime machine.
-func (s *Store) CreateMachine(name, url, key string) (domain.Machine, error) {
+func (s *Store) CreateMachine(name, url, key string, isLocal bool) (domain.Machine, error) {
 	id := idGen("m-")
-	if _, err := s.db.Exec(`INSERT INTO machines (id, name, url, key) VALUES (?, ?, ?, ?)`, id, name, url, key); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO machines (id, name, url, key, is_local) VALUES (?, ?, ?, ?, ?)`, id, name, url, key, boolInt(isLocal)); err != nil {
 		return domain.Machine{}, err
 	}
 	return s.MachineByID(id)
@@ -56,6 +56,7 @@ func (s *Store) UpdateMachine(id string, p port.MachinePatch) (domain.Machine, e
 		setStr(s.db, "machines", "name", id, p.Name),
 		setStr(s.db, "machines", "url", id, p.URL),
 		setStr(s.db, "machines", "key", id, p.Key),
+		setBool(s.db, "machines", "is_local", id, p.IsLocal),
 	); err != nil {
 		return domain.Machine{}, err
 	}

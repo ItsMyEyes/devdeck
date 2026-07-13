@@ -78,7 +78,7 @@ type Store interface {
 
 	// Machines (runtime registry, hub role only)
 	Machines() ([]domain.Machine, error)
-	CreateMachine(name, url, key string) (domain.Machine, error)
+	CreateMachine(name, url, key string, isLocal bool) (domain.Machine, error)
 	UpdateMachine(id string, p MachinePatch) (domain.Machine, error)
 	DeleteMachine(id string) error
 	MachineByID(id string) (domain.Machine, error)
@@ -175,9 +175,10 @@ type BankPatch struct {
 
 // MachinePatch carries optional fields for a partial machine update.
 type MachinePatch struct {
-	Name *string
-	URL  *string
-	Key  *string
+	Name    *string
+	URL     *string
+	Key     *string
+	IsLocal *bool
 }
 
 // RecurringTemplatePatch carries optional fields for a partial recurring-template update.

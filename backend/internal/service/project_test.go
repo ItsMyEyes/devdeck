@@ -169,7 +169,7 @@ func TestProjectCloneWithMachineIDDispatchesToMachineAndPersistsIt(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := st.CreateMachine("builder", fakeMachine.URL, "rt-key")
+	m, err := st.CreateMachine("builder", fakeMachine.URL, "rt-key", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestProjectCloneWithMachineIDFailureDoesNotCreateProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := st.CreateMachine("builder", deadMachine.URL, "rt-key")
+	m, err := st.CreateMachine("builder", deadMachine.URL, "rt-key", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestProjectCloneWithMachineIDConflictReturnsErrConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := st.CreateMachine("builder", conflictMachine.URL, "rt-key")
+	m, err := st.CreateMachine("builder", conflictMachine.URL, "rt-key", false)
 	if err != nil {
 		t.Fatal(err)
 	}

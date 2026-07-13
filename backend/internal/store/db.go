@@ -166,10 +166,11 @@ CREATE TABLE IF NOT EXISTS recurring_templates (
 CREATE INDEX IF NOT EXISTS idx_recurring_templates_ws ON recurring_templates(workspace_id);
 
 CREATE TABLE IF NOT EXISTS machines (
-  id   TEXT PRIMARY KEY,
-  name TEXT NOT NULL DEFAULT '',
-  url  TEXT NOT NULL DEFAULT '',
-  key  TEXT NOT NULL DEFAULT ''
+  id       TEXT PRIMARY KEY,
+  name     TEXT NOT NULL DEFAULT '',
+  url      TEXT NOT NULL DEFAULT '',
+  key      TEXT NOT NULL DEFAULT '',
+  is_local INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -250,6 +251,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateMachineColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -317,6 +322,18 @@ func migrateWorktreeColumns(db *sql.DB) error {
 // local/unassigned.
 func migrateProjectColumns(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateMachineColumns adds is_local (introduced with the Tauri desktop
+// shell's self-registered runtime) to pre-existing databases. Existing rows
+// default to 0 = not the local desktop machine.
+func migrateMachineColumns(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE machines ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}

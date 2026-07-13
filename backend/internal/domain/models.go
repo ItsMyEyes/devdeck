@@ -199,6 +199,11 @@ type Machine struct {
 	// distributes it to authenticated clients for direct-first connections
 	// (spec: docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md).
 	Key string `json:"key"`
+	// IsLocal marks the Tauri desktop shell's self-registered embedded
+	// runtime. The hub UI protects this entry from edit/delete since it's
+	// managed automatically by the desktop app's own lifecycle, not the
+	// operator, and auto-selects it as the default machine.
+	IsLocal bool `json:"isLocal"`
 }
 
 // FsEntry describes a single directory entry returned by the filesystem browser.

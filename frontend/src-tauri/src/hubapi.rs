@@ -18,11 +18,11 @@ fn base(port: u16) -> String {
 }
 
 pub fn create_body(name: &str, port: u16, key: &str) -> Value {
-    json!({ "name": name, "url": base(port), "key": key })
+    json!({ "name": name, "url": base(port), "key": key, "isLocal": true })
 }
 
 pub fn patch_body(port: u16, key: &str) -> Value {
-    json!({ "url": base(port), "key": key })
+    json!({ "url": base(port), "key": key, "isLocal": true })
 }
 
 /// Hostname as the machine display name; falls back to a constant.
@@ -118,9 +118,11 @@ mod tests {
         assert_eq!(create["name"], "mac");
         assert_eq!(create["url"], "http://127.0.0.1:4321");
         assert_eq!(create["key"], "k");
+        assert_eq!(create["isLocal"], true);
         let patch = patch_body(4321, "k");
         assert_eq!(patch["url"], "http://127.0.0.1:4321");
         assert_eq!(patch["key"], "k");
+        assert_eq!(patch["isLocal"], true);
         assert!(patch.get("name").is_none(), "PATCH must not rename the machine");
     }
 }

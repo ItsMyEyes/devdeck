@@ -26,20 +26,33 @@ function MachineRow({ machine }: { machine: Machine }) {
     <div className="flex items-center gap-3 border-b border-loom-border px-3 py-2.5">
       <Server size={14} className="flex-none text-loom-muted" />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[12.5px] text-loom-fg-2">{machine.name}</div>
+        <div className="flex items-center gap-2">
+          <div className="truncate font-mono text-[12.5px] text-loom-fg-2">{machine.name}</div>
+          {machine.isLocal ? (
+            <span className="flex-none rounded-full border border-loom-border px-2 py-0.5 font-mono text-[10.5px] text-loom-dim-2">
+              This device
+            </span>
+          ) : null}
+        </div>
         <div className="truncate font-mono text-[10.5px] text-loom-dim-2">{machine.url}</div>
       </div>
       <HealthBadge machineId={machine.id} />
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => openEditMachine(machine.id, machine.name, machine.url, machine.key)}
-      >
-        Edit
-      </Button>
-      <Button variant="destructive" size="sm" onClick={() => askDelete('machine', machine.id, machine.name)}>
-        Delete
-      </Button>
+      {machine.isLocal ? (
+        <span className="font-mono text-[10.5px] text-loom-dim-2">managed by the app</span>
+      ) : (
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => openEditMachine(machine.id, machine.name, machine.url, machine.key)}
+          >
+            Edit
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => askDelete('machine', machine.id, machine.name)}>
+            Delete
+          </Button>
+        </>
+      )}
     </div>
   )
 }

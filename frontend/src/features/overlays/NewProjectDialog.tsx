@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,14 @@ export function NewProjectDialog() {
   const machines = useMachines().data ?? []
   const createProject = useCreateProject()
   const cloneProject = useCloneProject()
+
+  // The desktop shell registers itself as a Machine with isLocal true, so when it's
+  // present, skip the manual 'Select a machine…' step and default straight to it.
+  useEffect(() => {
+    if (!np.open || np.machineId) return
+    const local = machines.find((m) => m.isLocal)
+    if (local) setNewProject({ machineId: local.id })
+  }, [np.open, np.machineId, machines, setNewProject])
 
   const mode = np.mode
   const cloneFolder = np.cloneFolder.trim() || repoFolderName(np.repo)
