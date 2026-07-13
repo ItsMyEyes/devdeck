@@ -237,3 +237,60 @@ func TestSetSecureCookiesTogglesSecureAttribute(t *testing.T) {
 		t.Fatal("expected non-Secure cookie after SetSecureCookies(false)")
 	}
 }
+
+func TestKeySessionExchangesKeyForSession(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.SetDesktopKey("sekrit")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/key-session", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	rec := httptest.NewRecorder()
+	h.PostKeySession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var session *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			session = c
+		}
+	}
+	if session == nil || session.Value == "" {
+		t.Fatal("no session cookie set")
+	}
+
+	// The minted session must work against GetMe.
+	me := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	me.AddCookie(session)
+	meRec := httptest.NewRecorder()
+	h.GetMe(meRec, me)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("GetMe with key-session cookie = %d, want 200", meRec.Code)
+	}
+}
+
+func TestKeySessionRejectsWrongKey(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.SetDesktopKey("sekrit")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/key-session", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec := httptest.NewRecorder()
+	h.PostKeySession(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestKeySessionRejectsWhenNoKeyConfigured(t *testing.T) {
+	h := newTestAuthHandler(t) // SetDesktopKey never called
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/key-session", nil)
+	req.Header.Set("Authorization", "Bearer anything")
+	rec := httptest.NewRecorder()
+	h.PostKeySession(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}

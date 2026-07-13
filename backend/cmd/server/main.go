@@ -236,6 +236,10 @@ func main() {
 		mux.HandleFunc("POST /api/auth/totp/verify", authH.PostTotpVerify)
 		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
 		mux.HandleFunc("GET /api/auth/me", authH.GetMe)
+		if *apiKey != "" {
+			authH.SetDesktopKey(*apiKey)
+			mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
+		}
 	}
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
@@ -405,6 +409,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("resolve UI URL: %v", err)
 	}
+	// NOTE: the desktop shell (frontend/src-tauri/src/sidecar.rs) parses this
+	// exact line to discover the bound port when launched with --addr 127.0.0.1:0.
 	log.Printf("loom listening on %s (db: %s)", uiURL, *dbPath)
 	if *tailscaleServe {
 		if err := startTailscaleServe(listener.Addr()); err != nil {

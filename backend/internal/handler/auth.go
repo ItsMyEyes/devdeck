@@ -20,6 +20,7 @@ type AuthHandler struct {
 	turnstile      *service.TurnstileVerifier
 	trustedProxies []*net.IPNet
 	clientIPHeader string
+	desktopKey     string
 }
 
 // NewAuthHandler creates an auth handler.
@@ -232,5 +233,26 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+// SetDesktopKey enables POST /api/auth/key-session, which exchanges the
+// hub's static --key for a normal operator session (desktop app bootstrap;
+// see docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md).
+func (h *AuthHandler) SetDesktopKey(key string) { h.desktopKey = key }
+
+// PostKeySession handles POST /api/auth/key-session. It re-verifies the
+// bearer key itself: the auth middleware also admits session cookies, and
+// key possession is the entire authorization for minting this session.
+func (h *AuthHandler) PostKeySession(w http.ResponseWriter, r *http.Request) {
+	if !keyMatches(bearerToken(r), h.desktopKey) {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sessionToken, user, err := h.svc.KeySession()
+	if handleStoreErr(w, err) {
+		return
+	}
+	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
 	writeJSON(w, http.StatusOK, user)
 }

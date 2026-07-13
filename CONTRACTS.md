@@ -75,6 +75,14 @@ All data access goes through `port.Store` (defined in `backend/internal/port/sto
   unchanged; `Authorization: Bearer <hubKey>` is accepted as an alternate
   credential when `--key`/`LOOM_KEY` is configured. An empty configured hub
   key never matches any bearer token (cookie-only behavior is preserved).
+- `POST /api/auth/key-session` (hub with `--key` only): exchanges
+  `Authorization: Bearer <hub key>` for a regular `loom_session` cookie tied
+  to the auto-created `operator@loom.desktop` account. Desktop (Tauri)
+  bootstrap only — the SPA calls it once at startup when launched with
+  `?key=`. Returns the user JSON; 401 on a wrong/absent key.
+- `--secure-cookies=false` drops the `Secure` attribute on auth cookies for
+  loopback desktop deployments (WebKit webviews reject Secure cookies over
+  plain `http://127.0.0.1`). Web deployments keep the default (`true`).
 
 ## Machines API (hub role only — runtime registry)
 
