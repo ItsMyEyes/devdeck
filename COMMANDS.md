@@ -254,3 +254,16 @@ cd frontend && npx @tanstack/router-plugin --target react
   (configured in `vite.config.ts`). Ensure the backend is running on the expected port.
 - Node.js terminal gateway (`frontend/server/terminal-server.mjs`) is legacy;
   the canonical terminal server is the Go `internal/terminal` package.
+
+## Desktop app (Tauri)
+
+- `cd frontend && npm run tauri:dev` — desktop shell in dev mode: builds the
+  host-triple sidecar (`make sidecar-host`, required or tauri-build fails),
+  then opens a window on the Vite dev server (normal login; sidecar flow is
+  release-only).
+- `cd frontend && npm run tauri:build` — full release build: web UI →
+  embedded into the Go sidecars (`make prepare-sidecar`, 3 target triples) →
+  platform bundles under `frontend/src-tauri/target/release/bundle/`.
+- Desktop data lives in the app-data dir (macOS:
+  `~/Library/Application Support/dev.kiyora.loom/` — `loom.db`, `.env`,
+  `local-machine-id`); sidecar logs in the app log dir (`sidecar.log`).

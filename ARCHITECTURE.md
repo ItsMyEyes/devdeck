@@ -283,6 +283,16 @@ needed — there's no shared mutable state between goroutines, only disjoint
 per-element writes, followed by a single `wg.Wait()` before the response is
 returned.
 
+### Desktop (Tauri sidecar)
+
+`frontend/src-tauri/` wraps the app for macOS/Windows/Linux: the Rust shell
+spawns the Go binary as a sidecar hub (`--addr 127.0.0.1:0`, ephemeral
+`--key`), parses the bound port from the listen line, upserts a local
+Machine entry (terminals need one), and points the webview at the sidecar's
+embedded UI with `?key=`, which `main.tsx` exchanges for a session cookie via
+`POST /api/auth/key-session`. Spec:
+`docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md`.
+
 ## Dependency wiring
 
 - `backend/cmd/server/main.go` wires everything manually (no DI framework).
@@ -319,6 +329,25 @@ frontend/
     styles/globals.css        — Tailwind v4 import + CSS variables
   server/terminal-server.mjs  — legacy Node.js PTY gateway (replaced by Go backend)
 ```
+
+## Terminal tiling workspace
+
+Opening a worktree (`/w/$wsId/p/$projectId/wt/$wtId`) switches
+`ExpandedTerminal` into a Wave-Terminal-style tiling workspace: a recursive
+split-tree of resizable panes (`frontend/src/features/terminal/paneTree.ts`
+for the pure tree model, `PaneCanvas.tsx` for rendering + drag-and-drop,
+`PanelHeader.tsx` for the generic per-pane header), each holding Terminal /
+Git / File / Explorer content. The global `Header` hides and `Sidebar`
+collapses to a 44px icon rail while a worktree is open, detected purely from
+the URL (`WORKSPACE_MODE_PATTERN` in `frontend/src/routes/w.$wsId.tsx`).
+Layout (pane structure, split sizes, open tabs) persists client-side per
+worktree via `useLoomStore`'s `worktreeLayouts` slice — no server-side
+layout storage. Splitting a Terminal pane allocates a genuinely independent
+PTY (`sessionKey = ${worktreeId}::term-${n}`); `backend/internal/terminal/
+server.go`'s `resolveCommand` strips the `::term-N` suffix before its
+`WorktreeByID` lookup so every pane resolves the same working directory and
+agent as the primary pane. Full design, drag-and-drop zone math, and the
+pane data model: `docs/superpowers/specs/2026-07-09-terminal-workspace-tiling-design.md`.
 
 ## Feature implementation order (canonical)
 
