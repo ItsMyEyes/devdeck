@@ -78,11 +78,17 @@ the existing `Header`/`Sidebar`/`ExpandedTerminal` layout entirely.
    worktree that no longer exists (deleted while the app was closed) is
    silently dropped.
 
-8. **No blank "new tab" affordance.** Unlike Chrome's "+" opening an empty
-   New Tab Page, there's no equivalent empty state here — tabs are always
-   opened contextually by clicking a worktree card. The pinned Agents tab
-   already serves as the "new tab page" equivalent (browse there, click a
-   card to open a tab).
+8. **Revised — a "+" button exists, but it's not a blank tab.** The original
+   decision here ruled out a Chrome-style empty New Tab Page. A later visual
+   pass (matching a reference screenshot) added a `+` button at the end of
+   the strip, but it doesn't open anything blank: it calls the existing
+   `openSpawn` action for whichever project is currently in view (falling
+   back to the workspace's first project on non-project routes), i.e. it's
+   a shortcut to the same "New worktree" dialog the Header's own "+
+   Worktree" button opens. The created worktree becomes a real tab once
+   `SpawnDialog`'s `onSuccess` fires, via the same `openWorktreeTab` call
+   used by `WorktreeCard`/`ProjectTree`. Tabs are still only ever opened
+   for real worktrees, never a placeholder.
 
 9. **Keyboard shortcuts:** `Cmd+W` (`event.metaKey`, not `event.ctrlKey`)
    closes the active worktree tab (no-op on the pinned tab, which isn't
@@ -106,6 +112,28 @@ the existing `Header`/`Sidebar`/`ExpandedTerminal` layout entirely.
     "close others", "close to the right"). Tabs render in the order they
     were opened; closing and reopening a worktree puts its tab at the end
     again.
+
+11. **Follow-up (macOS overlay title bar + pill visual style).** Matching a
+    reference screenshot, the bar was restyled and, on macOS only, made to
+    double as the window's title bar:
+    - `frontend/src-tauri/tauri.macos.conf.json` (new, auto-merged by Tauri
+      only on macOS builds/dev — verified via Tauri's docs that platform
+      config files use JSON Merge Patch/RFC 7396, which replaces arrays
+      wholesale rather than deep-merging by element, so this file repeats
+      the full `windows[0]` object rather than just the new fields) sets
+      `titleBarStyle: "Overlay"`, `hiddenTitle: true`, and a
+      `trafficLightPosition` for the native traffic-light buttons. Windows
+      and Linux builds are unaffected — they don't get this file merged in
+      and keep their normal native title bar above the tab bar.
+    - `TabBar.tsx` reserves a 76px drag-region gutter on the left for the
+      overlaid traffic lights, and a flexible trailing drag region after
+      the `+` button, both via `data-tauri-drag-region`, so empty bar space
+      still moves the window the way a native title bar would.
+    - The active tab (pinned or worktree) is now a fully-rounded
+      (`rounded-lg`) `bg-loom-elevated` pill rather than the earlier
+      flush/flat `rounded-t-md` treatment, with a thin divider between the
+      pinned tab and the worktree tabs — matching the reference image's
+      look rather than a literal flat Chrome tab.
 
 ## Architecture
 
