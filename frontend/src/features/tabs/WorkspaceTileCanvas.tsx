@@ -275,16 +275,21 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
         {isTopLeft ? (
           <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
         ) : null}
-        {leaf.tabs.map((tab) => (
-          <TileTabButton
-            key={tab.id}
-            leafId={leaf.id}
-            tab={tab}
-            active={tab.id === leaf.activeTabId}
-            resolveWorktreeTab={ctx.resolveWorktreeTab}
-            onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
-            onClose={tab.kind === 'worktree' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
-          />
+        {leaf.tabs.map((tab, i) => (
+          <Fragment key={tab.id}>
+            <TileTabButton
+              leafId={leaf.id}
+              tab={tab}
+              active={tab.id === leaf.activeTabId}
+              resolveWorktreeTab={ctx.resolveWorktreeTab}
+              onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
+              onClose={tab.kind === 'worktree' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
+            />
+            {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
+            {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
+              <div className="mx-1.5 h-4 w-px flex-none bg-loom-border-menu" />
+            ) : null}
+          </Fragment>
         ))}
         <button
           type="button"
