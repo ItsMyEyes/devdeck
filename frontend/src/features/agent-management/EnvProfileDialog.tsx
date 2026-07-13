@@ -14,8 +14,8 @@ import {
   useFetchAgentEnvModels,
   useUpdateAgentEnvProfile,
 } from '@/features/data/queries'
-import type { EnvProfileInput, EnvProfilePatch } from '@/lib/api'
-import type { EnvProfileSummary } from '@/store/types'
+import type { EnvProfileInput, EnvProfilePatch } from '@/lib/machineApi'
+import type { EnvProfileSummary, Machine } from '@/store/types'
 import { cn } from '@/lib/utils'
 
 const CLAUDE_SLOTS = [
@@ -57,11 +57,13 @@ function isValidHttpUrl(value: string): boolean {
 
 export function EnvProfileDialog({
   open,
+  machine,
   agentId,
   profile,
   onOpenChange,
 }: {
   open: boolean
+  machine: Machine
   agentId: string
   /** null = create mode; a summary = edit mode. */
   profile: EnvProfileSummary | null
@@ -139,6 +141,7 @@ export function EnvProfileDialog({
     setError('')
     try {
       const result = await fetchModels.mutateAsync({
+        machine,
         agentId,
         body: {
           baseUrl: url,
@@ -201,6 +204,7 @@ export function EnvProfileDialog({
       if (isEdit && profile) {
         const token = authToken.trim()
         await updateProfile.mutateAsync({
+          machine,
           agentId,
           profileId: profile.id,
           body: { ...common, authToken: token || undefined } as EnvProfilePatch,
@@ -208,6 +212,7 @@ export function EnvProfileDialog({
         toast.success(`${cleanName} updated`)
       } else {
         await createProfile.mutateAsync({
+          machine,
           agentId,
           body: { ...common, authToken: authToken.trim() } as EnvProfileInput,
         })

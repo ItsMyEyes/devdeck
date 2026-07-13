@@ -17,7 +17,7 @@ import {
   useRemoveAgentSkill,
 } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
-import type { AgentSummary } from '@/store/types'
+import type { AgentSummary, Machine } from '@/store/types'
 import { AgentMark } from './AgentMark'
 import { RemoveSkillDialog } from './RemoveSkillDialog'
 import type { AgentSkillInventory, CatalogSkill } from './types'
@@ -29,10 +29,12 @@ interface PendingRemoval {
 }
 
 export function SkillsManagement({
+  machine,
   agents,
   inventory,
   loading,
 }: {
+  machine: Machine
   agents: AgentSummary[]
   inventory: AgentSkillInventory[]
   loading: boolean
@@ -67,7 +69,7 @@ export function SkillsManagement({
 
   async function install(agentId: string, skillName: string) {
     try {
-      await installSkill.mutateAsync({ agentId, skillName })
+      await installSkill.mutateAsync({ machine, agentId, skillName })
       const agent = agents.find((item) => item.id === agentId)
       toast.success(`${skillName} installed in ${agent?.name ?? agentId}`)
     } catch (error) {
@@ -79,7 +81,7 @@ export function SkillsManagement({
     const missing = agents.filter((agent) => !skill.installations.has(agent.id))
     const results = await Promise.allSettled(
       missing.map((agent) =>
-        installSkill.mutateAsync({ agentId: agent.id, skillName: skill.name }),
+        installSkill.mutateAsync({ machine, agentId: agent.id, skillName: skill.name }),
       ),
     )
     const failed = results.filter((result) => result.status === 'rejected').length
@@ -94,6 +96,7 @@ export function SkillsManagement({
     if (!pendingRemoval) return
     try {
       await removeSkill.mutateAsync({
+        machine,
         agentId: pendingRemoval.agentId,
         skillName: pendingRemoval.skillName,
       })

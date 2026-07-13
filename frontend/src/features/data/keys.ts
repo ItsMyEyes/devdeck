@@ -3,13 +3,16 @@
 export const qk = {
   workspaces: ['workspaces'] as const,
   settings: ['settings'] as const,
-  agents: ['agents'] as const,
-  agentDetail: (id: string) => ['agents', id] as const,
-  agentModels: (id: string) => ['agents', id, 'models'] as const,
-  agentSkills: (id: string) => ['agents', id, 'skills'] as const,
-  agentMCPServers: (id: string) => ['agents', id, 'mcp-servers'] as const,
-  agentEnvProfiles: (id: string) => ['agents', id, 'env-profiles'] as const,
-  agentSettingsFile: (id: string) => ['agents', id, 'settings-file'] as const,
+  agents: (machineId: string) => ['machines', machineId, 'agents'] as const,
+  agentDetail: (machineId: string, id: string) => ['machines', machineId, 'agents', id] as const,
+  agentModels: (machineId: string, id: string) => ['machines', machineId, 'agents', id, 'models'] as const,
+  agentSkills: (machineId: string, id: string) => ['machines', machineId, 'agents', id, 'skills'] as const,
+  agentMCPServers: (machineId: string, id: string) =>
+    ['machines', machineId, 'agents', id, 'mcp-servers'] as const,
+  agentEnvProfiles: (machineId: string, id: string) =>
+    ['machines', machineId, 'agents', id, 'env-profiles'] as const,
+  agentSettingsFile: (machineId: string, id: string) =>
+    ['machines', machineId, 'agents', id, 'settings-file'] as const,
   fsList: (machineId: string, path: string) => ['machines', machineId, 'fs', 'list', path] as const,
   worktreeFilesRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'files'] as const,
   worktreeFiles: (machineId: string, id: string, path: string) =>

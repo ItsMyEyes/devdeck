@@ -2,22 +2,15 @@
 // The backend is the source of truth; these functions mirror the REST contract.
 
 import type {
-  Agent,
-  AgentModel,
-  AgentSkill,
-  AgentSummary,
   Attachment,
   Bank,
   Company,
-  EnvModelOption,
-  EnvProfileSummary,
   Invoice,
   InvoiceItem,
   InvoiceStatus,
   Issue,
   IssueComment,
   IssueEvent,
-  MCPServer,
   Machine,
   NewsItem,
   Priority,
@@ -498,185 +491,6 @@ export function fetchIssueEvents(issueId: string): Promise<IssueEvent[]> {
 
 export function seed(): Promise<Workspace[]> {
   return request<Workspace[]>('POST', '/seed')
-}
-
-// ---- Agents / Models / Skills ----
-
-export function fetchAgents(): Promise<AgentSummary[]> {
-  return request<AgentSummary[]>('GET', '/agents')
-}
-
-export function fetchAgent(agentId: string): Promise<Agent> {
-  return request<Agent>(`GET`, `/agents/${agentId}`)
-}
-
-export function fetchAgentModels(agentId: string): Promise<AgentModel[]> {
-  return request<AgentModel[]>('GET', `/agents/${agentId}/models`)
-}
-
-export function fetchAgentSkills(agentId: string): Promise<AgentSkill[]> {
-  return request<AgentSkill[]>('GET', `/agents/${agentId}/skills`)
-}
-
-export function installAgentSkill(agentId: string, skillName: string): Promise<void> {
-  return request<void>(
-    'POST',
-    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
-  )
-}
-
-export function removeAgentSkill(agentId: string, skillName: string): Promise<void> {
-  return request<void>(
-    'DELETE',
-    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
-  )
-}
-
-export interface AddMCPServerBody {
-  name: string
-  transport: 'stdio' | 'http'
-  command?: string
-  args?: string[]
-  url?: string
-  env?: Record<string, string>
-}
-
-export function fetchAgentMCPServers(agentId: string): Promise<MCPServer[]> {
-  return request<MCPServer[]>('GET', `/agents/${encodeURIComponent(agentId)}/mcp-servers`)
-}
-
-export function addAgentMCPServer(agentId: string, body: AddMCPServerBody): Promise<void> {
-  return request<void>('POST', `/agents/${encodeURIComponent(agentId)}/mcp-servers`, body)
-}
-
-export function removeAgentMCPServer(agentId: string, serverName: string): Promise<void> {
-  return request<void>(
-    'DELETE',
-    `/agents/${encodeURIComponent(agentId)}/mcp-servers/${encodeURIComponent(serverName)}`,
-  )
-}
-
-// ---- Agent env profiles (Claude LLM-environment snapshots) ----
-
-export interface EnvProfileInput {
-  name: string
-  baseUrl: string
-  authToken: string
-  models: Record<string, string>
-  extraEnv: Record<string, string>
-
-  // Codex-specific
-  codexProviderName?: string
-  codexWireAPI?: string
-  codexEnvKey?: string
-  codexContextWindow?: number
-  codexMaxTokens?: number
-}
-
-/** A blank authToken on update means "leave the stored token unchanged." */
-export interface EnvProfilePatch {
-  name: string
-  baseUrl: string
-  authToken?: string
-  models: Record<string, string>
-  extraEnv: Record<string, string>
-
-  // Codex-specific
-  codexProviderName?: string
-  codexWireAPI?: string
-  codexEnvKey?: string
-  codexContextWindow?: number
-  codexMaxTokens?: number
-}
-
-export function fetchAgentEnvProfiles(agentId: string): Promise<EnvProfileSummary[]> {
-  return request<EnvProfileSummary[]>(
-    'GET',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
-  )
-}
-
-export function fetchAgentEnvProfile(
-  agentId: string,
-  profileId: string,
-): Promise<EnvProfileSummary> {
-  return request<EnvProfileSummary>(
-    'GET',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
-  )
-}
-
-export function createAgentEnvProfile(
-  agentId: string,
-  body: EnvProfileInput,
-): Promise<EnvProfileSummary> {
-  return request<EnvProfileSummary>(
-    'POST',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
-    body,
-  )
-}
-
-export function updateAgentEnvProfile(
-  agentId: string,
-  profileId: string,
-  body: EnvProfilePatch,
-): Promise<EnvProfileSummary> {
-  return request<EnvProfileSummary>(
-    'PATCH',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
-    body,
-  )
-}
-
-export function removeAgentEnvProfile(agentId: string, profileId: string): Promise<void> {
-  return request<void>(
-    'DELETE',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
-  )
-}
-
-export function activateAgentEnvProfile(agentId: string, profileId: string): Promise<void> {
-  return request<void>(
-    'POST',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}/activate`,
-  )
-}
-
-export function deactivateAgentEnvProfile(agentId: string): Promise<void> {
-  return request<void>(
-    'POST',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/deactivate`,
-  )
-}
-
-/** When authToken is omitted, the backend uses the stored profile's token. */
-export function fetchAgentEnvModels(
-  agentId: string,
-  body: { profileId?: string; baseUrl: string; authToken?: string },
-): Promise<EnvModelOption[]> {
-  return request<EnvModelOption[]>(
-    'POST',
-    `/agents/${encodeURIComponent(agentId)}/env-profiles/fetch-models`,
-    body,
-  )
-}
-
-// ---- Settings file (raw JSON editor) ----
-
-export function fetchAgentSettingsFile(agentId: string): Promise<{ content: string }> {
-  return request<{ content: string }>(
-    'GET',
-    `/agents/${encodeURIComponent(agentId)}/settings-file`,
-  )
-}
-
-export function updateAgentSettingsFile(agentId: string, content: string): Promise<void> {
-  return request<void>(
-    'PUT',
-    `/agents/${encodeURIComponent(agentId)}/settings-file`,
-    { content },
-  )
 }
 
 // ---- Auth ----

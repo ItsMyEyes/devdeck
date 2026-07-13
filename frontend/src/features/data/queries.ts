@@ -4,16 +4,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Machine, Workspace } from '@/store/types'
 import {
-  addAgentMCPServer,
-  activateAgentEnvProfile,
-  createAgentEnvProfile,
-  deactivateAgentEnvProfile,
-  fetchAgentEnvModels,
-  fetchAgentEnvProfiles,
-  fetchAgentSettingsFile,
-  removeAgentEnvProfile,
-  updateAgentEnvProfile,
-  updateAgentSettingsFile,
   clearDoneTodos,
   cloneProject,
   createBank,
@@ -39,10 +29,6 @@ import {
   deleteRecurringTemplate,
   deleteTodo,
   deleteWorkspace,
-  fetchAgentModels,
-  fetchAgentMCPServers,
-  fetchAgentSkills,
-  fetchAgents,
   fetchAttachments,
   fetchBanks,
   fetchComments,
@@ -52,10 +38,7 @@ import {
   fetchMachines,
   fetchSettings,
   fetchWorkspaces,
-  installAgentSkill,
   markAllNewsRead,
-  removeAgentMCPServer,
-  removeAgentSkill,
   seed,
   uploadAttachment,
   updateBank,
@@ -72,11 +55,8 @@ import {
   updateWorkspace,
 } from '@/lib/api'
 import type {
-  AddMCPServerBody,
   CloneProjectBody,
   CreateBankBody,
-  EnvProfileInput,
-  EnvProfilePatch,
   CreateCommentBody,
   CreateCompanyBody,
   CreateInvoiceBody,
@@ -101,9 +81,20 @@ import type {
   UpdateWorkspaceBody,
 } from '@/lib/api'
 import {
+  activateAgentEnvProfile,
+  addAgentMCPServer,
+  createAgentEnvProfile,
   createWorktree,
+  deactivateAgentEnvProfile,
   deleteWorktree,
   deleteWorktreeFile,
+  fetchAgentEnvModels,
+  fetchAgentEnvProfiles,
+  fetchAgentMCPServers,
+  fetchAgentModels,
+  fetchAgentSettingsFile,
+  fetchAgentSkills,
+  fetchAgents,
   fetchFsList,
   fetchGitDiff,
   fetchGitLog,
@@ -117,12 +108,21 @@ import {
   gitPush,
   gitStage,
   gitUnstage,
+  installAgentSkill,
+  removeAgentEnvProfile,
+  removeAgentMCPServer,
+  removeAgentSkill,
   searchWorktreeFiles,
+  updateAgentEnvProfile,
+  updateAgentSettingsFile,
   updateWorktree,
   writeWorktreeFile,
   createFsFolder,
+  type AddMCPServerBody,
   type CreateFsFolderBody,
   type CreateWorktreeBody,
+  type EnvProfileInput,
+  type EnvProfilePatch,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
 import { qk } from './keys'
@@ -585,35 +585,40 @@ export function useSeed() {
   })
 }
 
-// ---- Agent / Model / Skill queries ----
+// ---- Agent / Model / Skill queries (installed CLI agents live on a machine) ----
 
-export function useAgents() {
-  return useQuery({ queryKey: qk.agents, queryFn: fetchAgents, staleTime: 300_000 })
-}
-
-export function useAgentModels(agentId: string | undefined) {
+export function useAgents(machine: Machine | undefined) {
   return useQuery({
-    queryKey: qk.agentModels(agentId ?? ''),
-    queryFn: () => fetchAgentModels(agentId!),
-    enabled: !!agentId,
+    queryKey: qk.agents(machine?.id ?? ''),
+    queryFn: () => fetchAgents(machine!),
+    enabled: !!machine,
     staleTime: 300_000,
   })
 }
 
-export function useAgentSkills(agentId: string | undefined) {
+export function useAgentModels(machine: Machine | undefined, agentId: string | undefined) {
   return useQuery({
-    queryKey: qk.agentSkills(agentId ?? ''),
-    queryFn: () => fetchAgentSkills(agentId!),
-    enabled: !!agentId,
+    queryKey: qk.agentModels(machine?.id ?? '', agentId ?? ''),
+    queryFn: () => fetchAgentModels(machine!, agentId!),
+    enabled: !!machine && !!agentId,
     staleTime: 300_000,
   })
 }
 
-export function useAgentMCPServers(agentId: string | undefined) {
+export function useAgentSkills(machine: Machine | undefined, agentId: string | undefined) {
   return useQuery({
-    queryKey: qk.agentMCPServers(agentId ?? ''),
-    queryFn: () => fetchAgentMCPServers(agentId!),
-    enabled: !!agentId,
+    queryKey: qk.agentSkills(machine?.id ?? '', agentId ?? ''),
+    queryFn: () => fetchAgentSkills(machine!, agentId!),
+    enabled: !!machine && !!agentId,
+    staleTime: 300_000,
+  })
+}
+
+export function useAgentMCPServers(machine: Machine | undefined, agentId: string | undefined) {
+  return useQuery({
+    queryKey: qk.agentMCPServers(machine?.id ?? '', agentId ?? ''),
+    queryFn: () => fetchAgentMCPServers(machine!, agentId!),
+    enabled: !!machine && !!agentId,
     staleTime: 30_000,
     retry: false,
   })
@@ -622,12 +627,12 @@ export function useAgentMCPServers(agentId: string | undefined) {
 export function useInstallAgentSkill() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, skillName }: { agentId: string; skillName: string }) =>
-      installAgentSkill(agentId, skillName),
+    mutationFn: ({ machine, agentId, skillName }: { machine: Machine; agentId: string; skillName: string }) =>
+      installAgentSkill(machine, agentId, skillName),
     onSettled: (_data, _error, variables) =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: qk.agents }),
-        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.agentId) }),
+        queryClient.invalidateQueries({ queryKey: qk.agents(variables.machine.id) }),
+        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.machine.id, variables.agentId) }),
       ]),
   })
 }
@@ -635,12 +640,12 @@ export function useInstallAgentSkill() {
 export function useRemoveAgentSkill() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, skillName }: { agentId: string; skillName: string }) =>
-      removeAgentSkill(agentId, skillName),
+    mutationFn: ({ machine, agentId, skillName }: { machine: Machine; agentId: string; skillName: string }) =>
+      removeAgentSkill(machine, agentId, skillName),
     onSettled: (_data, _error, variables) =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: qk.agents }),
-        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.agentId) }),
+        queryClient.invalidateQueries({ queryKey: qk.agents(variables.machine.id) }),
+        queryClient.invalidateQueries({ queryKey: qk.agentSkills(variables.machine.id, variables.agentId) }),
       ]),
   })
 }
@@ -648,30 +653,30 @@ export function useRemoveAgentSkill() {
 export function useAddAgentMCPServer() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, body }: { agentId: string; body: AddMCPServerBody }) =>
-      addAgentMCPServer(agentId, body),
+    mutationFn: ({ machine, agentId, body }: { machine: Machine; agentId: string; body: AddMCPServerBody }) =>
+      addAgentMCPServer(machine, agentId, body),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.machine.id, variables.agentId) }),
   })
 }
 
 export function useRemoveAgentMCPServer() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, serverName }: { agentId: string; serverName: string }) =>
-      removeAgentMCPServer(agentId, serverName),
+    mutationFn: ({ machine, agentId, serverName }: { machine: Machine; agentId: string; serverName: string }) =>
+      removeAgentMCPServer(machine, agentId, serverName),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentMCPServers(variables.machine.id, variables.agentId) }),
   })
 }
 
 // ---- Agent env profiles (Claude LLM-environment snapshots) ----
 
-export function useAgentEnvProfiles(agentId: string | undefined) {
+export function useAgentEnvProfiles(machine: Machine | undefined, agentId: string | undefined) {
   return useQuery({
-    queryKey: qk.agentEnvProfiles(agentId ?? ''),
-    queryFn: () => fetchAgentEnvProfiles(agentId!),
-    enabled: !!agentId,
+    queryKey: qk.agentEnvProfiles(machine?.id ?? '', agentId ?? ''),
+    queryFn: () => fetchAgentEnvProfiles(machine!, agentId!),
+    enabled: !!machine && !!agentId,
     staleTime: 30_000,
     retry: false,
   })
@@ -680,10 +685,10 @@ export function useAgentEnvProfiles(agentId: string | undefined) {
 export function useCreateAgentEnvProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, body }: { agentId: string; body: EnvProfileInput }) =>
-      createAgentEnvProfile(agentId, body),
+    mutationFn: ({ machine, agentId, body }: { machine: Machine; agentId: string; body: EnvProfileInput }) =>
+      createAgentEnvProfile(machine, agentId, body),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.machine.id, variables.agentId) }),
   })
 }
 
@@ -691,67 +696,72 @@ export function useUpdateAgentEnvProfile() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
+      machine,
       agentId,
       profileId,
       body,
     }: {
+      machine: Machine
       agentId: string
       profileId: string
       body: EnvProfilePatch
-    }) => updateAgentEnvProfile(agentId, profileId, body),
+    }) => updateAgentEnvProfile(machine, agentId, profileId, body),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.machine.id, variables.agentId) }),
   })
 }
 
 export function useRemoveAgentEnvProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, profileId }: { agentId: string; profileId: string }) =>
-      removeAgentEnvProfile(agentId, profileId),
+    mutationFn: ({ machine, agentId, profileId }: { machine: Machine; agentId: string; profileId: string }) =>
+      removeAgentEnvProfile(machine, agentId, profileId),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.machine.id, variables.agentId) }),
   })
 }
 
 export function useActivateAgentEnvProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, profileId }: { agentId: string; profileId: string }) =>
-      activateAgentEnvProfile(agentId, profileId),
+    mutationFn: ({ machine, agentId, profileId }: { machine: Machine; agentId: string; profileId: string }) =>
+      activateAgentEnvProfile(machine, agentId, profileId),
     onSettled: (_data, _error, variables) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.agentId) }),
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.machine.id, variables.agentId) }),
   })
 }
 
 export function useDeactivateAgentEnvProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (agentId: string) => deactivateAgentEnvProfile(agentId),
-    onSettled: (_data, _error, agentId) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(agentId) }),
+    mutationFn: ({ machine, agentId }: { machine: Machine; agentId: string }) =>
+      deactivateAgentEnvProfile(machine, agentId),
+    onSettled: (_data, _error, variables) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentEnvProfiles(variables.machine.id, variables.agentId) }),
   })
 }
 
 export function useFetchAgentEnvModels() {
   return useMutation({
     mutationFn: ({
+      machine,
       agentId,
       body,
     }: {
+      machine: Machine
       agentId: string
       body: { profileId?: string; baseUrl: string; authToken?: string }
-    }) => fetchAgentEnvModels(agentId, body),
+    }) => fetchAgentEnvModels(machine, agentId, body),
   })
 }
 
 // ---- Settings file (raw JSON editor) ----
 
-export function useAgentSettingsFile(agentId: string | undefined) {
+export function useAgentSettingsFile(machine: Machine | undefined, agentId: string | undefined) {
   return useQuery({
-    queryKey: qk.agentSettingsFile(agentId ?? ''),
-    queryFn: () => fetchAgentSettingsFile(agentId!),
-    enabled: !!agentId,
+    queryKey: qk.agentSettingsFile(machine?.id ?? '', agentId ?? ''),
+    queryFn: () => fetchAgentSettingsFile(machine!, agentId!),
+    enabled: !!machine && !!agentId,
     staleTime: 10_000,
     retry: false,
   })
@@ -760,10 +770,10 @@ export function useAgentSettingsFile(agentId: string | undefined) {
 export function useUpdateAgentSettingsFile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ agentId, content }: { agentId: string; content: string }) =>
-      updateAgentSettingsFile(agentId, content),
-    onSettled: (_data, _error, { agentId }) =>
-      queryClient.invalidateQueries({ queryKey: qk.agentSettingsFile(agentId) }),
+    mutationFn: ({ machine, agentId, content }: { machine: Machine; agentId: string; content: string }) =>
+      updateAgentSettingsFile(machine, agentId, content),
+    onSettled: (_data, _error, { machine, agentId }) =>
+      queryClient.invalidateQueries({ queryKey: qk.agentSettingsFile(machine.id, agentId) }),
   })
 }
 

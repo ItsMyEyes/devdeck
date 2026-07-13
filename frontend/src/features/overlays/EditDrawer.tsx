@@ -44,12 +44,6 @@ export function EditDrawer() {
   const updateProject = useUpdateProject()
   const updateWorkspace = useUpdateWorkspace()
 
-  // Dynamic model options from backend
-  const agents = useAgents().data ?? []
-  const defaultAgent = agents[0]?.id
-  const models = useAgentModels(defaultAgent).data ?? []
-  const modelOptions = models.map((m) => ({ value: m.id, label: m.name }))
-
   const editWorktree = edit.kind === 'worktree' && edit.id ? findWorktree(workspaces, edit.id) : null
   const editProject =
     edit.kind === 'worktree' && edit.id
@@ -62,6 +56,13 @@ export function EditDrawer() {
   const branches = useProjectBranches(editMachine, editProject?.id, editProject?.path).data ?? []
   const branchOptions = branches.map((b) => ({ value: b, label: b }))
   const branchLocked = editWorktree?.state === 'running' || editWorktree?.state === 'waiting'
+
+  // Dynamic model options from backend — reflects the edited worktree's own
+  // machine, since installed agents are a machine property.
+  const agents = useAgents(editMachine).data ?? []
+  const defaultAgent = agents[0]?.id
+  const models = useAgentModels(editMachine, defaultAgent).data ?? []
+  const modelOptions = models.map((m) => ({ value: m.id, label: m.name }))
 
   const open = !!edit.kind
   const view = buildView(edit.kind, edit.id, workspaces)

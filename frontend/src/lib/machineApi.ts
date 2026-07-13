@@ -1,10 +1,23 @@
 // Typed client for runtime-machine-scoped resources: worktrees, worktree
-// files, worktree git, project branches, and filesystem browsing. Every
-// function takes the target Machine and resolves direct-vs-proxy through
-// machineClient.ts. Hub-scoped resources (workspaces, todos, invoices, ...)
-// stay in api.ts.
+// files, worktree git, project branches, filesystem browsing, and agent
+// management (installed CLI agents, skills, MCP servers, env profiles —
+// all properties of a specific machine, not the hub). Every function takes
+// the target Machine and resolves direct-vs-proxy through machineClient.ts.
+// Hub-scoped resources (workspaces, todos, invoices, ...) stay in api.ts.
 
-import type { FsEntry, Machine, TermLine, Worktree } from '@/store/types'
+import type {
+  Agent,
+  AgentModel,
+  AgentSkill,
+  AgentSummary,
+  EnvModelOption,
+  EnvProfileSummary,
+  FsEntry,
+  MCPServer,
+  Machine,
+  TermLine,
+  Worktree,
+} from '@/store/types'
 import { machineRequest } from './machineClient'
 
 // ---- Worktrees ----
@@ -216,4 +229,200 @@ export interface ProxyStartResponse {
  *  call while already running returns the same bound addresses/key. */
 export function startProxy(machine: Machine): Promise<ProxyStartResponse> {
   return machineRequest<ProxyStartResponse>(machine, 'POST', '/proxy/start')
+}
+
+// ---- Agents / Models / Skills (installed CLI agents live on the machine) ----
+
+export function fetchAgents(machine: Machine): Promise<AgentSummary[]> {
+  return machineRequest<AgentSummary[]>(machine, 'GET', '/agents')
+}
+
+export function fetchAgent(machine: Machine, agentId: string): Promise<Agent> {
+  return machineRequest<Agent>(machine, 'GET', `/agents/${agentId}`)
+}
+
+export function fetchAgentModels(machine: Machine, agentId: string): Promise<AgentModel[]> {
+  return machineRequest<AgentModel[]>(machine, 'GET', `/agents/${agentId}/models`)
+}
+
+export function fetchAgentSkills(machine: Machine, agentId: string): Promise<AgentSkill[]> {
+  return machineRequest<AgentSkill[]>(machine, 'GET', `/agents/${agentId}/skills`)
+}
+
+export function installAgentSkill(machine: Machine, agentId: string, skillName: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
+  )
+}
+
+export function removeAgentSkill(machine: Machine, agentId: string, skillName: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}`,
+  )
+}
+
+export interface AddMCPServerBody {
+  name: string
+  transport: 'stdio' | 'http'
+  command?: string
+  args?: string[]
+  url?: string
+  env?: Record<string, string>
+}
+
+export function fetchAgentMCPServers(machine: Machine, agentId: string): Promise<MCPServer[]> {
+  return machineRequest<MCPServer[]>(machine, 'GET', `/agents/${encodeURIComponent(agentId)}/mcp-servers`)
+}
+
+export function addAgentMCPServer(machine: Machine, agentId: string, body: AddMCPServerBody): Promise<void> {
+  return machineRequest<void>(machine, 'POST', `/agents/${encodeURIComponent(agentId)}/mcp-servers`, body)
+}
+
+export function removeAgentMCPServer(machine: Machine, agentId: string, serverName: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/mcp-servers/${encodeURIComponent(serverName)}`,
+  )
+}
+
+// ---- Agent env profiles (Claude LLM-environment snapshots) ----
+
+export interface EnvProfileInput {
+  name: string
+  baseUrl: string
+  authToken: string
+  models: Record<string, string>
+  extraEnv: Record<string, string>
+
+  // Codex-specific
+  codexProviderName?: string
+  codexWireAPI?: string
+  codexEnvKey?: string
+  codexContextWindow?: number
+  codexMaxTokens?: number
+}
+
+/** A blank authToken on update means "leave the stored token unchanged." */
+export interface EnvProfilePatch {
+  name: string
+  baseUrl: string
+  authToken?: string
+  models: Record<string, string>
+  extraEnv: Record<string, string>
+
+  // Codex-specific
+  codexProviderName?: string
+  codexWireAPI?: string
+  codexEnvKey?: string
+  codexContextWindow?: number
+  codexMaxTokens?: number
+}
+
+export function fetchAgentEnvProfiles(machine: Machine, agentId: string): Promise<EnvProfileSummary[]> {
+  return machineRequest<EnvProfileSummary[]>(
+    machine,
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
+  )
+}
+
+export function fetchAgentEnvProfile(
+  machine: Machine,
+  agentId: string,
+  profileId: string,
+): Promise<EnvProfileSummary> {
+  return machineRequest<EnvProfileSummary>(
+    machine,
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+  )
+}
+
+export function createAgentEnvProfile(
+  machine: Machine,
+  agentId: string,
+  body: EnvProfileInput,
+): Promise<EnvProfileSummary> {
+  return machineRequest<EnvProfileSummary>(
+    machine,
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles`,
+    body,
+  )
+}
+
+export function updateAgentEnvProfile(
+  machine: Machine,
+  agentId: string,
+  profileId: string,
+  body: EnvProfilePatch,
+): Promise<EnvProfileSummary> {
+  return machineRequest<EnvProfileSummary>(
+    machine,
+    'PATCH',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+    body,
+  )
+}
+
+export function removeAgentEnvProfile(machine: Machine, agentId: string, profileId: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'DELETE',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}`,
+  )
+}
+
+export function activateAgentEnvProfile(machine: Machine, agentId: string, profileId: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/${encodeURIComponent(profileId)}/activate`,
+  )
+}
+
+export function deactivateAgentEnvProfile(machine: Machine, agentId: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/deactivate`,
+  )
+}
+
+/** When authToken is omitted, the backend uses the stored profile's token. */
+export function fetchAgentEnvModels(
+  machine: Machine,
+  agentId: string,
+  body: { profileId?: string; baseUrl: string; authToken?: string },
+): Promise<EnvModelOption[]> {
+  return machineRequest<EnvModelOption[]>(
+    machine,
+    'POST',
+    `/agents/${encodeURIComponent(agentId)}/env-profiles/fetch-models`,
+    body,
+  )
+}
+
+// ---- Settings file (raw JSON editor) ----
+
+export function fetchAgentSettingsFile(machine: Machine, agentId: string): Promise<{ content: string }> {
+  return machineRequest<{ content: string }>(
+    machine,
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/settings-file`,
+  )
+}
+
+export function updateAgentSettingsFile(machine: Machine, agentId: string, content: string): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'PUT',
+    `/agents/${encodeURIComponent(agentId)}/settings-file`,
+    { content },
+  )
 }

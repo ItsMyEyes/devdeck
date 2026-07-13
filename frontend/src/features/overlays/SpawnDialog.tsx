@@ -34,8 +34,9 @@ export function SpawnDialog() {
   const branches = useProjectBranches(machine, project?.id, project?.path).data ?? []
   const baseOptions = branches.map((b) => ({ value: b, label: b }))
 
-  // Dynamic agent/model data from backend
-  const agents = useAgents().data ?? []
+  // Dynamic agent/model data from backend — reflects whichever machine this
+  // project is assigned to, since installed agents are a machine property.
+  const agents = useAgents(machine).data ?? []
   const installedAgents = agents.filter((a) => a.installed)
   const agentOptions = installedAgents.map((a) => ({ value: a.id, label: a.name }))
 
@@ -43,7 +44,7 @@ export function SpawnDialog() {
   const defaultAgentId = installedAgents.find((a) => spawn.model.startsWith(a.id))?.id ?? installedAgents[0]?.id ?? ''
   const [agentId, setAgentId] = useState(defaultAgentId)
 
-  const models = useAgentModels(agentId).data ?? []
+  const models = useAgentModels(machine, agentId).data ?? []
   const modelOptions = models.map((m) => ({ value: m.id, label: m.name }))
 
   const branchMode = spawn.mode !== 'root'

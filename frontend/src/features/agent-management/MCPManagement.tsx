@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRemoveAgentMCPServer } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
-import type { AgentSummary, MCPServer } from '@/store/types'
+import type { AgentSummary, MCPServer, Machine } from '@/store/types'
 import { AddMCPDialog } from './AddMCPDialog'
 import { AgentMark } from './AgentMark'
 import { RemoveMCPDialog } from './RemoveMCPDialog'
@@ -25,10 +25,12 @@ interface PendingRemoval {
 }
 
 export function MCPManagement({
+  machine,
   agents,
   inventory,
   loading,
 }: {
+  machine: Machine
   agents: AgentSummary[]
   inventory: AgentMCPInventory[]
   loading: boolean
@@ -64,6 +66,7 @@ export function MCPManagement({
     if (!pendingRemoval) return
     try {
       await removeServer.mutateAsync({
+        machine,
         agentId: pendingRemoval.server.agentId,
         serverName: pendingRemoval.server.name,
       })
@@ -261,7 +264,7 @@ export function MCPManagement({
         )}
       </div>
 
-      <AddMCPDialog open={addOpen} agents={agents} onOpenChange={setAddOpen} />
+      <AddMCPDialog open={addOpen} machine={machine} agents={agents} onOpenChange={setAddOpen} />
       <RemoveMCPDialog
         open={pendingRemoval !== null}
         serverName={pendingRemoval?.server.name ?? ''}

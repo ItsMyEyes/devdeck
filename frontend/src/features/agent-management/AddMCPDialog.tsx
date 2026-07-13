@@ -11,17 +11,19 @@ import {
 import { Input } from '@/components/ui/input'
 import { useAddAgentMCPServer } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
-import type { AgentSummary } from '@/store/types'
+import type { AgentSummary, Machine } from '@/store/types'
 import { AgentMark } from './AgentMark'
 
 type Transport = 'stdio' | 'http'
 
 export function AddMCPDialog({
   open,
+  machine,
   agents,
   onOpenChange,
 }: {
   open: boolean
+  machine: Machine
   agents: AgentSummary[]
   onOpenChange: (open: boolean) => void
 }) {
@@ -96,7 +98,7 @@ export function AddMCPDialog({
     const results = []
     for (const agentId of selectedAgents) {
       try {
-        await addServer.mutateAsync({ agentId, body })
+        await addServer.mutateAsync({ machine, agentId, body })
         results.push({ agentId, ok: true })
       } catch (mutationError) {
         results.push({ agentId, ok: false, error: mutationError })

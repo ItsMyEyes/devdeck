@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { Blocks, RefreshCw, ServerCog, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
 import { qk } from '@/features/data/keys'
-import { useAgents } from '@/features/data/queries'
+import { useAgents, useMachines } from '@/features/data/queries'
 import { ModuleHeader } from '@/features/modules/ModuleHeader'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { EmptyState } from '@/features/screens/EmptyState'
-import { fetchAgentEnvProfiles, fetchAgentMCPServers, fetchAgentSkills } from '@/lib/api'
+import { fetchAgentEnvProfiles, fetchAgentMCPServers, fetchAgentSkills } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
 import { EnvProfileManagement } from './EnvProfileManagement'
 import { MCPManagement } from './MCPManagement'
@@ -20,7 +21,22 @@ type ManagementTab = 'skills' | 'mcp' | 'settings'
 
 export function AgentManagementModule() {
   const [tab, setTab] = useState<ManagementTab>('skills')
-  const agentsQuery = useAgents()
+  const machinesQuery = useMachines()
+  const machines = machinesQuery.data ?? []
+  const [machineId, setMachineId] = useState<string | null>(null)
+  // Installed CLI agents/skills/MCP servers/env profiles all live on a
+  // specific machine — default to the local device, falling back to
+  // whichever machine loads first if this isn't the desktop shell.
+  useEffect(() => {
+    if (machineId && machines.some((m) => m.id === machineId)) return
+    if (machines.length === 0) return
+    const preferred = machines.find((m) => m.isLocal) ?? machines[0]
+    setMachineId(preferred.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machines])
+  const machine = machines.find((m) => m.id === machineId)
+
+  const agentsQuery = useAgents(machine)
   const queryClient = useQueryClient()
   const installedAgents = useMemo(
     () => (agentsQuery.data ?? []).filter((agent) => agent.installed),
@@ -38,15 +54,17 @@ export function AgentManagementModule() {
 
   const skillQueries = useQueries({
     queries: installedAgents.map((agent) => ({
-      queryKey: qk.agentSkills(agent.id),
-      queryFn: () => fetchAgentSkills(agent.id),
+      queryKey: qk.agentSkills(machine?.id ?? '', agent.id),
+      queryFn: () => fetchAgentSkills(machine!, agent.id),
+      enabled: !!machine,
       staleTime: 30_000,
     })),
   })
   const mcpQueries = useQueries({
     queries: mcpAgents.map((agent) => ({
-      queryKey: qk.agentMCPServers(agent.id),
-      queryFn: () => fetchAgentMCPServers(agent.id),
+      queryKey: qk.agentMCPServers(machine?.id ?? '', agent.id),
+      queryFn: () => fetchAgentMCPServers(machine!, agent.id),
+      enabled: !!machine,
       staleTime: 30_000,
       retry: false,
     })),
@@ -62,9 +80,9 @@ export function AgentManagementModule() {
   const envProfileQueries = useQueries({
     queries: [
       {
-        queryKey: qk.agentEnvProfiles(activeSettingsAgentId ?? 'claude'),
-        queryFn: () => fetchAgentEnvProfiles(activeSettingsAgentId!),
-        enabled: !!activeSettingsAgentId,
+        queryKey: qk.agentEnvProfiles(machine?.id ?? '', activeSettingsAgentId ?? 'claude'),
+        queryFn: () => fetchAgentEnvProfiles(machine!, activeSettingsAgentId!),
+        enabled: !!machine && !!activeSettingsAgentId,
         staleTime: 30_000,
         retry: false,
       },
@@ -93,12 +111,26 @@ export function AgentManagementModule() {
     envProfileQueries.some((query) => query.isFetching)
 
   async function refresh() {
+    if (!machine) return
     await Promise.all([
       agentsQuery.refetch(),
-      queryClient.invalidateQueries({ queryKey: ['agents'] }),
+      queryClient.invalidateQueries({ queryKey: ['machines', machine.id, 'agents'] }),
     ])
   }
 
+  if (machinesQuery.isPending) return <DataLoading label="loading machines…" />
+  if (machinesQuery.isError) {
+    return <DataError error={machinesQuery.error} onRetry={() => machinesQuery.refetch()} />
+  }
+  if (!machine) {
+    return (
+      <EmptyState
+        icon={<ServerCog size={26} />}
+        title="No machine is registered yet"
+        hint="Register this device or a runtime machine to manage its installed agents."
+      />
+    )
+  }
   if (agentsQuery.isPending) return <DataLoading label="loading agent integrations..." />
   if (agentsQuery.isError) {
     return <DataError error={agentsQuery.error} onRetry={() => agentsQuery.refetch()} />
@@ -110,10 +142,23 @@ export function AgentManagementModule() {
         title="Agent management"
         meta={`${installedAgents.length} installed`}
         actions={
-          <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing}>
-            <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
-            Refresh
-          </Button>
+          <>
+            {machines.length > 1 ? (
+              <div className="w-44">
+                <Select
+                  value={machine.id}
+                  onValueChange={setMachineId}
+                  aria-label="Machine"
+                  options={machines.map((m) => ({ value: m.id, label: m.isLocal ? `${m.name} (this device)` : m.name }))}
+                  triggerClassName="h-8"
+                />
+              </div>
+            ) : null}
+            <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing}>
+              <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
+              Refresh
+            </Button>
+          </>
         }
       />
 
@@ -218,18 +263,21 @@ export function AgentManagementModule() {
 
           {tab === 'skills' ? (
             <SkillsManagement
+              machine={machine}
               agents={installedAgents}
               inventory={skillInventory}
               loading={skillQueries.some((query) => query.isPending)}
             />
           ) : tab === 'mcp' ? (
             <MCPManagement
+              machine={machine}
               agents={mcpAgents}
               inventory={mcpInventory}
               loading={mcpQueries.some((query) => query.isPending)}
             />
           ) : activeSettingsAgentId ? (
             <EnvProfileManagement
+              machine={machine}
               agentId={activeSettingsAgentId}
               allSettingsAgents={settingsAgents}
               profiles={envProfiles}
@@ -238,6 +286,7 @@ export function AgentManagementModule() {
             />
           ) : (
             <MCPManagement
+              machine={machine}
               agents={mcpAgents}
               inventory={mcpInventory}
               loading={mcpQueries.some((query) => query.isPending)}

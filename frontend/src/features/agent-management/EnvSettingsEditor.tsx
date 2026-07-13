@@ -14,7 +14,9 @@ import {
   useAgentSettingsFile,
   useUpdateAgentSettingsFile,
 } from '@/features/data/queries'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { cn } from '@/lib/utils'
+import type { Machine } from '@/store/types'
 
 const explicitHistoryKeymap = Prec.highest(
   keymap.of([
@@ -119,10 +121,10 @@ function useFileLanguage(agentId: string) {
   return language
 }
 
-export function EnvSettingsEditor({ agentId }: { agentId: string }) {
+export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agentId: string }) {
   const isCodex = agentId === 'codex'
   const editorRef = useRef<ReactCodeMirrorRef>(null)
-  const query = useAgentSettingsFile(agentId)
+  const query = useAgentSettingsFile(machine, agentId)
   const save = useUpdateAgentSettingsFile()
   const fileLanguage = useFileLanguage(agentId)
 
@@ -142,7 +144,7 @@ export function EnvSettingsEditor({ agentId }: { agentId: string }) {
       }
     }
     try {
-      await save.mutateAsync({ agentId, content })
+      await save.mutateAsync({ machine, agentId, content })
       toast.success(isCodex ? 'config.toml saved' : 'settings.json saved')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save settings file')
@@ -200,7 +202,7 @@ export function EnvSettingsEditor({ agentId }: { agentId: string }) {
       <div className="flex-1 overflow-hidden">
         {query.isLoading ? (
           <div className="flex h-full items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-loom-border-strong border-t-loom-accent-soft" />
+            <DataLoading compact label="loading settings…" />
           </div>
         ) : query.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">

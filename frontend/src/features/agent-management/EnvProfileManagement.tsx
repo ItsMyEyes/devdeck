@@ -29,7 +29,7 @@ import {
   useRemoveAgentEnvProfile,
 } from '@/features/data/queries'
 import type { EnvProfileSummary } from '@/store/types'
-import type { AgentSummary } from '@/store/types'
+import type { AgentSummary, Machine } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { AgentMark } from './AgentMark'
 import { EnvProfileDialog } from './EnvProfileDialog'
@@ -48,12 +48,14 @@ interface PendingRemoval {
 }
 
 export function EnvProfileManagement({
+  machine,
   agentId,
   allSettingsAgents,
   profiles,
   loading,
   onSelectAgent,
 }: {
+  machine: Machine
   agentId: string
   allSettingsAgents: AgentSummary[]
   profiles: EnvProfileSummary[]
@@ -116,10 +118,10 @@ export function EnvProfileManagement({
   async function toggleActive(profile: EnvProfileSummary) {
     try {
       if (profile.active) {
-        await deactivate.mutateAsync(agentId)
+        await deactivate.mutateAsync({ machine, agentId })
         toast.success(`${profile.name} deactivated`)
       } else {
-        await activate.mutateAsync({ agentId, profileId: profile.id })
+        await activate.mutateAsync({ machine, agentId, profileId: profile.id })
         toast.success(`${profile.name} is now active`)
       }
     } catch (error) {
@@ -130,7 +132,7 @@ export function EnvProfileManagement({
   async function confirmRemoval() {
     if (!pendingRemoval) return
     try {
-      await remove.mutateAsync({ agentId, profileId: pendingRemoval.profile.id })
+      await remove.mutateAsync({ machine, agentId, profileId: pendingRemoval.profile.id })
       toast.success(`${pendingRemoval.profile.name} removed`)
       setPendingRemoval(null)
     } catch (error) {
@@ -561,11 +563,12 @@ export function EnvProfileManagement({
         </>
       ) : (
         /* ── Editor view ── */
-        <EnvSettingsEditor agentId={agentId} />
+        <EnvSettingsEditor machine={machine} agentId={agentId} />
       )}
 
       <EnvProfileDialog
         open={dialogOpen}
+        machine={machine}
         agentId={agentId}
         profile={editing}
         onOpenChange={setDialogOpen}
