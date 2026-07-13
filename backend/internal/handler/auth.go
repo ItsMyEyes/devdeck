@@ -36,13 +36,21 @@ func (h *AuthHandler) SetTurnstile(v *service.TurnstileVerifier, trustedProxies 
 	h.clientIPHeader = clientIPHeader
 }
 
+// secureCookies controls the Secure attribute on auth cookies. Desktop
+// (Tauri) builds serve the UI over plain http://127.0.0.1, where WebKit
+// webviews drop Secure cookies; the sidecar passes --secure-cookies=false.
+var secureCookies = true
+
+// SetSecureCookies toggles the Secure attribute on all auth cookies.
+func SetSecureCookies(enabled bool) { secureCookies = enabled }
+
 func setAuthCookie(w http.ResponseWriter, name, value string, maxAge time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secureCookies,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(maxAge.Seconds()),
 	})
@@ -54,7 +62,7 @@ func clearAuthCookie(w http.ResponseWriter, name string) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secureCookies,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})

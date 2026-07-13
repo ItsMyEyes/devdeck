@@ -43,6 +43,7 @@ func main() {
 	trustedProxies := flag.String("trusted-proxies", envOr("LOOM_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
 	clientIPHeader := flag.String("client-ip-header", envOr("LOOM_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
 	twoFA := flag.Bool("2fa", envBool("LOOM_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
+	secureCookiesFlag := flag.Bool("secure-cookies", envBool("LOOM_SECURE_COOKIES", true), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false)")
 	turnstileSiteKey := flag.String("turnstile-site-key", envOr("LOOM_TURNSTILE_SITE_KEY", ""), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge")
 	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("LOOM_TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify login challenges server-side")
 	pythonBin := flag.String("python-bin", envOr("LOOM_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
@@ -142,6 +143,7 @@ func main() {
 		log.Printf("auth: warning: TOTP two-factor authentication disabled (--2fa=false); logins complete with password only")
 	}
 	authH := handler.NewAuthHandler(authSvc)
+	handler.SetSecureCookies(*secureCookiesFlag)
 	if (*turnstileSiteKey == "") != (*turnstileSecretKey == "") {
 		log.Fatalf("turnstile: --turnstile-site-key and --turnstile-secret-key must be set together")
 	}

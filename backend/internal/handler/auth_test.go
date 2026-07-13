@@ -220,3 +220,20 @@ func TestConfigOmitsTurnstileWhenDisabled(t *testing.T) {
 		t.Errorf("config turnstileSiteKey = %q, want empty when disabled", cfg.TurnstileSiteKey)
 	}
 }
+
+func TestSetSecureCookiesTogglesSecureAttribute(t *testing.T) {
+	t.Cleanup(func() { SetSecureCookies(true) })
+
+	rec := httptest.NewRecorder()
+	setAuthCookie(rec, sessionCookieName, "tok", time.Hour)
+	if c := rec.Result().Cookies()[0]; !c.Secure {
+		t.Fatal("expected Secure cookie by default")
+	}
+
+	SetSecureCookies(false)
+	rec = httptest.NewRecorder()
+	setAuthCookie(rec, sessionCookieName, "tok", time.Hour)
+	if c := rec.Result().Cookies()[0]; c.Secure {
+		t.Fatal("expected non-Secure cookie after SetSecureCookies(false)")
+	}
+}
