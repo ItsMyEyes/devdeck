@@ -203,3 +203,17 @@ export interface CreateFsFolderResponse {
 export function createFsFolder(machine: Machine, body: CreateFsFolderBody): Promise<CreateFsFolderResponse> {
   return machineRequest<CreateFsFolderResponse>(machine, 'POST', '/fs/mkdir', body)
 }
+
+// ---- Forward proxy (on-demand SOCKS5/HTTP, for the machine-proxied Browser tab) ----
+
+export interface ProxyStartResponse {
+  socks5Addr: string
+  httpProxyAddr: string
+  proxyKey: string
+}
+
+/** Idempotently starts this machine's SOCKS5+HTTP forward proxy. A second
+ *  call while already running returns the same bound addresses/key. */
+export function startProxy(machine: Machine): Promise<ProxyStartResponse> {
+  return machineRequest<ProxyStartResponse>(machine, 'POST', '/proxy/start')
+}
