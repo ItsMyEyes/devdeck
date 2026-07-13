@@ -147,10 +147,16 @@ Web SPA (browser) ──(cookie session)────────────┤
 
 ### Tauri shell
 
-- Tauri v2 wrapping the same built SPA. Rust side is shell-only: window +
-  secure storage (keychain) for hub key and any direct-mode runtime keys.
-- CORS on hub/runtime: allowlist `tauri://localhost` and
-  `http://tauri.localhost` (Windows).
+> **Superseded** — see
+> `docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md`.
+> The desktop app now bundles the hub as a sidecar and loads the embedded
+> SPA from `http://127.0.0.1:<port>` (same-origin), instead of wrapping the
+> built SPA under `tauri://localhost` and connecting to a remote hub.
+
+- ~~Tauri v2 wrapping the same built SPA. Rust side is shell-only: window +
+  secure storage (keychain) for hub key and any direct-mode runtime keys.~~
+- ~~CORS on hub/runtime: allowlist `tauri://localhost` and
+  `http://tauri.localhost` (Windows).~~
 
 ## Error handling
 
