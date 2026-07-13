@@ -36,6 +36,11 @@ pub fn run() {
             app.manage(ServerProc(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
             let handle = app.handle().clone();
+            // A raw SIGTERM (killall, forced logout, `pkill`) bypasses AppKit's
+            // quit sequence entirely, so RunEvent::ExitRequested/Exit below never
+            // fires and the sidecar is orphaned. Handle it explicitly on unix.
+            #[cfg(unix)]
+            install_signal_handlers(handle.clone());
             tauri::async_runtime::spawn(async move {
                 let mut respawns = 0;
                 loop {
@@ -62,14 +67,44 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| match event {
-            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
-                handle.state::<ShuttingDown>().0.store(true, Ordering::SeqCst);
-                if let Some(child) = handle.state::<ServerProc>().0.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
-            }
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => kill_sidecar(handle),
             _ => {}
         });
+}
+
+/// Marks shutdown (stops the respawn loop) and kills the sidecar child.
+/// Idempotent: the child is taken out of ServerProc, so a second call
+/// (e.g. RunEvent::Exit firing after a signal handler already ran this) is a
+/// no-op.
+fn kill_sidecar(handle: &AppHandle) {
+    handle.state::<ShuttingDown>().0.store(true, Ordering::SeqCst);
+    if let Some(child) = handle.state::<ServerProc>().0.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+}
+
+/// Kills the sidecar on a raw SIGTERM/SIGINT, then asks Tauri to exit
+/// normally (which will also run kill_sidecar via RunEvent::Exit, safely a
+/// no-op the second time).
+#[cfg(unix)]
+fn install_signal_handlers(handle: AppHandle) {
+    use tokio::signal::unix::{signal, SignalKind};
+    tauri::async_runtime::spawn(async move {
+        let mut term = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let mut int = match signal(SignalKind::interrupt()) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+        }
+        kill_sidecar(&handle);
+        handle.exit(0);
+    });
 }
 
 /// One full sidecar lifetime: spawn, wait ready, register machine, navigate,

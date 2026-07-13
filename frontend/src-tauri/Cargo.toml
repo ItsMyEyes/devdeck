@@ -15,15 +15,15 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3" }
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3" }
+tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 getrandom = "0.4"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "signal", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
