@@ -262,7 +262,15 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
       <div
         ref={setHeaderDropRef}
-        className="flex h-10 flex-none items-center overflow-x-auto border-b border-loom-border bg-loom-surface"
+        className={cn(
+          'flex h-10 items-center overflow-x-auto border-b border-loom-border bg-loom-surface',
+          // The top-left leaf's strip is pinned to the true viewport origin
+          // (not just "first in flow") so it visually merges with macOS's
+          // overlaid traffic-light buttons regardless of Header/Sidebar
+          // nesting above/beside it — see w.$wsId.tsx's matching `pt-10`,
+          // which reserves this exact height so nothing renders underneath.
+          isTopLeft ? 'fixed left-0 right-0 top-0 z-40' : 'flex-none',
+        )}
       >
         {isTopLeft ? (
           <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />

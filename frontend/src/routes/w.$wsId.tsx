@@ -80,8 +80,19 @@ function WorkspaceLayout() {
   }
 
   return (
-    <div className="flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
-      {!workspaceMode && <Header />}
+    <div
+      className={cn(
+        'flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg',
+        // Reserves space for WorkspaceTileCanvas's top-left leaf strip,
+        // which is `fixed` to the true viewport top (see
+        // WorkspaceTileCanvas.tsx) so it visually merges with macOS's
+        // overlaid traffic-light buttons instead of sitting behind Header.
+        inTiledScope && 'pt-10',
+      )}
+    >
+      {/* The tab strip already serves as this scope's top bar (traffic
+          lights, tabs, "+" spawn action) — Header would just duplicate it. */}
+      {!workspaceMode && !inTiledScope && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar compact={workspaceMode} />
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
