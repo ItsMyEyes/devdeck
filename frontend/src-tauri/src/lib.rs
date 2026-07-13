@@ -1,3 +1,4 @@
+mod hubapi;
 mod sidecar;
 
 pub fn run() {
