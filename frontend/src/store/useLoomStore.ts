@@ -5,6 +5,7 @@ import { toast as sonnerToast } from 'sonner'
 import type { WorktreeLayout } from '@/features/terminal/paneTree'
 import {
   closeTileTab,
+  createBrowserTab,
   createDefaultTileLayout,
   createWorktreeTab,
   findLeafForTab,
@@ -57,6 +58,47 @@ interface MachineDialogState {
   url: string
   key: string
 }
+
+export interface BrowserProxyInfo {
+  socks5Addr: string
+  httpProxyAddr: string
+  proxyKey: string
+}
+
+/** One browsing "document" within a Browser tile — plural because
+ *  fullscreen mode reveals an internal tab strip so a single Browser tile
+ *  can hold more than one page at once (see the design spec's Decision 2). */
+export interface BrowserDocState {
+  id: string
+  machineId: string | null
+  proxy: BrowserProxyInfo | null
+  url: string | null
+  title: string
+  loading: boolean
+  history: string[]
+  historyIndex: number
+}
+
+export interface BrowserTileState {
+  fullscreen: boolean
+  activeDocId: string
+  docs: BrowserDocState[]
+}
+
+function generateDocId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function createBrowserDoc(id: string): BrowserDocState {
+  return { id, machineId: null, proxy: null, url: null, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
+}
+
+function createBrowserTileState(): BrowserTileState {
+  const docId = generateDocId()
+  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId)] }
+}
+
 /**
  * Transient UI-only state.
  *
@@ -97,6 +139,11 @@ interface LoomState {
    *  tree of open worktree tabs (splits, per-leaf tab strips). Unused by
    *  the web app. */
   workspaceTileLayouts: Record<string, WorkspaceTileLayout>
+  /** Live browsing state for every open Browser tile, keyed by the tile's
+   *  TileTab id. Deliberately NOT persisted (see the `partialize` config
+   *  below) — a restored `browser` tab reopens to its blank/bookmarks home
+   *  state, same as `ensureBrowserTile` lazily re-creating a missing entry. */
+  browserTiles: Record<string, BrowserTileState>
 
   // ---- actions ----
   showToast: (msg: string) => void
@@ -111,6 +158,16 @@ interface LoomState {
   closeWorktreeTab: (wsId: string, wtId: string) => void
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
   setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
+
+  // browser tile (Tauri only)
+  openBrowserTab: (wsId: string) => void
+  ensureBrowserTile: (tabId: string) => void
+  setBrowserDocState: (tabId: string, docId: string, patch: Partial<Omit<BrowserDocState, 'id'>>) => void
+  addBrowserDoc: (tabId: string) => void
+  closeBrowserDoc: (tabId: string, docId: string) => void
+  selectBrowserDoc: (tabId: string, docId: string) => void
+  setBrowserTileFullscreen: (tabId: string, fullscreen: boolean) => void
+  removeBrowserTile: (tabId: string) => void
 
   // spawn worktree
   openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
@@ -209,6 +266,7 @@ export const useLoomStore = create<LoomState>()(
       worktreeLayouts: {},
       railExpanded: false,
       workspaceTileLayouts: {},
+      browserTiles: {},
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -240,6 +298,54 @@ export const useLoomStore = create<LoomState>()(
           if (!layout) return
           s.workspaceTileLayouts[wsId] = pruneTileTabs(layout, liveWtIds)
         }),
+
+      openBrowserTab: (wsId) =>
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          const tab = createBrowserTab()
+          s.workspaceTileLayouts[wsId] = openTileTab(layout, tab)
+          s.browserTiles[tab.id] = createBrowserTileState()
+        }),
+      ensureBrowserTile: (tabId) =>
+        set((s) => {
+          if (!s.browserTiles[tabId]) s.browserTiles[tabId] = createBrowserTileState()
+        }),
+      setBrowserDocState: (tabId, docId, patch) =>
+        set((s) => {
+          const tile = s.browserTiles[tabId]
+          const doc = tile?.docs.find((d) => d.id === docId)
+          if (doc) Object.assign(doc, patch)
+        }),
+      addBrowserDoc: (tabId) =>
+        set((s) => {
+          const tile = s.browserTiles[tabId]
+          if (!tile) return
+          const doc = createBrowserDoc(generateDocId())
+          tile.docs.push(doc)
+          tile.activeDocId = doc.id
+        }),
+      closeBrowserDoc: (tabId, docId) =>
+        set((s) => {
+          const tile = s.browserTiles[tabId]
+          if (!tile || tile.docs.length === 1) return
+          const idx = tile.docs.findIndex((d) => d.id === docId)
+          if (idx === -1) return
+          tile.docs.splice(idx, 1)
+          if (tile.activeDocId === docId) {
+            tile.activeDocId = (tile.docs[idx] ?? tile.docs[idx - 1]).id
+          }
+        }),
+      selectBrowserDoc: (tabId, docId) =>
+        set((s) => {
+          const tile = s.browserTiles[tabId]
+          if (tile) tile.activeDocId = docId
+        }),
+      setBrowserTileFullscreen: (tabId, fullscreen) =>
+        set((s) => {
+          const tile = s.browserTiles[tabId]
+          if (tile) tile.fullscreen = fullscreen
+        }),
+      removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {
