@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -106,6 +106,22 @@ portable-all: prepare-webui
 	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-linux-arm64 ./cmd/server
 	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-amd64.exe ./cmd/server
 	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-arm64.exe ./cmd/server
+
+# ── Desktop (Tauri) ──────────────────────────────────────────
+# Sidecar binaries for the desktop app, named by Rust target triple as
+# tauri's externalBin convention requires. tauri-build FAILS if these are
+# missing, so run sidecar-host before `tauri dev` / `cargo check`.
+TAURI_BIN_DIR := frontend/src-tauri/binaries
+
+prepare-sidecar: prepare-webui
+	mkdir -p $(TAURI_BIN_DIR)
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-aarch64-apple-darwin ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-x86_64-pc-windows-msvc.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-x86_64-unknown-linux-gnu ./cmd/server
+
+sidecar-host: prepare-webui
+	mkdir -p $(TAURI_BIN_DIR)
+	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check
