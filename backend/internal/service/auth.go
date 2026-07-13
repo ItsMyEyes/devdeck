@@ -355,6 +355,45 @@ func (a *AuthService) CompleteLogin(pendingToken string) (string, domain.User, e
 	return a.completeVerification(pendingToken, userID, user)
 }
 
+// desktopOperatorEmail identifies the auto-created single-operator account
+// used by the desktop app's key-session bootstrap (POST /api/auth/key-session).
+const desktopOperatorEmail = "operator@loom.desktop"
+
+// KeySession issues a session for the desktop operator account, creating it
+// on first run. The caller must already have proven possession of the hub's
+// static --key, so this deliberately bypasses password and TOTP.
+func (a *AuthService) KeySession() (string, domain.User, error) {
+	count, err := a.store.UserCount()
+	if err != nil {
+		return "", domain.User{}, err
+	}
+	if count == 0 {
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			return "", domain.User{}, err
+		}
+		// Throwaway password: desktop logins always come through KeySession.
+		user, _, err := a.Register(desktopOperatorEmail, hex.EncodeToString(buf))
+		if err != nil {
+			return "", domain.User{}, err
+		}
+		token, err := a.issueSession(user.ID)
+		if err != nil {
+			return "", domain.User{}, err
+		}
+		return token, user, nil
+	}
+	user, err := a.store.UserByEmail(desktopOperatorEmail)
+	if err != nil {
+		return "", domain.User{}, fmt.Errorf("key session requires the desktop operator account: %w", ErrConflict)
+	}
+	token, err := a.issueSession(user.ID)
+	if err != nil {
+		return "", domain.User{}, err
+	}
+	return token, user, nil
+}
+
 func (a *AuthService) completeVerification(pendingToken, userID string, user domain.User) (string, domain.User, error) {
 	sessionToken, err := a.issueSession(userID)
 	if err != nil {

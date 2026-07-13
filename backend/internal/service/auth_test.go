@@ -378,3 +378,49 @@ func TestCompleteLoginRejectsBogusToken(t *testing.T) {
 		t.Errorf("CompleteLogin with bogus token err = %v, want ErrUnauthorized", err)
 	}
 }
+
+func TestKeySessionCreatesDesktopOperatorOnFirstRun(t *testing.T) {
+	svc := newTestAuthService(t)
+
+	token, user, err := svc.KeySession()
+	if err != nil {
+		t.Fatalf("KeySession: %v", err)
+	}
+	if user.Email != "operator@loom.desktop" {
+		t.Fatalf("email = %q, want operator@loom.desktop", user.Email)
+	}
+	got, err := svc.CurrentUser(token)
+	if err != nil || got.ID != user.ID {
+		t.Fatalf("CurrentUser(token) = %+v, %v; want the operator user", got, err)
+	}
+}
+
+func TestKeySessionReusesExistingDesktopOperator(t *testing.T) {
+	svc := newTestAuthService(t)
+
+	_, first, err := svc.KeySession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token2, second, err := svc.KeySession()
+	if err != nil {
+		t.Fatalf("second KeySession: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("second call created a new user: %s != %s", second.ID, first.ID)
+	}
+	if _, err := svc.CurrentUser(token2); err != nil {
+		t.Fatalf("second session invalid: %v", err)
+	}
+}
+
+func TestKeySessionRejectsForeignOperatorAccount(t *testing.T) {
+	svc := newTestAuthService(t)
+
+	if _, _, err := svc.Register("me@example.com", "sufficiently-long-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.KeySession(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+}
