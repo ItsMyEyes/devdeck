@@ -14,6 +14,7 @@
 export type TileTab =
   | { kind: 'agents'; id: 'agents' }
   | { kind: 'worktree'; id: string; projectId: string; wtId: string }
+  | { kind: 'browser'; id: string }
 
 export interface TileLeaf {
   type: 'leaf'
@@ -70,6 +71,14 @@ export const AGENTS_TAB: TileTab = { kind: 'agents', id: 'agents' }
 
 export function createWorktreeTab(projectId: string, wtId: string): TileTab {
   return { kind: 'worktree', id: wtId, projectId, wtId }
+}
+
+/** A Browser tile carries no routing data of its own — unlike a worktree
+ *  tab (which points at a backend-owned worktree by id), a browser tab's
+ *  live state (url, history, machine/proxy) lives entirely in the store's
+ *  `browserTiles` slice, keyed by this same generated id. */
+export function createBrowserTab(): TileTab {
+  return { kind: 'browser', id: generateTileId() }
 }
 
 /** The default layout for a workspace with no persisted entry yet: a
