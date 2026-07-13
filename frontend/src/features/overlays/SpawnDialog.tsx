@@ -17,6 +17,7 @@ import {
   useWorkspaces,
 } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 
 export function SpawnDialog() {
   const navigate = useNavigate()
@@ -24,6 +25,8 @@ export function SpawnDialog() {
   const setSpawn = useLoomStore((s) => s.setSpawn)
   const closeSpawn = useLoomStore((s) => s.closeSpawn)
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
+  const openWorktreeTab = useLoomStore((s) => s.openWorktreeTab)
+  const isTauri = useIsTauri()
   const workspaces = useWorkspaces().data ?? []
   const createWorktree = useCreateWorktree()
   const project = workspaces.flatMap((w) => w.projects).find((p) => p.id === spawn.projectId)
@@ -77,6 +80,7 @@ export function SpawnDialog() {
           setSidebarOpen(false)
           const wsId = workspaces.find((w) => w.projects.some((p) => p.id === projectId))?.id
           if (wsId) {
+            if (isTauri) openWorktreeTab(wsId, projectId, wt.id)
             navigate({ to: '/w/$wsId/p/$projectId/wt/$wtId', params: { wsId, projectId, wtId: wt.id } })
           }
         },

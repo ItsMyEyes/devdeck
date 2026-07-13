@@ -8,6 +8,7 @@ import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
 import { useScope } from '@/features/useScope'
 import { useSettings, useUpdateProject, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 
 export function ProjectTree() {
   const { wsId } = useScope()
@@ -56,6 +57,8 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
   const pathname = useLocation({ select: (l) => l.pathname })
   const updateProject = useUpdateProject()
   const openSpawn = useLoomStore((s) => s.openSpawn)
+  const openWorktreeTab = useLoomStore((s) => s.openWorktreeTab)
+  const isTauri = useIsTauri()
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
 
   const toggleExpanded = (id: string, expanded: boolean) => updateProject.mutate({ id, patch: { expanded } })
@@ -70,6 +73,11 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
   function selectProject() {
     if (!p.expanded) toggleExpanded(p.id, true)
     navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId: p.id } })
+  }
+
+  function openWorktree(wtId: string) {
+    if (isTauri) openWorktreeTab(wsId, p.id, wtId)
+    navigate({ to: '/w/$wsId/p/$projectId/wt/$wtId', params: { wsId, projectId: p.id, wtId } })
   }
 
   function onRowKeydown(e: React.KeyboardEvent) {
@@ -152,19 +160,11 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
                 key={w.id}
                 role="button"
                 tabIndex={0}
-                onClick={() =>
-                  navigate({
-                    to: '/w/$wsId/p/$projectId/wt/$wtId',
-                    params: { wsId, projectId: p.id, wtId: w.id },
-                  })
-                }
+                onClick={() => openWorktree(w.id)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    navigate({
-                      to: '/w/$wsId/p/$projectId/wt/$wtId',
-                      params: { wsId, projectId: p.id, wtId: w.id },
-                    })
+                    openWorktree(w.id)
                   }
                 }}
                 className={cn(
