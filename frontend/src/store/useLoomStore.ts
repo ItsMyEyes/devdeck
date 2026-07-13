@@ -3,6 +3,15 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
 import type { WorktreeLayout } from '@/features/terminal/paneTree'
+import {
+  closeTileTab,
+  createDefaultTileLayout,
+  createWorktreeTab,
+  findLeafForTab,
+  openTileTab,
+  pruneTileTabs,
+} from '@/features/tabs/tileTree'
+import type { WorkspaceTileLayout } from '@/features/tabs/tileTree'
 import type {
   Priority,
   Project,
@@ -14,11 +23,6 @@ export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine'
 export type TodoFilter = 'all' | 'active' | 'done'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
-
-export interface WorktreeTabRef {
-  projectId: string
-  wtId: string
-}
 
 interface SpawnState {
   open: boolean
@@ -89,9 +93,10 @@ interface LoomState {
    *  out to the full labeled sidebar width. Independent of `sidebarOpen`, which is the mobile
    *  drawer's open/close — this is a desktop small/big toggle for the rail itself. */
   railExpanded: boolean
-  /** Chrome-style desktop tab bar (Tauri only): worktrees currently open as
-   *  tabs, per workspace, in open order. Unused by the web app. */
-  openTabs: Record<string, WorktreeTabRef[]>
+  /** Chrome-style desktop tab bar (Tauri only): each workspace's tiling
+   *  tree of open worktree tabs (splits, per-leaf tab strips). Unused by
+   *  the web app. */
+  workspaceTileLayouts: Record<string, WorkspaceTileLayout>
 
   // ---- actions ----
   showToast: (msg: string) => void
@@ -105,6 +110,7 @@ interface LoomState {
   openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
   closeWorktreeTab: (wsId: string, wtId: string) => void
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
+  setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
 
   // spawn worktree
   openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
@@ -202,7 +208,7 @@ export const useLoomStore = create<LoomState>()(
       dirtyFileCount: 0,
       worktreeLayouts: {},
       railExpanded: false,
-      openTabs: {},
+      workspaceTileLayouts: {},
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -214,16 +220,26 @@ export const useLoomStore = create<LoomState>()(
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
+      setWorkspaceTileLayout: (wsId, layout) => set((s) => void (s.workspaceTileLayouts[wsId] = layout)),
       openWorktreeTab: (wsId, projectId, wtId) =>
         set((s) => {
-          if (!s.openTabs[wsId]) s.openTabs[wsId] = []
-          const tabs = s.openTabs[wsId]
-          if (!tabs.some((t) => t.wtId === wtId)) tabs.push({ projectId, wtId })
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          s.workspaceTileLayouts[wsId] = openTileTab(layout, createWorktreeTab(projectId, wtId))
         }),
       closeWorktreeTab: (wsId, wtId) =>
-        set((s) => void (s.openTabs[wsId] = (s.openTabs[wsId] ?? []).filter((t) => t.wtId !== wtId))),
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId]
+          if (!layout) return
+          const leaf = findLeafForTab(layout.root, wtId)
+          if (!leaf) return
+          s.workspaceTileLayouts[wsId] = closeTileTab(layout, leaf.id, wtId)
+        }),
       pruneWorktreeTabs: (wsId, liveWtIds) =>
-        set((s) => void (s.openTabs[wsId] = (s.openTabs[wsId] ?? []).filter((t) => liveWtIds.has(t.wtId)))),
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId]
+          if (!layout) return
+          s.workspaceTileLayouts[wsId] = pruneTileTabs(layout, liveWtIds)
+        }),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {
@@ -316,15 +332,33 @@ export const useLoomStore = create<LoomState>()(
     })),
     {
       name: 'loom-ui-v2',
-      version: 2,
+      version: 3,
       // Persist only harmless UI preferences; no domain data ever touches
       // localStorage now that the backend is the source of truth.
       partialize: (s) => ({
         sidebarOpen: s.sidebarOpen,
         worktreeLayouts: s.worktreeLayouts,
         railExpanded: s.railExpanded,
-        openTabs: s.openTabs,
+        workspaceTileLayouts: s.workspaceTileLayouts,
       }),
+      // v2 -> v3 retires the flat `openTabs` shape for `workspaceTileLayouts`.
+      // A bare version bump with no `migrate` discards the *entire*
+      // persisted blob, which would also wipe the unrelated
+      // `worktreeLayouts`/`railExpanded` — so this carries those two
+      // forward unchanged and only drops the old `openTabs` key.
+      migrate: (persisted) => {
+        const old = persisted as {
+          sidebarOpen?: boolean
+          worktreeLayouts?: Record<string, WorktreeLayout>
+          railExpanded?: boolean
+        }
+        return {
+          sidebarOpen: old.sidebarOpen ?? false,
+          worktreeLayouts: old.worktreeLayouts ?? {},
+          railExpanded: old.railExpanded ?? false,
+          workspaceTileLayouts: {},
+        } as LoomState
+      },
     },
   ),
 )
