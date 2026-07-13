@@ -68,10 +68,15 @@ central the existing engine already is.
    - `TileNode = TileLeaf | TileSplit`.
    - `WorkspaceTileLayout { version: 1; root: TileNode; focusedLeafId: string }`.
    - This **replaces** the previously-shipped `openTabs: Record<string,
-     WorktreeTabRef[]>` slice entirely — the store's zustand `persist`
-     version bumps so old `openTabs` data is simply dropped on upgrade (no
-     migration function). Nothing has shipped to real users yet, so this is
-     a clean cutover, not a breaking change to anyone's saved state.
+     WorktreeTabRef[]>` slice entirely. The store's zustand `persist`
+     version bumps, **with an explicit `migrate` function** — verified via
+     zustand's docs that a bare version bump with no `migrate` discards the
+     *entire* persisted blob by default, which would also wipe the
+     unrelated, already-shipped `worktreeLayouts` (per-worktree pane
+     splits) and `railExpanded` for anyone who already has those. The
+     `migrate` function carries `sidebarOpen`/`worktreeLayouts`/
+     `railExpanded` forward unchanged and drops only the old `openTabs`
+     key, replacing it with a fresh `workspaceTileLayouts: {}`.
    - Default/initial layout for a workspace with no prior state: a single
      leaf containing just the pinned Agents tab, active — i.e. exactly
      what a fresh install of the previous flat-tab-bar iteration looked
