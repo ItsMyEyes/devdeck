@@ -15,6 +15,11 @@ export type TodoFilter = 'all' | 'active' | 'done'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
 
+export interface WorktreeTabRef {
+  projectId: string
+  wtId: string
+}
+
 interface SpawnState {
   open: boolean
   projectId: string | null
@@ -80,15 +85,26 @@ interface LoomState {
   /** Each worktree's tiling pane-tree layout (structure, split sizes, open
    *  tabs, active tab), keyed by worktree id. */
   worktreeLayouts: Record<string, WorktreeLayout>
+  /** Widens `SidebarRail` (the icon-only left sidebar shown in workspace/terminal mode) back
+   *  out to the full labeled sidebar width. Independent of `sidebarOpen`, which is the mobile
+   *  drawer's open/close — this is a desktop small/big toggle for the rail itself. */
+  railExpanded: boolean
+  /** Chrome-style desktop tab bar (Tauri only): worktrees currently open as
+   *  tabs, per workspace, in open order. Unused by the web app. */
+  openTabs: Record<string, WorktreeTabRef[]>
 
   // ---- actions ----
   showToast: (msg: string) => void
   setSidebarOpen: (open: boolean) => void
+  toggleRailExpanded: () => void
   toggleWsMenu: () => void
   closeWsMenu: () => void
   setDirtyFileCount: (n: number) => void
   setWorktreeLayout: (worktreeId: string, layout: WorktreeLayout) => void
   removeWorktreeLayout: (worktreeId: string) => void
+  openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
+  closeWorktreeTab: (wsId: string, wtId: string) => void
+  pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
 
   // spawn worktree
   openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
@@ -185,16 +201,29 @@ export const useLoomStore = create<LoomState>()(
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
+      railExpanded: false,
+      openTabs: {},
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
       showToast: (msg) => sonnerToast(msg),
       setSidebarOpen: (open) => set((s) => void (s.sidebarOpen = open)),
+      toggleRailExpanded: () => set((s) => void (s.railExpanded = !s.railExpanded)),
       toggleWsMenu: () => set((s) => void (s.wsMenuOpen = !s.wsMenuOpen)),
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
+      openWorktreeTab: (wsId, projectId, wtId) =>
+        set((s) => {
+          if (!s.openTabs[wsId]) s.openTabs[wsId] = []
+          const tabs = s.openTabs[wsId]
+          if (!tabs.some((t) => t.wtId === wtId)) tabs.push({ projectId, wtId })
+        }),
+      closeWorktreeTab: (wsId, wtId) =>
+        set((s) => void (s.openTabs[wsId] = (s.openTabs[wsId] ?? []).filter((t) => t.wtId !== wtId))),
+      pruneWorktreeTabs: (wsId, liveWtIds) =>
+        set((s) => void (s.openTabs[wsId] = (s.openTabs[wsId] ?? []).filter((t) => liveWtIds.has(t.wtId)))),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {
@@ -290,7 +319,12 @@ export const useLoomStore = create<LoomState>()(
       version: 2,
       // Persist only harmless UI preferences; no domain data ever touches
       // localStorage now that the backend is the source of truth.
-      partialize: (s) => ({ sidebarOpen: s.sidebarOpen, worktreeLayouts: s.worktreeLayouts }),
+      partialize: (s) => ({
+        sidebarOpen: s.sidebarOpen,
+        worktreeLayouts: s.worktreeLayouts,
+        railExpanded: s.railExpanded,
+        openTabs: s.openTabs,
+      }),
     },
   ),
 )
