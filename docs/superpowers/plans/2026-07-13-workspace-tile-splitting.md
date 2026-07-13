@@ -45,7 +45,7 @@
   - `pruneTileTabs(layout: WorkspaceTileLayout, liveWtIds: Set<string>): WorkspaceTileLayout`
   - `deserializeTileLayout(value: unknown): WorkspaceTileLayout | null`
 
-- [ ] **Step 1: Write `tileTree.ts`**
+- [x] **Step 1: Write `tileTree.ts`**
 
 ```ts
 /**
@@ -478,12 +478,12 @@ export function deserializeTileLayout(value: unknown): WorkspaceTileLayout | nul
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 Run: `cd frontend && npm run typecheck`
 Expected: PASS. (Nothing imports this file yet, so this only validates its own internal types.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/features/tabs/tileTree.ts
@@ -503,7 +503,7 @@ git commit -m "feat(tabs): add tileTree, the workspace-level tiling data model"
   - `export interface WorkspaceTileCanvasProps` (below)
   - `export function WorkspaceTileCanvas(props: WorkspaceTileCanvasProps): JSX.Element`
 
-- [ ] **Step 1: Write `WorkspaceTileCanvas.tsx`**
+- [x] **Step 1: Write `WorkspaceTileCanvas.tsx`**
 
 ```tsx
 import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
@@ -921,12 +921,12 @@ export function WorkspaceTileCanvas({
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 Run: `cd frontend && npm run typecheck`
 Expected: PASS. (Not imported anywhere yet, so this only validates its own types against Task 1's exports.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/features/tabs/WorkspaceTileCanvas.tsx
@@ -947,7 +947,7 @@ git commit -m "feat(tabs): add WorkspaceTileCanvas, the tiling render/DnD layer"
   - `openWorktreeTab(wsId, projectId, wtId)` / `closeWorktreeTab(wsId, wtId)` / `pruneWorktreeTabs(wsId, liveWtIds)` — same signatures as before, now backed by the tile tree.
   - `setWorkspaceTileLayout(wsId: string, layout: WorkspaceTileLayout): void` — new, generic setter for tree-structural commits (DnD drops, resizes) that Task 4 computes via Task 1's pure functions before calling this.
 
-- [ ] **Step 1: Remove `WorktreeTabRef` and add the `tileTree` import**
+- [x] **Step 1: Remove `WorktreeTabRef` and add the `tileTree` import**
 
 Replace (lines 1-21):
 
@@ -1005,7 +1005,7 @@ export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
 ```
 
-- [ ] **Step 2: Replace the `openTabs` field with `workspaceTileLayouts`**
+- [x] **Step 2: Replace the `openTabs` field with `workspaceTileLayouts`**
 
 Replace (the `railExpanded`/`openTabs` block inside `LoomState`):
 
@@ -1026,7 +1026,7 @@ with:
   workspaceTileLayouts: Record<string, WorkspaceTileLayout>
 ```
 
-- [ ] **Step 3: Add `setWorkspaceTileLayout` to the action signatures**
+- [x] **Step 3: Add `setWorkspaceTileLayout` to the action signatures**
 
 Change:
 
@@ -1045,7 +1045,7 @@ to:
   setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
 ```
 
-- [ ] **Step 4: Replace the initial state and the three action implementations**
+- [x] **Step 4: Replace the initial state and the three action implementations**
 
 Change:
 
@@ -1101,7 +1101,7 @@ to:
         }),
 ```
 
-- [ ] **Step 5: Bump the persist version with an explicit `migrate`, and update `partialize`**
+- [x] **Step 5: Bump the persist version with an explicit `migrate`, and update `partialize`**
 
 Change:
 
@@ -1178,7 +1178,7 @@ git commit -m "feat(store): replace openTabs with workspaceTileLayouts"
 - Consumes: `WorkspaceTileCanvas` (Task 2); `workspaceTileLayouts`/`setWorkspaceTileLayout`/`closeWorktreeTab`/`pruneWorktreeTabs`/`openSpawn`/`showToast` (Task 3, via `useLoomStore`); `createDefaultTileLayout`/`findTileLeaf`/`findTileTab`/`firstLeafId`/`focusTileLeaf`/`selectTileTab` (Task 1's `tileTree`); `useWorkspace` (`@/features/data/queries`); `WorktreeCardsGrid` (`@/features/agents/WorktreeCardsGrid`); `ExpandedTerminal` (`@/features/terminal/ExpandedTerminal`); `STATE` (`@/lib/constants`).
 - Produces (used by Task 5): `export function WorkspaceTileArea({ wsId }: { wsId: string }): JSX.Element`
 
-- [ ] **Step 1: Write `WorkspaceTileArea.tsx`**
+- [x] **Step 1: Write `WorkspaceTileArea.tsx`**
 
 ```tsx
 import { useEffect } from 'react'
@@ -1351,12 +1351,12 @@ export function WorkspaceTileArea({ wsId }: WorkspaceTileAreaProps) {
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 Run: `cd frontend && npm run typecheck`
 Expected: PASS. (Not mounted anywhere yet, so this only validates its own types against Tasks 1-3's exports.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/features/tabs/WorkspaceTileArea.tsx
@@ -1375,7 +1375,7 @@ git commit -m "feat(tabs): add WorkspaceTileArea, wiring the tile canvas to the 
 - Consumes: `WorkspaceTileArea` (Task 4), `useIsTauri` (existing, unchanged).
 - Produces: nothing further downstream — this is the integration task.
 
-- [ ] **Step 1: Swap the `TabBar` import for `WorkspaceTileArea`, add the agents-scope route pattern**
+- [x] **Step 1: Swap the `TabBar` import for `WorkspaceTileArea`, add the agents-scope route pattern**
 
 In `frontend/src/routes/w.$wsId.tsx`, change the import block (currently):
 
@@ -1425,7 +1425,7 @@ const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
 const AGENTS_SCOPE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+(\/wt\/[^/]+)?$/
 ```
 
-- [ ] **Step 2: Render `WorkspaceTileArea` (always mounted, CSS-hidden outside its scope) instead of `TabBar`, and stop `<Outlet/>` from double-rendering the same worktree**
+- [x] **Step 2: Render `WorkspaceTileArea` (always mounted, CSS-hidden outside its scope) instead of `TabBar`, and stop `<Outlet/>` from double-rendering the same worktree**
 
 Inside `WorkspaceLayout`, change:
 
@@ -1484,13 +1484,13 @@ to:
 
 `WorkspaceTileArea` stays mounted at all times once `isTauri` (CSS-hidden via `hidden` outside the Agents-grid/worktree scope), so every `ExpandedTerminal` it holds — including ones in split panes — keeps its WebSocket session alive while browsing Machines/Tools/etc. `<Outlet/>` is only actually mounted when `!inTiledScope`, so on Tauri it never renders `TerminalRoute`/`CardsRoute` for the same worktree `WorkspaceTileArea` is already showing — avoiding a duplicate `ExpandedTerminal`/duplicate WebSocket connection for the focused worktree. On the web (`!isTauri`), `inTiledScope` is always `false`, so `<Outlet/>` renders unconditionally exactly as it does today.
 
-- [ ] **Step 3: Delete the superseded `TabBar.tsx`**
+- [x] **Step 3: Delete the superseded `TabBar.tsx`**
 
 ```bash
 rm frontend/src/features/tabs/TabBar.tsx
 ```
 
-- [ ] **Step 4: Run typecheck and production build**
+- [x] **Step 4: Run typecheck and production build**
 
 Run: `cd frontend && npm run typecheck && npm run build`
 Expected: both PASS with no errors. (`npm run build` will fail loudly with an unresolved-import error if anything still references the deleted `TabBar.tsx`.)
@@ -1510,7 +1510,7 @@ Run: `make dev-tauri` (from the repo root). Walk through, confirming each behavi
 10. Delete a worktree that's part of a split, from the Agents grid: its tab (and, if it was that leaf's last tab, the leaf itself) is pruned on next load.
 11. Run `make dev` (the web app) in a browser: confirm the Agents grid and worktree terminal routes render exactly as before (via `<Outlet/>`), with no tab bar and no tiling — fully unaffected by this feature.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/routes/w.$wsId.tsx
