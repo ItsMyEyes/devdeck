@@ -12,7 +12,10 @@
     "build:api": "cd .. && make build-api",
     "preview": "vite preview",
     "pretypecheck": "vite build --outDir node_modules/.routegen --emptyOutDir --logLevel warn",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "cd .. && make sidecar-host && cd frontend && tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -58,6 +61,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/router-plugin": "^1.168.18",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.10.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0",
