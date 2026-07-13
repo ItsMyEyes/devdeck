@@ -12,13 +12,17 @@ import type { WorktreeTileTab } from './WorkspaceTileCanvas'
 
 interface WorkspaceTileAreaProps {
   wsId: string
+  /** `false` on non-tiled workspace routes (Machines, Tools, Invoices, ...)
+   *  — the pinned tab strip still renders, but the tiling body doesn't, so
+   *  `<Outlet/>` can take over the content area below it. Defaults to `true`. */
+  showContent?: boolean
 }
 
 /** Wires `WorkspaceTileCanvas` to the store (persisted tiling tree) and the
  *  router (URL follows the focused leaf's active worktree). Supersedes the
  *  previously-shipped flat `TabBar` — a single leaf with no splits *is*
  *  what that looked like. */
-export function WorkspaceTileArea({ wsId }: WorkspaceTileAreaProps) {
+export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAreaProps) {
   const navigate = useNavigate()
   const { projectId: currentProjectId } = useParams({ strict: false }) as { projectId?: string }
   const layout = useLoomStore((s) => s.workspaceTileLayouts[wsId]) ?? createDefaultTileLayout()
@@ -169,6 +173,7 @@ export function WorkspaceTileArea({ wsId }: WorkspaceTileAreaProps) {
       onCloseTab={handleCloseTab}
       onNewTab={handleNewTab}
       resolveWorktreeTab={resolveWorktreeTab}
+      showContent={showContent}
       className="min-h-0"
     />
   )

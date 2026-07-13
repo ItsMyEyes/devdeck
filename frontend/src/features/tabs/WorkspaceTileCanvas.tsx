@@ -5,7 +5,7 @@ import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
 import { LayoutGrid, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/status-dot'
-import { findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
+import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
 
 /** A split's children never shrink below this fraction of the split's axis while dragging a divider. */
@@ -36,6 +36,12 @@ export interface WorkspaceTileCanvasProps {
    *  `short` is "project name · machine host" (machine omitted when local),
    *  used only for the computed workspace title, not the tab pill itself. */
   resolveWorktreeTab: (tab: WorktreeTileTab) => { label: string; color: string; pulse: boolean; short: string } | undefined
+  /** When `false`, only the top-left leaf's pinned header renders — no
+   *  leaf bodies, no other leaves. Used on non-tiled workspace routes
+   *  (Machines, Tools, Invoices, ...) so the tab strip stays up as
+   *  persistent chrome while `<Outlet/>` takes over the content area
+   *  below it. Defaults to `true` (render the full tree, as before). */
+  showContent?: boolean
   className?: string
 }
 
@@ -273,72 +279,83 @@ function TileTabButton({
   )
 }
 
-function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext }) {
-  const { setNodeRef } = useDroppable({ id: leaf.id, data: { leafId: leaf.id } })
+/** A leaf's own header row: its tab strip. Extracted from `TileLeafView` so
+ *  it can also render standalone (no body, no other leaves) as the
+ *  persistent chrome on non-tiled workspace routes — see `showContent` on
+ *  `WorkspaceTileCanvas`. */
+function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: boolean; ctx: TileRenderContext }) {
   const { setNodeRef: setHeaderDropRef } = useDroppable({
     id: `${leaf.id}::header`,
     data: { leafId: leaf.id, forceCenter: true },
   })
+
+  return (
+    <div
+      ref={setHeaderDropRef}
+      className={cn(
+        'flex items-center overflow-x-auto border-b border-loom-border bg-loom-surface',
+        isTopLeft
+          ? // The top-left leaf's strip is pinned to the true viewport origin
+            // (not just "first in flow") so it visually merges with macOS's
+            // overlaid traffic-light buttons regardless of Header/Sidebar
+            // nesting above/beside it — see w.$wsId.tsx's matching `pt-10`,
+            // which reserves this exact height so nothing renders underneath.
+            'fixed left-0 right-0 top-0 z-40 h-10'
+          : // Every other leaf is a lightweight mini-header, not a second
+            // full tab strip — shorter, no title text, no drag region.
+            'h-8 flex-none',
+      )}
+    >
+      {isTopLeft ? (
+        <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
+      ) : null}
+      {leaf.tabs.map((tab, i) => (
+        <Fragment key={tab.id}>
+          <TileTabButton
+            leafId={leaf.id}
+            tab={tab}
+            active={tab.id === leaf.activeTabId}
+            compact={!isTopLeft}
+            resolveWorktreeTab={ctx.resolveWorktreeTab}
+            onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
+            onClose={tab.kind === 'worktree' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
+          />
+          {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
+          {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
+            <div className="mx-1.5 h-4 w-px flex-none bg-loom-border-menu" />
+          ) : null}
+        </Fragment>
+      ))}
+      <button
+        type="button"
+        onClick={() => ctx.onNewTab(leaf.id)}
+        aria-label="New worktree"
+        className={cn(
+          'ml-1 flex flex-none items-center justify-center rounded-lg text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg',
+          isTopLeft ? 'h-7 w-7' : 'h-6 w-6',
+        )}
+      >
+        <Plus size={isTopLeft ? 13 : 11} />
+      </button>
+      {isTopLeft ? (
+        <div data-tauri-drag-region className="flex h-full flex-1 items-center justify-center overflow-hidden px-2">
+          {ctx.workspaceTitle ? (
+            <span className="truncate font-mono text-[11px] text-loom-dim">{ctx.workspaceTitle}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext }) {
+  const { setNodeRef } = useDroppable({ id: leaf.id, data: { leafId: leaf.id } })
   const hoverZone = ctx.hoverZone && ctx.hoverZone.leafId === leaf.id ? ctx.hoverZone.zone : null
   const isTopLeft = leaf.id === ctx.topLeftLeafId
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
-      <div
-        ref={setHeaderDropRef}
-        className={cn(
-          'flex items-center overflow-x-auto border-b border-loom-border bg-loom-surface',
-          isTopLeft
-            ? // The top-left leaf's strip is pinned to the true viewport origin
-              // (not just "first in flow") so it visually merges with macOS's
-              // overlaid traffic-light buttons regardless of Header/Sidebar
-              // nesting above/beside it — see w.$wsId.tsx's matching `pt-10`,
-              // which reserves this exact height so nothing renders underneath.
-              'fixed left-0 right-0 top-0 z-40 h-10'
-            : // Every other leaf is a lightweight mini-header, not a second
-              // full tab strip — shorter, no title text, no drag region.
-              'h-8 flex-none',
-        )}
-      >
-        {isTopLeft ? (
-          <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
-        ) : null}
-        {leaf.tabs.map((tab, i) => (
-          <Fragment key={tab.id}>
-            <TileTabButton
-              leafId={leaf.id}
-              tab={tab}
-              active={tab.id === leaf.activeTabId}
-              compact={!isTopLeft}
-              resolveWorktreeTab={ctx.resolveWorktreeTab}
-              onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
-              onClose={tab.kind === 'worktree' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
-            />
-            {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
-            {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
-              <div className="mx-1.5 h-4 w-px flex-none bg-loom-border-menu" />
-            ) : null}
-          </Fragment>
-        ))}
-        <button
-          type="button"
-          onClick={() => ctx.onNewTab(leaf.id)}
-          aria-label="New worktree"
-          className={cn(
-            'ml-1 flex flex-none items-center justify-center rounded-lg text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg',
-            isTopLeft ? 'h-7 w-7' : 'h-6 w-6',
-          )}
-        >
-          <Plus size={isTopLeft ? 13 : 11} />
-        </button>
-        {isTopLeft ? (
-          <div data-tauri-drag-region className="flex h-full flex-1 items-center justify-center overflow-hidden px-2">
-            {ctx.workspaceTitle ? (
-              <span className="truncate font-mono text-[11px] text-loom-dim">{ctx.workspaceTitle}</span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      <TileLeafHeader leaf={leaf} isTopLeft={isTopLeft} ctx={ctx} />
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {leaf.tabs.map((tab) => (
           <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
@@ -372,6 +389,7 @@ export function WorkspaceTileCanvas({
   onCloseTab,
   onNewTab,
   resolveWorktreeTab,
+  showContent = true,
   className,
 }: WorkspaceTileCanvasProps) {
   const [dragTab, setDragTab] = useState<TileTab | null>(null)
@@ -379,6 +397,10 @@ export function WorkspaceTileCanvas({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const topLeftLeafId = useMemo(() => firstLeafId(root) ?? root.id, [root])
+  const topLeftLeaf = useMemo(() => {
+    const found = findTileLeaf(root, topLeftLeafId)
+    return found?.type === 'leaf' ? found : null
+  }, [root, topLeftLeafId])
   // Only meaningful once a split exists (root.type === 'split' implies >= 2
   // leaves per tileTree.ts's collapse invariant) — a single unsplit leaf
   // shows no title, matching today's clean single-pane look.
@@ -454,7 +476,11 @@ export function WorkspaceTileCanvas({
       onDragCancel={handleDragCancel}
     >
       <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
-        <TileNodeView node={root} ctx={ctx} />
+        {showContent ? (
+          <TileNodeView node={root} ctx={ctx} />
+        ) : topLeftLeaf ? (
+          <TileLeafHeader leaf={topLeftLeaf} isTopLeft ctx={ctx} />
+        ) : null}
       </div>
       <DragOverlay>
         {dragTab ? (

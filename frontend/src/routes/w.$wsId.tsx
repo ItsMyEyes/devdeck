@@ -15,10 +15,12 @@ import { useLoomStore } from '@/store/useLoomStore'
 
 /** Matches only the worktree route, e.g. /w/abc/p/def/wt/ghi (the ExpandedTerminal screen). */
 const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
-/** Matches the Agents grid or a worktree terminal — the two routes
- *  `WorkspaceTileArea` renders itself, bypassing `<Outlet/>`, once tiling
- *  is active. Every other workspace route (Machines, Tools, News, ...)
- *  keeps rendering via `<Outlet/>` as before. */
+/** Matches the Agents grid or a worktree terminal — the two routes where
+ *  `WorkspaceTileArea` renders its own tiling body (leaf content), bypassing
+ *  `<Outlet/>`. Every other workspace route (Machines, Tools, News, ...)
+ *  keeps rendering via `<Outlet/>` — but `WorkspaceTileArea`'s pinned tab
+ *  strip stays mounted and visible regardless, as persistent Tauri chrome;
+ *  see `showContent` below. */
 const AGENTS_SCOPE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+(\/wt\/[^/]+)?$/
 
 export const Route = createFileRoute('/w/$wsId')({
@@ -87,18 +89,26 @@ function WorkspaceLayout() {
         // which is `fixed` to the true viewport top (see
         // WorkspaceTileCanvas.tsx) so it visually merges with macOS's
         // overlaid traffic-light buttons instead of sitting behind Header.
-        inTiledScope && 'pt-10',
+        // The strip is persistent chrome on every Tauri route now, not
+        // just the Agents/worktree ones, so this reserves space whenever
+        // isTauri — matching the always-mounted WorkspaceTileArea below.
+        isTauri && 'pt-10',
       )}
     >
-      {/* The tab strip already serves as this scope's top bar (traffic
-          lights, tabs, "+" spawn action) — Header would just duplicate it. */}
-      {!workspaceMode && !inTiledScope && <Header />}
+      {/* The tab strip already serves as Tauri's top bar (traffic lights,
+          tabs, "+" spawn action) on every workspace route — Header would
+          just duplicate it, so it only renders on the web build. */}
+      {!workspaceMode && !isTauri && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar compact={workspaceMode} />
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
           {isTauri ? (
-            <div className={cn('flex min-h-0 flex-1 flex-col', !inTiledScope && 'hidden')}>
-              <WorkspaceTileArea wsId={wsId} />
+            // Always mounted so the pinned strip never disappears; only its
+            // tiling body is suppressed off the Agents/worktree routes
+            // (`showContent={inTiledScope}`), where it collapses to just
+            // the `fixed` header and `<Outlet/>` below takes the content area.
+            <div className={cn('flex min-h-0 flex-col', inTiledScope ? 'flex-1' : 'flex-none')}>
+              <WorkspaceTileArea wsId={wsId} showContent={inTiledScope} />
             </div>
           ) : null}
           {!inTiledScope ? <Outlet /> : null}
