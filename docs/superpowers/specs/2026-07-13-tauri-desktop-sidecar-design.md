@@ -34,11 +34,15 @@ the bundled hub is a full hub.
    package. Same-origin `/api` + `/ws/*`: no CORS, no API-base plumbing, UI
    and backend versions can never diverge. Chosen over bundling the Vite dist
    under `tauri://localhost`.
-5. **Auth: ephemeral per-launch key.** A fresh 32-byte hex key is generated
-   each launch and never persisted; it is handed to the SPA once via
-   `?key=` on the initial navigation. The backend's existing dual-auth
-   `RequireAuth` (session cookie OR bearer hub key) and WS `?key=` support
-   make this work with no backend changes.
+5. **Auth: ephemeral per-launch key, exchanged for a session.** A fresh
+   32-byte hex key is generated each launch and never persisted; it is handed
+   to the SPA once via `?key=` on the initial navigation. The SPA immediately
+   exchanges it for a normal session cookie via a new hub endpoint
+   `POST /api/auth/key-session` (see below), after which every surface —
+   login gate, `<img>` attachments, REST, WS — behaves exactly like the web.
+   Chosen over bearer-header plumbing during planning: `<img
+   src="/api/attachments/{id}">` cannot carry an Authorization header, and
+   the backend deliberately accepts `?key=` only on WS upgrades.
 
 ## Architecture
 
@@ -46,15 +50,21 @@ the bundled hub is a full hub.
 ┌─ Loom.app (Tauri v2) ───────────────────────────────┐
 │  Rust shell (thin)                                  │
 │   1. generate ephemeral key K (32-byte hex)         │
-│   2. pick a free localhost port P                   │
-│   3. spawn sidecar: loom-server                     │
-│        --role hub --addr 127.0.0.1:P --key K        │
+│   2. spawn sidecar: loom-server                     │
+│        --role hub --addr 127.0.0.1:0 --key K        │
 │        --db <appDataDir>/loom.db                    │
 │        --env <appDataDir>/.env                      │
 │        --open=false --2fa=false                     │
+│        --secure-cookies=false                       │
+│   3. parse bound port P from the sidecar's          │
+│      "loom listening on http://127.0.0.1:P" line    │
+│      (race-free — the OS picks the port)            │
 │   4. splash window ("Starting Loom…", bundled asset)│
 │   5. poll GET /api/health until 200 (15s timeout)   │
-│   6. main window → http://127.0.0.1:P/?key=K        │
+│   6. upsert local Machine {hostname, URL, key K}    │
+│   7. main window → http://127.0.0.1:P/?key=K        │
+│      (SPA exchanges K for a session cookie via      │
+│       POST /api/auth/key-session, then strips ?key) │
 │                                                     │
 │  Webview                                            │
 │   UI: served by Go (embedded webui, SPA fallback)   │
@@ -80,18 +90,49 @@ the bundled hub is a full hub.
 - Splash window content is a static HTML page in the Tauri `frontendDist`
   placeholder directory (the real UI comes from the sidecar).
 
-**2. Frontend key mode — `frontend/src/lib/desktopKey.ts` (new, web-safe)**
+**2. Backend key→session bootstrap — `POST /api/auth/key-session` (new)**
 
-- At SPA boot (`main.tsx`): read `?key=` from the URL, stash in module state +
-  `sessionStorage` (survives in-app reloads), strip it from the URL via
-  `history.replaceState`.
-- `api.ts`: attach `Authorization: Bearer <key>` to every request when a key
-  is present (`RequireAuth` on the hub already accepts it).
-- `terminalClient.ts` and the LSP WS client: append `?key=` to WS URLs
-  (backend `keyFromRequest` already accepts it on WS upgrades only).
-- Auth gate: bearer key passes `RequireAuth`, so the login/TOTP screens are
-  skipped in key mode; exact gate wiring verified during implementation.
-- No key present → all of this is inert. The web deployment is untouched.
+- Registered only when `--role hub` **and** `--key` is non-empty. The handler
+  re-verifies the bearer key itself (constant-time), independent of the
+  middleware pass.
+- Service method `AuthService.KeySession()`: if `UserCount() == 0`, create
+  the local operator (`operator@loom.desktop`, crypto-random password) and
+  issue a session directly (no TOTP — the caller already proved key
+  possession); otherwise issue a session for the existing single-operator
+  user (`UserByEmail`, fixed desktop email). Returns `(sessionToken, user)`.
+- Handler sets the normal `loom_session` cookie (30 days) and returns the
+  user JSON. From then on the desktop SPA is indistinguishable from a
+  logged-in web session — login gate, attachments, everything.
+- Cookie caveat: `setAuthCookie` hardcodes `Secure: true`, which
+  WKWebView/WebKitGTK may reject over plain `http://127.0.0.1`. New flag
+  `--secure-cookies` (default `true`; the sidecar passes
+  `--secure-cookies=false`). Web deployments are unchanged by the default.
+
+**2b. Frontend bootstrap — `main.tsx` (tiny, web-safe)**
+
+- Before rendering: read `?key=` from the URL; if present, strip it via
+  `history.replaceState`, then `POST /api/auth/key-session` with
+  `Authorization: Bearer <key>`; render the app afterwards. The root-route
+  guard's `ensureQueryData(meQueryOptions)` then succeeds normally.
+- No key present → no fetch, render immediately. The web deployment is
+  untouched. No changes to `api.ts`, WS clients, or the route guard.
+
+**2c. Local machine registration — Tauri shell (new)**
+
+- Terminals, LSP, files, and git all resolve through a registered `Machine`
+  (`machines.find(m => m.id === project.machineId)`); without one the UI
+  shows "no machine assigned". The desktop hub must therefore appear in its
+  own machine registry.
+- After the health poll, the Rust shell upserts the local machine via the
+  hub API (Bearer key): `PATCH /api/machines/{savedId}` with
+  `{"url": "http://127.0.0.1:<port>", "key": "<launch key>"}` when
+  `<appDataDir>/local-machine-id` exists and the PATCH returns 200;
+  otherwise `POST /api/machines` with
+  `{"name": "<hostname>", "url": ..., "key": ...}` and save the returned
+  `id` to `<appDataDir>/local-machine-id`.
+- With the entry in place, the existing direct-first machine client handles
+  all WS/REST against the local hub (`?key=` on WS upgrades) — zero frontend
+  changes for terminals.
 
 **3. Sidecar build pipeline — Makefile (extend)**
 
@@ -124,11 +165,13 @@ the bundled hub is a full hub.
 ## Error handling & lifecycle
 
 - **Startup failure** (sidecar exits early, or health not 200 within 15 s):
-  native error dialog showing the last ~20 log lines; app exits after
-  dismissal.
-- **Port conflict:** retry spawn with a new random port, 3 attempts total.
-- **Mid-session crash:** Rust monitors the child; on unexpected exit show a
-  dialog offering Restart (re-spawn, re-navigate with a fresh key) or Quit.
+  the window navigates to a bundled `error.html` naming the sidecar log path
+  (in-window error page; avoids an extra dialog-plugin dependency).
+- **Port conflict:** impossible by construction — `--addr 127.0.0.1:0` lets
+  the OS assign the port, and the shell parses it from the listen log line.
+- **Mid-session crash:** Rust monitors the child; on unexpected exit it
+  auto-respawns (fresh key, machine re-upsert, window re-navigated) up to 3
+  times, then shows the error page.
 - **App quit:** kill the sidecar child (process group on unix, job object /
   taskkill-tree on Windows) so no orphaned Go server keeps running.
 - In-webview API errors keep the existing `{"error":"message"}` envelope and
@@ -136,11 +179,12 @@ the bundled hub is a full hub.
 
 ## Testing
 
-- Backend: key-auth paths already covered (`keyauth_test.go`,
-  `middleware_test.go`); no backend changes expected.
-- Frontend: no test runner exists; `npm run typecheck` gates the
-  `desktopKey.ts` change. Manual check that the web flow (no key) is
-  unchanged.
+- Backend: TDD the new surface — `key-session` handler tests (valid key →
+  cookie + user, wrong/missing key → 401, first-run user creation,
+  idempotency on second call) and the `--secure-cookies` wiring; existing
+  key-auth tests (`keyauth_test.go`, `middleware_test.go`) keep passing.
+- Frontend: no test runner exists; `npm run typecheck` gates the `main.tsx`
+  bootstrap change. Manual check that the web flow (no key) is unchanged.
 - Rust: kept thin enough that unit tests are limited to pure helpers (port
   pick, arg construction); the real gate is the end-to-end smoke test.
 - E2E smoke (manual or webapp-testing-driven): built app launches, splash →
