@@ -9,6 +9,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from './WorktreeGlyph'
 import { useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 
 interface WorktreeCardProps {
   worktree: Worktree
@@ -22,6 +23,8 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
   const openEdit = useLoomStore((s) => s.openEdit)
   const askDelete = useLoomStore((s) => s.askDelete)
   const showToast = useLoomStore((s) => s.showToast)
+  const openWorktreeTab = useLoomStore((s) => s.openWorktreeTab)
+  const isTauri = useIsTauri()
   const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
   const machine = useMachines().data?.find((m) => m.id === project?.machineId)
 
@@ -69,6 +72,7 @@ export function WorktreeCard({ worktree: w, wsId, projectId }: WorktreeCardProps
   const paused = w.state === 'stopped' || w.state === 'idle'
 
   function expand() {
+    if (isTauri) openWorktreeTab(wsId, projectId, w.id)
     navigate({ to: '/w/$wsId/p/$projectId/wt/$wtId', params: { wsId, projectId, wtId: w.id } })
   }
 

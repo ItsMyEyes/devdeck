@@ -6,6 +6,8 @@ import { useSettings, useUpdateSettings, useWorkspaces } from '@/features/data/q
 import { Header } from '@/features/layout/Header'
 import { Sidebar } from '@/features/sidebar/Sidebar'
 import { GlobalOverlays } from '@/features/overlays/GlobalOverlays'
+import { TabBar } from '@/features/tabs/TabBar'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useLoomStore } from '@/store/useLoomStore'
@@ -35,6 +37,7 @@ function WorkspaceLayout() {
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
   const pathname = useLocation({ select: (l) => l.pathname })
   const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
+  const isTauri = useIsTauri()
 
   const workspaces = useWorkspaces()
   const settings = useSettings()
@@ -71,6 +74,7 @@ function WorkspaceLayout() {
 
   return (
     <div className="flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg">
+      {isTauri && <TabBar wsId={wsId} />}
       {!workspaceMode && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar compact={workspaceMode} />
