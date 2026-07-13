@@ -115,11 +115,12 @@ the existing `Header`/`Sidebar`/`ExpandedTerminal` layout entirely.
 openTabs: Record<string, { projectId: string; wtId: string }[]>  // keyed by wsId
 ```
 
-New actions:
+New actions (state-only — like every existing action in this store, neither
+calls `navigate()`; the calling component does that separately, since a
+zustand action has no access to the router's `useNavigate()` hook):
 - `openWorktreeTab(wsId, projectId, wtId)` — appends `{ projectId, wtId }` to
-  `openTabs[wsId]` if not already present (dedupe by `wtId`), then navigates
-  to `/w/$wsId/p/$projectId/wt/$wtId`. If already present, just navigates
-  (focuses the existing tab).
+  `openTabs[wsId]` if not already present (dedupe by `wtId`). No-op if
+  already present.
 - `closeWorktreeTab(wsId, wtId)` — removes the entry from `openTabs[wsId]`.
   Does not touch any backend session/PTY. Caller (the `TabBar` component)
   is responsible for the focus-switch navigation described in decision 6,
@@ -171,11 +172,10 @@ New actions:
   Header+Sidebar layout and the chrome-collapsed `ExpandedTerminal` workspace
   mode, matching Chrome's tab-bar-above-everything placement.
 
-- **`frontend/src/features/agents/WorktreeCard.tsx`**: `expand()` changes
-  from calling `navigate(...)` directly to calling the new
-  `openWorktreeTab(wsId, projectId, w.id)` store action when `useIsTauri()`
-  is true; falls back to the existing direct `navigate(...)` on web (where
-  there are no tabs to register).
+- **`frontend/src/features/agents/WorktreeCard.tsx`**: `expand()` changes to
+  call the new `openWorktreeTab(wsId, projectId, w.id)` store action when
+  `useIsTauri()` is true (registers the tab; no-op if already open), then
+  always calls `navigate(...)` as it does today either way.
 
 ## Data flow / lifecycle summary
 
@@ -183,8 +183,9 @@ New actions:
    reads persisted `openTabs[wsId]` (restored by zustand's `persist`
    middleware) → renders pinned tab + any restored worktree tabs.
 2. User clicks a `WorktreeCard` → `openWorktreeTab` adds/dedupes the tab
-   entry and navigates → `TabBar` re-renders with the new tab highlighted
-   active (URL now matches its route).
+   entry in the store, then `expand()`'s existing `navigate(...)` call fires
+   → `TabBar` re-renders with the new tab highlighted active (URL now
+   matches its route).
 3. User clicks a different tab in the strip → plain navigation, no store
    mutation (tab already exists in `openTabs`).
 4. User closes a tab → `closeWorktreeTab` removes the entry; if it was
