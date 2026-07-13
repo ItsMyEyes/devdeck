@@ -12,6 +12,7 @@ import {
   useWorktreeFiles,
   useWriteWorktreeFile,
 } from '@/features/data/queries'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface TerminalExplorerProps {
@@ -145,8 +146,8 @@ function TreeLevel({ worktreeId, machine, path, depth, ...rest }: TreeLevelProps
 
   if (isLoading) {
     return depth === 0 ? (
-      <div className="flex h-28 items-center justify-center text-loom-dim">
-        <Loader2 size={17} className="animate-spin" />
+      <div className="flex h-28 items-center justify-center">
+        <DataLoading compact label="loading files…" />
       </div>
     ) : (
       <div className="flex h-[29px] items-center gap-2 text-loom-dim" style={{ paddingLeft: indent + 18 }}>

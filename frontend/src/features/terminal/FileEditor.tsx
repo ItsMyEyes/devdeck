@@ -10,6 +10,7 @@ import {
   useWriteWorktreeFile,
 } from '@/features/data/queries'
 import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
+import { DataLoading } from '@/features/screens/DataLoading'
 import type {
   DefinitionReveal,
   DefinitionTarget,
@@ -155,8 +156,8 @@ export function FileEditor({
       </div>
 
       {file.isLoading ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center text-loom-dim">
-          <Loader2 size={18} className="animate-spin" />
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <DataLoading compact label="loading file…" />
         </div>
       ) : file.error ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -187,8 +188,8 @@ export function FileEditor({
       ) : (
         <Suspense
           fallback={
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c] text-loom-dim">
-              <Loader2 size={18} className="animate-spin" />
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+              <DataLoading compact label="loading editor…" />
             </div>
           }
         >

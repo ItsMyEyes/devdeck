@@ -1,8 +1,9 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
-import { FileSearch, Loader2, Search, X } from 'lucide-react'
+import { FileSearch, Search, X } from 'lucide-react'
 import { ApiError } from '@/lib/api'
 import type { Machine } from '@/store/types'
 import { useWorktreeFileSearch } from '@/features/data/queries'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface FileQuickOpenProps {
@@ -103,8 +104,8 @@ export function FileQuickOpen({
 
         <div className="min-h-0 flex-1 overflow-auto py-1.5">
           {search.isFetching ? (
-            <div className="flex h-24 items-center justify-center text-loom-dim">
-              <Loader2 size={17} className="animate-spin" />
+            <div className="flex h-24 items-center justify-center">
+              <DataLoading compact label="searching…" />
             </div>
           ) : search.error ? (
             <div className="flex h-24 items-center justify-center px-5 text-center font-mono text-[11px] text-loom-red-soft">

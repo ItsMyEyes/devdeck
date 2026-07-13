@@ -30,6 +30,7 @@ import {
   useGitStatus,
   useGitUnstage,
 } from '@/features/data/queries'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { DiffView, type DiffMode } from './DiffView'
 import { MaterialFileIcon } from './MaterialFileIcon'
 
@@ -213,8 +214,8 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
 
             <div className="min-h-0 flex-1 overflow-auto pb-2">
               {status.isLoading ? (
-                <div className="flex h-24 items-center justify-center text-loom-dim">
-                  <Loader2 size={15} className="animate-spin" />
+                <div className="flex h-24 items-center justify-center">
+                  <DataLoading compact />
                 </div>
               ) : status.error ? (
                 <div className="px-3 py-4 text-center font-mono text-[10.5px] text-loom-red-soft">
@@ -256,8 +257,8 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
         ) : (
           <div className="min-h-0 flex-1 overflow-auto py-1">
             {log.isLoading ? (
-              <div className="flex h-24 items-center justify-center text-loom-dim">
-                <Loader2 size={15} className="animate-spin" />
+              <div className="flex h-24 items-center justify-center">
+                <DataLoading compact />
               </div>
             ) : log.error ? (
               <div className="px-3 py-4 text-center font-mono text-[10.5px] text-loom-red-soft">
@@ -329,8 +330,8 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
               {diff.isLoading ? (
-                <div className="flex h-24 items-center justify-center text-loom-dim">
-                  <Loader2 size={15} className="animate-spin" />
+                <div className="flex h-24 items-center justify-center">
+                  <DataLoading compact />
                 </div>
               ) : diff.error ? (
                 <div className="px-4 py-4 font-mono text-[10.5px] text-loom-red-soft">{errMessage(diff.error)}</div>

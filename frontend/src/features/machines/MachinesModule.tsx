@@ -1,5 +1,6 @@
-import { Loader2, Plus, Server } from 'lucide-react'
+import { Plus, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
 import { useMachineHealth, useMachines } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
@@ -74,7 +75,7 @@ export function MachinesModule() {
       <div className="min-h-0 flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex h-[120px] items-center justify-center">
-            <Loader2 size={22} strokeWidth={1.5} className="animate-spin text-loom-dim-2" />
+            <DataLoading compact label="loading machines…" />
           </div>
         ) : error ? (
           <div className="flex h-[120px] flex-col items-center justify-center gap-3 px-4">

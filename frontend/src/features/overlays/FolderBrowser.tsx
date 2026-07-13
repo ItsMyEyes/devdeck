@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { useCreateFsFolder, useFsList, useMachines } from '@/features/data/queries'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function FolderBrowser() {
@@ -77,7 +78,7 @@ export function FolderBrowser() {
     if (isLoading) {
       return (
         <div className="flex h-[120px] items-center justify-center">
-          <Loader2 size={22} strokeWidth={1.5} className="animate-spin text-loom-dim-2" />
+          <DataLoading compact label="loading folder…" />
         </div>
       )
     }

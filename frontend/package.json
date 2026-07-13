@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${LOOM_API_PORT:-8989} && vite --host 0.0.0.0\" \"npm run dev:api\"",
     "dev:web": "vite",
-    "dev:api": "cd ../backend && go run ./cmd/server --db loom.db --open=false --2fa=false --env .env",
+    "dev:api": "cd ../backend && go run ./cmd/server --db loom.db --open=false --2fa=false --env .env --secure-cookies=false",
     "build": "vite build",
     "build:api": "cd .. && make build-api",
     "preview": "vite preview",
@@ -32,6 +32,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@icons-pack/react-simple-icons": "^12.0.0",
+    "@lottiefiles/dotlottie-react": "^0.19.9",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-query-devtools": "^5.101.2",
     "@tanstack/react-router": "^1.170.16",
