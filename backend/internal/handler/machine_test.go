@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"loom/backend/internal/machineclient"
+	"loom/backend/internal/service"
 	"loom/backend/internal/store"
 )
 
@@ -17,7 +19,7 @@ func newTestMachineHandler(t *testing.T) *MachineHandler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return NewMachineHandler(store.New(db))
+	return NewMachineHandler(store.New(db), service.NewMachineHealthCache())
 }
 
 func TestPostMachineValidatesRequiredFields(t *testing.T) {
@@ -112,5 +114,32 @@ func TestPostMachineDefaultsIsLocalFalse(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"isLocal":false`) {
 		t.Errorf("body = %s, want isLocal:false", rec.Body.String())
+	}
+}
+
+func TestMachineHealthServesFromCacheWithoutLiveCheck(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+	cache := service.NewMachineHealthCache()
+	h := NewMachineHandler(st, cache)
+
+	// Unreachable URL: if the handler ever did a live check here, it would
+	// report offline. The cached value must win instead.
+	m, err := st.CreateMachine("cached", "http://127.0.0.1:1", "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.Set(m.ID, machineclient.HealthStatus{Status: "online", LatencyMs: 42})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/health", h.GetMachineHealth)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/health", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"online"`) || !strings.Contains(rec.Body.String(), `"latencyMs":42`) {
+		t.Errorf("status=%d body=%s, want cached online/42", rec.Code, rec.Body.String())
 	}
 }

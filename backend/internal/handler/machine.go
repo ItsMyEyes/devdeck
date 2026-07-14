@@ -3,19 +3,21 @@ package handler
 import (
 	"net/http"
 	"net/url"
-	"time"
 
+	"loom/backend/internal/machineclient"
 	"loom/backend/internal/port"
+	"loom/backend/internal/service"
 	"loom/backend/internal/store"
 )
 
 // MachineHandler handles the hub's runtime-machine registry.
 type MachineHandler struct {
-	st *store.Store
+	st          *store.Store
+	healthCache *service.MachineHealthCache
 }
 
-func NewMachineHandler(st *store.Store) *MachineHandler {
-	return &MachineHandler{st: st}
+func NewMachineHandler(st *store.Store, healthCache *service.MachineHealthCache) *MachineHandler {
+	return &MachineHandler{st: st, healthCache: healthCache}
 }
 
 // validMachineURL accepts absolute http/https URLs.
@@ -84,33 +86,27 @@ func (h *MachineHandler) DeleteMachine(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetMachineHealth pings the runtime's public /api/health with a short
-// timeout. Offline is a normal answer (200), not an error: the frontend
-// polls this to drive status badges and direct-vs-proxy fallback.
+// GetMachineHealth reports a machine's status. It serves the background
+// poller's cached result when one exists (see MachineHealthCache), falling
+// back to a single live check for a machine that hasn't been polled yet
+// (just added, or the hub just started). Offline is a normal answer (200),
+// not an error: the frontend polls this to drive status badges and
+// direct-vs-proxy fallback.
 func (h *MachineHandler) GetMachineHealth(w http.ResponseWriter, r *http.Request) {
 	m, err := h.st.MachineByID(r.PathValue("id"))
 	if handleStoreErr(w, err) {
 		return
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, m.URL+"/api/health", nil)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "invalid machine url")
-		return
+	status, ok := h.healthCache.Get(m.ID)
+	if !ok {
+		status = machineclient.CheckHealth(r.Context(), m)
 	}
-	req.Header.Set("Authorization", "Bearer "+m.Key)
-	start := time.Now()
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "offline"})
-		return
+	writeJSON(w, http.StatusOK, healthResponse(status))
+}
+
+func healthResponse(s machineclient.HealthStatus) map[string]any {
+	if s.Status != "online" {
+		return map[string]any{"status": "offline"}
 	}
-	resp.Body.Close()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "online",
-		"latencyMs": time.Since(start).Milliseconds(),
-	})
+	return map[string]any{"status": "online", "latencyMs": s.LatencyMs}
 }
