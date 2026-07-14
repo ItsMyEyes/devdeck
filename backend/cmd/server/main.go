@@ -236,6 +236,9 @@ func main() {
 	seedH := handler.NewSeedHandler(seedSvc)
 	machineH := handler.NewMachineHandler(st, healthCache)
 
+	sshSecrets := service.NewSSHSecretService(st, authKey)
+	sshH := handler.NewSSHHandler(st, sshSecrets)
+
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
@@ -390,6 +393,13 @@ func main() {
 		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
 		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
+
+		// SSH connection registry — hub-scoped like the machine registry.
+		mux.HandleFunc("GET /api/ssh/connections", sshH.GetConnections)
+		mux.HandleFunc("POST /api/ssh/connections", sshH.PostConnection)
+		mux.HandleFunc("PATCH /api/ssh/connections/{id}", sshH.PatchConnection)
+		mux.HandleFunc("DELETE /api/ssh/connections/{id}", sshH.DeleteConnection)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/accept-hostkey", sshH.PostAcceptHostKey)
 	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
