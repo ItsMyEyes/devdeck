@@ -21,6 +21,12 @@ type SelfRegisterConfig struct {
 	PublicURL string // this runtime's own reachable URL
 	Name      string // display name in the hub's Machines UI
 	Key       string // this runtime's own static API key
+	// IsLocal marks this entry as a same-process, self-registered machine
+	// (a --role both process registering itself) so the hub protects it
+	// from accidental edit/delete the same way it already protects the
+	// Tauri desktop's embedded runtime entry. Zero value (false) is exactly
+	// today's behavior for a runtime self-registering with a remote hub.
+	IsLocal bool
 }
 
 // hubMachine mirrors domain.Machine's JSON shape for decoding the hub's
@@ -28,10 +34,11 @@ type SelfRegisterConfig struct {
 // this package already depends on domain.Worktree/Machine for the
 // hub->runtime direction and this is the inverse, runtime->hub direction.
 type hubMachine struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	URL  string `json:"url"`
-	Key  string `json:"key"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Key     string `json:"key"`
+	IsLocal bool   `json:"isLocal"`
 }
 
 // SelfRegister upserts this runtime's entry in the hub's machine registry
@@ -49,7 +56,7 @@ func SelfRegister(ctx context.Context, cfg SelfRegisterConfig) error {
 		if m.URL != cfg.PublicURL {
 			continue
 		}
-		if m.Name == cfg.Name && m.Key == cfg.Key {
+		if m.Name == cfg.Name && m.Key == cfg.Key && m.IsLocal == cfg.IsLocal {
 			return nil
 		}
 		return patchHubMachine(ctx, cfg, m.ID)
@@ -101,7 +108,12 @@ func listHubMachines(ctx context.Context, cfg SelfRegisterConfig) ([]hubMachine,
 }
 
 func createHubMachine(ctx context.Context, cfg SelfRegisterConfig) error {
-	body, err := json.Marshal(map[string]string{"name": cfg.Name, "url": cfg.PublicURL, "key": cfg.Key})
+	body, err := json.Marshal(struct {
+		Name    string `json:"name"`
+		URL     string `json:"url"`
+		Key     string `json:"key"`
+		IsLocal bool   `json:"isLocal,omitempty"`
+	}{Name: cfg.Name, URL: cfg.PublicURL, Key: cfg.Key, IsLocal: cfg.IsLocal})
 	if err != nil {
 		return err
 	}
@@ -109,7 +121,11 @@ func createHubMachine(ctx context.Context, cfg SelfRegisterConfig) error {
 }
 
 func patchHubMachine(ctx context.Context, cfg SelfRegisterConfig, id string) error {
-	body, err := json.Marshal(map[string]string{"name": cfg.Name, "key": cfg.Key})
+	body, err := json.Marshal(struct {
+		Name    string `json:"name"`
+		Key     string `json:"key"`
+		IsLocal bool   `json:"isLocal,omitempty"`
+	}{Name: cfg.Name, Key: cfg.Key, IsLocal: cfg.IsLocal})
 	if err != nil {
 		return err
 	}

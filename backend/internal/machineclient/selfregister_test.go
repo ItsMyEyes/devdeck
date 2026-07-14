@@ -173,3 +173,46 @@ func TestRunSelfRegisterLoopRetriesThenStopsOnSuccess(t *testing.T) {
 		t.Errorf("hub received %d requests, want at least 3 (2 failures + 1 success)", mu)
 	}
 }
+
+func TestSelfRegisterCreateIncludesIsLocalWhenTrue(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]hubMachine{})
+		case http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&captured)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	err := SelfRegister(context.Background(), SelfRegisterConfig{
+		HubURL: srv.URL, HubKey: "hubk",
+		PublicURL: "http://127.0.0.1:8989", Name: "desktop", Key: "k", IsLocal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured["isLocal"] != true {
+		t.Errorf("POST body isLocal = %v, want true", captured["isLocal"])
+	}
+}
+
+func TestSelfRegisterPatchesWhenOnlyIsLocalDiffers(t *testing.T) {
+	stub := newHubMachineStub(hubMachine{ID: "m-1", Name: "rt-a", URL: "https://rt-a.tail.ts.net:8989", Key: "rtk", IsLocal: false})
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+
+	err := SelfRegister(context.Background(), SelfRegisterConfig{
+		HubURL: srv.URL, HubKey: "hubk",
+		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk", IsLocal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.requests) != 2 || stub.requests[1].method != http.MethodPatch {
+		t.Fatalf("requests = %+v, want [GET, PATCH] (isLocal alone must trigger a patch)", stub.requests)
+	}
+}
