@@ -52,7 +52,7 @@ func main() {
 	pandocBin := flag.String("pandoc-bin", envOr("LOOM_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
 	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
-	role := flag.String("role", envOr("LOOM_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI) or runtime (headless execution daemon, key auth only)")
+	role := flag.String("role", envOr("LOOM_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address)")
 	apiKey := flag.String("key", envOr("LOOM_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
 	hubURL := flag.String("hub-url", envOr("LOOM_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
 	hubKey := flag.String("hub-key", envOr("LOOM_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
@@ -90,18 +90,33 @@ func main() {
 		return
 	}
 
-	if *role != "hub" && *role != "runtime" {
-		log.Fatalf("--role must be \"hub\" or \"runtime\", got %q", *role)
+	if *role != "hub" && *role != "runtime" && *role != "both" {
+		log.Fatalf("--role must be \"hub\", \"runtime\", or \"both\", got %q", *role)
 	}
-	if *role == "runtime" && *apiKey == "" {
-		log.Fatalf("--role runtime requires --key (or LOOM_KEY)")
+	isRuntime := *role == "runtime"
+	isBoth := *role == "both"
+	if (isRuntime || isBoth) && *apiKey == "" {
+		log.Fatalf("--role %s requires --key (or LOOM_KEY)", *role)
+	}
+	if isBoth {
+		// --role both self-registers with itself: default the self-register
+		// target to this same process unless the operator overrode it.
+		if *hubURL == "" {
+			*hubURL = "http://" + *addr
+		}
+		if *hubKey == "" {
+			*hubKey = *apiKey
+		}
 	}
 	if *hubURL != "" && *hubKey == "" {
 		log.Fatalf("--hub-url requires --hub-key (or LOOM_HUB_KEY) to authenticate self-registration")
 	}
-	isRuntime := *role == "runtime"
 
-	if *publicURL == "" {
+	// publicURLWasDefaulted tracks whether the operator left --public-url
+	// unset, so it can be recomputed after the listener binds (needed when
+	// --addr uses port 0 and the OS assigns the real port — see Step 2).
+	publicURLWasDefaulted := *publicURL == ""
+	if publicURLWasDefaulted {
 		*publicURL = "http://" + *addr
 	}
 	if *machineName == "" {
@@ -177,6 +192,11 @@ func main() {
 		}()
 	}
 
+	healthCache := service.NewMachineHealthCache()
+	if !isRuntime {
+		go healthCache.RunPoller(context.Background(), st, 15*time.Second)
+	}
+
 	var baseReg port.AgentRegistry
 	if *jadiURL != "" {
 		baseReg = registry.NewJadiRegistry(*jadiURL)
@@ -214,7 +234,7 @@ func main() {
 	eventH := handler.NewEventHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
-	machineH := handler.NewMachineHandler(st)
+	machineH := handler.NewMachineHandler(st, healthCache)
 
 	termSrv := terminal.NewServer(st)
 	lspSrv := lsp.NewServer(st)
@@ -419,6 +439,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen on %s: %v", *addr, err)
 	}
+	if publicURLWasDefaulted {
+		// *addr may have used port 0 (OS-assigned); the flag-parse-time
+		// default baked in the literal ":0", so recompute it now that the
+		// OS has bound a real port. advertiseURL (used only for its
+		// hostname, above) is unaffected by this — hostnames don't change
+		// when a port is reassigned.
+		*publicURL = "http://" + listener.Addr().String()
+	}
 	uiURL, err := browserURL(listener.Addr())
 	if err != nil {
 		log.Fatalf("resolve UI URL: %v", err)
@@ -431,13 +459,14 @@ func main() {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
 		}
 	}
-	if isRuntime && *hubURL != "" {
+	if (isRuntime || isBoth) && *hubURL != "" {
 		go machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
 			HubURL:    *hubURL,
 			HubKey:    *hubKey,
 			PublicURL: *publicURL,
 			Name:      *machineName,
 			Key:       *apiKey,
+			IsLocal:   isBoth,
 		}, 30*time.Second)
 		log.Printf("self-register: will register with hub %s as %q (%s)", *hubURL, *machineName, *publicURL)
 	}
