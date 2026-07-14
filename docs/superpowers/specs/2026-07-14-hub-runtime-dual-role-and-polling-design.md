@@ -39,11 +39,22 @@ page, machine health).
    usable as a project's execution machine with no separate runtime process
    and no manual Machines-page step.
 2. **Desktop hub mode:** a first-run choice — "Host locally" (today's
-   sidecar, now spawned as `--role both` so it's self-registered the same
-   way) or "Connect to a hub" (operator-supplied tailnet URL; the window
-   simply navigates there and behaves like a browser tab against that hub's
-   existing web SPA/session-cookie login). Remembered per install, with a
-   way to switch back.
+   sidecar, unchanged: still `--role hub` with its existing self-upsert —
+   see note below on why it can't switch to `--role both`) or "Connect to
+   a hub" (operator-supplied tailnet URL; the window simply navigates
+   there and behaves like a browser tab against that hub's existing web
+   SPA/session-cookie login). Remembered per install, with a way to switch
+   back.
+
+   **Note:** `--role both`'s self-registration matches an existing Machine
+   row by URL (see below). The sidecar binds `--addr 127.0.0.1:0` — a
+   fresh OS-assigned port every launch — so URL-matching would create a
+   new duplicate row on every launch instead of updating one. This is
+   exactly why the sidecar's existing upsert
+   (`frontend/src-tauri/src/hubapi.rs`) persists a `local-machine-id` file
+   instead of matching by URL. `--role both` is for fixed-address
+   deployments (a plain server with a stable `--addr`/`--public-url`) —
+   the sidecar keeps its own mechanism and does not adopt `--role both`.
 3. **Hub-side polling:** a background goroutine on hub/both roles pings
    every registered machine's `/api/health` every 15s (matching today's
    client poll cadence, just server-side and de-duplicated), caching
@@ -90,13 +101,11 @@ page, machine health).
 ### 2. Tauri desktop — "Connect to a hub"
 
 - First-run screen (new, `frontend/src-tauri/`): two choices.
-  - **Host locally** — unchanged spawn-a-sidecar flow from the sidecar
-    design, except the sidecar now launches as `--role both` instead of
-    `--role hub`. This lets the Rust shell drop its bespoke local-machine
-    upsert step (`2026-07-13-tauri-desktop-sidecar-design.md:126-132`,
-    `PATCH`/`POST /api/machines` against `<appDataDir>/local-machine-id`)
-    in favor of the same self-registration the backend now does on its
-    own — one less thing the Rust shell owns.
+  - **Host locally** — exactly today's spawn-a-sidecar flow from the
+    sidecar design (`--role hub`, ephemeral key, the existing bespoke
+    `hubapi::upsert_local_machine` upsert against a persisted
+    `local-machine-id` file). Completely unchanged by this project — see
+    the decision note above on why it can't move to `--role both`.
   - **Connect to a hub** — operator types a hub URL (tailnet address). No
     sidecar is spawned. The main window navigates directly to that URL;
     the remote hub already serves its own embedded SPA with full
@@ -182,9 +191,9 @@ GET /api/machines/{id}/health  ── cache hit ──→ cached {status, latenc
    in `main.go`; extract the health-ping call into `machineclient`; hub
    polling goroutine + in-memory cache; cache-first `GET /api/machines/
    {id}/health`.
-2. **Tauri:** first-run choice screen; sidecar spawn switches to
-   `--role both` (dropping the Rust-side manual upsert); "Connect to a
-   hub" navigation path; persisted choice + "change hub" action.
+2. **Tauri:** first-run choice screen (local sidecar path unchanged);
+   "Connect to a hub" navigation path; persisted choice + "change hub"
+   action.
 
 Each sub-project gets its own implementation plan; backend first, since the
 desktop change to "host locally" depends on `--role both` existing.
