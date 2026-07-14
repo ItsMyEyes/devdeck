@@ -242,7 +242,6 @@ func main() {
 	sshSrv := sshmgr.NewServer(sshmgr.NewDialer(st, sshSecrets))
 
 	termSrv := terminal.NewServer(st)
-	termH := handler.NewTerminalHandler()
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
 
@@ -420,7 +419,6 @@ func main() {
 	mux.HandleFunc("POST /api/proxy/start", proxyH.PostStart)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
-	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	if !isRuntime {
 		mux.Handle("/", webui.Handler())
