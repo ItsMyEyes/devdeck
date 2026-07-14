@@ -48,3 +48,35 @@ func FetchWorktrees(ctx context.Context, m domain.Machine, projectID string) ([]
 	}
 	return worktrees, nil
 }
+
+// HealthStatus is the result of pinging a machine's /api/health endpoint.
+type HealthStatus struct {
+	Status    string // "online" or "offline"
+	LatencyMs int64  // only meaningful when Status == "online"
+}
+
+// CheckHealth pings m's /api/health with a short timeout. Offline is a
+// normal result (not an error) — the same design as the hub's per-machine
+// health badge always had, just reusable outside the handler package now
+// (see MachineHealthCache in package service).
+func CheckHealth(ctx context.Context, m domain.Machine) HealthStatus {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(m.URL, "/")+"/api/health", nil)
+	if err != nil {
+		return HealthStatus{Status: "offline"}
+	}
+	req.Header.Set("Authorization", "Bearer "+m.Key)
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return HealthStatus{Status: "offline"}
+	}
+	resp.Body.Close()
+	return HealthStatus{Status: "online", LatencyMs: time.Since(start).Milliseconds()}
+}
