@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use browser_tiles::BrowserTiles;
+use tauri::menu::MenuBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -19,6 +20,7 @@ struct ServerProc(Mutex<Option<CommandChild>>);
 struct ShuttingDown(AtomicBool);
 
 const MAX_RESPAWNS: u32 = 3;
+const CHANGE_HUB_MENU_ID: &str = "change-hub";
 
 enum LaunchEnd {
     /// Process exited; respawn unless shutting down or out of attempts.
@@ -30,6 +32,7 @@ enum LaunchEnd {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_process::init())
         .manage(BrowserTiles::new())
         .on_page_load(|webview, payload| {
             // Global hook (fires for every webview in the app, including
@@ -54,6 +57,7 @@ pub fn run() {
             browser_tiles::browser_tile_show,
             browser_tiles::browser_tile_close,
             choose_hub_mode,
+            change_hub,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -63,6 +67,13 @@ pub fn run() {
             }
             app.manage(ServerProc(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
+            let menu = MenuBuilder::new(app).text(CHANGE_HUB_MENU_ID, "Change Hub…").build()?;
+            app.set_menu(menu)?;
+            app.on_menu_event(move |app_handle, event| {
+                if event.id() == CHANGE_HUB_MENU_ID {
+                    let _ = change_hub(app_handle.clone());
+                }
+            });
             let handle = app.handle().clone();
             // A raw SIGTERM (killall, forced logout, `pkill`) bypasses AppKit's
             // quit sequence entirely, so RunEvent::ExitRequested/Exit below never
@@ -116,6 +127,19 @@ async fn choose_hub_mode(app: AppHandle, mode: String, url: Option<String>) -> R
     let handle = app.clone();
     tauri::async_runtime::spawn(async move { proceed_with_mode(&handle, hub_mode).await });
     Ok(())
+}
+
+/// Clears the saved hub mode and restarts the app. On restart, `start`
+/// (see Step 3 of Task 6) finds no saved mode and shows the first-run
+/// choice screen again. Using a full app restart (rather than hand-rolled
+/// cross-task cancellation of the running respawn loop) means the normal
+/// RunEvent::Exit handler kills any local sidecar exactly as it would on a
+/// real quit — no separate teardown path to get right.
+#[tauri::command]
+fn change_hub(app: AppHandle) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    hubmode::clear(&data_dir).map_err(|e| e.to_string())?;
+    app.restart();
 }
 
 async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
