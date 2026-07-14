@@ -26,6 +26,7 @@ import (
 	"loom/backend/internal/registry"
 	"loom/backend/internal/selfupdate"
 	"loom/backend/internal/service"
+	"loom/backend/internal/sshmgr"
 	"loom/backend/internal/store"
 	"loom/backend/internal/terminal"
 	"loom/backend/internal/version"
@@ -238,8 +239,10 @@ func main() {
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
 	sshH := handler.NewSSHHandler(st, sshSecrets)
+	sshSrv := sshmgr.NewServer(sshmgr.NewDialer(st, sshSecrets))
 
 	termSrv := terminal.NewServer(st)
+	termH := handler.NewTerminalHandler()
 	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
 
@@ -400,6 +403,10 @@ func main() {
 		mux.HandleFunc("PATCH /api/ssh/connections/{id}", sshH.PatchConnection)
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}", sshH.DeleteConnection)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/accept-hostkey", sshH.PostAcceptHostKey)
+
+		// Phase 1 executes every SSH session on the hub itself;
+		// ExecutorMachineID routing to runtimes is a later phase.
+		mux.HandleFunc("/ws/ssh", sshSrv.HandleWS)
 	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
@@ -413,6 +420,7 @@ func main() {
 	mux.HandleFunc("POST /api/proxy/start", proxyH.PostStart)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
+	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	if !isRuntime {
 		mux.Handle("/", webui.Handler())
