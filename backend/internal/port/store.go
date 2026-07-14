@@ -83,6 +83,18 @@ type Store interface {
 	DeleteMachine(id string) error
 	MachineByID(id string) (domain.Machine, error)
 
+	// SSH connections (operator-global registry, hub role only — see
+	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets
+	// are stored separately, encrypted by the service layer.
+	SSHConnections() ([]domain.SSHConnection, error)
+	CreateSSHConnection(name, host string, portNum int, username, authType string) (domain.SSHConnection, error)
+	UpdateSSHConnection(id string, p SSHConnectionPatch) (domain.SSHConnection, error)
+	DeleteSSHConnection(id string) error
+	SSHConnectionByID(id string) (domain.SSHConnection, error)
+	SetSSHHostKey(id string, fingerprint *string) error
+	UpsertSSHSecret(connectionID, kind, cipherText string) error
+	SSHSecret(connectionID, kind string) (domain.SSHSecret, error)
+
 	// Recurring invoice templates (workspace-scoped; auto-generate draft Invoices on schedule)
 	CreateRecurringTemplate(wsID, companyName, companyAddress string, items []domain.InvoiceItem, bankName, bankAccountName, bankAccountNumber string, dayOfMonth, paymentTermDays int, createdAt string) (domain.RecurringInvoiceTemplate, error)
 	UpdateRecurringTemplate(id string, p RecurringTemplatePatch) (domain.RecurringInvoiceTemplate, error)
@@ -179,6 +191,17 @@ type MachinePatch struct {
 	URL     *string
 	Key     *string
 	IsLocal *bool
+}
+
+// SSHConnectionPatch carries optional fields for a partial SSH-connection
+// update. Secrets are not patched here — they go through SSHSecretService.
+// Jump-host / executor fields arrive with their own build-order phases.
+type SSHConnectionPatch struct {
+	Name     *string
+	Host     *string
+	Port     *int
+	Username *string
+	AuthType *string
 }
 
 // RecurringTemplatePatch carries optional fields for a partial recurring-template update.

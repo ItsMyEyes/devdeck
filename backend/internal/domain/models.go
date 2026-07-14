@@ -206,6 +206,42 @@ type Machine struct {
 	IsLocal bool `json:"isLocal"`
 }
 
+// SSHConnection is a saved connection to an arbitrary external SSH host —
+// a separate concept from Machine (an already-running Loom runtime trusted
+// via a shared key). Mirrors the frontend SSHConnection type. Credentials
+// live in SSHSecret rows, never on this struct.
+type SSHConnection struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	// AuthType is "password" or "privatekey".
+	AuthType string `json:"authType"`
+	// JumpConnectionID chains to another SSHConnection for bastion hops.
+	// Stored since phase 1 so the schema never needs reworking, but only
+	// used once jump-host chaining ships (build-order phase 3).
+	JumpConnectionID *string `json:"jumpConnectionId"`
+	// ExecutorMachineID selects which Machine dials this host; nil = the
+	// hub itself. Phase 1 always executes on the hub regardless — routing
+	// ships with a later phase.
+	ExecutorMachineID *string `json:"executorMachineId"`
+	// HostKeyFingerprint is the TOFU-pinned SHA256 host-key fingerprint,
+	// set on the first successful connect; later mismatches hard-block.
+	HostKeyFingerprint *string `json:"hostKeyFingerprint"`
+}
+
+// SSHSecret is one encrypted credential for an SSHConnection. Every field
+// is json:"-": unlike Machine.Key (deliberately distributed to clients),
+// SSH credentials never serialize into any API response.
+type SSHSecret struct {
+	ConnectionID string  `json:"-"`
+	Kind         string  `json:"-"` // "password" | "privatekey" | "passphrase"
+	StorageKind  string  `json:"-"` // "db" today; "keychain" arrives with the Tauri phase
+	CipherText   string  `json:"-"` // base64 "nonce||ciphertext" (AES-256-GCM)
+	KeychainRef  *string `json:"-"`
+}
+
 // FsEntry describes a single directory entry returned by the filesystem browser.
 type FsEntry struct {
 	Name  string `json:"name"`

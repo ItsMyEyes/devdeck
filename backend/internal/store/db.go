@@ -173,6 +173,27 @@ CREATE TABLE IF NOT EXISTS machines (
   is_local INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS ssh_connections (
+  id                   TEXT PRIMARY KEY,
+  name                 TEXT NOT NULL DEFAULT '',
+  host                 TEXT NOT NULL DEFAULT '',
+  port                 INTEGER NOT NULL DEFAULT 22,
+  username             TEXT NOT NULL DEFAULT '',
+  auth_type            TEXT NOT NULL DEFAULT 'password',
+  jump_connection_id   TEXT,
+  executor_machine_id  TEXT,
+  host_key_fingerprint TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ssh_secrets (
+  connection_id TEXT NOT NULL REFERENCES ssh_connections(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL,
+  storage_kind  TEXT NOT NULL DEFAULT 'db',
+  cipher_text   TEXT NOT NULL DEFAULT '',
+  keychain_ref  TEXT,
+  PRIMARY KEY (connection_id, kind)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),
   active_workspace_id TEXT,
