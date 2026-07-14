@@ -1,5 +1,6 @@
 mod browser_tiles;
 mod hubapi;
+mod hubmode;
 mod sidecar;
 
 use std::io::Write;
@@ -52,6 +53,7 @@ pub fn run() {
             browser_tiles::browser_tile_hide,
             browser_tiles::browser_tile_show,
             browser_tiles::browser_tile_close,
+            choose_hub_mode,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -67,27 +69,7 @@ pub fn run() {
             // fires and the sidecar is orphaned. Handle it explicitly on unix.
             #[cfg(unix)]
             install_signal_handlers(handle.clone());
-            tauri::async_runtime::spawn(async move {
-                let mut respawns = 0;
-                loop {
-                    match launch_once(&handle).await {
-                        LaunchEnd::Failed(msg) => {
-                            show_error(&handle, &msg);
-                            break;
-                        }
-                        LaunchEnd::Crashed => {
-                            if handle.state::<ShuttingDown>().0.load(Ordering::SeqCst) {
-                                break;
-                            }
-                            respawns += 1;
-                            if respawns > MAX_RESPAWNS {
-                                show_error(&handle, "loom-server crashed repeatedly");
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
+            tauri::async_runtime::spawn(async move { start(&handle).await });
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -98,10 +80,105 @@ pub fn run() {
         });
 }
 
+/// Resolves which hub mode this install is in (or shows the first-run
+/// choice screen if none is saved yet) and proceeds accordingly.
+async fn start(handle: &AppHandle) {
+    let data_dir = match handle.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            show_error(handle, &format!("resolve app data dir: {e}"));
+            return;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        show_error(handle, &format!("create app data dir: {e}"));
+        return;
+    }
+    match hubmode::load(&data_dir) {
+        Some(mode) => proceed_with_mode(handle, mode).await,
+        None => show_choose_screen(handle),
+    }
+}
+
+/// Tauri command invoked from choose.html once the operator picks a mode.
+/// Persists the choice, then proceeds the same way a saved-mode launch
+/// would (spawn the local sidecar, or navigate to the remote hub).
+#[tauri::command]
+async fn choose_hub_mode(app: AppHandle, mode: String, url: Option<String>) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let hub_mode = match mode.as_str() {
+        "local" => hubmode::HubMode::Local,
+        "remote" => hubmode::HubMode::Remote { url: url.ok_or("url is required for remote mode")? },
+        other => return Err(format!("unknown hub mode {other}")),
+    };
+    hubmode::save(&data_dir, &hub_mode).map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move { proceed_with_mode(&handle, hub_mode).await });
+    Ok(())
+}
+
+async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
+    match mode {
+        hubmode::HubMode::Remote { url } => navigate_remote(handle, &url),
+        hubmode::HubMode::Local => run_local_respawn_loop(handle).await,
+    }
+}
+
+/// Navigates the main window straight at an operator-hosted hub URL and
+/// shows it. No sidecar is spawned — the window behaves like a plain
+/// browser tab against that hub's existing web SPA/session-cookie login.
+fn navigate_remote(handle: &AppHandle, url: &str) {
+    let Ok(parsed) = url.parse() else {
+        show_error(handle, &format!("invalid hub URL: {url}"));
+        return;
+    };
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.navigate(parsed);
+        let _ = win.show();
+    }
+}
+
+/// The sidecar spawn/respawn loop, reachable from both a first-run choice
+/// and a saved "local" mode from a previous launch.
+async fn run_local_respawn_loop(handle: &AppHandle) {
+    let mut respawns = 0;
+    loop {
+        match launch_once(handle).await {
+            LaunchEnd::Failed(msg) => {
+                show_error(handle, &msg);
+                break;
+            }
+            LaunchEnd::Crashed => {
+                if handle.state::<ShuttingDown>().0.load(Ordering::SeqCst) {
+                    break;
+                }
+                respawns += 1;
+                if respawns > MAX_RESPAWNS {
+                    show_error(handle, "loom-server crashed repeatedly");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Navigates the main window to the bundled first-run choice screen.
+fn show_choose_screen(handle: &AppHandle) {
+    #[cfg(not(windows))]
+    let url = "tauri://localhost/choose.html";
+    #[cfg(windows)]
+    let url = "http://tauri.localhost/choose.html";
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.navigate(url.parse().expect("static choose url"));
+        let _ = win.show();
+    }
+}
+
 /// Marks shutdown (stops the respawn loop) and kills the sidecar child.
 /// Idempotent: the child is taken out of ServerProc, so a second call
-/// (e.g. RunEvent::Exit firing after a signal handler already ran this) is a
-/// no-op.
+/// (e.g. RunEvent::Exit firing after a signal handler already ran this) is
+/// a no-op. Also a no-op in remote mode (no child was ever spawned).
 fn kill_sidecar(handle: &AppHandle) {
     handle.state::<ShuttingDown>().0.store(true, Ordering::SeqCst);
     if let Some(child) = handle.state::<ServerProc>().0.lock().unwrap().take() {
