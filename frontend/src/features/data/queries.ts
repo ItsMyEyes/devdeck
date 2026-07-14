@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Machine, Workspace } from '@/store/types'
 import {
+  acceptSSHHostKey,
   clearDoneTodos,
   cloneProject,
   createBank,
@@ -15,6 +16,7 @@ import {
   createMachine,
   createProject,
   createRecurringTemplate,
+  createSSHConnection,
   createTodo,
   createWorkspace,
   deleteAttachment,
@@ -27,6 +29,7 @@ import {
   deleteNews,
   deleteProject,
   deleteRecurringTemplate,
+  deleteSSHConnection,
   deleteTodo,
   deleteWorkspace,
   fetchAttachments,
@@ -37,6 +40,7 @@ import {
   fetchMachineHealth,
   fetchMachines,
   fetchSettings,
+  fetchSSHConnections,
   fetchWorkspaces,
   markAllNewsRead,
   seed,
@@ -51,6 +55,7 @@ import {
   updateProject,
   updateRecurringTemplate,
   updateSettings,
+  updateSSHConnection,
   updateTodo,
   updateWorkspace,
 } from '@/lib/api'
@@ -65,6 +70,7 @@ import type {
   CreateNewsBody,
   CreateProjectBody,
   CreateRecurringTemplateBody,
+  CreateSSHConnectionBody,
   CreateTodoBody,
   CreateWorkspaceBody,
   SettingsPatch,
@@ -77,6 +83,7 @@ import type {
   UpdateNewsBody,
   UpdateProjectBody,
   UpdateRecurringTemplateBody,
+  UpdateSSHConnectionBody,
   UpdateTodoBody,
   UpdateWorkspaceBody,
 } from '@/lib/api'
@@ -109,6 +116,7 @@ import {
   gitStage,
   gitUnstage,
   installAgentSkill,
+  killTerminalSession,
   removeAgentEnvProfile,
   removeAgentMCPServer,
   removeAgentSkill,
@@ -183,6 +191,44 @@ export function useMachineHealth(id: string | undefined) {
     enabled: !!id,
     staleTime: 5_000,
     refetchInterval: 15_000,
+  })
+}
+
+// ---- SSH connections ----
+
+export function useSSHConnections() {
+  return useQuery({ queryKey: qk.sshConnections, queryFn: fetchSSHConnections, staleTime: 10_000 })
+}
+
+export function useCreateSSHConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateSSHConnectionBody) => createSSHConnection(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
+  })
+}
+
+export function useUpdateSSHConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateSSHConnectionBody }) => updateSSHConnection(id, patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
+  })
+}
+
+export function useDeleteSSHConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteSSHConnection(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
+  })
+}
+
+export function useAcceptSSHHostKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => acceptSSHHostKey(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
   })
 }
 
@@ -892,6 +938,15 @@ export function useGitPush(machine: Machine, worktreeId: string) {
 
 export function useGitPull(machine: Machine, worktreeId: string) {
   return useGitMutation(machine, worktreeId, (_: void) => gitPull(machine, worktreeId))
+}
+
+/** Kills one spawned terminal pane's PTY immediately on tab close — see
+ *  killTerminalSession's comment on why this can't target a worktree's
+ *  primary session. Not tied to any cached query, so no invalidation. */
+export function useKillTerminalSession(machine: Machine) {
+  return useMutation({
+    mutationFn: (sessionId: string) => killTerminalSession(machine, sessionId),
+  })
 }
 
 /** Refetch every loaded folder level of a worktree's file tree. */

@@ -17,6 +17,7 @@ import type {
   Project,
   RecurringInvoiceTemplate,
   Settings,
+  SSHConnection,
   Todo,
   User,
   Workspace,
@@ -653,4 +654,41 @@ export function deleteMachine(id: string): Promise<void> {
 
 export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
+}
+
+// ---- SSH connections (hub registry; secrets are write-only) ----
+
+export interface CreateSSHConnectionBody {
+  name: string
+  host: string
+  port: number
+  username: string
+  authType: 'password' | 'privatekey'
+  password?: string
+  privateKey?: string
+  passphrase?: string
+}
+
+export type UpdateSSHConnectionBody = Partial<CreateSSHConnectionBody>
+
+export function fetchSSHConnections(): Promise<SSHConnection[]> {
+  return request<SSHConnection[]>('GET', '/ssh/connections')
+}
+
+export function createSSHConnection(body: CreateSSHConnectionBody): Promise<SSHConnection> {
+  return request<SSHConnection>('POST', '/ssh/connections', body)
+}
+
+export function updateSSHConnection(id: string, patch: UpdateSSHConnectionBody): Promise<SSHConnection> {
+  return request<SSHConnection>('PATCH', `/ssh/connections/${id}`, patch)
+}
+
+export function deleteSSHConnection(id: string): Promise<void> {
+  return request<void>('DELETE', `/ssh/connections/${id}`)
+}
+
+/** Clears a pinned host key after a "host key changed" block, so the next
+ *  connect re-pins whatever key the host presents. */
+export function acceptSSHHostKey(id: string): Promise<void> {
+  return request<void>('POST', `/ssh/connections/${id}/accept-hostkey`)
 }

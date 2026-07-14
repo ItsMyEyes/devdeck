@@ -142,6 +142,22 @@ export interface Machine {
   isLocal: boolean
 }
 
+/** A saved SSH connection (operator-global registry — mirrors the backend's
+ *  domain.SSHConnection). Secrets are write-only: they ride on create/update
+ *  requests and never serialize back, unlike Machine.key which clients need
+ *  for direct-first connections. */
+export interface SSHConnection {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  authType: 'password' | 'privatekey'
+  jumpConnectionId: string | null
+  executorMachineId: string | null
+  hostKeyFingerprint: string | null
+}
+
 export interface InvoiceItem {
   description: string
   quantity: number
@@ -186,7 +202,7 @@ export interface Workspace {
   recurringTemplates: RecurringInvoiceTemplate[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines'
+export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {

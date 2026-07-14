@@ -37,4 +37,5 @@ export const qk = {
   authConfig: ['authConfig'] as const,
   machines: ['machines'] as const,
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
+  sshConnections: ['sshConnections'] as const,
 }
