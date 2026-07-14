@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loom — choose a hub</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #0d1017; color: #c0c6d4;
+        font: 13px/1.6 -apple-system, "Segoe UI", sans-serif; }
+      body { display: grid; place-items: center; }
+      main { max-width: 420px; width: 100%; padding: 0 24px; }
+      h1 { font-size: 15px; margin-bottom: 16px; }
+      button { display: block; width: 100%; margin: 8px 0; padding: 10px 12px;
+        background: #1a1f2b; color: #c0c6d4; border: 1px solid #2a3040;
+        border-radius: 6px; cursor: pointer; font: inherit; text-align: left; }
+      button:hover { background: #232936; }
+      input { width: 100%; padding: 8px 10px; margin: 8px 0; box-sizing: border-box;
+        background: #1a1f2b; color: #c0c6d4; border: 1px solid #2a3040;
+        border-radius: 6px; font: inherit; }
+      #remote-form { display: none; }
+      #error { color: #e46962; min-height: 18px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>How do you want to run Loom?</h1>
+      <button id="local-btn">Host locally on this device</button>
+      <button id="remote-btn">Connect to a hub I already host</button>
+      <div id="remote-form">
+        <input id="url" type="text" placeholder="https://hub.tail-xxxx.ts.net" />
+        <button id="connect-btn">Connect</button>
+      </div>
+      <p id="error"></p>
+    </main>
+    <script>
+      const invoke = window.__TAURI__.core.invoke
+      const errorEl = document.getElementById('error')
+      document.getElementById('local-btn').addEventListener('click', () => {
+        errorEl.textContent = ''
+        invoke('choose_hub_mode', { mode: 'local' }).catch((e) => {
+          errorEl.textContent = String(e)
+        })
+      })
+      document.getElementById('remote-btn').addEventListener('click', () => {
+        document.getElementById('remote-form').style.display = 'block'
+      })
+      document.getElementById('connect-btn').addEventListener('click', () => {
+        const url = document.getElementById('url').value.trim()
+        if (!url) return
+        errorEl.textContent = ''
+        invoke('choose_hub_mode', { mode: 'remote', url }).catch((e) => {
+          errorEl.textContent = String(e)
+        })
+      })
+    </script>
+  </body>
+</html>
