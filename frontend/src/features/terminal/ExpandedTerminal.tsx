@@ -5,11 +5,12 @@ import { Check, FilePlus, FolderTree, GitBranch, Settings2, TerminalSquare, Tras
 import { STATE } from '@/lib/constants'
 import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Machine, Worktree } from '@/store/types'
 import { StatusDot } from '@/components/ui/status-dot'
 import { Pill } from '@/components/ui/pill'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
-import { useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
+import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { FileEditor } from './FileEditor'
@@ -148,17 +149,27 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
   // unmount ExpandedTerminal — the route only updates params) resets every
   // per-worktree local state (dirty files, quick-open, ctrl-armed, the
   // terminal-handle map) instead of leaking it across worktrees.
-  return <TerminalWorkspace key={w.id} worktree={w} machine={machine} projectName={project?.name} />
+  return (
+    <TerminalWorkspace
+      key={w.id}
+      worktree={w}
+      machine={machine}
+      projectName={project?.name}
+      label={worktreeLabel(project, w)}
+    />
+  )
 }
 
 function TerminalWorkspace({
   worktree,
   machine,
   projectName,
+  label,
 }: {
   worktree: Worktree
   machine: Machine
   projectName?: string
+  label: string
 }) {
   const termHandles = useRef(new Map<string, TerminalHandle>())
   const definitionRequest = useRef(0)
@@ -181,6 +192,7 @@ function TerminalWorkspace({
   const setWorktreeLayout = useLoomStore((s) => s.setWorktreeLayout)
   const storedLayout = useLoomStore((s) => s.worktreeLayouts[worktree.id])
   const updateWorktree = useUpdateWorktree()
+  const killTerminalSession = useKillTerminalSession(machine)
 
   const layout = useMemo(
     () => deserializeLayout(storedLayout) ?? createDefaultLayout(worktree.id),
@@ -191,8 +203,17 @@ function TerminalWorkspace({
     setWorktreeLayout(worktree.id, next)
   }
 
+  // Closing a spawned Terminal pane's tab only removes it from the layout —
+  // its PTY otherwise lingers for the reconnect grace period. The primary
+  // pane (bare worktree id) is excluded: it backs the worktree itself, not
+  // one pane's tab, and must survive other panes closing.
+  function killIfSpawnedTerminal(content: PaneContent) {
+    if (content.kind === 'terminal' && content.sessionKey !== worktree.id) {
+      killTerminalSession.mutate(content.sessionKey)
+    }
+  }
+
   const st = STATE[worktree.state]
-  const label = worktree.root ? 'project root' : worktree.branch
 
   // Surfaced to `Sidebar`'s collapsed rail (`SidebarRail`) via the store — the
   // "back" button now lives outside this component entirely, so its dirty-file
@@ -297,6 +318,7 @@ function TerminalWorkspace({
       if (dirtyFiles.has(content.path) && !window.confirm(`Close ${basename(content.path)} without saving?`)) return
       cleanupFileBookkeeping(content.path)
     }
+    if (content) killIfSpawnedTerminal(content)
     commitLayout(closeTab(layout, paneId, contentId))
   }
 
@@ -313,6 +335,7 @@ function TerminalWorkspace({
     for (const tab of pane.tabs) {
       next = closeTab(next, paneId, tab.id)
       if (tab.kind === 'file') cleanupFileBookkeeping(tab.path)
+      killIfSpawnedTerminal(tab)
     }
     commitLayout(next)
   }

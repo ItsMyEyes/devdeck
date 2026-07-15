@@ -193,6 +193,18 @@ export function fetchProjectBranches(machine: Machine, projectId: string, path: 
   return machineRequest<string[]>(machine, 'GET', `/projects/${projectId}/branches?path=${encodeURIComponent(path)}`)
 }
 
+// ---- Terminal sessions ----
+
+/** Immediately kills a spawned terminal pane's PTY process. A pane's tab
+ *  closing in the UI only removes it from the layout — left alone, the PTY
+ *  lingers for the reconnect grace period (see registry.detach on the Go
+ *  side) instead of exiting right away. The backend refuses this for a
+ *  worktree's primary session (bare worktree id, no "::term-N" suffix),
+ *  since that one backs the worktree itself and must survive a pane close. */
+export function killTerminalSession(machine: Machine, sessionId: string): Promise<void> {
+  return machineRequest<void>(machine, 'DELETE', `/terminal/sessions/${encodeURIComponent(sessionId)}`)
+}
+
 // ---- Filesystem (browsing a path on this machine, e.g. for new-project setup) ----
 
 export interface FsListResponse {

@@ -16,7 +16,9 @@
  */
 
 import {
+  allocateTerminalContent,
   closeTab,
+  collectTerminalSessionKeys,
   createDefaultLayout,
   createFileContent,
   createGitContent,
@@ -251,6 +253,31 @@ check('serialize/deserialize round-trips a valid layout and rejects garbage', ()
     deserializeLayout({ version: 1, root: {}, focusedPaneId: 'x' }),
     null,
     'missing nextTerminalSeq rejected',
+  )
+})
+
+check('collectTerminalSessionKeys finds every Terminal sessionKey, including the primary pane', () => {
+  const layout = createDefaultLayout('w-1')
+  assertEqual(
+    JSON.stringify(collectTerminalSessionKeys(layout.root)),
+    JSON.stringify(['w-1']),
+    'default layout has only the primary session',
+  )
+
+  const allocated = allocateTerminalContent(layout, 'w-1')
+  const split = splitLeaf(allocated.layout, layout.root.id, 'row', allocated.content)
+  assertEqual(
+    JSON.stringify(collectTerminalSessionKeys(split.root).sort()),
+    JSON.stringify(['w-1', 'w-1::term-1'].sort()),
+    'split layout finds both the primary and spawned sessions',
+  )
+
+  const git = createGitContent()
+  const withGit = splitLeaf(split, layout.root.id, 'column', git)
+  assertEqual(
+    JSON.stringify(collectTerminalSessionKeys(withGit.root).sort()),
+    JSON.stringify(['w-1', 'w-1::term-1'].sort()),
+    'non-terminal content (git) is excluded',
   )
 })
 

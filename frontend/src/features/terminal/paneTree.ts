@@ -331,6 +331,18 @@ export function findContent(root: PaneNode, contentId: string): PaneContent | un
   return undefined
 }
 
+/** Every Terminal content's sessionKey anywhere in the tree — e.g. to kill
+ *  each spawned pane's PTY when the whole worktree tab (not just one pane)
+ *  closes. Includes the primary pane's sessionKey (== the worktree id);
+ *  callers that must spare it (see paneTree's primary-pane id rule above)
+ *  filter that out themselves. */
+export function collectTerminalSessionKeys(root: PaneNode): string[] {
+  if (root.type === 'leaf') {
+    return root.tabs.filter((t): t is TerminalContent => t.kind === 'terminal').map((t) => t.sessionKey)
+  }
+  return root.children.flatMap(collectTerminalSessionKeys)
+}
+
 export function findLeafForContent(root: PaneNode, contentId: string): LeafPane | undefined {
   if (root.type === 'leaf') return root.tabs.some((t) => t.id === contentId) ? root : undefined
   for (const child of root.children) {

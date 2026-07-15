@@ -4,8 +4,10 @@ import { BrowserTile } from '@/features/browser/BrowserTile'
 import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/browserTilesBridge'
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
+import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
 import { useMachines, useWorkspace } from '@/features/data/queries'
 import { STATE } from '@/lib/constants'
+import { killTerminalSession } from '@/lib/machineApi'
 import { useLoomStore } from '@/store/useLoomStore'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
 import { createDefaultTileLayout, findTileLeaf, findTileTab, firstLeafId, focusTileLeaf, selectTileTab } from './tileTree'
@@ -86,6 +88,14 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   // the store. `closeWorktreeTab` itself is id-based, not worktree-specific
   // (see tileTree.ts's `closeTileTab`), so it's reused as-is for the
   // generic tree removal regardless of tab kind.
+  //
+  // Closing a 'worktree' tab only drops it from this workspace's tab strip
+  // — the worktree itself (and its primary terminal session) keeps running
+  // so reopening it reattaches instead of respawning. Any *spawned* extra
+  // Terminal panes inside it (ExpandedTerminal's "Terminal 2", ...) are
+  // killed outright: unlike the primary session, they exist only as long as
+  // their tab does, and ExpandedTerminal unmounting here bypasses its own
+  // per-pane close handlers that would otherwise do this.
   async function handleCloseTab(_leafId: string, tabId: string) {
     const tab = findTileTab(layout.root, tabId)
     if (tab?.kind === 'browser') {
@@ -96,6 +106,17 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         )
       }
       removeBrowserTile(tabId)
+    }
+    if (tab?.kind === 'worktree') {
+      const project = projectsById.get(tab.projectId)
+      const machine = project?.machineId ? machinesById.get(project.machineId) : undefined
+      const storedLayout = useLoomStore.getState().worktreeLayouts[tab.wtId]
+      const paneLayout = deserializeLayout(storedLayout)
+      if (machine && paneLayout) {
+        for (const sessionKey of collectTerminalSessionKeys(paneLayout.root)) {
+          if (sessionKey !== tab.wtId) void killTerminalSession(machine, sessionKey).catch(() => {})
+        }
+      }
     }
     closeWorktreeTab(wsId, tabId)
     const next = useLoomStore.getState().workspaceTileLayouts[wsId]
