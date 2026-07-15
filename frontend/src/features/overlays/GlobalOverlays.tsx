@@ -5,6 +5,7 @@ import { FolderBrowser } from './FolderBrowser'
 import { EditDrawer } from './EditDrawer'
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog'
 import { MachineDialog } from '@/features/machines/MachineDialog'
+import { SSHConnectionDialog } from '@/features/ssh/SSHConnectionDialog'
 
 /** All portal-rendered overlays, driven by the store's UI state. */
 export function GlobalOverlays() {
@@ -17,6 +18,7 @@ export function GlobalOverlays() {
       <EditDrawer />
       <ConfirmDeleteDialog />
       <MachineDialog />
+      <SSHConnectionDialog />
     </>
   )
 }

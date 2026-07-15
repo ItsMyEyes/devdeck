@@ -17,11 +17,12 @@ import type { WorkspaceTileLayout } from '@/features/tabs/tileTree'
 import type {
   Priority,
   Project,
+  SSHConnection,
   Workspace,
   Worktree,
 } from './types'
 
-export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine'
+export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh'
 export type TodoFilter = 'all' | 'active' | 'done'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
@@ -68,6 +69,19 @@ interface MachineDialogState {
   name: string
   url: string
   key: string
+}
+interface SSHDialogState {
+  open: boolean
+  editingId: string | null
+  name: string
+  host: string
+  /** Kept as the text field's raw string; parsed + validated on submit. */
+  port: string
+  username: string
+  authType: 'password' | 'privatekey'
+  password: string
+  privateKey: string
+  passphrase: string
 }
 
 export interface BrowserProxyInfo {
@@ -236,6 +250,13 @@ interface LoomState {
   openEditMachine: (id: string, name: string, url: string, key: string) => void
   closeMachineDialog: () => void
   setMachineDialog: (patch: Partial<Omit<MachineDialogState, 'open' | 'editingId'>>) => void
+
+  // ssh dialog
+  sshDialog: SSHDialogState
+  openAddSSHConnection: () => void
+  openEditSSHConnection: (conn: SSHConnection) => void
+  closeSSHDialog: () => void
+  setSSHDialog: (patch: Partial<SSHDialogState>) => void
 }
 
 // ---------- pure lookup helpers (operate on a workspaces array) ----------
@@ -291,6 +312,7 @@ export const useLoomStore = create<LoomState>()(
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
+      sshDialog: { open: false, editingId: null, name: '', host: '', port: '22', username: '', authType: 'password', password: '', privateKey: '', passphrase: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
       railExpanded: false,
@@ -477,6 +499,41 @@ export const useLoomStore = create<LoomState>()(
         set((s) => void (s.machineDialog = { open: true, editingId: id, name, url, key })),
       closeMachineDialog: () => set((s) => void (s.machineDialog.open = false)),
       setMachineDialog: (patch) => set((s) => void Object.assign(s.machineDialog, patch)),
+
+      openAddSSHConnection: () =>
+        set(
+          (s) =>
+            void (s.sshDialog = {
+              open: true,
+              editingId: null,
+              name: '',
+              host: '',
+              port: '22',
+              username: '',
+              authType: 'password',
+              password: '',
+              privateKey: '',
+              passphrase: '',
+            }),
+        ),
+      openEditSSHConnection: (conn) =>
+        set(
+          (s) =>
+            void (s.sshDialog = {
+              open: true,
+              editingId: conn.id,
+              name: conn.name,
+              host: conn.host,
+              port: String(conn.port),
+              username: conn.username,
+              authType: conn.authType,
+              password: '',
+              privateKey: '',
+              passphrase: '',
+            }),
+        ),
+      closeSSHDialog: () => set((s) => void (s.sshDialog.open = false)),
+      setSSHDialog: (patch) => set((s) => void Object.assign(s.sshDialog, patch)),
     })),
     {
       name: 'loom-ui-v2',

@@ -1,6 +1,6 @@
 import { cloneElement, useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Blocks, Globe, LayoutGrid, Receipt, Server, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, Cable, Globe, LayoutGrid, Receipt, Server, Wrench, type LucideIcon } from 'lucide-react'
 import type { ModuleView } from '@/store/types'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
@@ -53,6 +53,7 @@ export function SidebarNav({ compact }: SidebarNavProps = {}) {
     { key: 'browser', label: 'Browser', Icon: Globe, badge: 0 },
     { key: 'tools', label: 'Tools', Icon: Wrench, badge: 0 },
     { key: 'machines', label: 'Machines', Icon: Server, badge: 0 },
+    { key: 'ssh', label: 'SSH', Icon: Cable, badge: 0 },
   ]
 
   function goto(key: ModuleView) {

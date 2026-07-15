@@ -6,6 +6,7 @@ import { useScope } from '@/features/useScope'
 import {
   useDeleteMachine,
   useDeleteProject,
+  useDeleteSSHConnection,
   useDeleteWorkspace,
   useDeleteWorktree,
   useMachines,
@@ -20,6 +21,8 @@ function bodyFor(kind: string, name: string) {
     return `This removes workspace "${name}" and every project inside it from loom. Your files on disk are not touched.`
   if (kind === 'machine')
     return `This removes machine "${name}" from the registry. Projects still pointing at it will show as unreachable until reassigned.`
+  if (kind === 'ssh')
+    return `This removes SSH connection "${name}" and its stored credentials. The remote host itself is not touched.`
   return `This removes project "${name}" and all of its worktrees from loom. Your files on disk are not touched.`
 }
 
@@ -36,6 +39,7 @@ export function ConfirmDeleteDialog() {
   const deleteProject = useDeleteProject()
   const deleteWorkspace = useDeleteWorkspace()
   const deleteMachine = useDeleteMachine()
+  const deleteSSHConnection = useDeleteSSHConnection()
 
   const open = !!confirm
 
@@ -83,6 +87,13 @@ export function ConfirmDeleteDialog() {
       })
     } else if (kind === 'machine') {
       deleteMachine.mutate(id, {
+        onSuccess: () => {
+          cancelConfirm()
+          toast()
+        },
+      })
+    } else if (kind === 'ssh') {
+      deleteSSHConnection.mutate(id, {
         onSuccess: () => {
           cancelConfirm()
           toast()
