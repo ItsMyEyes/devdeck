@@ -296,8 +296,9 @@ cd frontend && npx @tanstack/router-plugin --target react
 
 - Run `npm run typecheck` and `go vet ./...` before committing.
 - Run `npm run build` before pushing to verify no build regressions.
-- The frontend dev server proxies `/api` and `/ws/terminal` to the Go backend
-  (configured in `vite.config.ts`). Ensure the backend is running on the expected port.
+- The frontend dev server proxies `/api`, `/ws/terminal`, and `/ws/ssh` to the
+  Go backend (configured in `vite.config.ts`). Ensure the backend is running
+  on the expected port.
 - Node.js terminal gateway (`frontend/server/terminal-server.mjs`) is legacy;
   the canonical terminal server is the Go `internal/terminal` package.
 

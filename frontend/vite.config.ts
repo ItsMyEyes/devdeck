@@ -34,6 +34,12 @@ export default defineConfig({
         ws: true,
         rewriteWsOrigin: true,
       },
+      // xterm.js <-> Go SSH shell gateway
+      '/ws/ssh': {
+        target: `ws://localhost:${API_PORT}`,
+        ws: true,
+        rewriteWsOrigin: true,
+      },
       // Go + SQLite REST backend
       '/api': {
         target: `http://localhost:${API_PORT}`,
