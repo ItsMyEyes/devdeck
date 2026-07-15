@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, MouseEvent, MutableRefObject } from 'react'
+import type { ChangeEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
 import { useIsFetching } from '@tanstack/react-query'
 import { Archive, ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -16,6 +16,7 @@ import {
   useWriteWorktreeFile,
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { DeleteFilesDialog } from './DeleteFilesDialog'
 import {
   applySelectionClick,
   emptySelection,
@@ -73,6 +74,7 @@ export function TerminalExplorer({
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
   const treeContainerRef = useRef<HTMLDivElement>(null)
   const [zipping, setZipping] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<SelectedEntry[] | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const root = useWorktreeFiles(machine, worktreeId, '')
   const writeFile = useWriteWorktreeFile(machine, worktreeId)
@@ -134,34 +136,49 @@ export function TerminalExplorer({
   }
 
   function removeEntry(entry: SelectedEntry) {
-    if (!window.confirm(`Delete ${entry.name}? This cannot be undone.`)) return
-    deletePaths.mutate([entry.path], {
-      onSuccess: () => {
-        toast.success(`Deleted ${entry.name}`)
-        setSelection((current) => {
-          if (!current.selected[entry.path]) return current
-          const next = { ...current.selected }
-          delete next[entry.path]
-          return { selected: next, anchor: current.anchor }
-        })
-        onFileDeleted([entry.path])
-      },
-      onError: (error) => toast.error(errorMessage(error, `Could not delete ${entry.name}`)),
-    })
+    setPendingDelete([entry])
   }
 
   function removeSelected() {
     if (selectedPaths.length === 0) return
-    const label = selectedPaths.length === 1 ? (selectedEntries[0]?.name ?? 'selection') : `${selectedPaths.length} items`
-    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return
-    deletePaths.mutate(selectedPaths, {
+    setPendingDelete(selectedEntries)
+  }
+
+  function performDelete() {
+    if (!pendingDelete || pendingDelete.length === 0) return
+    const paths = pendingDelete.map((entry) => entry.path)
+    const label = pendingDelete.length === 1 ? (pendingDelete[0]?.name ?? 'selection') : `${pendingDelete.length} items`
+    deletePaths.mutate(paths, {
       onSuccess: () => {
         toast.success(`Deleted ${label}`)
-        onFileDeleted(selectedPaths)
-        clearSelection()
+        setSelection((current) => {
+          const next = { ...current.selected }
+          let changed = false
+          for (const path of paths) {
+            if (next[path]) {
+              delete next[path]
+              changed = true
+            }
+          }
+          return changed ? { selected: next, anchor: current.anchor } : current
+        })
+        onFileDeleted(paths)
+        setPendingDelete(null)
       },
-      onError: (error) => toast.error(errorMessage(error, `Could not delete ${label}`)),
+      onError: (error) => {
+        toast.error(errorMessage(error, `Could not delete ${label}`))
+        setPendingDelete(null)
+      },
     })
+  }
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    const target = event.target as HTMLElement
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+    if (selectedPaths.length === 0) return
+    event.preventDefault()
+    setPendingDelete(selectedEntries)
   }
 
   function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
@@ -194,7 +211,7 @@ export function TerminalExplorer({
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-loom-surface">
+    <aside className="flex min-h-0 flex-1 flex-col bg-loom-surface" onKeyDown={handleKeyDown}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
       <div className="flex h-9 flex-none items-center border-b border-loom-border bg-loom-surface-2">
         <div
@@ -293,6 +310,14 @@ export function TerminalExplorer({
           Ctrl P
         </kbd>
       </button>
+
+      <DeleteFilesDialog
+        open={pendingDelete !== null}
+        names={pendingDelete?.map((entry) => entry.name) ?? []}
+        pending={deletePaths.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={performDelete}
+      />
     </aside>
   )
 }
