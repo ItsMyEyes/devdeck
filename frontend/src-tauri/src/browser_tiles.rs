@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl};
 
 /// Live child webviews, keyed by `webview_label(tab_id, doc_id)`.
 /// Mutex-guarded — commands can arrive concurrently (e.g. a resize firing
@@ -64,7 +64,17 @@ pub fn browser_tile_open(
     let proxy: Url = proxy_url.parse().map_err(|e| format!("invalid proxy url: {e}"))?;
     let target: Url = initial_url.parse().map_err(|e| format!("invalid target url: {e}"))?;
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target)).proxy_url(proxy);
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
+        .proxy_url(proxy)
+        // Per-webview hook (unlike `on_page_load`, which is global and only
+        // carries the URL) — lets the React tab strip follow the loaded
+        // page's own <title> instead of guessing one from the URL.
+        .on_document_title_changed(|webview, title| {
+            let _ = webview.emit(
+                "browser-tile-title-changed",
+                serde_json::json!({ "label": webview.label(), "title": title }),
+            );
+        });
 
     // NOTE: `Window::add_child` is defined on `tauri::window::Window`;
     // `WebviewWindow` (returned by `get_webview_window`) derefs to it. If a

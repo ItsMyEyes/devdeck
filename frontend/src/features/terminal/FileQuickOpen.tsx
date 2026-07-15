@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api'
 import type { Machine } from '@/store/types'
 import { useWorktreeFileSearch } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { useLoomStore } from '@/store/useLoomStore'
 import { MaterialFileIcon } from './MaterialFileIcon'
 
 interface FileQuickOpenProps {
@@ -31,6 +32,8 @@ export function FileQuickOpen({
   const deferredPattern = useDeferredValue(pattern)
   const search = useWorktreeFileSearch(machine, worktreeId, deferredPattern, open)
   const results = search.data ?? []
+  const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
+  const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)
 
   useEffect(() => {
     if (!open) return
@@ -38,6 +41,16 @@ export function FileQuickOpen({
     setSelected(0)
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [open])
+
+  // A Browser tile's native webview is a separate OS surface Tauri always
+  // stacks above the app's own DOM (see `nativeOverlayBlockers`'s doc
+  // comment) — this dialog's `z-[70]` does nothing against it, so the
+  // webview must be told to get out of the way for as long as this is open.
+  useEffect(() => {
+    if (!open) return
+    pushNativeOverlayBlocker()
+    return () => popNativeOverlayBlocker()
+  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
 
   useEffect(() => {
     setSelected(0)

@@ -20,6 +20,7 @@ import {
   hideBrowserTile,
   navigateBrowserTile,
   onBrowserTilePageLoad,
+  onBrowserTileTitleChange,
   openBrowserTile,
   reloadBrowserTile,
   setBrowserTileBounds,
@@ -37,6 +38,22 @@ function normalizeAddress(value: string): string {
   return `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`
 }
 
+/** Readable placeholder shown the instant navigation starts, before the real
+ *  page `<title>` arrives (or for pages that never set one) — mirrors
+ *  `BrowserModule.tsx`'s own `titleFor`, deliberately duplicated rather than
+ *  shared since the two browsers are separate surfaces (see
+ *  `lib/browserTileBookmarks.ts`'s header comment). */
+function titleFor(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const search = parsed.hostname.includes('duckduckgo.com') ? parsed.searchParams.get('q') : null
+    if (search) return `Search: ${search}`
+    return parsed.hostname.replace(/^www\./, '') || url
+  } catch {
+    return url
+  }
+}
+
 export function BrowserTile({ tabId }: BrowserTileProps) {
   const tile = useLoomStore((s) => s.browserTiles[tabId])
   const ensureBrowserTile = useLoomStore((s) => s.ensureBrowserTile)
@@ -45,6 +62,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const closeBrowserDoc = useLoomStore((s) => s.closeBrowserDoc)
   const selectBrowserDoc = useLoomStore((s) => s.selectBrowserDoc)
   const setBrowserTileFullscreen = useLoomStore((s) => s.setBrowserTileFullscreen)
+  const nativeOverlayBlockers = useLoomStore((s) => s.nativeOverlayBlockers)
   const machines = useMachines().data ?? []
   const [draft, setDraft] = useState('')
   const [bookmarks, setBookmarks] = useState<BrowserTileBookmark[]>(loadBrowserTileBookmarks)
@@ -108,11 +126,45 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, doc?.id, doc?.url])
 
+  // Native webviews are separate OS surfaces the window manager always
+  // stacks above the app's DOM — no CSS z-index can put a dialog/command
+  // palette in front of one (see `nativeOverlayBlockers`'s doc comment).
+  // Zero the webview out for as long as any such overlay is open, then
+  // reassert this doc's real rect once the last one closes — mirrors the
+  // machine-switch path above, since the ResizeObserver won't fire on its
+  // own (the placeholder's on-screen size hasn't actually changed).
+  useEffect(() => {
+    if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
+    const docId = doc.id
+    if (nativeOverlayBlockers > 0) {
+      void hideBrowserTile(tabId, docId)
+      return
+    }
+    const el = bodyRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    void setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+  }, [nativeOverlayBlockers, tabId, doc?.id, doc?.url])
+
   // Sync the address bar/title from real in-page navigation inside the native webview.
   useEffect(() => {
     let unlisten: (() => void) | undefined
     void onBrowserTilePageLoad(({ tabId: t, docId: d, url }) => {
       if (t === tabId) setBrowserDocState(t, d, { url, loading: false })
+    }).then((fn) => {
+      unlisten = fn
+    })
+    return () => unlisten?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId])
+
+  // Follow the loaded page's own <title> (falls back to the humanized
+  // hostname set by navigate()/goHistory() below until the real title
+  // arrives, or for pages that never set one at all).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    void onBrowserTileTitleChange(({ tabId: t, docId: d, title }) => {
+      if (t === tabId && title) setBrowserDocState(t, d, { title })
     }).then((fn) => {
       unlisten = fn
     })
@@ -158,7 +210,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     if (!proxy && doc.machineId) proxy = await ensureProxyForMachine(doc.machineId)
     if (!proxy) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
-    setBrowserDocState(tabId, doc.id, { url, loading: true, history, historyIndex: history.length - 1 })
+    setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, history, historyIndex: history.length - 1 })
     // First navigation for this doc (doc.url was still null): the mount
     // effect below creates the native webview once the placeholder <div>
     // exists, sized correctly from the start — see that effect's comment
@@ -177,7 +229,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     const nextIndex = doc.historyIndex + delta
     const url = doc.history[nextIndex]
     if (!url) return
-    setBrowserDocState(tabId, doc.id, { url, historyIndex: nextIndex, loading: true })
+    setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), historyIndex: nextIndex, loading: true })
     await navigateBrowserTile(tabId, doc.id, url)
   }
 
@@ -220,7 +272,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const canGoForward = doc.historyIndex < doc.history.length - 1
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-loom-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-loom-bg">
       {tile.fullscreen && (
         <div className="flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-loom-border bg-loom-surface px-2">
           {tile.docs.map((d) => (
@@ -258,7 +310,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
         </div>
       )}
 
-      <div className="flex flex-none items-center gap-1.5 border-b border-loom-border bg-loom-bg px-2 py-1.5">
+      <div className="flex min-w-0 flex-none items-center gap-1.5 overflow-x-auto border-b border-loom-border bg-loom-bg px-2 py-1.5">
         <Globe size={13} className="flex-none text-loom-dim" />
         <Button size="icon-sm" variant="secondary" onClick={() => void goHistory(-1)} disabled={!canGoBack} aria-label="Back">
           <ArrowLeft size={12} />
@@ -304,7 +356,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
         </Button>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1">
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-4 overflow-auto p-6">
             {bookmarkGroups.length === 0 ? (

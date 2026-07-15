@@ -24,7 +24,17 @@ export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine'
 export type TodoFilter = 'all' | 'active' | 'done'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
+export type NewTabKind = 'browser' | 'shell'
 
+interface NewTabState {
+  open: boolean
+  wsId: string | null
+  leafId: string | null
+  kind: NewTabKind
+  /** Empty until the user (or the dialog's own default-to-first-machine
+   *  effect) picks one — both kinds require this before Create is enabled. */
+  machineId: string
+}
 interface SpawnState {
   open: boolean
   projectId: string | null
@@ -89,13 +99,13 @@ function generateDocId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function createBrowserDoc(id: string): BrowserDocState {
-  return { id, machineId: null, proxy: null, url: null, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
+function createBrowserDoc(id: string, machineId: string | null = null): BrowserDocState {
+  return { id, machineId, proxy: null, url: null, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
 }
 
-function createBrowserTileState(): BrowserTileState {
+function createBrowserTileState(machineId: string | null = null): BrowserTileState {
   const docId = generateDocId()
-  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId)] }
+  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId, machineId)] }
 }
 
 /**
@@ -112,6 +122,7 @@ interface LoomState {
   // ---- transient UI ----
   sidebarOpen: boolean
   wsMenuOpen: boolean
+  newTab: NewTabState
   spawn: SpawnState
   newProject: NewProjectState
   newWorkspace: { open: boolean; name: string }
@@ -143,6 +154,15 @@ interface LoomState {
    *  below) — a restored `browser` tab reopens to its blank/bookmarks home
    *  state, same as `ensureBrowserTile` lazily re-creating a missing entry. */
   browserTiles: Record<string, BrowserTileState>
+  /** Count of currently-open DOM overlays that must render above everything
+   *  (command palettes, dialogs, dropdowns) — Tauri's native child webviews
+   *  (Browser tiles) are separate OS-composited surfaces the window manager
+   *  always stacks above the app's own DOM, so no CSS `z-index` can put a
+   *  DOM overlay in front of one. `BrowserTile` hides its native webview
+   *  while this is nonzero and restores it once every blocker has closed —
+   *  see `FileQuickOpen`'s `useEffect` for the push/pop pattern other
+   *  full-screen overlays should follow. */
+  nativeOverlayBlockers: number
 
   // ---- actions ----
   showToast: (msg: string) => void
@@ -158,8 +178,13 @@ interface LoomState {
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
   setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
 
+  // new tab chooser (tab strip "+")
+  openNewTab: (wsId: string, leafId: string) => void
+  closeNewTab: () => void
+  setNewTab: (patch: Partial<Pick<NewTabState, 'kind' | 'machineId'>>) => void
+
   // browser tile (Tauri only)
-  openBrowserTab: (wsId: string) => void
+  openBrowserTab: (wsId: string, machineId?: string) => void
   ensureBrowserTile: (tabId: string) => void
   setBrowserDocState: (tabId: string, docId: string, patch: Partial<Omit<BrowserDocState, 'id'>>) => void
   addBrowserDoc: (tabId: string) => void
@@ -167,6 +192,8 @@ interface LoomState {
   selectBrowserDoc: (tabId: string, docId: string) => void
   setBrowserTileFullscreen: (tabId: string, fullscreen: boolean) => void
   removeBrowserTile: (tabId: string) => void
+  pushNativeOverlayBlocker: () => void
+  popNativeOverlayBlocker: () => void
 
   // spawn worktree
   openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
@@ -252,6 +279,7 @@ export const useLoomStore = create<LoomState>()(
     immer((set) => ({
       sidebarOpen: false,
       wsMenuOpen: false,
+      newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '' },
       spawn: { open: false, projectId: null, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
@@ -266,6 +294,7 @@ export const useLoomStore = create<LoomState>()(
       railExpanded: false,
       workspaceTileLayouts: {},
       browserTiles: {},
+      nativeOverlayBlockers: 0,
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -298,12 +327,17 @@ export const useLoomStore = create<LoomState>()(
           s.workspaceTileLayouts[wsId] = pruneTileTabs(layout, liveWtIds)
         }),
 
-      openBrowserTab: (wsId) =>
+      openNewTab: (wsId, leafId) =>
+        set((s) => void (s.newTab = { open: true, wsId, leafId, kind: 'browser', machineId: '' })),
+      closeNewTab: () => set((s) => void (s.newTab.open = false)),
+      setNewTab: (patch) => set((s) => void Object.assign(s.newTab, patch)),
+
+      openBrowserTab: (wsId, machineId) =>
         set((s) => {
           const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
           const tab = createBrowserTab()
           s.workspaceTileLayouts[wsId] = openTileTab(layout, tab)
-          s.browserTiles[tab.id] = createBrowserTileState()
+          s.browserTiles[tab.id] = createBrowserTileState(machineId ?? null)
         }),
       ensureBrowserTile: (tabId) =>
         set((s) => {
@@ -345,6 +379,8 @@ export const useLoomStore = create<LoomState>()(
           if (tile) tile.fullscreen = fullscreen
         }),
       removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
+      pushNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers += 1)),
+      popNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers = Math.max(0, s.nativeOverlayBlockers - 1))),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {

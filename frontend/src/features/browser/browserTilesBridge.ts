@@ -36,8 +36,32 @@ export function reloadBrowserTile(tabId: string, docId: string): Promise<void> {
   return invoke('browser_tile_reload', { tabId, docId })
 }
 
+/** Bounds in flight to Rust, and the latest bounds superseding it, keyed by
+ *  webview label. `BrowserTile`'s `ResizeObserver` calls this on every tick
+ *  of an interactive panel drag — dozens of unawaited invokes in quick
+ *  succession. `browser_tile_set_bounds` is a sync Tauri command, so nothing
+ *  guarantees those IPC calls apply in the order they were sent; the native
+ *  webview (an OS surface Tauri paints on top of the DOM, unclipped by any
+ *  CSS) can end up glued to a stale, larger, mid-drag rect that visibly
+ *  overflows the placeholder div once the drag settles. Serializing sends
+ *  per label — always the latest queued rect, never more than one in flight
+ *  — guarantees the final applied bounds match the final on-screen rect. */
+const pendingBounds = new Map<string, BrowserTileBounds>()
+const sendingBounds = new Set<string>()
+
 export function setBrowserTileBounds(tabId: string, docId: string, bounds: BrowserTileBounds): Promise<void> {
-  return invoke('browser_tile_set_bounds', { tabId, docId, ...bounds })
+  const key = browserTileLabel(tabId, docId)
+  pendingBounds.set(key, bounds)
+  if (sendingBounds.has(key)) return Promise.resolve()
+  sendingBounds.add(key)
+  return (async () => {
+    let next: BrowserTileBounds | undefined
+    while ((next = pendingBounds.get(key))) {
+      pendingBounds.delete(key)
+      await invoke('browser_tile_set_bounds', { tabId, docId, ...next }).catch(() => {})
+    }
+    sendingBounds.delete(key)
+  })()
 }
 
 export function hideBrowserTile(tabId: string, docId: string): Promise<void> {
@@ -63,5 +87,18 @@ export function onBrowserTilePageLoad(
   return listen<{ label: string; url: string }>('browser-tile-page-load', (event) => {
     const ids = labelRegistry.get(event.payload.label)
     if (ids) callback({ ...ids, url: event.payload.url })
+  })
+}
+
+/** Subscribes to the loaded page's own `<title>` changing (Rust's per-webview
+ *  `on_document_title_changed` hook set up in `browser_tile_open`), so the
+ *  Browser tile's tab strip and doc title follow the real page title instead
+ *  of a URL-derived guess. */
+export function onBrowserTileTitleChange(
+  callback: (info: { tabId: string; docId: string; title: string }) => void,
+): Promise<() => void> {
+  return listen<{ label: string; title: string }>('browser-tile-title-changed', (event) => {
+    const ids = labelRegistry.get(event.payload.label)
+    if (ids) callback({ ...ids, title: event.payload.title })
   })
 }

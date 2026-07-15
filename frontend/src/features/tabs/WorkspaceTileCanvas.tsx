@@ -361,7 +361,7 @@ function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: b
       <button
         type="button"
         onClick={() => ctx.onNewTab(leaf.id)}
-        aria-label="New worktree"
+        aria-label="New tab"
         className={cn(
           'ml-1 flex flex-none items-center justify-center rounded-lg text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg',
           isTopLeft ? 'h-7 w-7' : 'h-6 w-6',

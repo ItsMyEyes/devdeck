@@ -8,7 +8,9 @@ import { collectTerminalSessionKeys, deserializeLayout } from '@/features/termin
 import { useMachines, useWorkspace } from '@/features/data/queries'
 import { STATE } from '@/lib/constants'
 import { killTerminalSession } from '@/lib/machineApi'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 import { useLoomStore } from '@/store/useLoomStore'
+import { NewTabDialog } from './NewTabDialog'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
 import { createDefaultTileLayout, findTileLeaf, findTileTab, firstLeafId, focusTileLeaf, selectTileTab } from './tileTree'
 import type { TileTab, WorkspaceTileLayout } from './tileTree'
@@ -35,7 +37,8 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const pruneWorktreeTabs = useLoomStore((s) => s.pruneWorktreeTabs)
   const removeBrowserTile = useLoomStore((s) => s.removeBrowserTile)
   const openSpawn = useLoomStore((s) => s.openSpawn)
-  const showToast = useLoomStore((s) => s.showToast)
+  const openNewTab = useLoomStore((s) => s.openNewTab)
+  const openBrowserTab = useLoomStore((s) => s.openBrowserTab)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
   const machines = useMachines().data ?? []
@@ -127,13 +130,8 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   }
 
   function handleNewTab(leafId: string) {
-    const targetProjectId = currentProjectId ?? workspace?.projects[0]?.id
-    if (!targetProjectId) {
-      showToast('Add a project first')
-      return
-    }
     commit(focusTileLeaf(layout, leafId))
-    openSpawn(targetProjectId)
+    openNewTab(wsId, leafId)
   }
 
   // `WorkspaceTileCanvas.onTreeChange` only ever hands back the new `root`
@@ -156,7 +154,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     const machine = project?.machineId ? machinesById.get(project.machineId) : undefined
     const short = machine && !machine.isLocal ? `${project?.name ?? 'project'} · ${machine.name}` : (project?.name ?? 'project')
     return {
-      label: worktree.root ? 'project root' : worktree.branch,
+      label: worktreeLabel(project, worktree),
       color: st.color,
       pulse: worktree.state === 'running' || worktree.state === 'waiting',
       short,
@@ -202,30 +200,39 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   }, [layout])
 
   return (
-    <WorkspaceTileCanvas
-      root={layout.root}
-      renderers={{
-        agents: () => {
-          const project = workspace?.projects.find((p) => p.id === (currentProjectId ?? workspace.projects[0]?.id))
-          if (!project) return null
-          return <WorktreeCardsGrid project={project} wsId={wsId} />
-        },
-        worktree: ({ tab }) => {
-          const worktree = worktrees.find((w) => w.id === tab.wtId)
-          if (!worktree) return null
-          return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={tab.projectId} />
-        },
-        browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
-      }}
-      onTreeChange={handleTreeChange}
-      onFocusLeaf={handleFocusLeaf}
-      onSelectTab={handleSelectTab}
-      onCloseTab={handleCloseTab}
-      onNewTab={handleNewTab}
-      resolveWorktreeTab={resolveWorktreeTab}
-      resolveBrowserTab={resolveBrowserTab}
-      showContent={showContent}
-      className="min-h-0"
-    />
+    <>
+      <WorkspaceTileCanvas
+        root={layout.root}
+        renderers={{
+          agents: () => {
+            const project = workspace?.projects.find((p) => p.id === (currentProjectId ?? workspace.projects[0]?.id))
+            if (!project) return null
+            return <WorktreeCardsGrid project={project} wsId={wsId} />
+          },
+          worktree: ({ tab }) => {
+            const worktree = worktrees.find((w) => w.id === tab.wtId)
+            if (!worktree) return null
+            return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={tab.projectId} />
+          },
+          browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
+        }}
+        onTreeChange={handleTreeChange}
+        onFocusLeaf={handleFocusLeaf}
+        onSelectTab={handleSelectTab}
+        onCloseTab={handleCloseTab}
+        onNewTab={handleNewTab}
+        resolveWorktreeTab={resolveWorktreeTab}
+        resolveBrowserTab={resolveBrowserTab}
+        showContent={showContent}
+        className="min-h-0"
+      />
+      <NewTabDialog
+        wsId={wsId}
+        projects={workspace?.projects ?? []}
+        currentProjectId={currentProjectId}
+        onCreateBrowser={(machineId) => openBrowserTab(wsId, machineId)}
+        onCreateShell={(projectId) => openSpawn(projectId, 'root')}
+      />
+    </>
   )
 }
