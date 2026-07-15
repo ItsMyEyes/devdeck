@@ -5,16 +5,16 @@ import { Archive, ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2, U
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
 import {
-  useDeleteWorktreePaths,
-  useInvalidateWorktreeFiles,
-  useWorktreeFiles,
-  useWriteWorktreeFile,
+  useDeletePathsTarget,
+  useFilesList,
+  useInvalidateFilesTarget,
+  useWriteFileTarget,
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { DeleteFilesDialog } from './DeleteFilesDialog'
+import type { FilesTarget } from './filesTarget'
 import {
   applySelectionClick,
   emptySelection,
@@ -27,12 +27,12 @@ import { MaterialFileIcon } from './MaterialFileIcon'
 import { useFileTransfers } from './useFileTransfers'
 
 interface TerminalExplorerProps {
-  worktreeId: string
-  machine: Machine
+  target: FilesTarget
   rootLabel: string
   onOpenFile: (path: string) => void
   onFileDeleted: (paths: string[]) => void
-  onRequestQuickOpen: () => void
+  /** Omitted for SSH connections — there's no remote file quick-open (yet). */
+  onRequestQuickOpen?: () => void
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -60,14 +60,11 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-export function TerminalExplorer({
-  worktreeId,
-  machine,
-  rootLabel,
-  onOpenFile,
-  onFileDeleted,
-  onRequestQuickOpen,
-}: TerminalExplorerProps) {
+function filesRootKey(target: FilesTarget) {
+  return target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
+}
+
+export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted, onRequestQuickOpen }: TerminalExplorerProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
@@ -76,12 +73,12 @@ export function TerminalExplorer({
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
-  const root = useWorktreeFiles(machine, worktreeId, '')
-  const writeFile = useWriteWorktreeFile(machine, worktreeId)
-  const { uploadFiles, downloadZip, uploading, zipping } = useFileTransfers(machine, worktreeId)
-  const deletePaths = useDeleteWorktreePaths(machine, worktreeId)
-  const invalidateFiles = useInvalidateWorktreeFiles(machine, worktreeId)
-  const isFetching = useIsFetching({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }) > 0
+  const root = useFilesList(target, '')
+  const writeFile = useWriteFileTarget(target)
+  const { uploadFiles, downloadZip, uploading, zipping } = useFileTransfers(target)
+  const deletePaths = useDeletePathsTarget(target)
+  const invalidateFiles = useInvalidateFilesTarget(target)
+  const isFetching = useIsFetching({ queryKey: filesRootKey(target) }) > 0
   const selectedEntries = useMemo(() => Object.values(selection.selected), [selection.selected])
   const selectedPaths = useMemo(() => selectedEntries.map((entry) => entry.path), [selectedEntries])
   const selectedCount = selectedEntries.length
@@ -174,8 +171,8 @@ export function TerminalExplorer({
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key !== 'Delete' && event.key !== 'Backspace') return
-    const target = event.target as HTMLElement
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+    const eventTarget = event.target as HTMLElement
+    if (eventTarget.tagName === 'INPUT' || eventTarget.tagName === 'TEXTAREA') return
     if (selectedPaths.length === 0) return
     event.preventDefault()
     setPendingDelete(selectedEntries)
@@ -318,8 +315,7 @@ export function TerminalExplorer({
         )}
       >
         <TreeLevel
-          worktreeId={worktreeId}
-          machine={machine}
+          target={target}
           path=""
           depth={0}
           expanded={expanded}
@@ -336,17 +332,19 @@ export function TerminalExplorer({
         />
       </div>
 
-      <button
-        type="button"
-        onClick={onRequestQuickOpen}
-        className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-loom-border bg-loom-surface-2 px-3 text-left font-mono text-[10.5px] text-loom-muted hover:text-loom-fg-2"
-      >
-        <Search size={12} />
-        <span>Search files / folders</span>
-        <kbd className="ml-auto rounded border border-loom-border-strong bg-loom-terminal px-1.5 py-0.5 text-[9.5px] text-loom-dim">
-          Ctrl P
-        </kbd>
-      </button>
+      {onRequestQuickOpen ? (
+        <button
+          type="button"
+          onClick={onRequestQuickOpen}
+          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-loom-border bg-loom-surface-2 px-3 text-left font-mono text-[10.5px] text-loom-muted hover:text-loom-fg-2"
+        >
+          <Search size={12} />
+          <span>Search files / folders</span>
+          <kbd className="ml-auto rounded border border-loom-border-strong bg-loom-terminal px-1.5 py-0.5 text-[9.5px] text-loom-dim">
+            Ctrl P
+          </kbd>
+        </button>
+      ) : null}
 
       <DeleteFilesDialog
         open={pendingDelete !== null}
@@ -360,8 +358,7 @@ export function TerminalExplorer({
 }
 
 interface TreeLevelProps {
-  worktreeId: string
-  machine: Machine
+  target: FilesTarget
   path: string
   depth: number
   expanded: ReadonlySet<string>
@@ -377,8 +374,8 @@ interface TreeLevelProps {
   deletePending: boolean
 }
 
-function TreeLevel({ worktreeId, machine, path, depth, ...rest }: TreeLevelProps) {
-  const { data, error, isLoading, refetch } = useWorktreeFiles(machine, worktreeId, path)
+function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
+  const { data, error, isLoading, refetch } = useFilesList(target, path)
   const indent = 8 + depth * 14
   const entries = data ?? []
 
@@ -503,7 +500,7 @@ function TreeLevel({ worktreeId, machine, path, depth, ...rest }: TreeLevelProps
                 <Trash2 size={11} />
               </button>
             </div>
-            {isOpen && <TreeLevel worktreeId={worktreeId} machine={machine} path={entry.path} depth={depth + 1} {...rest} />}
+            {isOpen && <TreeLevel target={target} path={entry.path} depth={depth + 1} {...rest} />}
           </div>
         )
       })}

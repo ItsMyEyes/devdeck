@@ -80,7 +80,7 @@ const candidateExtensions = [
   'sql',
 ]
 
-const loomCodeTheme = EditorView.theme(
+export const loomCodeTheme = EditorView.theme(
   {
     '&': {
       height: '100%',
@@ -184,7 +184,7 @@ const loomCodeTheme = EditorView.theme(
   { dark: true },
 )
 
-const syntaxDiagnostics = linter(
+export const syntaxDiagnostics = linter(
   (view) => {
     const diagnostics: Diagnostic[] = []
     const documentLength = view.state.doc.length
@@ -209,7 +209,7 @@ const syntaxDiagnostics = linter(
 // CodeMirror's default history keymap binds undo/redo to Cmd on macOS
 // (Mod-z) and rebinds redo to Cmd-Shift-Z there, leaving no Mac binding for
 // the literal Ctrl+Z / Ctrl+Y combo users expect from other editors.
-const explicitHistoryKeymap = Prec.highest(
+export const explicitHistoryKeymap = Prec.highest(
   keymap.of([
     { key: 'Ctrl-z', run: undo, preventDefault: true },
     { key: 'Ctrl-y', run: redo, preventDefault: true },
@@ -465,7 +465,7 @@ function codeMirrorDiagnostics(document: Text, diagnostics: LspDiagnostic[]) {
   )
 }
 
-function useFileLanguage(path: string) {
+export function useFileLanguage(path: string) {
   const [language, setLanguage] = useState<LanguageSupport | null>(null)
 
   useEffect(() => {

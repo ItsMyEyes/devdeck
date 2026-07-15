@@ -76,6 +76,18 @@ func (d *Dialer) Dial(ctx context.Context, connectionID string) (*ssh.Client, er
 	return d.dial(ctx, connectionID, map[string]bool{})
 }
 
+// Describe returns a short "user@host:port (authType)" string for a saved
+// connection, for the terminal's "[ssh connecting to ...]" banner — so the
+// operator sees what's being attempted before the (possibly slow, possibly
+// failing) handshake completes, instead of a blank pane until it does.
+func (d *Dialer) Describe(connectionID string) (string, error) {
+	conn, err := d.store.SSHConnectionByID(connectionID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s@%s:%d (%s)", conn.Username, conn.Host, conn.Port, conn.AuthType), nil
+}
+
 func (d *Dialer) dial(ctx context.Context, connectionID string, visited map[string]bool) (*ssh.Client, error) {
 	if visited[connectionID] {
 		return nil, fmt.Errorf("%w at connection %s", ErrJumpChainCycle, connectionID)
@@ -126,7 +138,12 @@ func (d *Dialer) dial(ctx context.Context, connectionID string, visited map[stri
 		if jumpClient != nil {
 			jumpClient.Close()
 		}
-		return nil, err
+		// The raw ssh error (e.g. "attempted methods [none]") doesn't say
+		// who we dialed as or what auth type we offered — wrap it so the
+		// terminal's [ssh error: ...] line is self-contained instead of
+		// requiring a trip to the server log to know which connection and
+		// auth type it belongs to.
+		return nil, fmt.Errorf("connect to %s@%s as %s: %w", conn.Username, addr, conn.AuthType, err)
 	}
 	client := ssh.NewClient(sc, chans, reqs)
 	if jumpClient != nil {

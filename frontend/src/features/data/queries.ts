@@ -137,6 +137,14 @@ import {
   type SearchWorktreeFilesOptions,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
+import {
+  deleteSSHFile,
+  deleteSSHPaths,
+  fetchSSHFile,
+  fetchSSHFiles,
+  writeSSHFile,
+} from '@/lib/sshFileApi'
+import type { FilesTarget } from '@/features/terminal/filesTarget'
 import { qk } from './keys'
 
 // ---- Queries ----
@@ -1051,6 +1059,92 @@ export function useDeleteWorktreePaths(machine: Machine, worktreeId: string) {
     onSuccess: (_result, paths) => {
       for (const path of paths) queryClient.removeQueries({ queryKey: qk.worktreeFile(machine.id, worktreeId, path) })
       return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
+    },
+  })
+}
+
+// ---- File source dispatch (worktree checkout | SSH connection over SFTP) ----
+//
+// TerminalExplorer.tsx and SSHFileEditor.tsx are shared across both file
+// sources; these hooks pick the right cache key + API call for whichever
+// FilesTarget they're handed, so the two sources never need their own
+// parallel copy of the shared UI. The plain worktree-only hooks above stay
+// untouched — FileEditor.tsx and FileQuickOpen.tsx keep calling those
+// directly.
+
+export function useFilesList(target: FilesTarget, path: string) {
+  return useQuery({
+    queryKey:
+      target.kind === 'ssh' ? qk.sshFiles(target.connectionId, path) : qk.worktreeFiles(target.machine.id, target.worktreeId, path),
+    queryFn: () =>
+      target.kind === 'ssh' ? fetchSSHFiles(target.connectionId, path) : fetchWorktreeFiles(target.machine, target.worktreeId, path),
+    enabled: target.kind === 'ssh' || target.worktreeId.length > 0,
+  })
+}
+
+export function useFileTarget(target: FilesTarget, path: string) {
+  return useQuery({
+    queryKey:
+      target.kind === 'ssh' ? qk.sshFile(target.connectionId, path) : qk.worktreeFile(target.machine.id, target.worktreeId, path),
+    queryFn: () =>
+      target.kind === 'ssh' ? fetchSSHFile(target.connectionId, path) : fetchWorktreeFile(target.machine, target.worktreeId, path),
+    enabled: (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
+    staleTime: 0,
+  })
+}
+
+export function useInvalidateFilesTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return () =>
+    queryClient.invalidateQueries({
+      queryKey: target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId),
+    })
+}
+
+export function useWriteFileTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { path: string; content: string }) =>
+      target.kind === 'ssh' ? writeSSHFile(target.connectionId, body) : writeWorktreeFile(target.machine, target.worktreeId, body),
+    onSuccess: (content) => {
+      if (target.kind === 'ssh') {
+        queryClient.setQueryData(qk.sshFile(target.connectionId, content.path), content)
+        return queryClient.invalidateQueries({ queryKey: qk.sshFilesRoot(target.connectionId) })
+      }
+      queryClient.setQueryData(qk.worktreeFile(target.machine.id, target.worktreeId, content.path), content)
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(target.machine.id, target.worktreeId) })
+    },
+  })
+}
+
+export function useDeleteFileTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (path: string) =>
+      target.kind === 'ssh' ? deleteSSHFile(target.connectionId, path) : deleteWorktreeFile(target.machine, target.worktreeId, path),
+    onSuccess: (_result, path) => {
+      if (target.kind === 'ssh') {
+        queryClient.removeQueries({ queryKey: qk.sshFile(target.connectionId, path) })
+        return queryClient.invalidateQueries({ queryKey: qk.sshFilesRoot(target.connectionId) })
+      }
+      queryClient.removeQueries({ queryKey: qk.worktreeFile(target.machine.id, target.worktreeId, path) })
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(target.machine.id, target.worktreeId) })
+    },
+  })
+}
+
+export function useDeletePathsTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (paths: readonly string[]) =>
+      target.kind === 'ssh' ? deleteSSHPaths(target.connectionId, paths) : deleteWorktreePaths(target.machine, target.worktreeId, paths),
+    onSuccess: (_result, paths) => {
+      if (target.kind === 'ssh') {
+        for (const path of paths) queryClient.removeQueries({ queryKey: qk.sshFile(target.connectionId, path) })
+        return queryClient.invalidateQueries({ queryKey: qk.sshFilesRoot(target.connectionId) })
+      }
+      for (const path of paths) queryClient.removeQueries({ queryKey: qk.worktreeFile(target.machine.id, target.worktreeId, path) })
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(target.machine.id, target.worktreeId) })
     },
   })
 }

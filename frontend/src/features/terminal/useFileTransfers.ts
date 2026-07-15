@@ -5,13 +5,16 @@ import {
   uploadWorktreeFileWithProgress,
   type WorktreeFileEntry,
 } from '@/lib/machineApi'
+import { downloadSSHZipWithProgress, uploadSSHFileWithProgress } from '@/lib/sshFileApi'
 import { qk } from '@/features/data/keys'
-import type { Machine } from '@/store/types'
 import { useLoomStore } from '@/store/useLoomStore'
+import type { FilesTarget } from './filesTarget'
 
 const UPLOAD_CONCURRENCY = 3
 
-export function useFileTransfers(machine: Machine, worktreeId: string) {
+/** Shared by TerminalExplorer for both file sources — the upload/download
+ *  calls and cache-invalidation key are the only things that differ. */
+export function useFileTransfers(target: FilesTarget) {
   const queryClient = useQueryClient()
   const startTransfer = useLoomStore((s) => s.startTransfer)
   const updateTransferProgress = useLoomStore((s) => s.updateTransferProgress)
@@ -44,10 +47,14 @@ export function useFileTransfers(machine: Machine, worktreeId: string) {
         const file = files[index]
         if (!file) return
         try {
-          const entries = await uploadWorktreeFileWithProgress(machine, worktreeId, folderPath, file, (progress) => {
+          const onProgress = (progress: { loaded: number; total: number }) => {
             fileLoaded[index] = progress.loaded
             updateTransferProgress(id, { loadedBytes: fileLoaded.reduce((sum, n) => sum + n, 0) })
-          })
+          }
+          const entries =
+            target.kind === 'ssh'
+              ? await uploadSSHFileWithProgress(target.connectionId, folderPath, file, onProgress)
+              : await uploadWorktreeFileWithProgress(target.machine, target.worktreeId, folderPath, file, onProgress)
           uploaded.push(...entries)
         } catch (error) {
           firstError = firstError ?? error
@@ -68,11 +75,12 @@ export function useFileTransfers(machine: Machine, worktreeId: string) {
 
       setUploading(false)
       finishTransfer(id, firstError ? 'error' : 'done', firstError instanceof Error ? firstError.message : undefined)
-      await queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
+      const filesRootKey = target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
+      await queryClient.invalidateQueries({ queryKey: filesRootKey })
       if (firstError) throw firstError
       return uploaded
     },
-    [machine, worktreeId, startTransfer, updateTransferProgress, finishTransfer, queryClient],
+    [target, startTransfer, updateTransferProgress, finishTransfer, queryClient],
   )
 
   const downloadZip = useCallback(
@@ -90,9 +98,12 @@ export function useFileTransfers(machine: Machine, worktreeId: string) {
       })
       setZipping(true)
       try {
-        const blob = await downloadWorktreeZipWithProgress(machine, worktreeId, paths, (progress) => {
+        const onProgress = (progress: { loaded: number; total: number }) =>
           updateTransferProgress(id, { loadedBytes: progress.loaded, totalBytes: progress.total })
-        })
+        const blob =
+          target.kind === 'ssh'
+            ? await downloadSSHZipWithProgress(target.connectionId, paths, onProgress)
+            : await downloadWorktreeZipWithProgress(target.machine, target.worktreeId, paths, onProgress)
         finishTransfer(id, 'done')
         return blob
       } catch (error) {
@@ -102,7 +113,7 @@ export function useFileTransfers(machine: Machine, worktreeId: string) {
         setZipping(false)
       }
     },
-    [machine, worktreeId, startTransfer, updateTransferProgress, finishTransfer],
+    [target, startTransfer, updateTransferProgress, finishTransfer],
   )
 
   return { uploadFiles, downloadZip, uploading, zipping }

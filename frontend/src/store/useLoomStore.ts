@@ -183,6 +183,9 @@ interface LoomState {
   /** Each worktree's tiling pane-tree layout (structure, split sizes, open
    *  tabs, active tab), keyed by worktree id. */
   worktreeLayouts: Record<string, WorktreeLayout>
+  /** Same pane-tree layout shape, reused for an SSH shell tab's own
+   *  Terminal/Explorer/File panes — keyed by connection id. */
+  sshTileLayouts: Record<string, WorktreeLayout>
   /** Widens the sidebar from its default icon-only rail out to the full labeled width —
    *  applies globally, on every route. Independent of `sidebarOpen`, which is the mobile
    *  drawer's open/close — this is a small/big toggle for the rail's own width. */
@@ -221,6 +224,8 @@ interface LoomState {
   setDirtyFileCount: (n: number) => void
   setWorktreeLayout: (worktreeId: string, layout: WorktreeLayout) => void
   removeWorktreeLayout: (worktreeId: string) => void
+  setSSHTileLayout: (connectionId: string, layout: WorktreeLayout) => void
+  removeSSHTileLayout: (connectionId: string) => void
   openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
   closeWorktreeTab: (wsId: string, wtId: string) => void
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
@@ -372,6 +377,7 @@ export const useLoomStore = create<LoomState>()(
       },
       dirtyFileCount: 0,
       worktreeLayouts: {},
+      sshTileLayouts: {},
       railExpanded: false,
       sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
@@ -389,6 +395,8 @@ export const useLoomStore = create<LoomState>()(
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
+      setSSHTileLayout: (connectionId, layout) => set((s) => void (s.sshTileLayouts[connectionId] = layout)),
+      removeSSHTileLayout: (connectionId) => set((s) => void delete s.sshTileLayouts[connectionId]),
       setWorkspaceTileLayout: (wsId, layout) => set((s) => void (s.workspaceTileLayouts[wsId] = layout)),
       selectAgentsTab: (wsId) =>
         set((s) => {
@@ -639,6 +647,7 @@ export const useLoomStore = create<LoomState>()(
       partialize: (s) => ({
         sidebarOpen: s.sidebarOpen,
         worktreeLayouts: s.worktreeLayouts,
+        sshTileLayouts: s.sshTileLayouts,
         railExpanded: s.railExpanded,
         workspaceTileLayouts: s.workspaceTileLayouts,
       }),

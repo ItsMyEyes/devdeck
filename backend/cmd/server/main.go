@@ -239,7 +239,10 @@ func main() {
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
 	sshH := handler.NewSSHHandler(st, sshSecrets)
-	sshSrv := sshmgr.NewServer(sshmgr.NewDialer(st, sshSecrets))
+	sshDialer := sshmgr.NewDialer(st, sshSecrets)
+	sshSrv := sshmgr.NewServer(sshDialer)
+	sshFileSvc := service.NewSSHFileService(sshmgr.NewFilePool(sshDialer))
+	sshFileH := handler.NewSSHFileHandler(sshFileSvc)
 
 	termSrv := terminal.NewServer(st)
 	termH := handler.NewTerminalHandler()
@@ -412,6 +415,16 @@ func main() {
 		// Phase 1 executes every SSH session on the hub itself;
 		// ExecutorMachineID routing to runtimes is a later phase.
 		mux.HandleFunc("/ws/ssh", sshSrv.HandleWS)
+
+		// Remote file browser for a saved SSH connection, over SFTP — same
+		// route shapes as the worktree file API above.
+		mux.HandleFunc("GET /api/ssh/connections/{id}/files", sshFileH.List)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/upload", sshFileH.Upload)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/delete", sshFileH.DeleteMany)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/zip", sshFileH.Archive)
+		mux.HandleFunc("GET /api/ssh/connections/{id}/file", sshFileH.Read)
+		mux.HandleFunc("PUT /api/ssh/connections/{id}/file", sshFileH.Write)
+		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)
 	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)

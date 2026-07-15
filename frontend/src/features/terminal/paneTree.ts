@@ -171,13 +171,49 @@ function renormalizeSizes(sizes: number[]): number[] {
   return sizes.map((s) => s / total)
 }
 
-function firstLeafId(node: PaneNode): string | undefined {
+export function firstLeafId(node: PaneNode): string | undefined {
   if (node.type === 'leaf') return node.id
   for (const child of node.children) {
     const found = firstLeafId(child)
     if (found) return found
   }
   return undefined
+}
+
+/** Switches which tab is active within one leaf, by tab id rather than a
+ *  whole WorktreeLayout — used for content-tab strips (files/terminals in a
+ *  pane) the same way tileTree.ts's selectTileTab is used for workspace tabs. */
+export function selectTabInTree(node: PaneNode, paneId: string, tabId: string): PaneNode {
+  if (node.type === 'leaf') {
+    if (node.id !== paneId || node.activeTabId === tabId) return node
+    if (!node.tabs.some((t) => t.id === tabId)) return node
+    return { ...node, activeTabId: tabId }
+  }
+  let changed = false
+  const children = node.children.map((child) => {
+    const next = selectTabInTree(child, paneId, tabId)
+    if (next !== child) changed = true
+    return next
+  })
+  return changed ? { ...node, children } : node
+}
+
+/** Adds `content` as a new tab in leaf `paneId` (or focuses it there if a
+ *  tab with that id already exists) — the "open this content in a specific
+ *  pane" primitive behind Explorer's onOpenFile, "new tab" buttons, etc. */
+export function addContentToLeaf(node: PaneNode, paneId: string, content: PaneContent): PaneNode {
+  if (node.type === 'leaf') {
+    if (node.id !== paneId) return node
+    if (node.tabs.some((t) => t.id === content.id)) return { ...node, activeTabId: content.id }
+    return { ...node, tabs: [...node.tabs, content], activeTabId: content.id }
+  }
+  let changed = false
+  const children = node.children.map((child) => {
+    const next = addContentToLeaf(child, paneId, content)
+    if (next !== child) changed = true
+    return next
+  })
+  return changed ? { ...node, children } : node
 }
 
 /** Finds the node matching `predicate` anywhere in the tree and replaces it

@@ -75,21 +75,36 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	if connectionID == "" {
 		writeText(ctx, conn, "\r\n[ssh error: missing connection id]\r\n")
+		conn.Close(websocket.StatusNormalClosure, "")
 		return
 	}
 	if err := s.runShell(ctx, cancel, conn, connectionID, cols, rows); err != nil {
 		log.Printf("ssh: connection %s session failed: %v", connectionID, err)
 		writeText(ctx, conn, fmt.Sprintf("\r\n[ssh error: %v]\r\n", err))
 	}
+	// Graceful close: CloseNow (the deferred backstop above) tears down the
+	// raw TCP connection with no WebSocket close handshake, which races the
+	// text frame just written above through any WS proxy hop (e.g. vite's
+	// dev-server ws:true proxy) — the frame can still be sitting in the
+	// proxy's read buffer when the abrupt reset arrives, so the browser only
+	// ever sees a dead connection and never the "[ssh error: ...]" or
+	// "[ssh session ended]" reason. Close() performs the real close
+	// handshake, so the client's read loop drains any pending frame first.
+	conn.Close(websocket.StatusNormalClosure, "")
 }
 
 // runShell dials the saved connection, opens a PTY-backed shell session,
 // and bridges it to the WebSocket until either side ends.
 func (s *Server) runShell(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, connectionID string, cols, rows int) error {
+	if desc, err := s.dialer.Describe(connectionID); err == nil {
+		writeText(ctx, conn, fmt.Sprintf("\r\n[ssh connecting to %s ...]\r\n", desc))
+	}
+
 	client, err := s.dialer.Dial(ctx, connectionID)
 	if err != nil {
 		return err
 	}
+	writeText(ctx, conn, "\r\n[ssh connected — starting shell]\r\n")
 	defer client.Close()
 
 	sess, err := client.NewSession()

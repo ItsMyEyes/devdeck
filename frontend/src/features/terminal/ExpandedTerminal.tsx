@@ -16,6 +16,7 @@ import { MobileKeyToolbar } from './MobileKeyToolbar'
 import { PaneCanvas } from './PaneCanvas'
 import type { PaneContentRendererMap } from './PaneCanvas'
 import {
+  addContentToLeaf,
   allocateTerminalContent,
   closeTab,
   createDefaultLayout,
@@ -26,8 +27,10 @@ import {
   findContent,
   findLeafForContent,
   findPane,
+  firstLeafId,
   focusPane,
   moveTab,
+  selectTabInTree,
   splitLeaf,
 } from './paneTree'
 import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
@@ -45,52 +48,6 @@ function basename(path: string) {
   return path.split('/').pop() ?? path
 }
 
-/**
- * paneTree.ts deliberately only exports split/close/move/resize — "select a
- * tab" and "add a brand-new content item to an existing leaf" are needed
- * here (quick-open, jump-to-definition, the Git/Explorer overflow actions)
- * but not by any pure tree op, so these mirror its structurally-sharing
- * style locally instead of widening that file's surface for one caller.
- */
-function firstLeafId(node: PaneNode): string | undefined {
-  if (node.type === 'leaf') return node.id
-  for (const child of node.children) {
-    const found = firstLeafId(child)
-    if (found) return found
-  }
-  return undefined
-}
-
-function selectTabInTree(node: PaneNode, paneId: string, tabId: string): PaneNode {
-  if (node.type === 'leaf') {
-    if (node.id !== paneId || node.activeTabId === tabId) return node
-    if (!node.tabs.some((t) => t.id === tabId)) return node
-    return { ...node, activeTabId: tabId }
-  }
-  let changed = false
-  const children = node.children.map((child) => {
-    const next = selectTabInTree(child, paneId, tabId)
-    if (next !== child) changed = true
-    return next
-  })
-  return changed ? { ...node, children } : node
-}
-
-function addContentToLeaf(node: PaneNode, paneId: string, content: PaneContent): PaneNode {
-  if (node.type === 'leaf') {
-    if (node.id !== paneId) return node
-    if (node.tabs.some((t) => t.id === content.id)) return { ...node, activeTabId: content.id }
-    return { ...node, tabs: [...node.tabs, content], activeTabId: content.id }
-  }
-  let changed = false
-  const children = node.children.map((child) => {
-    const next = addContentToLeaf(child, paneId, content)
-    if (next !== child) changed = true
-    return next
-  })
-  return changed ? { ...node, children } : node
-}
-
 function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
 }
@@ -106,7 +63,7 @@ function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string
 }
 
 /** Mobile has no room for side-by-side splits (spec decision 10) — used to gate `PaneCanvas`'s drag-and-drop sensors. */
-function useIsDesktop() {
+export function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
   )
@@ -123,7 +80,7 @@ function useIsDesktop() {
 const overflowItemClass =
   'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-loom-fg-2 hover:bg-loom-hover-wash'
 
-function OverflowItem({
+export function OverflowItem({
   onClick,
   danger,
   children,
@@ -619,8 +576,7 @@ function TerminalWorkspace({
     },
     explorer: () => (
       <TerminalExplorer
-        worktreeId={worktree.id}
-        machine={machine}
+        target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         rootLabel={projectName ?? label}
         onOpenFile={openFile}
         onFileDeleted={handleFilesDeleted}

@@ -491,46 +491,9 @@ type resolvedWorktreePath struct {
 }
 
 func (svc *WorktreeFileService) resolveSelection(worktreeID string, paths []string) ([]resolvedWorktreePath, error) {
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("at least one path is required: %w", ErrValidation)
-	}
-	cleaned := make([]string, 0, len(paths))
-	seen := make(map[string]bool, len(paths))
-	for _, raw := range paths {
-		clean, err := normalizeRelativePath(raw, false)
-		if err != nil {
-			return nil, err
-		}
-		if err := rejectReservedPath(clean, false); err != nil {
-			return nil, err
-		}
-		if seen[clean] {
-			continue
-		}
-		seen[clean] = true
-		cleaned = append(cleaned, clean)
-	}
-	if len(cleaned) == 0 {
-		return nil, fmt.Errorf("at least one path is required: %w", ErrValidation)
-	}
-	sort.Slice(cleaned, func(i, j int) bool {
-		if strings.Count(cleaned[i], "/") != strings.Count(cleaned[j], "/") {
-			return strings.Count(cleaned[i], "/") < strings.Count(cleaned[j], "/")
-		}
-		return cleaned[i] < cleaned[j]
-	})
-	pruned := cleaned[:0]
-	for _, candidate := range cleaned {
-		nested := false
-		for _, parent := range pruned {
-			if strings.HasPrefix(candidate, parent+"/") {
-				nested = true
-				break
-			}
-		}
-		if !nested {
-			pruned = append(pruned, candidate)
-		}
+	pruned, err := cleanAndPruneSelection(paths, func(clean string) error { return rejectReservedPath(clean, false) })
+	if err != nil {
+		return nil, err
 	}
 
 	selection := make([]resolvedWorktreePath, 0, len(pruned))

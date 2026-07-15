@@ -1,10 +1,9 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Maximize2, MoreHorizontal, Pause, Play, Trash2 } from 'lucide-react'
 import { KIND, STATE } from '@/lib/constants'
-import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
+import { fmtCost } from '@/lib/format'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Worktree } from '@/store/types'
-import { Button } from '@/components/ui/button'
 import { Pill } from '@/components/ui/pill'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from './WorktreeGlyph'
@@ -30,30 +29,6 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
   const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
   const machine = useMachines().data?.find((m) => m.id === project?.machineId)
 
-  function approve(ok: boolean) {
-    if (!machine) {
-      showToast("Could not resolve this worktree's machine")
-      return
-    }
-    updateWorktree.mutate({
-      machine,
-      id: w.id,
-      patch: ok
-        ? { state: 'running', pending: null, appendLine: { k: 'ok', t: '✓ approved — continuing' } }
-        : { state: 'idle', pending: null, appendLine: { k: 'err', t: '✗ rejected by user — halted' } },
-    })
-  }
-  function retry() {
-    if (!machine) {
-      showToast("Could not resolve this worktree's machine")
-      return
-    }
-    updateWorktree.mutate({
-      machine,
-      id: w.id,
-      patch: { state: 'running', appendLine: { k: 'sys', t: '↻ retrying with patched config…' } },
-    })
-  }
   function pauseToggle() {
     if (!machine) {
       showToast("Could not resolve this worktree's machine")

@@ -5,11 +5,9 @@ import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/b
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { WorkspaceHostsView } from '@/features/agents/WorkspaceHostsView'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
-import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
-import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
+import { useSSHConnections, useWorkspace } from '@/features/data/queries'
 import { SSHShellPane } from '@/features/ssh/SSHShellPane'
 import { STATE } from '@/lib/constants'
-import { killTerminalSession } from '@/lib/machineApi'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import { useLoomStore } from '@/store/useLoomStore'
 import { NewTabDialog } from './NewTabDialog'
@@ -43,9 +41,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const openBrowserTab = useLoomStore((s) => s.openBrowserTab)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
-  const machines = useMachines().data ?? []
   const sshConnections = useSSHConnections().data ?? []
-  const machinesById = new Map(machines.map((m) => [m.id, m]))
   const projectsById = new Map(workspace ? workspace.projects.map((p) => [p.id, p]) : [])
 
   function commit(next: WorkspaceTileLayout) {
@@ -100,13 +96,13 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   // (see tileTree.ts's `closeTileTab`), so it's reused as-is for the
   // generic tree removal regardless of tab kind.
   //
-  // Closing a 'worktree' tab only drops it from this workspace's tab strip
-  // — the worktree itself (and its primary terminal session) keeps running
-  // so reopening it reattaches instead of respawning. Any *spawned* extra
-  // Terminal panes inside it (ExpandedTerminal's "Terminal 2", ...) are
-  // killed outright: unlike the primary session, they exist only as long as
-  // their tab does, and ExpandedTerminal unmounting here bypasses its own
-  // per-pane close handlers that would otherwise do this.
+  // Closing a 'worktree' tab only drops it from this workspace's tab strip —
+  // the worktree itself, its primary terminal session, AND any *spawned*
+  // extra Terminal panes inside it (ExpandedTerminal's "Terminal 2", ...)
+  // all keep running server-side, so reopening the worktree reattaches every
+  // pane instead of respawning it — a spawned pane may be running its own
+  // long-lived agent process, not just a throwaway shell, so it deserves the
+  // same "survive the tab closing" treatment as the primary session.
   async function handleCloseTab(_leafId: string, tabId: string) {
     const tab = findTileTab(layout.root, tabId)
     if (tab?.kind === 'browser') {
@@ -117,17 +113,6 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         )
       }
       removeBrowserTile(tabId)
-    }
-    if (tab?.kind === 'worktree') {
-      const project = projectsById.get(tab.projectId)
-      const machine = project?.machineId ? machinesById.get(project.machineId) : undefined
-      const storedLayout = useLoomStore.getState().worktreeLayouts[tab.wtId]
-      const paneLayout = deserializeLayout(storedLayout)
-      if (machine && paneLayout) {
-        for (const sessionKey of collectTerminalSessionKeys(paneLayout.root)) {
-          if (sessionKey !== tab.wtId) void killTerminalSession(machine, sessionKey).catch(() => {})
-        }
-      }
     }
     closeWorktreeTab(wsId, tabId)
     const next = useLoomStore.getState().workspaceTileLayouts[wsId]

@@ -41,20 +41,17 @@ export function SpawnDialog() {
   const project = workspaces.flatMap((candidate) => candidate.projects).find((candidate) => candidate.id === spawn.projectId)
   const machine = machines.find((candidate) => candidate.id === project?.machineId)
   const branches = useProjectBranches(machine, project?.id, project?.path).data ?? []
-  const baseOptions = branches.map((branch) => ({ value: branch, label: branch }))
 
   // Dynamic agent/model data from backend — reflects whichever machine this
   // project is assigned to, since installed agents are a machine property.
   const agents = useAgents(machine).data ?? []
   const installedAgents = agents.filter((agent) => agent.installed)
-  const agentOptions = installedAgents.map((agent) => ({ value: agent.id, label: agent.name }))
 
   // Default agent from the current model selection (guess from model ID prefix)
   const defaultAgentId = installedAgents.find((agent) => spawn.model.startsWith(agent.id))?.id ?? installedAgents[0]?.id ?? ''
   const [agentId, setAgentId] = useState(defaultAgentId)
 
   const models = useAgentModels(machine, agentId).data ?? []
-  const modelOptions = models.map((model) => ({ value: model.id, label: model.name }))
 
   const branchMode = spawn.mode !== 'root'
   const canSubmit = Boolean(project && machine) && !createWorktree.isPending
@@ -118,14 +115,6 @@ export function SpawnDialog() {
         },
       },
     )
-  }
-
-  const handleAgentChange = (value: string) => {
-    setAgentId(value)
-    const agent = installedAgents.find((candidate) => candidate.id === value)
-    if (agent) {
-      // Set model to the first model of the selected agent (fetched async)
-    }
   }
 
   return (
