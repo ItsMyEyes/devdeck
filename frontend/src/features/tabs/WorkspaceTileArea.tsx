@@ -5,7 +5,8 @@ import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/b
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
 import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
-import { useMachines, useWorkspace } from '@/features/data/queries'
+import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
+import { SSHShellPane } from '@/features/ssh/SSHShellPane'
 import { STATE } from '@/lib/constants'
 import { killTerminalSession } from '@/lib/machineApi'
 import { worktreeLabel } from '@/lib/worktreeLabel'
@@ -14,7 +15,7 @@ import { NewTabDialog } from './NewTabDialog'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
 import { createDefaultTileLayout, findTileLeaf, findTileTab, firstLeafId, focusTileLeaf, selectTileTab } from './tileTree'
 import type { TileTab, WorkspaceTileLayout } from './tileTree'
-import type { BrowserTileTab, WorktreeTileTab } from './WorkspaceTileCanvas'
+import type { BrowserTileTab, SSHShellTileTab, WorktreeTileTab } from './WorkspaceTileCanvas'
 
 interface WorkspaceTileAreaProps {
   wsId: string
@@ -42,6 +43,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
   const machines = useMachines().data ?? []
+  const sshConnections = useSSHConnections().data ?? []
   const machinesById = new Map(machines.map((m) => [m.id, m]))
   const projectsById = new Map(workspace ? workspace.projects.map((p) => [p.id, p]) : [])
 
@@ -167,6 +169,11 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     return { label: doc?.title ?? 'Web' }
   }
 
+  function resolveSSHShellTab(tab: SSHShellTileTab) {
+    const connection = sshConnections.find((c) => c.id === tab.connectionId)
+    return { label: connection?.name ?? 'SSH' }
+  }
+
   // Cmd+W closes the focused leaf's active tab (no-op on the Agents tab);
   // Cmd+Shift+[ / Cmd+Shift+] cycle the focused leaf's own tab strip —
   // scoped per-leaf now that tabs live inside panes instead of one global
@@ -215,6 +222,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
             return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={tab.projectId} />
           },
           browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
+          sshShell: ({ tab }) => <SSHShellPane connectionId={tab.connectionId} />,
         }}
         onTreeChange={handleTreeChange}
         onFocusLeaf={handleFocusLeaf}
@@ -223,6 +231,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         onNewTab={handleNewTab}
         resolveWorktreeTab={resolveWorktreeTab}
         resolveBrowserTab={resolveBrowserTab}
+        resolveSSHShellTab={resolveSSHShellTab}
         showContent={showContent}
         className="min-h-0"
       />

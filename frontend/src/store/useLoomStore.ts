@@ -7,6 +7,7 @@ import {
   closeTileTab,
   createBrowserTab,
   createDefaultTileLayout,
+  createSSHShellTab,
   createWorktreeTab,
   findLeafForTab,
   openTileTab,
@@ -185,6 +186,7 @@ interface LoomState {
 
   // browser tile (Tauri only)
   openBrowserTab: (wsId: string, machineId?: string) => void
+  openSSHShellTab: (wsId: string, connectionId: string) => void
   ensureBrowserTile: (tabId: string) => void
   setBrowserDocState: (tabId: string, docId: string, patch: Partial<Omit<BrowserDocState, 'id'>>) => void
   addBrowserDoc: (tabId: string) => void
@@ -338,6 +340,11 @@ export const useLoomStore = create<LoomState>()(
           const tab = createBrowserTab()
           s.workspaceTileLayouts[wsId] = openTileTab(layout, tab)
           s.browserTiles[tab.id] = createBrowserTileState(machineId ?? null)
+        }),
+      openSSHShellTab: (wsId, connectionId) =>
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          s.workspaceTileLayouts[wsId] = openTileTab(layout, createSSHShellTab(connectionId))
         }),
       ensureBrowserTile: (tabId) =>
         set((s) => {

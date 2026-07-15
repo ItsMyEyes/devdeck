@@ -2,7 +2,7 @@ import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
-import { Globe, LayoutGrid, Plus, X } from 'lucide-react'
+import { Cable, Globe, LayoutGrid, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/status-dot'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
@@ -17,6 +17,7 @@ const TRAFFIC_LIGHT_GUTTER = 76
 
 export type WorktreeTileTab = Extract<TileTab, { kind: 'worktree' }>
 export type BrowserTileTab = Extract<TileTab, { kind: 'browser' }>
+export type SSHShellTileTab = Extract<TileTab, { kind: 'ssh-shell' }>
 
 export interface WorkspaceTileCanvasProps {
   root: TileNode
@@ -24,6 +25,7 @@ export interface WorkspaceTileCanvasProps {
     agents: (ctx: { leafId: string }) => ReactNode
     worktree: (ctx: { leafId: string; tab: WorktreeTileTab }) => ReactNode
     browser: (ctx: { leafId: string; tab: BrowserTileTab }) => ReactNode
+    sshShell: (ctx: { leafId: string; tab: SSHShellTileTab }) => ReactNode
   }
   /** Fired for every structural change this component makes itself: drag-and-drop commits and divider-resize commits. */
   onTreeChange: (root: TileNode) => void
@@ -42,6 +44,9 @@ export interface WorkspaceTileCanvasProps {
    *  slice (not stored in the tile tree itself). `undefined` hides the tab
    *  (mirrors `resolveWorktreeTab`'s contract). */
   resolveBrowserTab: (tab: BrowserTileTab) => { label: string } | undefined
+  /** Live title for an ssh-shell tab, resolved from the SSH connections
+   *  query (mirrors `resolveBrowserTab`'s contract). */
+  resolveSSHShellTab: (tab: SSHShellTileTab) => { label: string } | undefined
   /** When `false`, only the top-left leaf's pinned header renders — no
    *  leaf bodies, no other leaves. Used on non-tiled workspace routes
    *  (Machines, Tools, Invoices, ...) so the tab strip stays up as
@@ -64,6 +69,7 @@ interface TileRenderContext {
   onResizeSplit: (splitId: string, sizes: number[]) => void
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']
   resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
+  resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab']
   hoverZone: { leafId: string; zone: TileDropZone } | null
 }
 
@@ -78,11 +84,13 @@ function leafShortTitle(
   leaf: TileLeaf,
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab'],
   resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab'],
+  resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab'],
 ): string {
   const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0]
   if (!tab) return ''
   if (tab.kind === 'agents') return 'Agents'
   if (tab.kind === 'browser') return resolveBrowserTab(tab)?.label ?? 'Browser'
+  if (tab.kind === 'ssh-shell') return resolveSSHShellTab(tab)?.label ?? 'SSH'
   return resolveWorktreeTab(tab)?.short ?? tab.wtId
 }
 
@@ -230,6 +238,7 @@ function TileTabButton({
   compact,
   resolveWorktreeTab,
   resolveBrowserTab,
+  resolveSSHShellTab,
   onSelect,
   onClose,
 }: {
@@ -241,6 +250,7 @@ function TileTabButton({
   compact: boolean
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']
   resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
+  resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab']
   onSelect: () => void
   onClose?: () => void
 }) {
@@ -279,6 +289,20 @@ function TileTabButton({
       <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
         <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
           <StatusDot color={info.color} pulse={info.pulse} />
+          <span className="truncate">{info.label}</span>
+        </button>
+        {closeButton(info.label)}
+      </div>
+    )
+  }
+
+  if (tab.kind === 'ssh-shell') {
+    const info = resolveSSHShellTab(tab)
+    if (!info) return null
+    return (
+      <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
+        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
+          <Cable size={12} />
           <span className="truncate">{info.label}</span>
         </button>
         {closeButton(info.label)}
@@ -349,6 +373,7 @@ function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: b
             compact={!isTopLeft}
             resolveWorktreeTab={ctx.resolveWorktreeTab}
             resolveBrowserTab={ctx.resolveBrowserTab}
+            resolveSSHShellTab={ctx.resolveSSHShellTab}
             onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
             onClose={tab.kind !== 'agents' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
           />
@@ -395,7 +420,9 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
               ? ctx.renderers.agents({ leafId: leaf.id })
               : tab.kind === 'worktree'
                 ? ctx.renderers.worktree({ leafId: leaf.id, tab })
-                : ctx.renderers.browser({ leafId: leaf.id, tab })}
+                : tab.kind === 'ssh-shell'
+                  ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
+                  : ctx.renderers.browser({ leafId: leaf.id, tab })}
           </div>
         ))}
         {hoverZone ? (
@@ -426,6 +453,7 @@ export function WorkspaceTileCanvas({
   onNewTab,
   resolveWorktreeTab,
   resolveBrowserTab,
+  resolveSSHShellTab,
   showContent = true,
   className,
 }: WorkspaceTileCanvasProps) {
@@ -444,10 +472,10 @@ export function WorkspaceTileCanvas({
   const workspaceTitle = useMemo(() => {
     if (root.type !== 'split') return null
     const titles = collectLeaves(root)
-      .map((leaf) => leafShortTitle(leaf, resolveWorktreeTab, resolveBrowserTab))
+      .map((leaf) => leafShortTitle(leaf, resolveWorktreeTab, resolveBrowserTab, resolveSSHShellTab))
       .filter(Boolean)
     return titles.length > 1 ? `Workspace (${titles.join(' + ')})` : null
-  }, [root, resolveWorktreeTab, resolveBrowserTab])
+  }, [root, resolveWorktreeTab, resolveBrowserTab, resolveSSHShellTab])
 
   const handleResizeSplit = useCallback(
     (splitId: string, sizes: number[]) => {
@@ -502,6 +530,7 @@ export function WorkspaceTileCanvas({
     onResizeSplit: handleResizeSplit,
     resolveWorktreeTab,
     resolveBrowserTab,
+    resolveSSHShellTab,
     hoverZone,
   }
 
@@ -527,6 +556,8 @@ export function WorkspaceTileCanvas({
               <LayoutGrid size={12} />
             ) : dragTab.kind === 'worktree' ? (
               <StatusDot color={resolveWorktreeTab(dragTab)?.color ?? '#6b7280'} />
+            ) : dragTab.kind === 'ssh-shell' ? (
+              <Cable size={12} />
             ) : (
               <Globe size={12} />
             )}
@@ -535,7 +566,9 @@ export function WorkspaceTileCanvas({
                 ? 'Agents'
                 : dragTab.kind === 'worktree'
                   ? (resolveWorktreeTab(dragTab)?.label ?? dragTab.wtId)
-                  : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
+                  : dragTab.kind === 'ssh-shell'
+                    ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
+                    : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
             </span>
           </div>
         ) : null}

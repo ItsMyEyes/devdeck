@@ -17,7 +17,7 @@ export interface TerminalHandle {
   copyBuffer: () => void
 }
 
-const THEME = {
+export const TERMINAL_THEME = {
   background: '#111214',
   foreground: '#c9ccca',
   cursor: '#39c6bd',
@@ -106,7 +106,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       lineHeight: 1.35,
       cursorBlink: true,
       convertEol: false,
-      theme: THEME,
+      theme: TERMINAL_THEME,
       scrollback: 5000,
     })
     const fit = new FitAddon()

@@ -15,6 +15,7 @@ export type TileTab =
   | { kind: 'agents'; id: 'agents' }
   | { kind: 'worktree'; id: string; projectId: string; wtId: string }
   | { kind: 'browser'; id: string }
+  | { kind: 'ssh-shell'; id: string; connectionId: string }
 
 export interface TileLeaf {
   type: 'leaf'
@@ -79,6 +80,13 @@ export function createWorktreeTab(projectId: string, wtId: string): TileTab {
  *  `browserTiles` slice, keyed by this same generated id. */
 export function createBrowserTab(): TileTab {
   return { kind: 'browser', id: generateTileId() }
+}
+
+/** An ssh-shell tile's id is derived from its connection id, so opening the
+ *  same saved connection twice focuses the existing shell instead of
+ *  spawning a second one (same dedupe contract as worktree tabs). */
+export function createSSHShellTab(connectionId: string): TileTab {
+  return { kind: 'ssh-shell', id: `ssh-${connectionId}`, connectionId }
 }
 
 /** The default layout for a workspace with no persisted entry yet: a
