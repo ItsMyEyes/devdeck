@@ -251,8 +251,10 @@ release is available.
 
 To cut a release: push an annotated semver tag (`git tag -a v1.2.3 -m
 v1.2.3 && git push origin v1.2.3`). The `release.yml` GitHub Actions workflow
-then runs the test suite, `make portable-all`, and publishes a GitHub Release
-for that tag with all 6 platform binaries attached.
+then runs the test suite, `make portable-all` (backend runtime/hub binaries)
+and a macOS/Linux/Windows Tauri desktop build in parallel, and publishes a
+GitHub Release for that tag with all 6 platform binaries plus the desktop
+installers (`.dmg`, `.deb`/`.rpm`/`.AppImage`, `.msi`/`.exe`) attached.
 
 ## Type checking / linting
 
@@ -308,8 +310,8 @@ cd frontend && npx @tanstack/router-plugin --target react
   dev mode: builds the host-triple sidecar (`make sidecar-host`, required or
   tauri-build fails), then opens a native window on the Vite dev server
   (`beforeDevCommand` in `tauri.conf.json` runs `npm run dev`, which also
-  starts the Go backend — no separate `make dev`/`dev-api` needed). This is
-  normal username/password login, not the release sidecar's ephemeral-key
+  starts the Go backend as `--role both` — no separate `make dev`/`dev-api`
+  needed). This is normal username/password login, not the release sidecar's ephemeral-key
   bootstrap (`setup()` in `lib.rs` skips spawning the sidecar entirely when
   `cfg!(debug_assertions)` is true).
 - The dev backend (`dev:api` in `frontend/package.json`, and `make

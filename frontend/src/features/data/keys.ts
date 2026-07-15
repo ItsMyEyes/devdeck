@@ -7,6 +7,8 @@ export const qk = {
   agentDetail: (machineId: string, id: string) => ['machines', machineId, 'agents', id] as const,
   agentModels: (machineId: string, id: string) => ['machines', machineId, 'agents', id, 'models'] as const,
   agentSkills: (machineId: string, id: string) => ['machines', machineId, 'agents', id, 'skills'] as const,
+  agentSkillContent: (machineId: string, id: string, skillName: string) =>
+    ['machines', machineId, 'agents', id, 'skills', skillName, 'content'] as const,
   agentMCPServers: (machineId: string, id: string) =>
     ['machines', machineId, 'agents', id, 'mcp-servers'] as const,
   agentEnvProfiles: (machineId: string, id: string) =>

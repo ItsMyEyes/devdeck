@@ -25,15 +25,16 @@ export function AgentManagementModule() {
   const machines = machinesQuery.data ?? []
   const [machineId, setMachineId] = useState<string | null>(null)
   // Installed CLI agents/skills/MCP servers/env profiles all live on a
-  // specific machine — default to the local device, falling back to
-  // whichever machine loads first if this isn't the desktop shell.
+  // specific machine. Keep a valid selection, otherwise use the first machine
+  // returned by the registry.
   useEffect(() => {
+    if (machines.length === 0) {
+      if (machineId !== null) setMachineId(null)
+      return
+    }
     if (machineId && machines.some((m) => m.id === machineId)) return
-    if (machines.length === 0) return
-    const preferred = machines.find((m) => m.isLocal) ?? machines[0]
-    setMachineId(preferred.id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machines])
+    setMachineId(machines[0].id)
+  }, [machineId, machines])
   const machine = machines.find((m) => m.id === machineId)
 
   const agentsQuery = useAgents(machine)
@@ -143,17 +144,15 @@ export function AgentManagementModule() {
         meta={`${installedAgents.length} installed`}
         actions={
           <>
-            {machines.length > 1 ? (
-              <div className="w-44">
-                <Select
-                  value={machine.id}
-                  onValueChange={setMachineId}
-                  aria-label="Machine"
-                  options={machines.map((m) => ({ value: m.id, label: m.isLocal ? `${m.name} (this device)` : m.name }))}
-                  triggerClassName="h-8"
-                />
-              </div>
-            ) : null}
+            <div className="w-44">
+              <Select
+                value={machine.id}
+                onValueChange={setMachineId}
+                aria-label="Machine"
+                options={machines.map((m) => ({ value: m.id, label: m.isLocal ? `${m.name} (this device)` : m.name }))}
+                triggerClassName="h-8"
+              />
+            </div>
             <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing}>
               <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
               Refresh

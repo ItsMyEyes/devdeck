@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Blocks,
   Check,
   CircleAlert,
+  FilePenLine,
   Link2,
   LockKeyhole,
   Search,
@@ -20,9 +21,16 @@ import { cn } from '@/lib/utils'
 import type { AgentSummary, Machine } from '@/store/types'
 import { AgentMark } from './AgentMark'
 import { RemoveSkillDialog } from './RemoveSkillDialog'
+import { SkillContentDialog } from './SkillContentDialog'
 import type { AgentSkillInventory, CatalogSkill } from './types'
 
 interface PendingRemoval {
+  agentId: string
+  agentName: string
+  skillName: string
+}
+
+interface OpenSkillContent {
   agentId: string
   agentName: string
   skillName: string
@@ -43,8 +51,14 @@ export function SkillsManagement({
   const [agentFilter, setAgentFilter] = useState('all')
   const [category, setCategory] = useState('all')
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
+  const [openContent, setOpenContent] = useState<OpenSkillContent | null>(null)
   const installSkill = useInstallAgentSkill()
   const removeSkill = useRemoveAgentSkill()
+
+  useEffect(() => {
+    setPendingRemoval(null)
+    setOpenContent(null)
+  }, [machine.id])
 
   const catalog = useMemo(() => buildCatalog(inventory), [inventory])
   const categories = useMemo(
@@ -248,50 +262,68 @@ export function SkillsManagement({
                       const installed = Boolean(installation)
                       const locked = installation?.readOnly ?? false
                       return (
-                        <button
-                          key={agent.id}
-                          type="button"
-                          aria-label={
-                            locked
-                              ? `${skill.name} is managed by ${agent.name}`
-                              : installed
-                                ? `Remove ${skill.name} from ${agent.name}`
-                                : `Install ${skill.name} in ${agent.name}`
-                          }
-                          disabled={locked || installSkill.isPending || removeSkill.isPending}
-                          onClick={() => {
-                            if (installed) {
-                              setPendingRemoval({
-                                agentId: agent.id,
-                                agentName: agent.name,
-                                skillName: skill.name,
-                              })
-                            } else if (portable) {
-                              void install(agent.id, skill.name)
+                        <div key={agent.id} className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            aria-label={
+                              locked
+                                ? `${skill.name} is managed by ${agent.name}`
+                                : installed
+                                  ? `Remove ${skill.name} from ${agent.name}`
+                                  : `Install ${skill.name} in ${agent.name}`
                             }
-                          }}
-                          title={
-                            locked
-                              ? `${skill.name} is managed by ${agent.name}`
-                              : installed
-                                ? `Remove from ${agent.name}`
-                                : portable
-                                  ? `Install in ${agent.name}`
-                                  : 'System skills cannot be copied'
-                          }
-                          className={cn(
-                            'flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 transition-colors sm:h-8',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                            installed
-                              ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
-                              : 'border-loom-border-card bg-loom-surface-2 text-loom-dim hover:border-loom-border-strong hover:text-loom-muted',
-                            (locked || (!installed && !portable)) && 'cursor-not-allowed opacity-55',
-                          )}
-                        >
-                          <AgentMark id={agent.id} name={agent.name} size="sm" active={installed} />
-                          <span className="hidden text-[10.5px] sm:inline">{agent.name}</span>
-                          {installed ? <Check size={10} strokeWidth={2.5} /> : <Link2 size={10} />}
-                        </button>
+                            disabled={locked || installSkill.isPending || removeSkill.isPending}
+                            onClick={() => {
+                              if (installed) {
+                                setPendingRemoval({
+                                  agentId: agent.id,
+                                  agentName: agent.name,
+                                  skillName: skill.name,
+                                })
+                              } else if (portable) {
+                                void install(agent.id, skill.name)
+                              }
+                            }}
+                            title={
+                              locked
+                                ? `${skill.name} is managed by ${agent.name}`
+                                : installed
+                                  ? `Remove from ${agent.name}`
+                                  : portable
+                                    ? `Install in ${agent.name}`
+                                    : 'System skills cannot be copied'
+                            }
+                            className={cn(
+                              'flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 transition-colors sm:h-8',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                              installed
+                                ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
+                                : 'border-loom-border-card bg-loom-surface-2 text-loom-dim hover:border-loom-border-strong hover:text-loom-muted',
+                              (locked || (!installed && !portable)) && 'cursor-not-allowed opacity-55',
+                            )}
+                          >
+                            <AgentMark id={agent.id} name={agent.name} size="sm" active={installed} />
+                            <span className="hidden text-[10.5px] sm:inline">{agent.name}</span>
+                            {installed ? <Check size={10} strokeWidth={2.5} /> : <Link2 size={10} />}
+                          </button>
+                          {installed ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setOpenContent({
+                                  agentId: agent.id,
+                                  agentName: agent.name,
+                                  skillName: skill.name,
+                                })
+                              }
+                              aria-label={`Edit ${skill.name} SKILL.md for ${agent.name}`}
+                              title={`Open ${skill.name}/SKILL.md in ${agent.name}`}
+                              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-loom-border-card bg-loom-surface-2 text-loom-dim transition-colors hover:border-loom-border-accent hover:text-loom-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:h-8 sm:w-8"
+                            >
+                              <FilePenLine size={12} />
+                            </button>
+                          ) : null}
+                        </div>
                       )
                     })}
                     {portable && missing.length > 1 ? (
@@ -321,6 +353,17 @@ export function SkillsManagement({
         onOpenChange={(open) => !open && setPendingRemoval(null)}
         onConfirm={() => void confirmRemoval()}
       />
+      {openContent ? (
+        <SkillContentDialog
+          key={`${machine.id}:${openContent.agentId}:${openContent.skillName}`}
+          open
+          machine={machine}
+          agentId={openContent.agentId}
+          agentName={openContent.agentName}
+          skillName={openContent.skillName}
+          onOpenChange={(open) => !open && setOpenContent(null)}
+        />
+      ) : null}
     </div>
   )
 }

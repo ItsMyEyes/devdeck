@@ -41,7 +41,7 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
   }
 
   return (
-    <div className="relative flex-none border-b border-loom-border p-3 pb-[9px]">
+    <div className="relative flex-none border-b border-t border-loom-border p-3 pb-[9px]">
       <Popover.Root open={open} onOpenChange={(o) => (o ? toggle() : closeMenu())}>
         <Popover.Trigger
           className={cn(

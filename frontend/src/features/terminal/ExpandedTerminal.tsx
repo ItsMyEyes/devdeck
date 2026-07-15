@@ -2,14 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { Check, FilePlus, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
-import { STATE } from '@/lib/constants'
-import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Machine, Worktree } from '@/store/types'
-import { StatusDot } from '@/components/ui/status-dot'
-import { Pill } from '@/components/ui/pill'
-import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
@@ -43,6 +38,7 @@ interface Props {
   worktree: Worktree
   wsId: string
   projectId: string
+  onPrimaryExit?: () => void
 }
 
 function basename(path: string) {
@@ -132,7 +128,7 @@ function OverflowItem({
   )
 }
 
-export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
+export function ExpandedTerminal({ worktree: w, wsId, projectId, onPrimaryExit }: Props) {
   const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
   const machines = useMachines().data
   const machine = machines?.find((m) => m.id === project?.machineId)
@@ -156,6 +152,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId }: Props) {
       machine={machine}
       projectName={project?.name}
       label={worktreeLabel(project, w)}
+      onPrimaryExit={onPrimaryExit}
     />
   )
 }
@@ -165,11 +162,13 @@ function TerminalWorkspace({
   machine,
   projectName,
   label,
+  onPrimaryExit,
 }: {
   worktree: Worktree
   machine: Machine
   projectName?: string
   label: string
+  onPrimaryExit?: () => void
 }) {
   const termHandles = useRef(new Map<string, TerminalHandle>())
   const definitionRequest = useRef(0)
@@ -212,8 +211,6 @@ function TerminalWorkspace({
       killTerminalSession.mutate(content.sessionKey)
     }
   }
-
-  const st = STATE[worktree.state]
 
   // Surfaced to `Sidebar`'s collapsed rail (`SidebarRail`) via the store — the
   // "back" button now lives outside this component entirely, so its dirty-file
@@ -322,6 +319,18 @@ function TerminalWorkspace({
     commitLayout(closeTab(layout, paneId, contentId))
   }
 
+  function handleTerminalExit(sessionKey: string) {
+    termHandles.current.delete(sessionKey)
+    if (sessionKey === worktree.id) {
+      onPrimaryExit?.()
+      return
+    }
+    const current = deserializeLayout(useLoomStore.getState().worktreeLayouts[worktree.id]) ?? createDefaultLayout(worktree.id)
+    const leaf = findLeafForContent(current.root, sessionKey)
+    if (!leaf) return
+    setWorktreeLayout(worktree.id, closeTab(current, leaf.id, sessionKey))
+  }
+
   function handleClosePane(paneId: string) {
     const pane = findPane(layout.root, paneId)
     if (!pane || pane.type !== 'leaf') return
@@ -425,21 +434,23 @@ function TerminalWorkspace({
       // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
       // i.e. some other tab is the one currently on screen. Ignore the shortcut then.
       if (containerRef.current?.offsetParent === null) return
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+      const primary = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase()
+      if (primary && key === 'p') {
         event.preventDefault()
         setQuickOpen(true)
         return
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't') {
+      if (primary && key === 't') {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
         return
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'w') {
+      if (primary && key === 'w') {
         const pane = findPane(layout.root, layout.focusedPaneId)
         if (!pane || pane.type !== 'leaf') return
         const active = pane.tabs.find((t) => t.id === pane.activeTabId)
-        if (!active || active.kind !== 'file') return
+        if (!active) return
         event.preventDefault()
         handleCloseTab(pane.id, active.id)
       }
@@ -474,19 +485,6 @@ function TerminalWorkspace({
     return content.kind === 'file' && dirtyFiles.has(content.path)
   }
 
-  function renderTerminalTitle() {
-    return (
-      <div className="flex min-w-0 flex-none items-center gap-2 px-2">
-        <StatusDot color={st.color} pulse={worktree.state === 'running' || worktree.state === 'waiting'} />
-        <WorktreeGlyph root={worktree.root} size={12} />
-        <span className="max-w-[160px] flex-none truncate font-mono text-[11px] font-medium">{label}</span>
-        <Pill color={st.color}>{st.label}</Pill>
-        <span className="hidden min-w-[70px] flex-1 truncate whitespace-nowrap font-mono text-[10px] text-loom-dim lg:block">
-          {worktree.model} · {fmtEl(worktree.elapsed)} · {fmtTok(worktree.tokens)} tok · {fmtCost(worktree.tokens)}
-        </span>
-      </div>
-    )
-  }
 
   function renderOverflowActions() {
     return (
@@ -550,6 +548,7 @@ function TerminalWorkspace({
             machine={machine}
             ctrlArmed={ctrlArmed && isFocusedTerminal}
             onCtrlConsumed={() => setCtrlArmed(false)}
+            onExit={() => handleTerminalExit(content.sessionKey)}
           />
         </div>
       )
@@ -596,7 +595,6 @@ function TerminalWorkspace({
         onClosePane={handleClosePane}
         tabIcon={tabIcon}
         isTabDirty={isTabDirty}
-        paneTitleContent={renderTerminalTitle}
         paneOverflowActions={renderOverflowActions}
         paneNewTabActions={renderNewTabActions}
         dragEnabled={isDesktop}

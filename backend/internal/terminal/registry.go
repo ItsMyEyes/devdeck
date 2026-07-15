@@ -20,9 +20,6 @@ const (
 	// KiB in seconds and silently evict history the client had never seen,
 	// which read as "messages disappearing" on reattach.
 	ringBufferMaxBytes = 1024 * 1024
-	// sessionGraceTTL is how long a session's PTY stays alive with nobody
-	// attached before it's killed. Mirrors trash/term's SESSION_GRACE_MS.
-	sessionGraceTTL = 10 * time.Minute
 	// ptyReadBufBytes is the PTY read chunk size. Interactive TUIs can emit
 	// bursts far larger than 4 KB; a bigger buffer means fewer reads and
 	// fewer downstream frames.
@@ -39,7 +36,9 @@ const (
 	// connWriteTimeout caps a single WebSocket write. A connection that
 	// can't accept a frame within this window is dead or hopelessly backed
 	// up; it gets closed so the client reconnects and replays history.
-	connWriteTimeout = 15 * time.Second
+	connWriteTimeout          = 15 * time.Second
+	terminalExitedFrame       = `{"t":"x"}`
+	terminalExitedCloseReason = "terminal exited"
 )
 
 // ringBuffer is a byte-capped rolling buffer of recent PTY output.
@@ -152,11 +151,34 @@ func (sess *ptySession) nudgeFlush() {
 	}
 }
 
+func (sess *ptySession) notifyExit() {
+	sess.mu.Lock()
+	conn := sess.conn
+	sess.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connWriteTimeout)
+	_ = conn.Write(ctx, websocket.MessageText, []byte(terminalExitedFrame))
+	cancel()
+	_ = conn.Close(websocket.StatusNormalClosure, terminalExitedCloseReason)
+}
+
 // registry holds live PTY sessions keyed by session id, so they can survive
 // individual WebSocket disconnects.
 type registry struct {
 	mu       sync.Mutex
 	sessions map[string]*ptySession
+	// graceTTL is how long a session's PTY stays alive with nobody attached
+	// before it's reaped. Zero (the default) disables reaping entirely: a
+	// session lives until its child process exits on its own or it's killed
+	// explicitly (worktree deletion, spawned-pane tab close). This keeps a
+	// long-running background agent — the whole point of decoupling the PTY
+	// from any single WebSocket (see attachPTY) — from being SIGTERM'd mid-task
+	// just because the operator closed the tab and stepped away. Kept as a
+	// field rather than a constant so the reaper path stays exercisable in
+	// tests and could be re-enabled behind a flag without new plumbing.
+	graceTTL time.Duration
 }
 
 func newRegistry() *registry {
@@ -292,6 +314,7 @@ func (r *registry) pump(sess *ptySession) {
 		case chunk, ok := <-chunks:
 			if !ok {
 				flush()
+				sess.notifyExit()
 				r.discard(sess)
 				return
 			}
@@ -313,11 +336,14 @@ func (r *registry) pump(sess *ptySession) {
 }
 
 // detach clears the attached socket (if it's still the one that's closing —
-// a newer connection may have already replaced it) and schedules the
-// session to be killed after a grace period with nobody attached. Returns
-// false if the session was already gone (e.g. killed directly, as
-// WorktreeService.Delete does) so the caller doesn't log that it's still
-// running in the background when it isn't.
+// a newer connection may have already replaced it) and, when reaping is
+// enabled (graceTTL > 0), schedules the session to be killed after that grace
+// period with nobody attached. With reaping disabled (the default) the session
+// is left running so a background agent survives the disconnect; it's reclaimed
+// only when its process exits (the cmd.Wait goroutine in spawn) or it's killed
+// explicitly. Returns false if the session was already gone (e.g. killed
+// directly, as WorktreeService.Delete does) so the caller doesn't log that it's
+// still running in the background when it isn't.
 func (r *registry) detach(id string, conn *websocket.Conn) bool {
 	sess := r.get(id)
 	if sess == nil {
@@ -329,9 +355,11 @@ func (r *registry) detach(id string, conn *websocket.Conn) bool {
 		return false
 	}
 	sess.conn = nil
-	sess.killTimer = time.AfterFunc(sessionGraceTTL, func() {
-		r.kill(id)
-	})
+	if r.graceTTL > 0 {
+		sess.killTimer = time.AfterFunc(r.graceTTL, func() {
+			r.kill(id)
+		})
+	}
 	return true
 }
 

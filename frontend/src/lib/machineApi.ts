@@ -262,6 +262,39 @@ export function fetchAgentSkills(machine: Machine, agentId: string): Promise<Age
   return machineRequest<AgentSkill[]>(machine, 'GET', `/agents/${agentId}/skills`)
 }
 
+export interface AgentSkillContent {
+  path: string
+  content: string
+  readOnly: boolean
+  linked: boolean
+}
+
+export function fetchAgentSkillContent(
+  machine: Machine,
+  agentId: string,
+  skillName: string,
+): Promise<AgentSkillContent> {
+  return machineRequest<AgentSkillContent>(
+    machine,
+    'GET',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}/content`,
+  )
+}
+
+export function updateAgentSkillContent(
+  machine: Machine,
+  agentId: string,
+  skillName: string,
+  content: string,
+): Promise<void> {
+  return machineRequest<void>(
+    machine,
+    'PUT',
+    `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillName)}/content`,
+    { content },
+  )
+}
+
 export function installAgentSkill(machine: Machine, agentId: string, skillName: string): Promise<void> {
   return machineRequest<void>(
     machine,

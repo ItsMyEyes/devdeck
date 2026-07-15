@@ -49,6 +49,8 @@ type MCPServerInput struct {
 type AgentManager interface {
 	InstallSkill(agentID, skillName string) error
 	RemoveSkill(agentID, skillName string) error
+	ReadSkillContent(agentID, skillName string) (content string, readOnly, linked bool, err error)
+	WriteSkillContent(agentID, skillName, content string) error
 	ListMCPServers(agentID string) ([]domain.MCPServer, error)
 	AddMCPServer(agentID string, input MCPServerInput) error
 	RemoveMCPServer(agentID, serverName string) error

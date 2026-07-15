@@ -26,6 +26,14 @@ type AddMCPServerInput struct {
 	Env       map[string]string `json:"env"`
 }
 
+// AgentSkillContent is the API-facing representation of one skill's SKILL.md.
+type AgentSkillContent struct {
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	ReadOnly bool   `json:"readOnly"`
+	Linked   bool   `json:"linked"`
+}
+
 // AgentService resolves agent, model, and skill information.
 type AgentService struct {
 	registry port.AgentRegistry
@@ -90,6 +98,45 @@ func (svc *AgentService) RemoveSkill(agentID, skillName string) error {
 		return err
 	}
 	return mapManagementError(manager.RemoveSkill(agentID, skillName))
+}
+
+// GetSkillContent returns one installed skill's fixed SKILL.md file.
+func (svc *AgentService) GetSkillContent(agentID, skillName string) (AgentSkillContent, error) {
+	if err := svc.validateManagedAgent(agentID); err != nil {
+		return AgentSkillContent{}, err
+	}
+	if !integrationNamePattern.MatchString(skillName) {
+		return AgentSkillContent{}, fmt.Errorf("invalid skill name: %w", ErrValidation)
+	}
+	manager, err := svc.manager()
+	if err != nil {
+		return AgentSkillContent{}, err
+	}
+	content, readOnly, linked, err := manager.ReadSkillContent(agentID, skillName)
+	if err != nil {
+		return AgentSkillContent{}, mapManagementError(err)
+	}
+	return AgentSkillContent{
+		Path:     "SKILL.md",
+		Content:  content,
+		ReadOnly: readOnly,
+		Linked:   linked,
+	}, nil
+}
+
+// UpdateSkillContent atomically writes one installed skill's SKILL.md file.
+func (svc *AgentService) UpdateSkillContent(agentID, skillName, content string) error {
+	if err := svc.validateManagedAgent(agentID); err != nil {
+		return err
+	}
+	if !integrationNamePattern.MatchString(skillName) {
+		return fmt.Errorf("invalid skill name: %w", ErrValidation)
+	}
+	manager, err := svc.manager()
+	if err != nil {
+		return err
+	}
+	return mapManagementError(manager.WriteSkillContent(agentID, skillName, content))
 }
 
 // ListMCPServers returns redacted MCP configuration for one installed agent.
@@ -280,18 +327,18 @@ func (svc *AgentService) CreateEnvProfile(agentID string, input EnvProfileInput)
 	}
 	id := uniqueEnvProfileID(slugifyEnvProfileID(input.Name), existing)
 	profile := domain.EnvProfile{
-		ID:                id,
-		AgentID:           agentID,
-		Name:              strings.TrimSpace(input.Name),
-		BaseURL:           input.BaseURL,
-		AuthToken:         input.AuthToken,
-		Models:            normalizeModels(input.Models),
-		ExtraEnv:          normalizeExtraEnv(input.ExtraEnv),
-		CodexProviderName: input.CodexProviderName,
-		CodexWireAPI:      input.CodexWireAPI,
-		CodexEnvKey:       input.CodexEnvKey,
+		ID:                 id,
+		AgentID:            agentID,
+		Name:               strings.TrimSpace(input.Name),
+		BaseURL:            input.BaseURL,
+		AuthToken:          input.AuthToken,
+		Models:             normalizeModels(input.Models),
+		ExtraEnv:           normalizeExtraEnv(input.ExtraEnv),
+		CodexProviderName:  input.CodexProviderName,
+		CodexWireAPI:       input.CodexWireAPI,
+		CodexEnvKey:        input.CodexEnvKey,
 		CodexContextWindow: input.CodexContextWindow,
-		CodexMaxTokens:    input.CodexMaxTokens,
+		CodexMaxTokens:     input.CodexMaxTokens,
 	}
 	if err := manager.SaveEnvProfile(agentID, profile); err != nil {
 		return nil, mapManagementError(err)
@@ -540,13 +587,13 @@ func summarizeEnvProfile(p domain.EnvProfile) domain.EnvProfileSummary {
 		models = map[string]string{}
 	}
 	return domain.EnvProfileSummary{
-		ID:        p.ID,
-		AgentID:   p.AgentID,
-		Name:      p.Name,
-		BaseURL:   p.BaseURL,
-		HasToken:  strings.TrimSpace(p.AuthToken) != "",
-		Models:    models,
-		ExtraEnv:  extra,
+		ID:       p.ID,
+		AgentID:  p.AgentID,
+		Name:     p.Name,
+		BaseURL:  p.BaseURL,
+		HasToken: strings.TrimSpace(p.AuthToken) != "",
+		Models:   models,
+		ExtraEnv: extra,
 
 		CodexProviderName:  p.CodexProviderName,
 		CodexWireAPI:       p.CodexWireAPI,

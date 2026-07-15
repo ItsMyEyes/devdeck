@@ -270,7 +270,11 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
           onSplitDown={() => ctx.onSplitPane(pane.id, 'column')}
           onClose={() => ctx.onClosePane(pane.id)}
           isFocused={isFocused}
-          titleContent={activeContent?.kind === 'terminal' ? ctx.paneTitleContent?.(pane) : undefined}
+          // Worktree status/cost is one fact about the whole worktree, not
+          // per-pane — showing it on every split terminal pane just repeats
+          // the same "project root running · ..." block, so only the
+          // focused pane renders it.
+          titleContent={isFocused && activeContent?.kind === 'terminal' ? ctx.paneTitleContent?.(pane) : undefined}
           overflowActions={isFocused ? ctx.paneOverflowActions?.(pane) : undefined}
           newTabActions={ctx.paneNewTabActions?.(pane)}
         />

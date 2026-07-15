@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { STATE } from '@/lib/constants'
 import { fmtCost, fmtEl, fmtTok } from '@/lib/format'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Workspace } from '@/store/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,7 +27,6 @@ interface EditView {
   title: string
   sub: string
   dotColor: string
-  dotPulse: boolean
   isWorktree: boolean
   isRoot: boolean
   meta: { k: string; v: string }[]
@@ -113,7 +113,7 @@ export function EditDrawer() {
         <>
           {/* header */}
           <div className="flex flex-none items-start gap-2.5 border-b border-loom-border px-[18px] pb-3.5 pt-[18px]">
-            <StatusDot color={view.dotColor} pulse={view.dotPulse} style={{ marginTop: 4 }} />
+            <StatusDot color={view.dotColor} style={{ marginTop: 4 }} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate font-mono text-[14px] font-semibold text-loom-fg">
                 {view.isWorktree && <WorktreeGlyph root={view.isRoot} size={13} />}
@@ -227,10 +227,9 @@ function buildView(kind: string | null, id: string | null, workspaces: Workspace
     const p = workspaces.flatMap((ws) => ws.projects).find((pr) => pr.worktrees.some((x) => x.id === id))
     const base = p?.path ?? ''
     return {
-      title: w.root ? 'project root' : w.branch,
+      title: worktreeLabel(p, w),
       sub: `${st.label} · ${w.model}`,
       dotColor: st.color,
-      dotPulse: w.state === 'running' || w.state === 'waiting',
       isWorktree: true,
       isRoot: !!w.root,
       meta: [
@@ -250,7 +249,6 @@ function buildView(kind: string | null, id: string | null, workspaces: Workspace
       title: p.name,
       sub: `${p.worktrees.length} worktrees`,
       dotColor: prun > 0 ? STATE.running.color : '#5f6672',
-      dotPulse: prun > 0,
       isWorktree: false,
       isRoot: false,
       meta: [
@@ -268,7 +266,6 @@ function buildView(kind: string | null, id: string | null, workspaces: Workspace
     title: ws.name,
     sub: `${ws.projects.length} projects`,
     dotColor: '#6d8bff',
-    dotPulse: false,
     isWorktree: false,
     isRoot: false,
     meta: [

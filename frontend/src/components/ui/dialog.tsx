@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
+import { useLoomStore } from '@/store/useLoomStore'
 
 export const DialogPrimitive = BaseDialog
 
@@ -17,6 +18,15 @@ interface DialogProps {
 
 /** Centered modal card matching the loom overlay style. */
 export function Dialog({ open, onOpenChange, children, width = 480, z = 60, className }: DialogProps) {
+  const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
+  const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)
+
+  React.useEffect(() => {
+    if (!open) return
+    pushNativeOverlayBlocker()
+    return () => popNativeOverlayBlocker()
+  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
+
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseDialog.Portal>

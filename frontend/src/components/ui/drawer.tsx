@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
+import { useLoomStore } from '@/store/useLoomStore'
 
 interface SideDrawerProps {
   open: boolean
@@ -13,6 +14,15 @@ interface SideDrawerProps {
 
 /** Right-anchored settings drawer (worktree / project / workspace details). */
 export function SideDrawer({ open, onOpenChange, children, width = 380, z = 50, className }: SideDrawerProps) {
+  const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
+  const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)
+
+  useEffect(() => {
+    if (!open) return
+    pushNativeOverlayBlocker()
+    return () => popNativeOverlayBlocker()
+  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
+
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
       <BaseDialog.Portal>

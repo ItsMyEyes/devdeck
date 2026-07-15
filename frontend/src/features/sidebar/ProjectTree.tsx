@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from '@tanstack/react-router'
 import { ChevronDown, ChevronRight, House, Kanban, Plus } from 'lucide-react'
 import { STATE } from '@/lib/constants'
 import { cn } from '@/lib/utils'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Project } from '@/store/types'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
@@ -121,7 +122,7 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
           </div>
           <div className="mt-px truncate font-mono text-[9.5px] text-loom-dim-2">{p.path}</div>
         </div>
-        <StatusDot color={agg} pulse={running > 0 || hasWait} />
+        <StatusDot color={agg} />
         <span className="sr-only">{aggLabel}</span>
         <span className="flex-none font-mono text-[10.5px] text-loom-dim">{p.worktrees.length}</span>
       </div>
@@ -174,7 +175,7 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
                     : 'hover:bg-loom-hover-wash',
                 )}
               >
-                <StatusDot color={st.color} pulse={w.state === 'running' || w.state === 'waiting'} />
+                <StatusDot color={st.color} />
                 <WorktreeGlyph root={w.root} size={11} />
                 <span
                   className={cn(
@@ -182,7 +183,7 @@ function ProjectRow({ project: p, wsId }: { project: Project; wsId: string }) {
                     wsel ? 'text-loom-fg' : 'text-loom-muted',
                   )}
                 >
-                  {w.root ? 'project root' : w.branch}
+                  {worktreeLabel(p, w)}
                 </span>
                 <span className="flex-none font-mono text-[9.5px]" style={{ color: st.color }}>
                   {st.label}

@@ -62,8 +62,10 @@ func buildSessionCmd(session, agentBin, workDir string, args []string) *exec.Cmd
 // connection for a given session id, or reattaches — replaying buffered
 // output — if the session is already running from an earlier connection.
 // The PTY (and, for agent sessions, the agent process) lives in the
-// package-level registry and is not torn down when conn closes; it is only
-// killed after a grace period with nobody attached (see registry.detach).
+// package-level registry and is not torn down when conn closes: a detached
+// session keeps running (see registry.detach) so a background agent survives
+// the operator closing the tab, and is reclaimed only when its process exits
+// or it's killed explicitly (worktree deletion / spawned-pane tab close).
 func (s *Server) attachPTY(ctx context.Context, conn *websocket.Conn, session string, cols, rows int, agentBin, workDir string, args []string) error {
 	sess := s.registry.get(session)
 	if sess == nil {

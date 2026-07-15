@@ -14,7 +14,7 @@
     "pretypecheck": "vite build --outDir node_modules/.routegen --emptyOutDir --logLevel warn",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "cd .. && make sidecar-host && cd frontend && tauri dev",
+    "tauri:dev": "cd .. && make sidecar-host && cd frontend && LOOM_ROLE=${LOOM_ROLE:-both} LOOM_KEY=${LOOM_KEY:-dev-hub-key} tauri dev",
     "tauri:build": "tauri build"
   },
   "dependencies": {

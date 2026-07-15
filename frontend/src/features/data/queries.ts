@@ -100,6 +100,7 @@ import {
   fetchAgentMCPServers,
   fetchAgentModels,
   fetchAgentSettingsFile,
+  fetchAgentSkillContent,
   fetchAgentSkills,
   fetchAgents,
   fetchFsList,
@@ -123,6 +124,7 @@ import {
   searchWorktreeFiles,
   updateAgentEnvProfile,
   updateAgentSettingsFile,
+  updateAgentSkillContent,
   updateWorktree,
   writeWorktreeFile,
   createFsFolder,
@@ -657,6 +659,44 @@ export function useAgentSkills(machine: Machine | undefined, agentId: string | u
     queryFn: () => fetchAgentSkills(machine!, agentId!),
     enabled: !!machine && !!agentId,
     staleTime: 300_000,
+  })
+}
+
+export function useAgentSkillContent(
+  machine: Machine | undefined,
+  agentId: string | undefined,
+  skillName: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.agentSkillContent(machine?.id ?? '', agentId ?? '', skillName ?? ''),
+    queryFn: () => fetchAgentSkillContent(machine!, agentId!, skillName!),
+    enabled: enabled && !!machine && !!agentId && !!skillName,
+    staleTime: 10_000,
+    retry: false,
+  })
+}
+
+export function useUpdateAgentSkillContent() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      machine,
+      agentId,
+      skillName,
+      content,
+    }: {
+      machine: Machine
+      agentId: string
+      skillName: string
+      content: string
+    }) => updateAgentSkillContent(machine, agentId, skillName, content),
+    onSettled: (_data, _error, { machine, agentId, skillName }) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.agentSkillContent(machine.id, agentId, skillName) }),
+        queryClient.invalidateQueries({ queryKey: qk.agentSkills(machine.id, agentId) }),
+        queryClient.invalidateQueries({ queryKey: qk.agents(machine.id) }),
+      ]),
   })
 }
 

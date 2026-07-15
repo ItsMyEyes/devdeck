@@ -666,6 +666,7 @@ export interface CreateSSHConnectionBody {
   authType: 'password' | 'privatekey'
   password?: string
   privateKey?: string
+  privateKeyPath?: string
   passphrase?: string
 }
 

@@ -342,6 +342,8 @@ func main() {
 	mux.HandleFunc("GET /api/agents/{agentId}/skills", agentH.ListSkills)
 	mux.HandleFunc("POST /api/agents/{agentId}/skills/{skillName}", agentH.InstallSkill)
 	mux.HandleFunc("DELETE /api/agents/{agentId}/skills/{skillName}", agentH.RemoveSkill)
+	mux.HandleFunc("GET /api/agents/{agentId}/skills/{skillName}/content", agentH.GetSkillContent)
+	mux.HandleFunc("PUT /api/agents/{agentId}/skills/{skillName}/content", agentH.UpdateSkillContent)
 	mux.HandleFunc("GET /api/agents/{agentId}/mcp-servers", agentH.ListMCPServers)
 	mux.HandleFunc("POST /api/agents/{agentId}/mcp-servers", agentH.AddMCPServer)
 	mux.HandleFunc("DELETE /api/agents/{agentId}/mcp-servers/{serverName}", agentH.RemoveMCPServer)

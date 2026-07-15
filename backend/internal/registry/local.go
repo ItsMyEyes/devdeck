@@ -121,6 +121,22 @@ func (r *LocalRegistry) RemoveSkill(agentID, skillName string) error {
 	return detect.RemoveSkill(agentID, skillName)
 }
 
+// ReadSkillContent reads an installed skill's fixed SKILL.md file.
+func (r *LocalRegistry) ReadSkillContent(agentID, skillName string) (string, bool, bool, error) {
+	if !r.installed[agentID] {
+		return "", false, false, port.ErrAgentManagementUnsupported
+	}
+	return detect.ReadSkillContent(agentID, skillName)
+}
+
+// WriteSkillContent atomically updates an installed skill's SKILL.md file.
+func (r *LocalRegistry) WriteSkillContent(agentID, skillName, content string) error {
+	if !r.installed[agentID] {
+		return port.ErrAgentManagementUnsupported
+	}
+	return detect.WriteSkillContent(agentID, skillName, content)
+}
+
 // ListMCPServers reads redacted MCP configuration through the agent's CLI.
 func (r *LocalRegistry) ListMCPServers(agentID string) ([]domain.MCPServer, error) {
 	if !r.installed[agentID] {

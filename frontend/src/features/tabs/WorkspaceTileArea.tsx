@@ -153,13 +153,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     if (!worktree) return undefined
     const st = STATE[worktree.state]
     const project = projectsById.get(tab.projectId)
-    const machine = project?.machineId ? machinesById.get(project.machineId) : undefined
-    const short = machine && !machine.isLocal ? `${project?.name ?? 'project'} · ${machine.name}` : (project?.name ?? 'project')
     return {
       label: worktreeLabel(project, worktree),
       color: st.color,
-      pulse: worktree.state === 'running' || worktree.state === 'waiting',
-      short,
     }
   }
 
@@ -174,24 +170,37 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     return { label: connection?.name ?? 'SSH' }
   }
 
-  // Cmd+W closes the focused leaf's active tab (no-op on the Agents tab);
-  // Cmd+Shift+[ / Cmd+Shift+] cycle the focused leaf's own tab strip —
-  // scoped per-leaf now that tabs live inside panes instead of one global
-  // strip. metaKey only, matching the flat TabBar's prior shortcuts — see
-  // that spec's decision 9 for why ctrlKey would collide with
-  // ExpandedTerminal's own Ctrl+T/Ctrl+W handler.
+  // Cmd/Ctrl+T opens the workspace tab chooser outside a visible worktree
+  // terminal. Inside a worktree terminal, Cmd/Ctrl+T stays reserved for
+  // TerminalWorkspace's own "new terminal" tab, so Cmd/Ctrl+O opens the
+  // workspace tab chooser instead. Cmd/Ctrl+W closes the focused leaf's active
+  // tab, except visible worktree terminals handle their own pane tab strip.
+  // Cmd+Shift+[ / Cmd+Shift+] cycle the focused leaf's own tab strip.
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
-      if (!event.metaKey) return
+      const primary = event.metaKey || event.ctrlKey
+      if (!primary) return
       const leaf = findTileLeaf(layout.root, layout.focusedLeafId)
       if (!leaf || leaf.type !== 'leaf') return
 
-      if (event.key.toLowerCase() === 'w') {
-        if (leaf.activeTabId === 'agents') return
+      const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId)
+      const inTerminalWorkspace = showContent && activeTab?.kind === 'worktree'
+      const key = event.key.toLowerCase()
+
+      if ((key === 't' && !inTerminalWorkspace) || (key === 'o' && inTerminalWorkspace)) {
         event.preventDefault()
-        handleCloseTab(leaf.id, leaf.activeTabId)
+        handleNewTab(leaf.id)
         return
       }
+
+      if (key === 'w') {
+        if (leaf.activeTabId === 'agents') return
+        event.preventDefault()
+        if (!inTerminalWorkspace) handleCloseTab(leaf.id, leaf.activeTabId)
+        return
+      }
+
+      if (!event.metaKey) return
 
       if (event.key === '[' || event.key === ']') {
         event.preventDefault()
@@ -204,7 +213,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout])
+  }, [layout, showContent])
 
   return (
     <>
@@ -216,10 +225,17 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
             if (!project) return null
             return <WorktreeCardsGrid project={project} wsId={wsId} />
           },
-          worktree: ({ tab }) => {
+          worktree: ({ leafId, tab }) => {
             const worktree = worktrees.find((w) => w.id === tab.wtId)
             if (!worktree) return null
-            return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={tab.projectId} />
+            return (
+              <ExpandedTerminal
+                worktree={worktree}
+                wsId={wsId}
+                projectId={tab.projectId}
+                onPrimaryExit={() => void handleCloseTab(leafId, tab.id)}
+              />
+            )
           },
           browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
           sshShell: ({ tab }) => <SSHShellPane connectionId={tab.connectionId} />,

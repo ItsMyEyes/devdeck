@@ -2,6 +2,7 @@ package detect
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,14 +13,23 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"loom/backend/internal/domain"
 	"loom/backend/internal/port"
 )
 
+const maxSkillContentBytes = 2 << 20
+
 type skillLocation struct {
 	dir      string
 	readOnly bool
+}
+
+type skillContentTarget struct {
+	path     string
+	readOnly bool
+	linked   bool
 }
 
 // ReadSkills reads skills installed in the local directories understood by an
@@ -69,6 +79,188 @@ func ReadSkills(agentID string) []domain.Skill {
 		return strings.ToLower(skills[i].Name) < strings.ToLower(skills[j].Name)
 	})
 	return skills
+}
+
+// ReadSkillContent returns one installed skill's fixed SKILL.md file and its
+// effective mutability. Linked skills are writable only when their resolved
+// source remains inside a configured writable skill root.
+func ReadSkillContent(agentID, skillName string) (content string, readOnly, linked bool, err error) {
+	target, err := resolveSkillContentTarget(agentID, skillName)
+	if err != nil {
+		return "", false, false, err
+	}
+	raw, err := readSkillContentFile(target.path)
+	if err != nil {
+		return "", false, false, err
+	}
+	if err := validateSkillContent(raw, skillName); err != nil {
+		return "", false, false, err
+	}
+	return string(raw), target.readOnly, target.linked, nil
+}
+
+// WriteSkillContent atomically replaces one installed skill's SKILL.md file.
+func WriteSkillContent(agentID, skillName, content string) error {
+	target, err := resolveSkillContentTarget(agentID, skillName)
+	if err != nil {
+		return err
+	}
+	if target.readOnly {
+		return fmt.Errorf("skill %q is read-only: %w", skillName, port.ErrIntegrationConflict)
+	}
+	raw := []byte(content)
+	if err := validateSkillContent(raw, skillName); err != nil {
+		return err
+	}
+	info, err := os.Stat(target.path)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o600
+	}
+	return atomicWrite(target.path, raw, mode)
+}
+
+func resolveSkillContentTarget(agentID, skillName string) (skillContentTarget, error) {
+	if err := validateSkillName(skillName); err != nil {
+		return skillContentTarget{}, err
+	}
+	locations, err := agentSkillLocations(agentID)
+	if err != nil {
+		return skillContentTarget{}, err
+	}
+
+	var selected skillContentTarget
+	found := false
+	for _, location := range locations {
+		entries, err := os.ReadDir(location.dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			skillDir := filepath.Join(location.dir, entry.Name())
+			info, err := os.Lstat(skillDir)
+			if err != nil {
+				continue
+			}
+			resolvedDir, err := filepath.EvalSymlinks(skillDir)
+			if err != nil {
+				continue
+			}
+			resolvedInfo, err := os.Stat(resolvedDir)
+			if err != nil || !resolvedInfo.IsDir() {
+				continue
+			}
+			contentPath := filepath.Join(resolvedDir, "SKILL.md")
+			skill, ok := parseSkill(contentPath)
+			if !ok || skill.Name != skillName {
+				continue
+			}
+			linked := info.Mode()&os.ModeSymlink != 0
+			readOnly := location.readOnly
+			if linked && !readOnly {
+				writable, err := isManagedWritableSkillTarget(resolvedDir)
+				if err != nil {
+					return skillContentTarget{}, err
+				}
+				readOnly = !writable
+			}
+			candidate := skillContentTarget{path: contentPath, readOnly: readOnly, linked: linked}
+			if !found || (selected.readOnly && !candidate.readOnly) {
+				selected = candidate
+				found = true
+			}
+		}
+	}
+	if !found {
+		return skillContentTarget{}, fmt.Errorf("skill %q is not installed: %w", skillName, port.ErrIntegrationNotFound)
+	}
+	return selected, nil
+}
+
+func isManagedWritableSkillTarget(target string) (bool, error) {
+	ids := []string{"claude", "codex", "pi", "opencode", "gemini"}
+	writable := false
+	for _, agentID := range ids {
+		locations, err := agentSkillLocations(agentID)
+		if err != nil {
+			return false, err
+		}
+		for _, location := range locations {
+			contains, err := pathContains(location.dir, target)
+			if err != nil {
+				return false, err
+			}
+			if !contains {
+				continue
+			}
+			if location.readOnly {
+				return false, nil
+			}
+			writable = true
+		}
+	}
+	return writable, nil
+}
+
+func pathContains(root, target string) (bool, error) {
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	if resolved, err := filepath.EvalSymlinks(rootPath); err == nil {
+		rootPath = resolved
+	}
+	targetPath, err := filepath.Abs(target)
+	if err != nil {
+		return false, err
+	}
+	relative, err := filepath.Rel(rootPath, targetPath)
+	if err != nil {
+		return false, err
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && !filepath.IsAbs(relative), nil
+}
+
+func readSkillContentFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxSkillContentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxSkillContentBytes {
+		return nil, fmt.Errorf("skill content exceeds %d bytes: %w", maxSkillContentBytes, port.ErrIntegrationConflict)
+	}
+	return raw, nil
+}
+
+func validateSkillContent(content []byte, expectedName string) error {
+	if len(content) > maxSkillContentBytes {
+		return fmt.Errorf("skill content exceeds %d bytes: %w", maxSkillContentBytes, port.ErrIntegrationConflict)
+	}
+	if !utf8.Valid(content) {
+		return fmt.Errorf("skill content must be valid UTF-8: %w", port.ErrIntegrationConflict)
+	}
+	if bytes.IndexByte(content, 0) >= 0 {
+		return fmt.Errorf("skill content contains a NUL byte: %w", port.ErrIntegrationConflict)
+	}
+	skill, ok := parseSkillReader(bytes.NewReader(content))
+	if !ok {
+		return fmt.Errorf("skill content must include valid frontmatter with a name: %w", port.ErrIntegrationConflict)
+	}
+	if skill.Name != expectedName {
+		return fmt.Errorf("skill name must remain %q: %w", expectedName, port.ErrIntegrationConflict)
+	}
+	return nil
 }
 
 // InstallSkill links a skill that already exists in another supported agent's
@@ -347,16 +539,20 @@ func parseSkill(path string) (domain.Skill, bool) {
 		return domain.Skill{}, false
 	}
 	defer file.Close()
+	return parseSkillReader(file)
+}
 
+func parseSkillReader(reader io.Reader) (domain.Skill, bool) {
 	var (
 		inFrontmatter bool
 		started       bool
+		closed        bool
 		name          string
 		description   []string
 		category      string
 		inDescription bool
 	)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4<<10), 256<<10)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -367,6 +563,7 @@ func parseSkill(path string) (domain.Skill, bool) {
 			continue
 		}
 		if inFrontmatter && trimmed == "---" {
+			closed = true
 			break
 		}
 		if !inFrontmatter {
@@ -395,7 +592,7 @@ func parseSkill(path string) (domain.Skill, bool) {
 			category = cleanYAMLScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "category:")))
 		}
 	}
-	if name == "" {
+	if name == "" || !closed {
 		return domain.Skill{}, false
 	}
 	if category == "" {

@@ -106,9 +106,14 @@ export function createPrimaryTerminalContent(worktreeId: string): TerminalConten
   return { kind: 'terminal', id: worktreeId, sessionKey: worktreeId, label: 'Terminal' }
 }
 
+/** `seq` starts at 1 (see `nextTerminalSeq`) and the primary pane's own
+ *  Terminal content (unnumbered "Terminal") isn't allocated through here —
+ *  so the first spawned shell is "Terminal 2", keeping every open shell
+ *  tab in a pane's strip distinguishable instead of several identical
+ *  "Terminal" labels. */
 export function createTerminalContent(worktreeId: string, seq: number): TerminalContent {
   const sessionKey = `${worktreeId}::term-${seq}`
-  return { kind: 'terminal', id: sessionKey, sessionKey, label: 'Terminal' }
+  return { kind: 'terminal', id: sessionKey, sessionKey, label: `Terminal ${seq + 1}` }
 }
 
 /** Allocates a new non-primary Terminal content item and bumps

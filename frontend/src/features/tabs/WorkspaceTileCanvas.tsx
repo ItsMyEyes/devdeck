@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
@@ -36,10 +36,8 @@ export interface WorkspaceTileCanvasProps {
   /** Live label/status-color for a worktree tab, resolved by the caller
    *  from react-query data (not stored statically, since a worktree's
    *  branch/state can change while its tab stays open). `undefined` hides
-   *  the tab (e.g. a worktree deleted right before pruning catches up).
-   *  `short` is "project name · machine host" (machine omitted when local),
-   *  used only for the computed workspace title, not the tab pill itself. */
-  resolveWorktreeTab: (tab: WorktreeTileTab) => { label: string; color: string; pulse: boolean; short: string } | undefined
+   *  the tab (e.g. a worktree deleted right before pruning catches up). */
+  resolveWorktreeTab: (tab: WorktreeTileTab) => { label: string; color: string } | undefined
   /** Live title for a browser tab, resolved from the store's `browserTiles`
    *  slice (not stored in the tile tree itself). `undefined` hides the tab
    *  (mirrors `resolveWorktreeTab`'s contract). */
@@ -56,10 +54,19 @@ export interface WorkspaceTileCanvasProps {
   className?: string
 }
 
+interface ChromeRect {
+  left: number
+  width: number
+}
+
 interface TileRenderContext {
   topLeftLeafId: string
+  topChromeLeafIds: Set<string>
+  chromeRects: Record<string, ChromeRect>
+  registerLeafElement: (leafId: string, element: HTMLDivElement | null) => void
   /** "Workspace (A + B)" summary shown in the pinned strip once a split
-   *  exists; `null` while there's only one leaf (nothing to summarize). */
+   *  exists, using the same labels as the visible tab pills/sidebar rows;
+   *  `null` while there's only one leaf (nothing to summarize). */
   workspaceTitle: string | null
   renderers: WorkspaceTileCanvasProps['renderers']
   onFocusLeaf: (leafId: string) => void
@@ -77,9 +84,22 @@ function collectLeaves(node: TileNode): TileLeaf[] {
   return node.type === 'leaf' ? [node] : node.children.flatMap(collectLeaves)
 }
 
-/** Short display name for whichever tab is active in a leaf — 'Agents' for
- *  the pinned home tab, otherwise the worktree's `short` (project ·
- *  machine). Used to build the "Workspace (A + B)" summary title. */
+function collectTopChromeLeafIds(node: TileNode): string[] {
+  if (node.type === 'leaf') return [node.id]
+  if (node.children.length === 0) return []
+  if (node.direction === 'column') return collectTopChromeLeafIds(node.children[0])
+  return node.children.flatMap(collectTopChromeLeafIds)
+}
+
+function sameChromeRects(a: Record<string, ChromeRect>, b: Record<string, ChromeRect>) {
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every((key) => a[key]?.left === b[key]?.left && a[key]?.width === b[key]?.width)
+}
+
+/** Display name for whichever tab is active in a leaf — the same label used
+ *  by the tab pill/sidebar row. Used to build the "Workspace (A + B)" summary title. */
 function leafShortTitle(
   leaf: TileLeaf,
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab'],
@@ -91,7 +111,7 @@ function leafShortTitle(
   if (tab.kind === 'agents') return 'Agents'
   if (tab.kind === 'browser') return resolveBrowserTab(tab)?.label ?? 'Browser'
   if (tab.kind === 'ssh-shell') return resolveSSHShellTab(tab)?.label ?? 'SSH'
-  return resolveWorktreeTab(tab)?.short ?? tab.wtId
+  return resolveWorktreeTab(tab)?.label ?? tab.wtId
 }
 
 function clamp01(value: number): number {
@@ -288,7 +308,7 @@ function TileTabButton({
     return (
       <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
         <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
-          <StatusDot color={info.color} pulse={info.pulse} />
+          <StatusDot color={info.color} />
           <span className="truncate">{info.label}</span>
         </button>
         {closeButton(info.label)}
@@ -338,30 +358,51 @@ function TileTabButton({
  *  it can also render standalone (no body, no other leaves) as the
  *  persistent chrome on non-tiled workspace routes — see `showContent` on
  *  `WorkspaceTileCanvas`. */
-function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: boolean; ctx: TileRenderContext }) {
+function TileLeafHeader({
+  leaf,
+  isTopLeft,
+  topChrome,
+  chromeRect,
+  ctx,
+}: {
+  leaf: TileLeaf
+  isTopLeft: boolean
+  topChrome: boolean
+  chromeRect?: ChromeRect
+  ctx: TileRenderContext
+}) {
   const { setNodeRef: setHeaderDropRef } = useDroppable({
     id: `${leaf.id}::header`,
     data: { leafId: leaf.id, forceCenter: true },
   })
+  const headerStyle: CSSProperties | undefined = topChrome
+    ? chromeRect
+      ? { left: chromeRect.left, width: chromeRect.width }
+      : isTopLeft
+        ? { left: 0, right: 0 }
+        : { visibility: 'hidden' }
+    : undefined
 
   return (
     <div
       ref={setHeaderDropRef}
+      style={headerStyle}
       className={cn(
         'flex items-center overflow-x-auto border-b border-loom-border bg-loom-surface',
-        isTopLeft
-          ? // The top-left leaf's strip is pinned to the true viewport origin
-            // (not just "first in flow") so it visually merges with macOS's
-            // overlaid traffic-light buttons regardless of Header/Sidebar
-            // nesting above/beside it — see w.$wsId.tsx's matching `pt-10`,
-            // which reserves this exact height so nothing renders underneath.
-            'fixed left-0 right-0 top-0 z-40 h-10'
-          : // Every other leaf is a lightweight mini-header, not a second
-            // full tab strip — shorter, no title text, no drag region.
+        topChrome
+          ? // Every leaf touching the workspace's top edge gets a real chrome
+            // strip. The first one starts at the true viewport edge so it
+            // still fuses with macOS's overlaid traffic lights; sibling top
+            // strips are measured to their split column, filling the blank
+            // upper area instead of pushing a second row into the pane body.
+            'fixed top-0 z-40 h-10'
+          : // Lower split panes keep the lighter in-pane header; they don't
+            // compete with the app chrome or steal vertical space from top panes.
             'h-8 flex-none',
+        topChrome && !isTopLeft && 'border-l border-loom-border',
       )}
     >
-      {isTopLeft ? (
+      {topChrome && isTopLeft ? (
         <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
       ) : null}
       {leaf.tabs.map((tab, i) => (
@@ -370,7 +411,7 @@ function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: b
             leafId={leaf.id}
             tab={tab}
             active={tab.id === leaf.activeTabId}
-            compact={!isTopLeft}
+            compact={!topChrome}
             resolveWorktreeTab={ctx.resolveWorktreeTab}
             resolveBrowserTab={ctx.resolveBrowserTab}
             resolveSSHShellTab={ctx.resolveSSHShellTab}
@@ -389,14 +430,14 @@ function TileLeafHeader({ leaf, isTopLeft, ctx }: { leaf: TileLeaf; isTopLeft: b
         aria-label="New tab"
         className={cn(
           'ml-1 flex flex-none items-center justify-center rounded-lg text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg',
-          isTopLeft ? 'h-7 w-7' : 'h-6 w-6',
+          topChrome ? 'h-7 w-7' : 'h-6 w-6',
         )}
       >
-        <Plus size={isTopLeft ? 13 : 11} />
+        <Plus size={topChrome ? 13 : 11} />
       </button>
-      {isTopLeft ? (
+      {topChrome ? (
         <div data-tauri-drag-region className="flex h-full flex-1 items-center justify-center overflow-hidden px-2">
-          {ctx.workspaceTitle ? (
+          {isTopLeft && ctx.workspaceTitle ? (
             <span className="truncate font-mono text-[11px] text-loom-dim">{ctx.workspaceTitle}</span>
           ) : null}
         </div>
@@ -409,10 +450,16 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
   const { setNodeRef } = useDroppable({ id: leaf.id, data: { leafId: leaf.id } })
   const hoverZone = ctx.hoverZone && ctx.hoverZone.leafId === leaf.id ? ctx.hoverZone.zone : null
   const isTopLeft = leaf.id === ctx.topLeftLeafId
+  const topChrome = ctx.topChromeLeafIds.has(leaf.id)
+  const registerLeafElement = ctx.registerLeafElement
+  const setLeafRef = useCallback(
+    (element: HTMLDivElement | null) => registerLeafElement(leaf.id, element),
+    [leaf.id, registerLeafElement],
+  )
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
-      <TileLeafHeader leaf={leaf} isTopLeft={isTopLeft} ctx={ctx} />
+    <div ref={setLeafRef} className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
+      <TileLeafHeader leaf={leaf} isTopLeft={isTopLeft} topChrome={topChrome} chromeRect={ctx.chromeRects[leaf.id]} ctx={ctx} />
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {leaf.tabs.map((tab) => (
           <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
@@ -459,9 +506,14 @@ export function WorkspaceTileCanvas({
 }: WorkspaceTileCanvasProps) {
   const [dragTab, setDragTab] = useState<TileTab | null>(null)
   const [hoverZone, setHoverZone] = useState<{ leafId: string; zone: TileDropZone } | null>(null)
+  const [chromeRects, setChromeRects] = useState<Record<string, ChromeRect>>({})
+  const rootRef = useRef<HTMLDivElement>(null)
+  const leafElementsRef = useRef(new Map<string, HTMLDivElement>())
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const topLeftLeafId = useMemo(() => firstLeafId(root) ?? root.id, [root])
+  const topChromeLeafIdList = useMemo(() => collectTopChromeLeafIds(root), [root])
+  const topChromeLeafIds = useMemo(() => new Set(topChromeLeafIdList), [topChromeLeafIdList])
   const topLeftLeaf = useMemo(() => {
     const found = findTileLeaf(root, topLeftLeafId)
     return found?.type === 'leaf' ? found : null
@@ -476,6 +528,47 @@ export function WorkspaceTileCanvas({
       .filter(Boolean)
     return titles.length > 1 ? `Workspace (${titles.join(' + ')})` : null
   }, [root, resolveWorktreeTab, resolveBrowserTab, resolveSSHShellTab])
+
+  const registerLeafElement = useCallback((leafId: string, element: HTMLDivElement | null) => {
+    if (element) leafElementsRef.current.set(leafId, element)
+    else leafElementsRef.current.delete(leafId)
+  }, [])
+
+  const measureChromeRects = useCallback(() => {
+    const viewportWidth = window.innerWidth
+    const next: Record<string, ChromeRect> = {}
+
+    for (const leafId of topChromeLeafIdList) {
+      const element = leafElementsRef.current.get(leafId)
+      if (!element) continue
+      const rect = element.getBoundingClientRect()
+      const left = leafId === topLeftLeafId ? 0 : Math.max(0, rect.left)
+      const right = Math.min(viewportWidth, Math.max(left, rect.right))
+      next[leafId] = {
+        left: Math.round(left),
+        width: Math.max(0, Math.round(right - left)),
+      }
+    }
+
+    setChromeRects((current) => (sameChromeRects(current, next) ? current : next))
+  }, [topChromeLeafIdList, topLeftLeafId])
+
+  useLayoutEffect(() => {
+    measureChromeRects()
+
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureChromeRects)
+    if (rootRef.current) observer?.observe(rootRef.current)
+    for (const leafId of topChromeLeafIdList) {
+      const element = leafElementsRef.current.get(leafId)
+      if (element) observer?.observe(element)
+    }
+    window.addEventListener('resize', measureChromeRects)
+
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measureChromeRects)
+    }
+  }, [measureChromeRects, topChromeLeafIdList])
 
   const handleResizeSplit = useCallback(
     (splitId: string, sizes: number[]) => {
@@ -521,6 +614,9 @@ export function WorkspaceTileCanvas({
 
   const ctx: TileRenderContext = {
     topLeftLeafId,
+    topChromeLeafIds,
+    chromeRects,
+    registerLeafElement,
     workspaceTitle,
     renderers,
     onFocusLeaf,
@@ -542,11 +638,11 @@ export function WorkspaceTileCanvas({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
+      <div ref={rootRef} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
         {showContent ? (
           <TileNodeView node={root} ctx={ctx} />
         ) : topLeftLeaf ? (
-          <TileLeafHeader leaf={topLeftLeaf} isTopLeft ctx={ctx} />
+          <TileLeafHeader leaf={topLeftLeaf} isTopLeft topChrome ctx={ctx} />
         ) : null}
       </div>
       <DragOverlay>

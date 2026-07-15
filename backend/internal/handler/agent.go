@@ -78,6 +78,34 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetSkillContent returns one installed skill's fixed SKILL.md file.
+func (h *AgentHandler) GetSkillContent(w http.ResponseWriter, r *http.Request) {
+	content, err := h.svc.GetSkillContent(r.PathValue("agentId"), r.PathValue("skillName"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, content)
+}
+
+// UpdateSkillContent writes one installed skill's fixed SKILL.md file.
+func (h *AgentHandler) UpdateSkillContent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := h.svc.UpdateSkillContent(
+		r.PathValue("agentId"),
+		r.PathValue("skillName"),
+		body.Content,
+	); handleStoreErr(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ListMCPServers returns redacted native MCP configuration for one agent.
 func (h *AgentHandler) ListMCPServers(w http.ResponseWriter, r *http.Request) {
 	servers, err := h.svc.ListMCPServers(r.PathValue("agentId"))

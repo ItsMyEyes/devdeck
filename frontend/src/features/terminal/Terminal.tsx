@@ -47,11 +47,20 @@ interface TerminalProps {
   /** When true, the next single keystroke is sent as its Ctrl+key control code. */
   ctrlArmed?: boolean
   onCtrlConsumed?: () => void
+  onExit?: () => void
+}
+
+function isTerminalExitedFrame(data: string) {
+  try {
+    return (JSON.parse(data) as { t?: unknown }).t === 'x'
+  } catch {
+    return false
+  }
 }
 
 /** xterm.js terminal wired to the loom WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
-  { session, machine, ctrlArmed = false, onCtrlConsumed },
+  { session, machine, ctrlArmed = false, onCtrlConsumed, onExit },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -60,6 +69,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const outbox = useRef<string[]>([])
   const ctrlArmedRef = useRef(ctrlArmed)
   const onCtrlConsumedRef = useRef(onCtrlConsumed)
+  const onExitRef = useRef(onExit)
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -72,6 +82,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   useEffect(() => {
     onCtrlConsumedRef.current = onCtrlConsumed
   }, [onCtrlConsumed])
+  useEffect(() => {
+    onExitRef.current = onExit
+  }, [onExit])
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
@@ -146,6 +159,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // round-trip, which reads as a "refresh" on every mobile socket drop.
     let resetOnNextFrame = false
     let resolvedUrl: string | null = null
+    let exited = false
+
+    const handleExit = () => {
+      if (exited || disposed) return
+      exited = true
+      onExitRef.current?.()
+    }
 
     const connect = () => {
       if (disposed || !resolvedUrl) return
@@ -162,6 +182,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         outbox.current = []
       }
       ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string' && isTerminalExitedFrame(ev.data)) {
+          handleExit()
+          return
+        }
         if (resetOnNextFrame) {
           resetOnNextFrame = false
           term.reset()
@@ -169,7 +193,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (typeof ev.data === 'string') term.write(ev.data)
         else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
       }
-      ws.onclose = () => scheduleReconnect()
+      ws.onclose = (event) => {
+        if (event.reason === 'terminal exited') handleExit()
+        else if (!exited) scheduleReconnect()
+      }
       ws.onerror = () => {
         if (!everOpened) {
           term.write('\r\n\x1b[38;5;210m[connection error — is the terminal server running?]\x1b[0m\r\n')

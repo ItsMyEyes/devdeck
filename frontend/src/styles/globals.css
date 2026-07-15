@@ -184,22 +184,10 @@
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
 
-  --animate-pulse-dot: agpulse 1.8s ease-in-out infinite;
   --animate-blink: agblink 1.1s step-end infinite;
   --animate-slide-in: agslidein 0.18s ease;
 }
 
-@keyframes agpulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.35);
-    opacity: 0.65;
-  }
-}
 @keyframes agblink {
   0%,
   50% {

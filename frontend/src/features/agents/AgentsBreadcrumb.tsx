@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 import { WorktreeGlyph } from './WorktreeGlyph'
 import { useScope } from '@/features/useScope'
 import { useWorkspace } from '@/features/data/queries'
@@ -48,7 +49,7 @@ export function AgentsBreadcrumb() {
           <span className="text-loom-dim-3">/</span>
           <WorktreeGlyph root={worktree.root} size={12} />
           <span className="max-w-[200px] truncate whitespace-nowrap font-mono text-[12px] text-loom-fg-2">
-            {worktree.root ? 'project root' : worktree.branch}
+            {worktreeLabel(project ?? undefined, worktree)}
           </span>
         </>
       ) : (

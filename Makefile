@@ -126,10 +126,11 @@ sidecar-host: prepare-webui
 # Run the desktop app in dev mode: builds the host-triple sidecar, then
 # `tauri dev` opens a native window against the Vite dev server (:5173) —
 # beforeDevCommand in tauri.conf.json runs `npm run dev`, which also starts
-# the Go backend (:8989), so no separate `make dev`/`dev-api` is needed.
-# Hot-reloads on frontend changes; rerun this target after Go/Rust changes.
+# the Go backend (:8989) as --role both, so no separate `make dev`/`dev-api`
+# is needed. Hot-reloads on frontend changes; rerun this target after Go/Rust
+# changes.
 dev-tauri:
-	cd frontend && npm run tauri:dev
+	cd frontend && LOOM_ROLE=both LOOM_KEY=$(DEV_HUB_KEY) npm run tauri:dev
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check
@@ -152,7 +153,8 @@ install:
 
 # ── Release ──────────────────────────────────────────────────
 # Cut a release: creates an annotated semver tag and pushes it, which
-# triggers .github/workflows/release.yml (test, portable-all, GH Release).
+# triggers .github/workflows/release.yml (test, portable-all + desktop
+# builds, GH Release).
 # Usage: make tag VERSION=v1.2.3
 tag:
 	@test -n "$(VERSION)" || (echo "Usage: make tag VERSION=v1.2.3"; exit 1)
