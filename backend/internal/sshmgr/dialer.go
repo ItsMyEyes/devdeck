@@ -2,9 +2,10 @@
 // interactive shell now; SFTP and port forwarding in later phases (see
 // docs/superpowers/specs/2026-07-14-ssh-management-design.md). It is a
 // sibling of internal/terminal, not an extension of it: sessions are backed
-// by golang.org/x/crypto/ssh instead of a local PTY, and Phase 1 always
-// executes on this process (ExecutorMachineID routing and jump-host
-// chaining are later phases).
+// by golang.org/x/crypto/ssh instead of a local PTY. Dial resolves
+// JumpConnectionID chains (bastion hops); ExecutorMachineID routing to a
+// non-hub runtime is still a later phase — Dial always executes on this
+// process regardless of ExecutorMachineID.
 package sshmgr
 
 import (
@@ -41,6 +42,15 @@ type ConnStore interface {
 // before the next connect can proceed.
 var ErrHostKeyChanged = errors.New("host key changed")
 
+// ErrJumpChainCycle means a connection's JumpConnectionID chain loops back
+// on itself. The handler layer also validates this on write, so this only
+// fires for chains that became cyclic after the fact (e.g. concurrent edits).
+var ErrJumpChainCycle = errors.New("jump connection chain forms a cycle")
+
+// maxJumpChainDepth bounds how many bastion hops Dial will follow — mirrors
+// handler.maxJumpChainDepth so writes and reads agree on the limit.
+const maxJumpChainDepth = 8
+
 // Dialer opens authenticated ssh.Clients for saved connections.
 type Dialer struct {
 	store   ConnStore
@@ -55,7 +65,26 @@ func NewDialer(store ConnStore, secrets SecretSource) *Dialer {
 // TOFU host keys: an empty fingerprint is pinned on the first successful
 // key exchange; a pinned fingerprint must match exactly or the dial fails
 // with ErrHostKeyChanged.
+//
+// When the connection has a JumpConnectionID, Dial first resolves that
+// connection (recursively — chains longer than one hop work for free) and
+// tunnels the target handshake through the resulting *ssh.Client's own
+// Dial, the standard nested-client bastion pattern. Each hop's tunneled
+// client is closed automatically once the client it feeds into disconnects,
+// so a multi-hop chain doesn't leak intermediate connections.
 func (d *Dialer) Dial(ctx context.Context, connectionID string) (*ssh.Client, error) {
+	return d.dial(ctx, connectionID, map[string]bool{})
+}
+
+func (d *Dialer) dial(ctx context.Context, connectionID string, visited map[string]bool) (*ssh.Client, error) {
+	if visited[connectionID] {
+		return nil, fmt.Errorf("%w at connection %s", ErrJumpChainCycle, connectionID)
+	}
+	if len(visited) >= maxJumpChainDepth {
+		return nil, fmt.Errorf("jump connection chain exceeds max depth of %d", maxJumpChainDepth)
+	}
+	visited[connectionID] = true
+
 	conn, err := d.store.SSHConnectionByID(connectionID)
 	if err != nil {
 		return nil, err
@@ -71,16 +100,47 @@ func (d *Dialer) Dial(ctx context.Context, connectionID string) (*ssh.Client, er
 		Timeout:         dialTimeout,
 	}
 	addr := net.JoinHostPort(conn.Host, fmt.Sprint(conn.Port))
-	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
+
+	var nc net.Conn
+	var jumpClient *ssh.Client
+	if conn.JumpConnectionID != nil && *conn.JumpConnectionID != "" {
+		jumpClient, err = d.dial(ctx, *conn.JumpConnectionID, visited)
+		if err != nil {
+			return nil, fmt.Errorf("dial jump connection: %w", err)
+		}
+		nc, err = jumpClient.Dial("tcp", addr)
+		if err != nil {
+			jumpClient.Close()
+			return nil, fmt.Errorf("dial %s via jump host: %w", addr, err)
+		}
+	} else {
+		nc, err = (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: %w", addr, err)
+		}
 	}
+
 	sc, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
 	if err != nil {
 		nc.Close()
+		if jumpClient != nil {
+			jumpClient.Close()
+		}
 		return nil, err
 	}
-	return ssh.NewClient(sc, chans, reqs), nil
+	client := ssh.NewClient(sc, chans, reqs)
+	if jumpClient != nil {
+		// Tie the jump hop's lifetime to this hop's: once this client
+		// disconnects (caller Close, or the transport dying on its own),
+		// tear down the jump client too. Recurses naturally through
+		// arbitrarily long chains since each hop wires only its own
+		// immediate jump client this way.
+		go func() {
+			client.Wait()
+			jumpClient.Close()
+		}()
+	}
+	return client, nil
 }
 
 func (d *Dialer) authMethods(conn domain.SSHConnection) ([]ssh.AuthMethod, error) {

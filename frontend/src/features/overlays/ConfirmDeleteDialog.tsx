@@ -33,6 +33,8 @@ export function ConfirmDeleteDialog() {
   const cancelConfirm = useLoomStore((s) => s.cancelConfirm)
   const showToast = useLoomStore((s) => s.showToast)
   const removeWorktreeLayout = useLoomStore((s) => s.removeWorktreeLayout)
+  const closeWorktreeTab = useLoomStore((s) => s.closeWorktreeTab)
+  const selectAgentsTab = useLoomStore((s) => s.selectAgentsTab)
   const workspaces = useWorkspaces().data ?? []
   const machines = useMachines().data
   const deleteWorktree = useDeleteWorktree()
@@ -65,7 +67,9 @@ export function ConfirmDeleteDialog() {
           cancelConfirm()
           toast()
           removeWorktreeLayout(id)
+          if (parentWs) closeWorktreeTab(parentWs.id, id)
           if (affectsCurrent && parent && parentWs) {
+            selectAgentsTab(parentWs.id)
             navigate({ to: '/w/$wsId/p/$projectId', params: { wsId: parentWs.id, projectId: parent.id } })
           }
         },
@@ -80,9 +84,14 @@ export function ConfirmDeleteDialog() {
         onSuccess: () => {
           cancelConfirm()
           toast()
-          worktreeIds.forEach(removeWorktreeLayout)
-          // The workspace index route redirects to the next project (or AgentsEmpty).
-          if (affectsCurrent && ws) navigate({ to: '/w/$wsId', params: { wsId: ws.id } })
+          worktreeIds.forEach((worktreeId) => {
+            removeWorktreeLayout(worktreeId)
+            if (ws) closeWorktreeTab(ws.id, worktreeId)
+          })
+          if (affectsCurrent && ws) {
+            selectAgentsTab(ws.id)
+            navigate({ to: '/w/$wsId', params: { wsId: ws.id } })
+          }
         },
       })
     } else if (kind === 'machine') {

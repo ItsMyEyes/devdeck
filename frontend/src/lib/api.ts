@@ -660,6 +660,7 @@ export function fetchMachineHealth(id: string): Promise<MachineHealth> {
 
 export interface CreateSSHConnectionBody {
   name: string
+  group?: string
   host: string
   port: number
   username: string
@@ -668,6 +669,10 @@ export interface CreateSSHConnectionBody {
   privateKey?: string
   privateKeyPath?: string
   passphrase?: string
+  /** Chains this connection through another saved connection for bastion hops. */
+  jumpConnectionId?: string | null
+  /** Which Machine dials this host; null/omitted means the hub decides. */
+  executorMachineId?: string | null
 }
 
 export type UpdateSSHConnectionBody = Partial<CreateSSHConnectionBody>

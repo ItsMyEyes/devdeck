@@ -18,7 +18,7 @@ import type {
   TermLine,
   Worktree,
 } from '@/store/types'
-import { machineRequest } from './machineClient'
+import { machineFetch, machineRequest } from './machineClient'
 
 // ---- Worktrees ----
 
@@ -103,12 +103,50 @@ export function deleteWorktreeFile(machine: Machine, worktreeId: string, path: s
   return machineRequest<void>(machine, 'DELETE', `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`)
 }
 
-export function searchWorktreeFiles(machine: Machine, worktreeId: string, pattern: string): Promise<string[]> {
-  return machineRequest<string[]>(
-    machine,
-    'GET',
-    `/worktrees/${worktreeId}/files/search?pattern=${encodeURIComponent(pattern)}`,
-  )
+export function uploadWorktreeFiles(
+  machine: Machine,
+  worktreeId: string,
+  folderPath: string,
+  files: readonly File[],
+): Promise<WorktreeFileEntry[]> {
+  const form = new FormData()
+  for (const file of files) form.append('file', file)
+  return machineFetch(machine, `/worktrees/${worktreeId}/files/upload?path=${encodeURIComponent(folderPath)}`, {
+    method: 'POST',
+    body: form,
+  }).then((res) => res.json() as Promise<WorktreeFileEntry[]>)
+}
+
+export function deleteWorktreePaths(machine: Machine, worktreeId: string, paths: readonly string[]): Promise<void> {
+  return machineRequest<void>(machine, 'POST', `/worktrees/${worktreeId}/files/delete`, { paths })
+}
+
+export async function downloadWorktreeZip(
+  machine: Machine,
+  worktreeId: string,
+  paths: readonly string[],
+): Promise<Blob> {
+  const res = await machineFetch(machine, `/worktrees/${worktreeId}/files/zip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  })
+  return res.blob()
+}
+
+export interface SearchWorktreeFilesOptions {
+  includeDirs?: boolean
+}
+
+export function searchWorktreeFiles(
+  machine: Machine,
+  worktreeId: string,
+  pattern: string,
+  options: SearchWorktreeFilesOptions = {},
+): Promise<string[]> {
+  const params = new URLSearchParams({ pattern })
+  if (options.includeDirs) params.set('includeDirs', '1')
+  return machineRequest<string[]>(machine, 'GET', `/worktrees/${worktreeId}/files/search?${params}`)
 }
 
 // ---- Worktree git (source control) ----

@@ -15,8 +15,17 @@ interface FileQuickOpenProps {
   onOpenFile: (path: string) => void
 }
 
+function isDirectoryResult(path: string) {
+  return path.endsWith('/')
+}
+
+function withoutDirectoryMarker(path: string) {
+  return isDirectoryResult(path) ? path.slice(0, -1) : path
+}
+
 function basename(path: string) {
-  return path.split('/').pop() ?? path
+  const clean = withoutDirectoryMarker(path)
+  return clean.split('/').pop() ?? clean
 }
 
 export function FileQuickOpen({
@@ -30,7 +39,7 @@ export function FileQuickOpen({
   const [pattern, setPattern] = useState('')
   const [selected, setSelected] = useState(0)
   const deferredPattern = useDeferredValue(pattern)
-  const search = useWorktreeFileSearch(machine, worktreeId, deferredPattern, open)
+  const search = useWorktreeFileSearch(machine, worktreeId, deferredPattern, open, { includeDirs: true })
   const results = search.data ?? []
   const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
   const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)
@@ -59,6 +68,12 @@ export function FileQuickOpen({
   if (!open) return null
 
   function choose(path: string) {
+    if (isDirectoryResult(path)) {
+      setPattern(path)
+      setSelected(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
+      return
+    }
     onOpenFile(path)
     onClose()
   }
@@ -87,7 +102,7 @@ export function FileQuickOpen({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Find file by regular expression"
+        aria-label="Find file or folder"
         onMouseDown={(event) => event.stopPropagation()}
         className="flex max-h-[68vh] w-full max-w-[680px] flex-col overflow-hidden rounded-lg border border-loom-border-menu bg-loom-popover shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
       >
@@ -98,12 +113,12 @@ export function FileQuickOpen({
             value={pattern}
             onChange={(event) => setPattern(event.target.value)}
             onKeyDown={handleKeydown}
-            aria-label="File path regular expression"
-            placeholder="Regex: ^src/.*\\.tsx$"
+            aria-label="File or folder search"
+            placeholder="Search files/folders: terminal file editor"
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-loom-fg outline-none placeholder:text-loom-dim"
           />
           <span className="rounded border border-loom-border-strong bg-loom-terminal px-1.5 py-0.5 font-mono text-[9.5px] text-loom-dim">
-            RE2
+            Fuzzy
           </span>
           <button
             type="button"
@@ -127,33 +142,41 @@ export function FileQuickOpen({
           ) : results.length === 0 ? (
             <div className="flex h-24 flex-col items-center justify-center gap-2 text-loom-dim">
               <FileSearch size={20} />
-              <span className="font-mono text-[11px]">No matching files</span>
+              <span className="font-mono text-[11px]">No matching files or folders</span>
             </div>
           ) : (
-            results.map((path, index) => (
-              <button
-                key={path}
-                type="button"
-                onMouseEnter={() => setSelected(index)}
-                onClick={() => choose(path)}
-                className={`flex h-9 w-full cursor-pointer items-center gap-2.5 px-3 text-left ${
-                  index === selected ? 'bg-loom-accent-tint' : 'hover:bg-loom-hover-wash'
-                }`}
-              >
-                <MaterialFileIcon name={basename(path)} size={17} />
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-loom-fg-2">
-                  {path}
-                </span>
-              </button>
-            ))
+            results.map((path, index) => {
+              const isDir = isDirectoryResult(path)
+              return (
+                <button
+                  key={path}
+                  type="button"
+                  onMouseEnter={() => setSelected(index)}
+                  onClick={() => choose(path)}
+                  className={`flex h-9 w-full cursor-pointer items-center gap-2.5 px-3 text-left ${
+                    index === selected ? 'bg-loom-accent-tint' : 'hover:bg-loom-hover-wash'
+                  }`}
+                >
+                  <MaterialFileIcon name={basename(path)} isDir={isDir} size={17} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-loom-fg-2">
+                    {path}
+                  </span>
+                  {isDir ? (
+                    <span className="flex-none rounded border border-loom-border-strong px-1.5 py-0.5 font-mono text-[9px] text-loom-dim">
+                      folder
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })
           )}
         </div>
 
         <div className="flex h-8 flex-none items-center gap-3 border-t border-loom-border bg-loom-surface px-3 font-mono text-[9.5px] text-loom-dim">
           <span>↑↓ select</span>
-          <span>Enter open</span>
+          <span>Enter open / narrow folder</span>
           <span>Esc close</span>
-          <span className="ml-auto">Regular expression path matching</span>
+          <span className="ml-auto">Fuzzy path matching; regex still works</span>
         </div>
       </div>
     </div>

@@ -149,6 +149,7 @@ export interface Machine {
 export interface SSHConnection {
   id: string
   name: string
+  group: string
   host: string
   port: number
   username: string

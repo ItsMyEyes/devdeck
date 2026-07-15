@@ -95,6 +95,7 @@ import {
   deactivateAgentEnvProfile,
   deleteWorktree,
   deleteWorktreeFile,
+  deleteWorktreePaths,
   fetchAgentEnvModels,
   fetchAgentEnvProfiles,
   fetchAgentMCPServers,
@@ -126,6 +127,7 @@ import {
   updateAgentSettingsFile,
   updateAgentSkillContent,
   updateWorktree,
+  uploadWorktreeFiles,
   writeWorktreeFile,
   createFsFolder,
   type AddMCPServerBody,
@@ -133,6 +135,7 @@ import {
   type CreateWorktreeBody,
   type EnvProfileInput,
   type EnvProfilePatch,
+  type SearchWorktreeFilesOptions,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
 import { qk } from './keys'
@@ -1004,10 +1007,17 @@ export function useWorktreeFile(machine: Machine, worktreeId: string, path: stri
   })
 }
 
-export function useWorktreeFileSearch(machine: Machine, worktreeId: string, pattern: string, enabled: boolean) {
+export function useWorktreeFileSearch(
+  machine: Machine,
+  worktreeId: string,
+  pattern: string,
+  enabled: boolean,
+  options: SearchWorktreeFilesOptions = {},
+) {
+  const mode = options.includeDirs ? 'with-dirs' : 'files-only'
   return useQuery({
-    queryKey: qk.worktreeFileSearch(machine.id, worktreeId, pattern),
-    queryFn: () => searchWorktreeFiles(machine, worktreeId, pattern),
+    queryKey: [...qk.worktreeFileSearch(machine.id, worktreeId, pattern), mode] as const,
+    queryFn: () => searchWorktreeFiles(machine, worktreeId, pattern, options),
     enabled: enabled && worktreeId.length > 0,
     staleTime: 0,
   })
@@ -1030,6 +1040,26 @@ export function useDeleteWorktreeFile(machine: Machine, worktreeId: string) {
     mutationFn: (path: string) => deleteWorktreeFile(machine, worktreeId, path),
     onSuccess: (_result, path) => {
       queryClient.removeQueries({ queryKey: qk.worktreeFile(machine.id, worktreeId, path) })
+      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
+    },
+  })
+}
+
+export function useUploadWorktreeFiles(machine: Machine, worktreeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ folderPath, files }: { folderPath: string; files: readonly File[] }) =>
+      uploadWorktreeFiles(machine, worktreeId, folderPath, files),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }),
+  })
+}
+
+export function useDeleteWorktreePaths(machine: Machine, worktreeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (paths: readonly string[]) => deleteWorktreePaths(machine, worktreeId, paths),
+    onSuccess: (_result, paths) => {
+      for (const path of paths) queryClient.removeQueries({ queryKey: qk.worktreeFile(machine.id, worktreeId, path) })
       return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
     },
   })

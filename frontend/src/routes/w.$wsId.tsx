@@ -15,13 +15,12 @@ import { useLoomStore } from '@/store/useLoomStore'
 
 /** Matches only the worktree route, e.g. /w/abc/p/def/wt/ghi (the ExpandedTerminal screen). */
 const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
-/** Matches the Agents grid or a worktree terminal — the two routes where
- *  `WorkspaceTileArea` renders its own tiling body (leaf content), bypassing
- *  `<Outlet/>`. Every other workspace route (Machines, Tools, News, ...)
- *  keeps rendering via `<Outlet/>` — but `WorkspaceTileArea`'s pinned tab
- *  strip stays mounted and visible regardless, as persistent Tauri chrome;
- *  see `showContent` below. */
-const AGENTS_SCOPE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+(\/wt\/[^/]+)?$/
+/** Matches workspace routes whose body is owned by the persisted tile tree:
+ *  all-project agents, browser tiles, project agents, and worktree terminals.
+ *  Every other workspace route (Machines, Tools, News, ...) keeps rendering via
+ *  `<Outlet/>` — but `WorkspaceTileArea`'s pinned tab strip stays mounted and
+ *  visible regardless, as persistent Tauri chrome; see `showContent` below. */
+const TILED_SCOPE_PATTERN = /^\/w\/[^/]+(?:\/browser|\/p\/[^/]+(?:\/wt\/[^/]+)?)?\/?$/
 
 export const Route = createFileRoute('/w/$wsId')({
   beforeLoad: async ({ context, params }) => {
@@ -46,7 +45,7 @@ function WorkspaceLayout() {
   const pathname = useLocation({ select: (l) => l.pathname })
   const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
   const isTauri = useIsTauri()
-  const inTiledScope = isTauri && AGENTS_SCOPE_PATTERN.test(pathname)
+  const inTiledScope = isTauri && TILED_SCOPE_PATTERN.test(pathname)
 
   const workspaces = useWorkspaces()
   const settings = useSettings()
@@ -104,7 +103,7 @@ function WorkspaceLayout() {
         <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
           {isTauri ? (
             // Always mounted so the pinned strip never disappears; only its
-            // tiling body is suppressed off the Agents/worktree routes
+            // tiling body is suppressed off the tile-owned routes
             // (`showContent={inTiledScope}`), where it collapses to just
             // the `fixed` header and `<Outlet/>` below takes the content area.
             <div className={cn('flex min-h-0 flex-col', inTiledScope ? 'flex-1' : 'flex-none')}>

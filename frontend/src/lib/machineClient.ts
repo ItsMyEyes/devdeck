@@ -4,7 +4,7 @@
 // See docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md.
 
 import type { Machine } from '@/store/types'
-import { request, type RequestOpts } from './api'
+import { ApiError, request, type RequestOpts } from './api'
 
 const DIRECT_PROBE_TIMEOUT_MS = 1500
 const MODE_TTL_MS = 30_000
@@ -83,6 +83,39 @@ export async function machineRequest<T>(
 ): Promise<T> {
   const opts = await resolveMachineRest(machine)
   return request<T>(method, path, body, opts)
+}
+
+async function toMachineApiError(res: Response): Promise<ApiError> {
+  let message = `Request failed with status ${res.status}`
+  try {
+    const data = (await res.json()) as { error?: string }
+    if (data && typeof data.error === 'string') message = data.error
+  } catch {
+    // Binary or empty error response; keep the default message.
+  }
+  if (res.status === 403 && message.startsWith('access denied') && window.location.pathname !== '/access-denied') {
+    window.location.assign('/access-denied')
+  }
+  return new ApiError(message, res.status)
+}
+
+/** Raw machine fetch for multipart uploads and Blob downloads. */
+export async function machineFetch(machine: Machine, path: string, init: RequestInit): Promise<Response> {
+  const opts = await resolveMachineRest(machine)
+  const headers = new Headers(init.headers)
+  for (const [key, value] of Object.entries(opts.headers ?? {})) {
+    if (!headers.has(key)) headers.set(key, value)
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`${opts.base ?? ''}${path}`, { ...init, headers })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+  if (!res.ok) throw await toMachineApiError(res)
+  return res
 }
 
 /**

@@ -52,6 +52,82 @@ func TestPostSSHConnectionRequiresMatchingSecret(t *testing.T) {
 	}
 }
 
+func TestPostSSHConnectionRejectsUnknownJumpConnection(t *testing.T) {
+	h := newTestSSHHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostConnection(rec, httptest.NewRequest(http.MethodPost, "/api/ssh/connections",
+		strings.NewReader(`{"name":"web","host":"h","username":"u","authType":"password","password":"x","jumpConnectionId":"sc-missing"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPostSSHConnectionRejectsUnknownExecutorMachine(t *testing.T) {
+	h := newTestSSHHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostConnection(rec, httptest.NewRequest(http.MethodPost, "/api/ssh/connections",
+		strings.NewReader(`{"name":"web","host":"h","username":"u","authType":"password","password":"x","executorMachineId":"m-missing"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPostSSHConnectionAcceptsValidJumpConnection(t *testing.T) {
+	h := newTestSSHHandler(t)
+	jump, err := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.PostConnection(rec, httptest.NewRequest(http.MethodPost, "/api/ssh/connections",
+		strings.NewReader(`{"name":"web","host":"h","username":"u","authType":"password","password":"x","jumpConnectionId":"`+jump.ID+`"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"jumpConnectionId":"`+jump.ID+`"`) {
+		t.Errorf("body = %s, want jumpConnectionId set", rec.Body.String())
+	}
+}
+
+func TestPatchSSHConnectionRejectsJumpChainCycle(t *testing.T) {
+	h := newTestSSHHandler(t)
+	a, _ := h.st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
+	b, err := h.st.CreateSSHConnection("b", "", "h", 22, "u", "password", &a.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/ssh/connections/{id}", h.PatchConnection)
+	rec := httptest.NewRecorder()
+	// a -> b would close the loop, since b already jumps through a.
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/ssh/connections/"+a.ID,
+		strings.NewReader(`{"jumpConnectionId":"`+b.ID+`"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (cycle)", rec.Code)
+	}
+}
+
+func TestPatchSSHConnectionCanClearJumpConnection(t *testing.T) {
+	h := newTestSSHHandler(t)
+	jump, _ := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil)
+	c, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", &jump.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/ssh/connections/{id}", h.PatchConnection)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/ssh/connections/"+c.ID,
+		strings.NewReader(`{"jumpConnectionId":null}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	got, _ := h.st.SSHConnectionByID(c.ID)
+	if got.JumpConnectionID != nil {
+		t.Errorf("JumpConnectionID = %v, want cleared", got.JumpConnectionID)
+	}
+}
+
 func TestSSHConnectionCRUDRoundtripNeverLeaksSecrets(t *testing.T) {
 	h := newTestSSHHandler(t)
 	rec := httptest.NewRecorder()
@@ -76,7 +152,7 @@ func TestSSHConnectionCRUDRoundtripNeverLeaksSecrets(t *testing.T) {
 
 func TestPatchSSHConnectionUpdatesFieldsAndSecrets(t *testing.T) {
 	h := newTestSSHHandler(t)
-	conn, err := h.st.CreateSSHConnection("web", "h", 22, "u", "password")
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +172,7 @@ func TestPatchSSHConnectionUpdatesFieldsAndSecrets(t *testing.T) {
 
 func TestPostAcceptHostKeyClearsPin(t *testing.T) {
 	h := newTestSSHHandler(t)
-	conn, _ := h.st.CreateSSHConnection("web", "h", 22, "u", "password")
+	conn, _ := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
 	fp := "SHA256:abc"
 	if err := h.st.SetSSHHostKey(conn.ID, &fp); err != nil {
 		t.Fatal(err)

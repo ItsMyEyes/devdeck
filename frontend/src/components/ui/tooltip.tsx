@@ -19,7 +19,7 @@ export function Tooltip({
 }) {
   return (
     <BaseTooltip.Root open={open}>
-      <BaseTooltip.Trigger render={children} />
+      <BaseTooltip.Trigger delay={150} render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 70 }}>
           <BaseTooltip.Popup
@@ -43,6 +43,7 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
   return (
     <BaseTooltip.Root>
       <BaseTooltip.Trigger
+        delay={150}
         render={<button type="button" aria-label="More info" />}
         className={cn('inline-flex cursor-help text-loom-dim hover:text-loom-accent-soft', className)}
       >

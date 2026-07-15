@@ -9,7 +9,7 @@ import (
 
 func TestCreateSSHConnectionRoundtrip(t *testing.T) {
 	st := newTestStore(t)
-	c, err := st.CreateSSHConnection("prod-web", "web.example.com", 2222, "deploy", "password")
+	c, err := st.CreateSSHConnection("prod-web", "prod", "web.example.com", 2222, "deploy", "password", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,9 +31,76 @@ func TestCreateSSHConnectionRoundtrip(t *testing.T) {
 	}
 }
 
+func TestCreateSSHConnectionWithJumpAndExecutor(t *testing.T) {
+	st := newTestStore(t)
+	jump, _ := st.CreateSSHConnection("bastion", "", "bastion.example.com", 22, "root", "password", nil, nil)
+	machine, err := st.CreateMachine("builder", "https://builder:8989", "key", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.CreateSSHConnection("prod-web", "", "web.internal", 22, "deploy", "password", &jump.ID, &machine.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.JumpConnectionID == nil || *c.JumpConnectionID != jump.ID {
+		t.Errorf("JumpConnectionID = %v, want %s", c.JumpConnectionID, jump.ID)
+	}
+	if c.ExecutorMachineID == nil || *c.ExecutorMachineID != machine.ID {
+		t.Errorf("ExecutorMachineID = %v, want %s", c.ExecutorMachineID, machine.ID)
+	}
+}
+
+func TestUpdateSSHConnectionPatchesJumpAndExecutor(t *testing.T) {
+	st := newTestStore(t)
+	jump, _ := st.CreateSSHConnection("bastion", "", "bastion.example.com", 22, "root", "password", nil, nil)
+	machine, err := st.CreateMachine("builder", "https://builder:8989", "key", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := st.CreateSSHConnection("prod-web", "", "web.internal", 22, "deploy", "password", nil, nil)
+
+	got, err := st.UpdateSSHConnection(c.ID, port.SSHConnectionPatch{
+		JumpConnectionID: &jump.ID, HasJumpConnectionID: true,
+		ExecutorMachineID: &machine.ID, HasExecutorMachineID: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.JumpConnectionID == nil || *got.JumpConnectionID != jump.ID {
+		t.Errorf("JumpConnectionID = %v, want %s", got.JumpConnectionID, jump.ID)
+	}
+	if got.ExecutorMachineID == nil || *got.ExecutorMachineID != machine.ID {
+		t.Errorf("ExecutorMachineID = %v, want %s", got.ExecutorMachineID, machine.ID)
+	}
+
+	// Has* + nil value means an explicit clear, distinct from "not provided".
+	cleared, err := st.UpdateSSHConnection(c.ID, port.SSHConnectionPatch{HasJumpConnectionID: true, HasExecutorMachineID: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.JumpConnectionID != nil || cleared.ExecutorMachineID != nil {
+		t.Errorf("cleared patch = %+v, want both nil", cleared)
+	}
+}
+
+func TestUpdateSSHConnectionWithoutHasFlagLeavesJumpAndExecutorUntouched(t *testing.T) {
+	st := newTestStore(t)
+	jump, _ := st.CreateSSHConnection("bastion", "", "bastion.example.com", 22, "root", "password", nil, nil)
+	c, _ := st.CreateSSHConnection("prod-web", "", "web.internal", 22, "deploy", "password", &jump.ID, nil)
+
+	name := "renamed"
+	got, err := st.UpdateSSHConnection(c.ID, port.SSHConnectionPatch{Name: &name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.JumpConnectionID == nil || *got.JumpConnectionID != jump.ID {
+		t.Errorf("JumpConnectionID = %v, want preserved %s", got.JumpConnectionID, jump.ID)
+	}
+}
+
 func TestUpdateSSHConnectionPatchesFields(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "old.example.com", 22, "root", "password")
+	c, _ := st.CreateSSHConnection("a", "", "old.example.com", 22, "root", "password", nil, nil)
 	name, portNum := "b", 2200
 	got, err := st.UpdateSSHConnection(c.ID, port.SSHConnectionPatch{Name: &name, Port: &portNum})
 	if err != nil {
@@ -46,7 +113,7 @@ func TestUpdateSSHConnectionPatchesFields(t *testing.T) {
 
 func TestUpdateSSHConnectionHostChangeClearsPinnedKey(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "old.example.com", 22, "root", "password")
+	c, _ := st.CreateSSHConnection("a", "", "old.example.com", 22, "root", "password", nil, nil)
 	fp := "SHA256:abc"
 	if err := st.SetSSHHostKey(c.ID, &fp); err != nil {
 		t.Fatal(err)
@@ -63,7 +130,7 @@ func TestUpdateSSHConnectionHostChangeClearsPinnedKey(t *testing.T) {
 
 func TestUpdateSSHConnectionNonHostPatchKeepsPinnedKey(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "same.example.com", 22, "root", "password")
+	c, _ := st.CreateSSHConnection("a", "", "same.example.com", 22, "root", "password", nil, nil)
 	fp := "SHA256:abc"
 	if err := st.SetSSHHostKey(c.ID, &fp); err != nil {
 		t.Fatal(err)
@@ -82,7 +149,7 @@ func TestUpdateSSHConnectionNonHostPatchKeepsPinnedKey(t *testing.T) {
 
 func TestSetSSHHostKeyPinAndClear(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "h", 22, "u", "password")
+	c, _ := st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
 	fp := "SHA256:abc"
 	if err := st.SetSSHHostKey(c.ID, &fp); err != nil {
 		t.Fatal(err)
@@ -105,7 +172,7 @@ func TestSetSSHHostKeyPinAndClear(t *testing.T) {
 
 func TestUpsertSSHSecretReplaces(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "h", 22, "u", "password")
+	c, _ := st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
 	if err := st.UpsertSSHSecret(c.ID, "password", "cipher-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +193,7 @@ func TestUpsertSSHSecretReplaces(t *testing.T) {
 
 func TestDeleteSSHConnectionCascadesSecrets(t *testing.T) {
 	st := newTestStore(t)
-	c, _ := st.CreateSSHConnection("a", "h", 22, "u", "password")
+	c, _ := st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
 	_ = st.UpsertSSHSecret(c.ID, "password", "cipher")
 	if err := st.DeleteSSHConnection(c.ID); err != nil {
 		t.Fatal(err)

@@ -87,7 +87,7 @@ type Store interface {
 	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets
 	// are stored separately, encrypted by the service layer.
 	SSHConnections() ([]domain.SSHConnection, error)
-	CreateSSHConnection(name, host string, portNum int, username, authType string) (domain.SSHConnection, error)
+	CreateSSHConnection(name, group, host string, portNum int, username, authType string, jumpConnectionID, executorMachineID *string) (domain.SSHConnection, error)
 	UpdateSSHConnection(id string, p SSHConnectionPatch) (domain.SSHConnection, error)
 	DeleteSSHConnection(id string) error
 	SSHConnectionByID(id string) (domain.SSHConnection, error)
@@ -195,13 +195,23 @@ type MachinePatch struct {
 
 // SSHConnectionPatch carries optional fields for a partial SSH-connection
 // update. Secrets are not patched here — they go through SSHSecretService.
-// Jump-host / executor fields arrive with their own build-order phases.
 type SSHConnectionPatch struct {
 	Name     *string
+	Group    *string
 	Host     *string
 	Port     *int
 	Username *string
 	AuthType *string
+	// JumpConnectionID chains this connection through another saved
+	// connection for bastion hops. HasJumpConnectionID distinguishes "not
+	// provided" from an explicit null (clears the jump host).
+	JumpConnectionID    *string
+	HasJumpConnectionID bool
+	// ExecutorMachineID selects which Machine dials this host; nil means
+	// the hub decides. HasExecutorMachineID distinguishes "not provided"
+	// from an explicit null (clears back to hub-decides).
+	ExecutorMachineID    *string
+	HasExecutorMachineID bool
 }
 
 // RecurringTemplatePatch carries optional fields for a partial recurring-template update.

@@ -305,6 +305,9 @@ func main() {
 	mux.HandleFunc("DELETE /api/worktrees/{id}", wtH.DeleteWorktree)
 
 	mux.HandleFunc("GET /api/worktrees/{id}/files", fileH.List)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/upload", fileH.Upload)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/delete", fileH.DeleteMany)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/zip", fileH.Archive)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/search", fileH.Search)
 	mux.HandleFunc("GET /api/worktrees/{id}/file", fileH.Read)
 	mux.HandleFunc("PUT /api/worktrees/{id}/file", fileH.Write)

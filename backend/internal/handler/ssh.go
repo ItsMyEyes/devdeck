@@ -28,6 +28,57 @@ func validSSHAuthType(t string) bool {
 	return t == "password" || t == "privatekey"
 }
 
+// maxJumpChainDepth bounds how many bastion hops validateJumpChain will walk
+// before giving up — a generous ceiling for a real-world chain, cheap enough
+// to check synchronously on every write.
+const maxJumpChainDepth = 8
+
+// nilIfEmpty treats an empty-string pointer the same as no value — the
+// frontend's "none" select option submits "" rather than omitting the key.
+func nilIfEmpty(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
+}
+
+// validateJumpChain checks that jumpID names an existing connection and that
+// chaining selfID through it would not create a cycle. selfID is "" on
+// create, since a brand-new connection can't yet be part of any cycle.
+func (h *SSHHandler) validateJumpChain(selfID, jumpID string) error {
+	seen := map[string]bool{}
+	if selfID != "" {
+		seen[selfID] = true
+	}
+	cur := jumpID
+	for depth := 0; depth < maxJumpChainDepth; depth++ {
+		if cur == "" {
+			return nil
+		}
+		if seen[cur] {
+			return fmt.Errorf("jump connection chain forms a cycle at %s", cur)
+		}
+		seen[cur] = true
+		conn, err := h.st.SSHConnectionByID(cur)
+		if err != nil {
+			return fmt.Errorf("jump connection %s not found", cur)
+		}
+		if conn.JumpConnectionID == nil {
+			return nil
+		}
+		cur = *conn.JumpConnectionID
+	}
+	return fmt.Errorf("jump connection chain exceeds max depth of %d", maxJumpChainDepth)
+}
+
+// validateExecutorMachine checks that machineID names an existing Machine.
+func (h *SSHHandler) validateExecutorMachine(machineID string) error {
+	if _, err := h.st.MachineByID(machineID); err != nil {
+		return fmt.Errorf("executor machine %s not found", machineID)
+	}
+	return nil
+}
+
 // sshSecretFields are the write-only credential fields accepted alongside
 // connection fields on create/update. Blank/absent means "leave unchanged".
 type sshSecretFields struct {
@@ -107,11 +158,14 @@ func (h *SSHHandler) GetConnections(w http.ResponseWriter, r *http.Request) {
 
 func (h *SSHHandler) PostConnection(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string `json:"name"`
-		Host     *string `json:"host"`
-		Port     *int    `json:"port"`
-		Username *string `json:"username"`
-		AuthType *string `json:"authType"`
+		Name              *string `json:"name"`
+		Group             *string `json:"group"`
+		Host              *string `json:"host"`
+		Port              *int    `json:"port"`
+		Username          *string `json:"username"`
+		AuthType          *string `json:"authType"`
+		JumpConnectionID  *string `json:"jumpConnectionId"`
+		ExecutorMachineID *string `json:"executorMachineId"`
 		sshSecretFields
 	}
 	if _, err := decodeBody(r, &body); err != nil {
@@ -149,7 +203,21 @@ func (h *SSHHandler) PostConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	conn, err := h.st.CreateSSHConnection(str(body.Name), str(body.Host), portNum, str(body.Username), authType)
+	jumpConnectionID := nilIfEmpty(body.JumpConnectionID)
+	if jumpConnectionID != nil {
+		if err := h.validateJumpChain("", *jumpConnectionID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	executorMachineID := nilIfEmpty(body.ExecutorMachineID)
+	if executorMachineID != nil {
+		if err := h.validateExecutorMachine(*executorMachineID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	conn, err := h.st.CreateSSHConnection(str(body.Name), str(body.Group), str(body.Host), portNum, str(body.Username), authType, jumpConnectionID, executorMachineID)
 	if handleStoreErr(w, err) {
 		return
 	}
@@ -164,9 +232,18 @@ func (h *SSHHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 		port.SSHConnectionPatch
 		sshSecretFields
 	}
-	if _, err := decodeBody(r, &body); err != nil {
+	raw, err := decodeBody(r, &body)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
+	}
+	if _, ok := raw["jumpConnectionId"]; ok {
+		body.HasJumpConnectionID = true
+		body.JumpConnectionID = nilIfEmpty(body.JumpConnectionID)
+	}
+	if _, ok := raw["executorMachineId"]; ok {
+		body.HasExecutorMachineID = true
+		body.ExecutorMachineID = nilIfEmpty(body.ExecutorMachineID)
 	}
 	if body.AuthType != nil && !validSSHAuthType(*body.AuthType) {
 		writeErr(w, http.StatusBadRequest, "authType must be \"password\" or \"privatekey\"")
@@ -182,7 +259,20 @@ func (h *SSHHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	conn, err := h.st.UpdateSSHConnection(r.PathValue("id"), body.SSHConnectionPatch)
+	id := r.PathValue("id")
+	if body.HasJumpConnectionID && body.JumpConnectionID != nil {
+		if err := h.validateJumpChain(id, *body.JumpConnectionID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if body.HasExecutorMachineID && body.ExecutorMachineID != nil {
+		if err := h.validateExecutorMachine(*body.ExecutorMachineID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	conn, err := h.st.UpdateSSHConnection(id, body.SSHConnectionPatch)
 	if handleStoreErr(w, err) {
 		return
 	}

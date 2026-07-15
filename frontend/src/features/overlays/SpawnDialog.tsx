@@ -16,11 +16,13 @@ import {
   useProjectBranches,
   useWorkspaces,
 } from '@/features/data/queries'
+import { useScope } from '@/features/useScope'
 import { useLoomStore } from '@/store/useLoomStore'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 
 export function SpawnDialog() {
   const navigate = useNavigate()
+  const { wsId } = useScope()
   const spawn = useLoomStore((s) => s.spawn)
   const setSpawn = useLoomStore((s) => s.setSpawn)
   const closeSpawn = useLoomStore((s) => s.closeSpawn)
@@ -28,26 +30,52 @@ export function SpawnDialog() {
   const openWorktreeTab = useLoomStore((s) => s.openWorktreeTab)
   const isTauri = useIsTauri()
   const workspaces = useWorkspaces().data ?? []
+  const machinesQuery = useMachines()
+  const machines = machinesQuery.data ?? []
   const createWorktree = useCreateWorktree()
-  const project = workspaces.flatMap((w) => w.projects).find((p) => p.id === spawn.projectId)
-  const machine = useMachines().data?.find((m) => m.id === project?.machineId)
+  const projectWorkspace = spawn.projectId
+    ? workspaces.find((workspace) => workspace.projects.some((candidate) => candidate.id === spawn.projectId))
+    : undefined
+  const workspace = workspaces.find((candidate) => candidate.id === wsId) ?? projectWorkspace
+  const projectOptions = (workspace?.projects ?? []).map((candidate) => ({ value: candidate.id, label: candidate.name }))
+  const project = workspaces.flatMap((candidate) => candidate.projects).find((candidate) => candidate.id === spawn.projectId)
+  const machine = machines.find((candidate) => candidate.id === project?.machineId)
   const branches = useProjectBranches(machine, project?.id, project?.path).data ?? []
-  const baseOptions = branches.map((b) => ({ value: b, label: b }))
+  const baseOptions = branches.map((branch) => ({ value: branch, label: branch }))
 
   // Dynamic agent/model data from backend — reflects whichever machine this
   // project is assigned to, since installed agents are a machine property.
   const agents = useAgents(machine).data ?? []
-  const installedAgents = agents.filter((a) => a.installed)
-  const agentOptions = installedAgents.map((a) => ({ value: a.id, label: a.name }))
+  const installedAgents = agents.filter((agent) => agent.installed)
+  const agentOptions = installedAgents.map((agent) => ({ value: agent.id, label: agent.name }))
 
   // Default agent from the current model selection (guess from model ID prefix)
-  const defaultAgentId = installedAgents.find((a) => spawn.model.startsWith(a.id))?.id ?? installedAgents[0]?.id ?? ''
+  const defaultAgentId = installedAgents.find((agent) => spawn.model.startsWith(agent.id))?.id ?? installedAgents[0]?.id ?? ''
   const [agentId, setAgentId] = useState(defaultAgentId)
 
   const models = useAgentModels(machine, agentId).data ?? []
-  const modelOptions = models.map((m) => ({ value: m.id, label: m.name }))
+  const modelOptions = models.map((model) => ({ value: model.id, label: model.name }))
 
   const branchMode = spawn.mode !== 'root'
+  const canSubmit = Boolean(project && machine) && !createWorktree.isPending
+
+  useEffect(() => {
+    if (!spawn.open || !spawn.chooseProject || spawn.projectId || !workspace || machinesQuery.isPending) return
+    const preferredProject =
+      workspace.projects.find((candidate) => machines.some((candidateMachine) => candidateMachine.id === candidate.machineId)) ??
+      workspace.projects[0]
+    if (preferredProject) setSpawn({ projectId: preferredProject.id })
+  }, [machines, machinesQuery.isPending, setSpawn, spawn.chooseProject, spawn.open, spawn.projectId, workspace])
+
+  useEffect(() => {
+    if (!spawn.open || installedAgents.some((agent) => agent.id === agentId)) return
+    if (agentId !== defaultAgentId) setAgentId(defaultAgentId)
+  }, [agentId, defaultAgentId, installedAgents, spawn.open])
+
+  useEffect(() => {
+    if (!spawn.open || !branchMode || models.length === 0 || models.some((model) => model.id === spawn.model)) return
+    setSpawn({ model: models[0].id })
+  }, [branchMode, models, setSpawn, spawn.model, spawn.open])
 
   useEffect(() => {
     if (branchMode && branches.length > 0 && !branches.includes(spawn.base)) {
@@ -56,7 +84,7 @@ export function SpawnDialog() {
   }, [branchMode, branches, spawn.base, setSpawn])
 
   function submit() {
-    const projectId = spawn.projectId
+    const projectId = project?.id
     if (!projectId || !machine || !project) return
     createWorktree.mutate(
       {
@@ -76,38 +104,62 @@ export function SpawnDialog() {
         },
       },
       {
-        onSuccess: (wt) => {
+        onSuccess: (worktree) => {
           closeSpawn()
           setSidebarOpen(false)
-          const wsId = workspaces.find((w) => w.projects.some((p) => p.id === projectId))?.id
-          if (wsId) {
-            if (isTauri) openWorktreeTab(wsId, projectId, wt.id)
-            navigate({ to: '/w/$wsId/p/$projectId/wt/$wtId', params: { wsId, projectId, wtId: wt.id } })
+          const targetWsId = workspaces.find((candidate) => candidate.projects.some((candidateProject) => candidateProject.id === projectId))?.id
+          if (targetWsId) {
+            if (isTauri) openWorktreeTab(targetWsId, projectId, worktree.id)
+            navigate({
+              to: '/w/$wsId/p/$projectId/wt/$wtId',
+              params: { wsId: targetWsId, projectId, wtId: worktree.id },
+            })
           }
         },
       },
     )
   }
 
-  const handleAgentChange = (v: string) => {
-    setAgentId(v)
-    const agent = installedAgents.find((a) => a.id === v)
+  const handleAgentChange = (value: string) => {
+    setAgentId(value)
+    const agent = installedAgents.find((candidate) => candidate.id === value)
     if (agent) {
       // Set model to the first model of the selected agent (fetched async)
     }
   }
 
   return (
-    <Dialog open={spawn.open} onOpenChange={(o) => !o && closeSpawn()} width={480}>
+    <Dialog open={spawn.open} onOpenChange={(open) => !open && closeSpawn()} width={480}>
       <div className="mb-1 flex items-center gap-2.5">
         {branchMode ? <GitBranch size={14} className="text-loom-accent" /> : <House size={14} className="text-loom-purple" />}
         <DialogTitle>{branchMode ? 'New worktree' : 'Root terminal'}</DialogTitle>
       </div>
       <DialogDescription className="mb-4">
         {branchMode
-          ? `git worktree add · ${project?.name ?? ''}`
-          : `terminal in project root · no branch · ${project?.path ?? ''}`}
+          ? `git worktree add${project ? ` · ${project.name}` : ''}`
+          : `terminal in project root · no branch${project ? ` · ${project.path}` : ''}`}
       </DialogDescription>
+
+      {spawn.chooseProject ? (
+        <div className="mb-4">
+          <Label>Project</Label>
+          {projectOptions.length > 0 ? (
+            <Select
+              value={spawn.projectId ?? ''}
+              onValueChange={(projectId) => setSpawn({ projectId })}
+              options={projectOptions}
+              aria-label="Project"
+            />
+          ) : (
+            <p className="mt-1 font-mono text-[11px] text-loom-dim">No projects in this workspace.</p>
+          )}
+          {project && !machine ? (
+            <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">Select a project with an assigned machine.</p>
+          ) : null}
+        </div>
+      ) : project && !machine ? (
+        <p className="mb-4 font-mono text-[11px] text-loom-red-soft">This project has no available machine.</p>
+      ) : null}
 
       {/* mode tabs */}
       <div className="mb-4 flex gap-1.5 rounded-lg border border-loom-border-strong bg-loom-bg p-1">
@@ -126,8 +178,13 @@ export function SpawnDialog() {
           <Label>Branch name</Label>
           <Input
             value={spawn.branch}
-            onChange={(e) => setSpawn({ branch: e.target.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
+            onChange={(event) => setSpawn({ branch: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submit()
+              }
+            }}
             placeholder="feat/my-feature"
             className="font-mono"
           />
@@ -136,10 +193,10 @@ export function SpawnDialog() {
 
       {branchMode && (
         <div className="mb-3.5">
-          <Label>Task</Label>
+          <Label>Description</Label>
           <Textarea
             value={spawn.task}
-            onChange={(e) => setSpawn({ task: e.target.value })}
+            onChange={(event) => setSpawn({ task: event.target.value })}
             placeholder="Describe what this agent should do…"
             className="h-[70px]"
           />
@@ -148,18 +205,18 @@ export function SpawnDialog() {
 
       {branchMode && (
         <div className="mb-5 flex flex-wrap gap-3">
-          <div className="min-w-[140px] flex-1">
+          {/* <div className="min-w-[140px] flex-1">
             <Label>Base branch</Label>
-            <Select value={spawn.base} onValueChange={(v) => setSpawn({ base: v })} options={baseOptions} />
-          </div>
-          <div className="min-w-[140px] flex-1">
+            <Select value={spawn.base} onValueChange={(base) => setSpawn({ base })} options={baseOptions} />
+          </div> */}
+          {/* <div className="min-w-[140px] flex-1">
             <Label>Agent</Label>
             <Select value={agentId} onValueChange={handleAgentChange} options={agentOptions} />
           </div>
           <div className="min-w-[140px] flex-1">
             <Label>Model</Label>
-            <Select value={spawn.model} onValueChange={(v) => setSpawn({ model: v })} options={modelOptions} />
-          </div>
+            <Select value={spawn.model} onValueChange={(model) => setSpawn({ model })} options={modelOptions} />
+          </div> */}
         </div>
       )}
 
@@ -167,7 +224,7 @@ export function SpawnDialog() {
         <Button variant="secondary" onClick={closeSpawn}>
           Cancel
         </Button>
-        <Button onClick={submit} disabled={createWorktree.isPending || !machine}>
+        <Button onClick={submit} disabled={!canSubmit}>
           {createWorktree.isPending ? 'Creating…' : 'Create →'}
         </Button>
       </div>

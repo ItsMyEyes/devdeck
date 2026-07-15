@@ -31,11 +31,11 @@ type Worktree struct {
 
 // Project mirrors the frontend Project type.
 type Project struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Repo      string     `json:"repo"`
-	Path      string     `json:"path"`
-	Expanded  bool       `json:"expanded"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Repo     string `json:"repo"`
+	Path     string `json:"path"`
+	Expanded bool   `json:"expanded"`
 	// MachineID links the project to a registered runtime machine (hub
 	// registry). Empty string = local/unassigned; existing rows default to it.
 	MachineID string     `json:"machineId"`
@@ -213,6 +213,7 @@ type Machine struct {
 type SSHConnection struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+	Group    string `json:"group"`
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`

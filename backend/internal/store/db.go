@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS machines (
 CREATE TABLE IF NOT EXISTS ssh_connections (
   id                   TEXT PRIMARY KEY,
   name                 TEXT NOT NULL DEFAULT '',
+  group_name           TEXT NOT NULL DEFAULT '',
   host                 TEXT NOT NULL DEFAULT '',
   port                 INTEGER NOT NULL DEFAULT 22,
   username             TEXT NOT NULL DEFAULT '',
@@ -276,6 +277,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateSSHConnectionColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -339,7 +344,7 @@ func migrateWorktreeColumns(db *sql.DB) error {
 }
 
 // migrateProjectColumns adds machine_id (introduced with the hub/runtime
-// split) to pre-existing databases. Existing projects default to '' =
+// split) to pre-existing databases. Existing projects default to ” =
 // local/unassigned.
 func migrateProjectColumns(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -355,6 +360,17 @@ func migrateProjectColumns(db *sql.DB) error {
 // default to 0 = not the local desktop machine.
 func migrateMachineColumns(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE machines ADD COLUMN is_local INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateSSHConnectionColumns adds group_name (introduced when the SSH page
+// gained host grouping) to pre-existing databases.
+func migrateSSHConnectionColumns(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE ssh_connections ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}

@@ -60,9 +60,9 @@ export function MachineDialog() {
 
   return (
     <Dialog open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={480}>
-      <DialogTitle>{isEdit ? 'Edit machine' : 'Add machine'}</DialogTitle>
+      <DialogTitle>{isEdit ? 'Edit runtime' : 'Add runtime'}</DialogTitle>
       <DialogDescription className="mb-[18px]">
-        Runtime machines run worktrees, terminals, and git — reachable over your tailnet.
+        Runtimes run worktrees, terminals, and git — reachable over your tailnet.
       </DialogDescription>
 
       <Label>Name</Label>
@@ -99,7 +99,7 @@ export function MachineDialog() {
         <>
           <Label>Runtime command</Label>
           <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
-            Run this on the target machine — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
+            Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
             this hub on startup.
           </p>
           <div className="relative mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-2.5 pr-9">

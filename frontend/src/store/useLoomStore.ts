@@ -10,7 +10,9 @@ import {
   createSSHShellTab,
   createWorktreeTab,
   findLeafForTab,
+  focusTileLeaf,
   openTileTab,
+  selectTileTab,
   pruneTileTabs,
 } from '@/features/tabs/tileTree'
 import type { WorkspaceTileLayout } from '@/features/tabs/tileTree'
@@ -24,6 +26,8 @@ import type {
 
 export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh'
 export type TodoFilter = 'all' | 'active' | 'done'
+/** Sentinel for the SSH group filter meaning "no group selected, show every host". */
+export const ALL_SSH_GROUPS = '__all__'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
 export type NewTabKind = 'browser' | 'shell'
@@ -40,6 +44,7 @@ interface NewTabState {
 interface SpawnState {
   open: boolean
   projectId: string | null
+  chooseProject: boolean
   mode: 'branch' | 'root'
   branch: string
   base: string
@@ -74,6 +79,7 @@ interface SSHDialogState {
   open: boolean
   editingId: string | null
   name: string
+  group: string
   host: string
   /** Kept as the text field's raw string; parsed + validated on submit. */
   port: string
@@ -81,7 +87,13 @@ interface SSHDialogState {
   authType: 'password' | 'privatekey'
   password: string
   privateKey: string
+  privateKeyPath: string
   passphrase: string
+  /** Flow step 1: which Machine dials this host. '' means "hub decides". */
+  executorMachineId: string
+  /** Flow step 3 (alternative to direct): another saved connection id this
+   *  one bastions through. '' means connect directly. */
+  jumpConnectionId: string
 }
 
 export interface BrowserProxyInfo {
@@ -160,6 +172,11 @@ interface LoomState {
    *  applies globally, on every route. Independent of `sidebarOpen`, which is the mobile
    *  drawer's open/close — this is a small/big toggle for the rail's own width. */
   railExpanded: boolean
+  /** Selected SSH host group filter — shared between the sidebar's compact
+   *  group list (rendered when the rail is expanded) and the full SSH
+   *  module, so picking a group in either place stays in sync. Not
+   *  persisted, same as `wsMenuOpen`. */
+  sshActiveGroup: string
   /** Chrome-style desktop tab bar (Tauri only): each workspace's tiling
    *  tree of open worktree tabs (splits, per-leaf tab strips). Unused by
    *  the web app. */
@@ -183,6 +200,7 @@ interface LoomState {
   showToast: (msg: string) => void
   setSidebarOpen: (open: boolean) => void
   toggleRailExpanded: () => void
+  setSSHActiveGroup: (group: string) => void
   toggleWsMenu: () => void
   closeWsMenu: () => void
   setDirtyFileCount: (n: number) => void
@@ -192,6 +210,7 @@ interface LoomState {
   closeWorktreeTab: (wsId: string, wtId: string) => void
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
   setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
+  selectAgentsTab: (wsId: string) => void
 
   // new tab chooser (tab strip "+")
   openNewTab: (wsId: string, leafId: string) => void
@@ -212,7 +231,7 @@ interface LoomState {
   popNativeOverlayBlocker: () => void
 
   // spawn worktree
-  openSpawn: (projectId: string, mode?: 'branch' | 'root', model?: string) => void
+  openSpawn: (projectId: string | null, mode?: 'branch' | 'root', model?: string) => void
   closeSpawn: () => void
   setSpawn: (patch: Partial<SpawnState>) => void
 
@@ -303,7 +322,7 @@ export const useLoomStore = create<LoomState>()(
       sidebarOpen: false,
       wsMenuOpen: false,
       newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '' },
-      spawn: { open: false, projectId: null, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
+      spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
       browse: { open: false, target: 'newPath', path: [], machineId: '' },
@@ -312,10 +331,26 @@ export const useLoomStore = create<LoomState>()(
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
-      sshDialog: { open: false, editingId: null, name: '', host: '', port: '22', username: '', authType: 'password', password: '', privateKey: '', passphrase: '' },
+      sshDialog: {
+        open: false,
+        editingId: null,
+        name: '',
+        group: '',
+        host: '',
+        port: '22',
+        username: '',
+        authType: 'password',
+        password: '',
+        privateKey: '',
+        privateKeyPath: '',
+        passphrase: '',
+        executorMachineId: '',
+        jumpConnectionId: '',
+      },
       dirtyFileCount: 0,
       worktreeLayouts: {},
       railExpanded: false,
+      sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
       browserTiles: {},
       nativeOverlayBlockers: 0,
@@ -325,12 +360,23 @@ export const useLoomStore = create<LoomState>()(
       showToast: (msg) => sonnerToast(msg),
       setSidebarOpen: (open) => set((s) => void (s.sidebarOpen = open)),
       toggleRailExpanded: () => set((s) => void (s.railExpanded = !s.railExpanded)),
+      setSSHActiveGroup: (group) => set((s) => void (s.sshActiveGroup = group)),
       toggleWsMenu: () => set((s) => void (s.wsMenuOpen = !s.wsMenuOpen)),
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
       setWorkspaceTileLayout: (wsId, layout) => set((s) => void (s.workspaceTileLayouts[wsId] = layout)),
+      selectAgentsTab: (wsId) =>
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          const leaf = findLeafForTab(layout.root, 'agents')
+          if (!leaf) {
+            s.workspaceTileLayouts[wsId] = openTileTab(layout, { kind: 'agents', id: 'agents' })
+            return
+          }
+          s.workspaceTileLayouts[wsId] = focusTileLeaf(selectTileTab(layout, leaf.id, 'agents'), leaf.id)
+        }),
       openWorktreeTab: (wsId, projectId, wtId) =>
         set((s) => {
           const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
@@ -416,6 +462,7 @@ export const useLoomStore = create<LoomState>()(
           s.spawn = {
             open: true,
             projectId,
+            chooseProject: projectId === null,
             mode: mode ?? 'branch',
             branch: '',
             base: 'main',
@@ -507,13 +554,17 @@ export const useLoomStore = create<LoomState>()(
               open: true,
               editingId: null,
               name: '',
+              group: '',
               host: '',
               port: '22',
               username: '',
               authType: 'password',
               password: '',
               privateKey: '',
+              privateKeyPath: '',
               passphrase: '',
+              executorMachineId: '',
+              jumpConnectionId: '',
             }),
         ),
       openEditSSHConnection: (conn) =>
@@ -523,13 +574,17 @@ export const useLoomStore = create<LoomState>()(
               open: true,
               editingId: conn.id,
               name: conn.name,
+              group: conn.group,
               host: conn.host,
               port: String(conn.port),
               username: conn.username,
               authType: conn.authType,
               password: '',
               privateKey: '',
+              privateKeyPath: '',
               passphrase: '',
+              executorMachineId: conn.executorMachineId ?? '',
+              jumpConnectionId: conn.jumpConnectionId ?? '',
             }),
         ),
       closeSSHDialog: () => set((s) => void (s.sshDialog.open = false)),

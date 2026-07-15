@@ -91,6 +91,20 @@ function addContentToLeaf(node: PaneNode, paneId: string, content: PaneContent):
   return changed ? { ...node, children } : node
 }
 
+function isDeletedPath(filePath: string, deletedPath: string) {
+  return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
+}
+
+function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string[]): string[] {
+  if (node.type === 'leaf') {
+    return node.tabs.flatMap((tab) => {
+      if (tab.kind !== 'file') return []
+      return deletedPaths.some((deletedPath) => isDeletedPath(tab.path, deletedPath)) ? [tab.path] : []
+    })
+  }
+  return node.children.flatMap((child) => fileTabsUnderDeletedPaths(child, deletedPaths))
+}
+
 /** Mobile has no room for side-by-side splits (spec decision 10) — used to gate `PaneCanvas`'s drag-and-drop sensors. */
 function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(
@@ -291,15 +305,24 @@ function TerminalWorkspace({
     [openFile],
   )
 
-  const handleFileDeleted = useCallback(
-    (path: string) => {
-      cleanupFileBookkeeping(path)
-      const leaf = findLeafForContent(layout.root, path)
-      if (!leaf) return
-      setWorktreeLayout(worktree.id, closeTab(layout, leaf.id, path))
+  const handleFilesDeleted = useCallback(
+    (paths: string[]) => {
+      const filePaths = fileTabsUnderDeletedPaths(layout.root, paths)
+      let nextLayout = layout
+      let changed = false
+      for (const path of filePaths) {
+        cleanupFileBookkeeping(path)
+        const leaf = findLeafForContent(nextLayout.root, path)
+        if (!leaf) continue
+        nextLayout = closeTab(nextLayout, leaf.id, path)
+        changed = true
+      }
+      if (changed) setWorktreeLayout(worktree.id, nextLayout)
     },
     [layout, worktree.id, setWorktreeLayout, cleanupFileBookkeeping],
   )
+
+  const handleFileDeleted = useCallback((path: string) => handleFilesDeleted([path]), [handleFilesDeleted])
 
   function handleFocusPane(paneId: string) {
     commitLayout(focusPane(layout, paneId))
@@ -401,6 +424,20 @@ function TerminalWorkspace({
     })
   }
 
+  /** Cmd/Ctrl+G / Cmd/Ctrl+E — opens (or refocuses) the Git/Explorer tab in the
+   *  focused pane, or closes it if it's already the focused pane's active tab. */
+  function toggleKindInFocusedPane(kind: 'git' | 'explorer') {
+    const pane = findPane(layout.root, layout.focusedPaneId)
+    if (pane && pane.type === 'leaf') {
+      const existing = pane.tabs.find((t) => t.kind === kind)
+      if (existing && existing.id === pane.activeTabId) {
+        handleCloseTab(pane.id, existing.id)
+        return
+      }
+    }
+    openKindInFocusedPane(kind)
+  }
+
   /** "+" new-tab button / `Ctrl+T` — adds a brand-new independent Terminal tab to `paneId`'s
    *  own tab strip (unlike `handleSplitPane`, this never creates a sibling pane). */
   function handleNewTerminalTab(paneId: string) {
@@ -453,6 +490,17 @@ function TerminalWorkspace({
         if (!active) return
         event.preventDefault()
         handleCloseTab(pane.id, active.id)
+        return
+      }
+      if (primary && key === 'g') {
+        event.preventDefault()
+        toggleKindInFocusedPane('git')
+        return
+      }
+      if (primary && key === 'e') {
+        event.preventDefault()
+        toggleKindInFocusedPane('explorer')
+        return
       }
     }
     window.addEventListener('keydown', handleKeydown)
@@ -575,7 +623,7 @@ function TerminalWorkspace({
         machine={machine}
         rootLabel={projectName ?? label}
         onOpenFile={openFile}
-        onFileDeleted={handleFileDeleted}
+        onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
       />
     ),

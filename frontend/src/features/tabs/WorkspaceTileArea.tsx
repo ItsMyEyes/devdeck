@@ -3,6 +3,7 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { BrowserTile } from '@/features/browser/BrowserTile'
 import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/browserTilesBridge'
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
+import { WorkspaceHostsView } from '@/features/agents/WorkspaceHostsView'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
 import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
 import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
@@ -57,11 +58,16 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         to: '/w/$wsId/p/$projectId/wt/$wtId',
         params: { wsId, projectId: tab.projectId, wtId: tab.wtId },
       })
+    } else if (tab.kind === 'browser') {
+      navigate({ to: '/w/$wsId/browser', params: { wsId } })
     } else {
-      // 'agents' and 'browser' tabs both just need to land somewhere inside
-      // the tiled scope; '/w/$wsId' redirects into the current project.
       navigate({ to: '/w/$wsId', params: { wsId } })
     }
+  }
+
+  function handleCreateBrowser(machineId: string) {
+    openBrowserTab(wsId, machineId)
+    navigate({ to: '/w/$wsId/browser', params: { wsId } })
   }
 
   // Drop tabs for worktrees deleted while the app was closed (or by another tab).
@@ -221,7 +227,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         root={layout.root}
         renderers={{
           agents: () => {
-            const project = workspace?.projects.find((p) => p.id === (currentProjectId ?? workspace.projects[0]?.id))
+            if (!workspace) return null
+            if (!currentProjectId) return <WorkspaceHostsView wsId={wsId} projects={workspace.projects} />
+            const project = workspace.projects.find((p) => p.id === currentProjectId)
             if (!project) return null
             return <WorktreeCardsGrid project={project} wsId={wsId} />
           },
@@ -255,7 +263,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         wsId={wsId}
         projects={workspace?.projects ?? []}
         currentProjectId={currentProjectId}
-        onCreateBrowser={(machineId) => openBrowserTab(wsId, machineId)}
+        onCreateBrowser={handleCreateBrowser}
         onCreateShell={(projectId) => openSpawn(projectId, 'root')}
       />
     </>

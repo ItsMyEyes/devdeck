@@ -21,7 +21,7 @@ func newTestSSHSecretService(t *testing.T) (*SSHSecretService, *store.Store) {
 
 func TestSSHSecretRoundtrip(t *testing.T) {
 	svc, st := newTestSSHSecretService(t)
-	c, err := st.CreateSSHConnection("a", "h", 22, "u", "password")
+	c, err := st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSSHSecretRoundtrip(t *testing.T) {
 
 func TestSSHSecretGetMissingKind(t *testing.T) {
 	svc, st := newTestSSHSecretService(t)
-	c, _ := st.CreateSSHConnection("a", "h", 22, "u", "password")
+	c, _ := st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
 	_, ok, err := svc.Get(c.ID, "passphrase")
 	if err != nil || ok {
 		t.Errorf("Get missing = (ok=%v, err=%v), want (false, nil)", ok, err)

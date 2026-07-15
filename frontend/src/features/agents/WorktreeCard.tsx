@@ -147,7 +147,7 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
   }
 
   return (
-    <article className="group flex min-h-[218px] flex-col overflow-hidden rounded-[13px] border border-loom-border-card bg-loom-card transition-colors hover:border-loom-border-accent">
+    <article className="group flex min-h-[150px] flex-col overflow-hidden rounded-[13px] border border-loom-border-card bg-loom-card transition-colors hover:border-loom-border-accent">
       <div className="flex items-start gap-3 px-3 pb-2 pt-3">
         <div className="flex h-11 w-11 flex-none items-center justify-center rounded-[10px] bg-loom-surface-2">
           <WorktreeGlyph root={w.root} size={15} />
@@ -171,14 +171,6 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
         </div>
 
         <div className="flex flex-none items-center gap-1">
-          <button
-            type="button"
-            aria-label={`Edit ${label}`}
-            onClick={() => openEdit('worktree', w.id, { a: w.branch, b: w.task, model: w.model })}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            <MoreHorizontal size={15} />
-          </button>
           <button
             type="button"
             aria-label={`Delete ${label}`}
@@ -205,58 +197,7 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
 
       <div className="mx-3 my-2 h-px bg-loom-border" />
 
-      <div className="flex min-h-0 flex-1 flex-col px-3">
-        <p className="line-clamp-2 min-h-[34px] text-[12px] leading-[1.45] text-loom-muted">
-          {w.task || <span className="italic text-loom-dim">no task — runs interactively</span>}
-        </p>
-
-        <button
-          type="button"
-          onClick={expand}
-          className="mt-2 flex min-h-[30px] w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-loom-border bg-loom-terminal px-2.5 text-left font-mono text-[10.5px] leading-none hover:border-loom-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <span className="truncate" style={lastLine ? { color: KIND[lastLine.k] } : undefined}>
-            {lastLine ? lastLine.t : 'no output yet'}
-          </span>
-          <Maximize2 size={9} className="ml-auto flex-none text-loom-dim-2" />
-        </button>
-      </div>
-
-      {w.state === 'waiting' && (
-        <div className="mx-3 mt-2 rounded-[10px] border border-[#3a3112] bg-[#1f1a08] px-3 py-2">
-          <div className="mb-1.5 text-[11.5px] font-medium text-loom-yellow">⚠ Needs approval</div>
-          <div className="mb-2 line-clamp-2 font-mono text-[11px] leading-[1.4] text-[#d8cba0]">{w.pending}</div>
-          <div className="flex gap-2">
-            <Button variant="warning" className="h-7 flex-1" onClick={() => approve(true)}>
-              Approve
-            </Button>
-            <Button
-              variant="secondary"
-              className="h-7 flex-1 border-[#3a3112] hover:bg-[#241d0a]"
-              onClick={() => approve(false)}
-            >
-              Reject
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {w.state === 'error' && (
-        <div className="mx-3 mt-2 flex items-center gap-2.5 rounded-[10px] border border-[#3a2020] bg-[#1f0e0e] px-3 py-2">
-          <span className="flex-1 text-[11.5px] text-loom-red-soft">✗ Exited with error</span>
-          <Button variant="destructive" size="sm" onClick={retry}>
-            ↻ Retry
-          </Button>
-        </div>
-      )}
-
-      <div className="mt-3 flex items-center gap-3 border-t border-loom-border px-3 py-2 font-mono text-[10.5px] text-loom-dim">
-        <span>{fmtTok(w.tokens)} tok</span>
-        <span className="text-loom-green-soft">{fmtCost(w.tokens)}</span>
-        <span>{fmtEl(w.elapsed)}</span>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 px-3 pb-3">
+      <div className="grid grid-cols-2 gap-2 px-3 pb-3">
         <button
           type="button"
           onClick={expand}
@@ -264,14 +205,6 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
         >
           <Maximize2 size={13} />
           Open
-        </button>
-        <button
-          type="button"
-          onClick={pauseToggle}
-          className="flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-loom-surface-2 text-[12px] font-semibold text-loom-muted hover:bg-loom-popover hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          {paused ? <Play size={13} /> : <Pause size={13} />}
-          {paused ? 'Resume' : 'Pause'}
         </button>
         <button
           type="button"

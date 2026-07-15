@@ -6,7 +6,7 @@ import { useMarkAllNewsRead, useSettings, useWorkspace } from '@/features/data/q
 import { useLoomStore } from '@/store/useLoomStore'
 
 export function Header() {
-  const { wsId, view } = useScope()
+  const { wsId, projectId, view } = useScope()
   const ws = useWorkspace(wsId).data
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
   const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
@@ -22,12 +22,12 @@ export function Header() {
   const agents = view === 'agents'
 
   function spawnWorktree() {
-    const first = ws?.projects[0]
-    if (!first) {
+    if (!ws?.projects.length) {
       showToast('Add a project first')
       return
     }
-    openSpawn(first.id, 'branch', defaultModel)
+    const selectedProject = ws.projects.find((project) => project.id === projectId)
+    openSpawn(selectedProject?.id ?? null, 'branch', defaultModel)
   }
 
   function markRead() {

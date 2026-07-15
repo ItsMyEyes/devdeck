@@ -65,6 +65,16 @@ func startTestSSHServer(t *testing.T, authorizedKey ssh.PublicKey) (addr, finger
 	return ln.Addr().String(), ssh.FingerprintSHA256(hostSigner.PublicKey())
 }
 
+// directTCPIPMsg mirrors RFC 4254 §7.2's "direct-tcpip" channel-open extra
+// data — what ssh.Client.Dial sends when tunneling through this server, e.g.
+// via a jump-connection hop (see dialer.go's dial).
+type directTCPIPMsg struct {
+	DestAddr string
+	DestPort uint32
+	OrigAddr string
+	OrigPort uint32
+}
+
 func serveTestSSHConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
 	if err != nil {
@@ -73,25 +83,54 @@ func serveTestSSHConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	defer sc.Close()
 	go ssh.DiscardRequests(reqs)
 	for newCh := range chans {
-		if newCh.ChannelType() != "session" {
-			newCh.Reject(ssh.UnknownChannelType, "only session channels in tests")
-			continue
-		}
-		ch, chReqs, err := newCh.Accept()
-		if err != nil {
-			continue
-		}
-		go func(chReqs <-chan *ssh.Request) {
-			for req := range chReqs {
-				if req.WantReply {
-					ok := req.Type == "pty-req" || req.Type == "shell" || req.Type == "window-change"
-					_ = req.Reply(ok, nil)
-				}
+		switch newCh.ChannelType() {
+		case "session":
+			ch, chReqs, err := newCh.Accept()
+			if err != nil {
+				continue
 			}
-		}(chReqs)
-		go func(ch ssh.Channel) {
-			_, _ = io.Copy(ch, ch) // echo stdin -> stdout
-			_ = ch.Close()
-		}(ch)
+			go func(chReqs <-chan *ssh.Request) {
+				for req := range chReqs {
+					if req.WantReply {
+						ok := req.Type == "pty-req" || req.Type == "shell" || req.Type == "window-change"
+						_ = req.Reply(ok, nil)
+					}
+				}
+			}(chReqs)
+			go func(ch ssh.Channel) {
+				_, _ = io.Copy(ch, ch) // echo stdin -> stdout
+				_ = ch.Close()
+			}(ch)
+		case "direct-tcpip":
+			// Makes this test server double as a jump/bastion host: proxy
+			// the requested destination the way a real sshd would for
+			// ssh.Client.Dial (used by jump-connection chaining tests).
+			var msg directTCPIPMsg
+			if err := ssh.Unmarshal(newCh.ExtraData(), &msg); err != nil {
+				newCh.Reject(ssh.ConnectionFailed, "bad direct-tcpip payload")
+				continue
+			}
+			target, err := net.Dial("tcp", net.JoinHostPort(msg.DestAddr, fmt.Sprint(msg.DestPort)))
+			if err != nil {
+				newCh.Reject(ssh.ConnectionFailed, err.Error())
+				continue
+			}
+			ch, chReqs, err := newCh.Accept()
+			if err != nil {
+				target.Close()
+				continue
+			}
+			go ssh.DiscardRequests(chReqs)
+			go func() {
+				_, _ = io.Copy(target, ch)
+				target.Close()
+			}()
+			go func() {
+				_, _ = io.Copy(ch, target)
+				ch.Close()
+			}()
+		default:
+			newCh.Reject(ssh.UnknownChannelType, "only session/direct-tcpip channels in tests")
+		}
 	}
 }
