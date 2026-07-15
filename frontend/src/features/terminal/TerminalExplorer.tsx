@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
+import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
 import { useIsFetching } from '@tanstack/react-query'
 import { Archive, ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -73,6 +73,8 @@ export function TerminalExplorer({
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
   const treeContainerRef = useRef<HTMLDivElement>(null)
   const [pendingDelete, setPendingDelete] = useState<SelectedEntry[] | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const root = useWorktreeFiles(machine, worktreeId, '')
   const writeFile = useWriteWorktreeFile(machine, worktreeId)
@@ -196,6 +198,31 @@ export function TerminalExplorer({
     void uploadToFolder(uploadTarget, files)
   }
 
+  function handleTreeDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    setIsDragOver(true)
+  }
+
+  function handleTreeDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setIsDragOver(false)
+  }
+
+  function handleTreeDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setIsDragOver(false)
+    const files = Array.from(event.dataTransfer.files ?? [])
+    void uploadToFolder(uploadTarget, files)
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLElement>) {
+    const files = Array.from(event.clipboardData?.files ?? [])
+    if (files.length === 0) return
+    event.preventDefault()
+    void uploadToFolder(uploadTarget, files)
+  }
+
   async function zipSelected() {
     if (selectedPaths.length === 0 || zipping) return
     const filename = archiveFileName(selectedEntries)
@@ -209,7 +236,7 @@ export function TerminalExplorer({
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-loom-surface" onKeyDown={handleKeyDown}>
+    <aside className="flex min-h-0 flex-1 flex-col bg-loom-surface" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
       <div className="flex h-9 flex-none items-center border-b border-loom-border bg-loom-surface-2">
         <div
@@ -280,7 +307,16 @@ export function TerminalExplorer({
         </button>
       </div>
 
-      <div ref={treeContainerRef} className="min-h-0 flex-1 overflow-auto py-1">
+      <div
+        ref={treeContainerRef}
+        onDragOver={handleTreeDragOver}
+        onDragLeave={handleTreeDragLeave}
+        onDrop={handleTreeDrop}
+        className={cn(
+          'min-h-0 flex-1 overflow-auto py-1',
+          isDragOver && 'outline outline-2 outline-dashed outline-loom-accent -outline-offset-2',
+        )}
+      >
         <TreeLevel
           worktreeId={worktreeId}
           machine={machine}
@@ -289,10 +325,13 @@ export function TerminalExplorer({
           expanded={expanded}
           selected={selection.selected}
           entryCache={entryCacheRef}
+          dropTargetPath={dropTargetPath}
           onToggleDir={toggleDir}
           onSelectEntry={selectEntry}
           onOpenFile={onOpenFile}
           onRemovePath={removeEntry}
+          onSetDropTarget={setDropTargetPath}
+          onDropFilesToFolder={(path, files) => void uploadToFolder(path, files)}
           deletePending={deletePaths.isPending}
         />
       </div>
@@ -328,10 +367,13 @@ interface TreeLevelProps {
   expanded: ReadonlySet<string>
   selected: Readonly<Record<string, SelectedEntry>>
   entryCache: MutableRefObject<Map<string, SelectedEntry>>
+  dropTargetPath: string | null
   onToggleDir: (path: string) => void
   onSelectEntry: (entry: SelectedEntry, modifier: ClickModifier) => void
   onOpenFile: (path: string) => void
   onRemovePath: (entry: SelectedEntry) => void
+  onSetDropTarget: (path: string | null) => void
+  onDropFilesToFolder: (path: string, files: File[]) => void
   deletePending: boolean
 }
 
@@ -401,7 +443,29 @@ function TreeLevel({ worktreeId, machine, path, depth, ...rest }: TreeLevelProps
           <div key={entry.path}>
             <div
               data-row-path={entry.path}
-              className={cn('group flex h-[29px] items-center pr-1.5 hover:bg-loom-hover-wash', isSelected && 'bg-loom-accent/10')}
+              onDragOver={(event) => {
+                if (!entry.isDir || !event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                event.stopPropagation()
+                rest.onSetDropTarget(entry.path)
+              }}
+              onDragLeave={(event) => {
+                if (!entry.isDir) return
+                event.stopPropagation()
+                rest.onSetDropTarget(null)
+              }}
+              onDrop={(event) => {
+                if (!entry.isDir) return
+                event.preventDefault()
+                event.stopPropagation()
+                rest.onSetDropTarget(null)
+                rest.onDropFilesToFolder(entry.path, Array.from(event.dataTransfer.files ?? []))
+              }}
+              className={cn(
+                'group flex h-[29px] items-center pr-1.5 hover:bg-loom-hover-wash',
+                isSelected && 'bg-loom-accent/10',
+                rest.dropTargetPath === entry.path && 'outline outline-2 outline-dashed outline-loom-accent -outline-offset-2',
+              )}
               style={{ paddingLeft: indent }}
             >
               <button
