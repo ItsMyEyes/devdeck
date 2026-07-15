@@ -18,7 +18,7 @@ import type {
   TermLine,
   Worktree,
 } from '@/store/types'
-import { machineFetch, machineRequest } from './machineClient'
+import { machineRequest, machineXhr, type TransferProgress } from './machineClient'
 
 // ---- Worktrees ----
 
@@ -103,35 +103,42 @@ export function deleteWorktreeFile(machine: Machine, worktreeId: string, path: s
   return machineRequest<void>(machine, 'DELETE', `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`)
 }
 
-export function uploadWorktreeFiles(
+export function uploadWorktreeFileWithProgress(
   machine: Machine,
   worktreeId: string,
   folderPath: string,
-  files: readonly File[],
+  file: File,
+  onProgress: (progress: TransferProgress) => void,
 ): Promise<WorktreeFileEntry[]> {
   const form = new FormData()
-  for (const file of files) form.append('file', file)
-  return machineFetch(machine, `/worktrees/${worktreeId}/files/upload?path=${encodeURIComponent(folderPath)}`, {
+  form.append('file', file)
+  return machineXhr<WorktreeFileEntry[]>(machine, {
     method: 'POST',
+    path: `/worktrees/${worktreeId}/files/upload?path=${encodeURIComponent(folderPath)}`,
     body: form,
-  }).then((res) => res.json() as Promise<WorktreeFileEntry[]>)
+    onUploadProgress: onProgress,
+    responseType: 'json',
+  })
 }
 
 export function deleteWorktreePaths(machine: Machine, worktreeId: string, paths: readonly string[]): Promise<void> {
   return machineRequest<void>(machine, 'POST', `/worktrees/${worktreeId}/files/delete`, { paths })
 }
 
-export async function downloadWorktreeZip(
+export function downloadWorktreeZipWithProgress(
   machine: Machine,
   worktreeId: string,
   paths: readonly string[],
+  onProgress: (progress: TransferProgress) => void,
 ): Promise<Blob> {
-  const res = await machineFetch(machine, `/worktrees/${worktreeId}/files/zip`, {
+  return machineXhr<Blob>(machine, {
     method: 'POST',
+    path: `/worktrees/${worktreeId}/files/zip`,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
+    onDownloadProgress: onProgress,
+    responseType: 'blob',
   })
-  return res.blob()
 }
 
 export interface SearchWorktreeFilesOptions {

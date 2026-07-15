@@ -127,7 +127,6 @@ import {
   updateAgentSettingsFile,
   updateAgentSkillContent,
   updateWorktree,
-  uploadWorktreeFiles,
   writeWorktreeFile,
   createFsFolder,
   type AddMCPServerBody,
@@ -1042,15 +1041,6 @@ export function useDeleteWorktreeFile(machine: Machine, worktreeId: string) {
       queryClient.removeQueries({ queryKey: qk.worktreeFile(machine.id, worktreeId, path) })
       return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
     },
-  })
-}
-
-export function useUploadWorktreeFiles(machine: Machine, worktreeId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ folderPath, files }: { folderPath: string; files: readonly File[] }) =>
-      uploadWorktreeFiles(machine, worktreeId, folderPath, files),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }),
   })
 }
 

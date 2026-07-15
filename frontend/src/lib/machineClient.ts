@@ -67,7 +67,7 @@ export async function resolveMachineMode(machine: Machine): Promise<Mode> {
   return mode
 }
 
-async function resolveMachineRest(machine: Machine): Promise<RequestOpts> {
+export async function resolveMachineRest(machine: Machine): Promise<RequestOpts> {
   const mode = await resolveMachineMode(machine)
   return mode === 'direct'
     ? { base: directRestBase(machine), headers: { Authorization: `Bearer ${machine.key}` } }
@@ -116,6 +116,64 @@ export async function machineFetch(machine: Machine, path: string, init: Request
   }
   if (!res.ok) throw await toMachineApiError(res)
   return res
+}
+
+export interface TransferProgress {
+  loaded: number
+  total: number
+}
+
+interface XhrRequestOpts {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  path: string
+  body?: XMLHttpRequestBodyInit | null
+  headers?: Record<string, string>
+  onUploadProgress?: (progress: TransferProgress) => void
+  onDownloadProgress?: (progress: TransferProgress) => void
+  responseType: 'json' | 'blob'
+}
+
+/**
+ * Like machineFetch, but via XMLHttpRequest so upload/download progress
+ * events are available — fetch() doesn't expose upload progress in a
+ * reliably supported way, and download progress via fetch needs a
+ * ReadableStream reader loop that's more code than this for the same result.
+ */
+export async function machineXhr<T>(machine: Machine, opts: XhrRequestOpts): Promise<T> {
+  const resolved = await resolveMachineRest(machine)
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(opts.method, `${resolved.base ?? ''}${opts.path}`)
+    xhr.responseType = opts.responseType
+    for (const [key, value] of Object.entries({ ...resolved.headers, ...opts.headers })) {
+      xhr.setRequestHeader(key, value)
+    }
+    if (opts.onUploadProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) opts.onUploadProgress?.({ loaded: event.loaded, total: event.total })
+      }
+    }
+    if (opts.onDownloadProgress) {
+      xhr.onprogress = (event) => {
+        if (event.lengthComputable) opts.onDownloadProgress?.({ loaded: event.loaded, total: event.total })
+      }
+    }
+    xhr.onerror = () => reject(new ApiError('Network request failed', 0))
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response as T)
+        return
+      }
+      if (opts.responseType === 'blob') {
+        reject(new ApiError(`Request failed with status ${xhr.status}`, xhr.status))
+        return
+      }
+      const data = xhr.response as { error?: string } | null
+      const message = data && typeof data.error === 'string' ? data.error : `Request failed with status ${xhr.status}`
+      reject(new ApiError(message, xhr.status))
+    }
+    xhr.send(opts.body ?? null)
+  })
 }
 
 /**

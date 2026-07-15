@@ -4,14 +4,12 @@ import { useIsFetching } from '@tanstack/react-query'
 import { Archive, ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
-import { downloadWorktreeZip } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
 import {
   useDeleteWorktreePaths,
   useInvalidateWorktreeFiles,
-  useUploadWorktreeFiles,
   useWorktreeFiles,
   useWriteWorktreeFile,
 } from '@/features/data/queries'
@@ -26,6 +24,7 @@ import {
   type SelectionState,
 } from './fileTreeSelection'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import { useFileTransfers } from './useFileTransfers'
 
 interface TerminalExplorerProps {
   worktreeId: string
@@ -73,12 +72,11 @@ export function TerminalExplorer({
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
   const treeContainerRef = useRef<HTMLDivElement>(null)
-  const [zipping, setZipping] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<SelectedEntry[] | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const root = useWorktreeFiles(machine, worktreeId, '')
   const writeFile = useWriteWorktreeFile(machine, worktreeId)
-  const uploadFiles = useUploadWorktreeFiles(machine, worktreeId)
+  const { uploadFiles, downloadZip, uploading, zipping } = useFileTransfers(machine, worktreeId)
   const deletePaths = useDeleteWorktreePaths(machine, worktreeId)
   const invalidateFiles = useInvalidateWorktreeFiles(machine, worktreeId)
   const isFetching = useIsFetching({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) }) > 0
@@ -181,32 +179,32 @@ export function TerminalExplorer({
     setPendingDelete(selectedEntries)
   }
 
+  async function uploadToFolder(folderPath: string, files: readonly File[]) {
+    if (files.length === 0) return
+    const label = folderPath || 'root'
+    try {
+      const entries = await uploadFiles(folderPath, files)
+      toast.success(`Uploaded ${entries.length} file${entries.length === 1 ? '' : 's'} to ${label}`)
+    } catch (error) {
+      toast.error(errorMessage(error, `Could not upload to ${label}`))
+    }
+  }
+
   function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ''
-    if (files.length === 0) return
-    uploadFiles.mutate(
-      { folderPath: uploadTarget, files },
-      {
-        onSuccess: (entries) => {
-          toast.success(`Uploaded ${entries.length} file${entries.length === 1 ? '' : 's'} to ${uploadTargetLabel}`)
-        },
-        onError: (error) => toast.error(errorMessage(error, `Could not upload to ${uploadTargetLabel}`)),
-      },
-    )
+    void uploadToFolder(uploadTarget, files)
   }
 
   async function zipSelected() {
     if (selectedPaths.length === 0 || zipping) return
-    setZipping(true)
+    const filename = archiveFileName(selectedEntries)
     try {
-      const blob = await downloadWorktreeZip(machine, worktreeId, selectedPaths)
-      downloadBlob(blob, archiveFileName(selectedEntries))
+      const blob = await downloadZip(selectedPaths, filename)
+      downloadBlob(blob, filename)
       toast.success(`Zipped ${selectedPaths.length} item${selectedPaths.length === 1 ? '' : 's'}`)
     } catch (error) {
       toast.error(errorMessage(error, 'Could not zip selection'))
-    } finally {
-      setZipping(false)
     }
   }
 
@@ -238,11 +236,11 @@ export function TerminalExplorer({
         <button
           type="button"
           onClick={() => uploadInputRef.current?.click()}
-          disabled={uploadFiles.isPending}
+          disabled={uploading}
           title={`Upload files to ${uploadTargetLabel}`}
           className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-fg disabled:cursor-wait"
         >
-          {uploadFiles.isPending ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+          {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
         </button>
         <button
           type="button"

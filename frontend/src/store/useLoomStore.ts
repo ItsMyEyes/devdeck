@@ -25,6 +25,18 @@ import type {
 } from './types'
 
 export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh'
+
+export interface Transfer {
+  id: string
+  kind: 'upload' | 'download'
+  label: string
+  totalFiles: number
+  completedFiles: number
+  totalBytes: number
+  loadedBytes: number
+  status: 'active' | 'done' | 'error'
+  error?: string
+}
 export type TodoFilter = 'all' | 'active' | 'done'
 /** Sentinel for the SSH group filter meaning "no group selected, show every host". */
 export const ALL_SSH_GROUPS = '__all__'
@@ -163,6 +175,9 @@ interface LoomState {
    *  unsaved. `SidebarRail`'s back button lives outside `ExpandedTerminal`
    *  now, so this is how it gates its own dirty-file confirm. */
   dirtyFileCount: number
+  /** In-flight/recently-finished file transfers for the explorer's upload/
+   *  download status panel. Not persisted — purely a live progress view. */
+  transfers: Transfer[]
 
   // ---- persisted UI preference ----
   /** Each worktree's tiling pane-tree layout (structure, split sizes, open
@@ -229,6 +244,13 @@ interface LoomState {
   removeBrowserTile: (tabId: string) => void
   pushNativeOverlayBlocker: () => void
   popNativeOverlayBlocker: () => void
+  startTransfer: (transfer: Transfer) => void
+  updateTransferProgress: (
+    id: string,
+    patch: { loadedBytes?: number; totalBytes?: number; completedFiles?: number },
+  ) => void
+  finishTransfer: (id: string, status: 'done' | 'error', error?: string) => void
+  dismissTransfer: (id: string) => void
 
   // spawn worktree
   openSpawn: (projectId: string | null, mode?: 'branch' | 'root', model?: string) => void
@@ -328,6 +350,7 @@ export const useLoomStore = create<LoomState>()(
       browse: { open: false, target: 'newPath', path: [], machineId: '' },
       edit: { kind: null, id: null, a: '', b: '', model: '' },
       confirmDelete: null,
+      transfers: [],
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
@@ -456,6 +479,24 @@ export const useLoomStore = create<LoomState>()(
       removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
       pushNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers += 1)),
       popNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers = Math.max(0, s.nativeOverlayBlockers - 1))),
+      startTransfer: (transfer) => set((s) => void s.transfers.push(transfer)),
+      updateTransferProgress: (id, patch) =>
+        set((s) => {
+          const t = s.transfers.find((t) => t.id === id)
+          if (!t) return
+          if (patch.loadedBytes !== undefined) t.loadedBytes = patch.loadedBytes
+          if (patch.totalBytes !== undefined) t.totalBytes = patch.totalBytes
+          if (patch.completedFiles !== undefined) t.completedFiles = patch.completedFiles
+        }),
+      finishTransfer: (id, status, error) =>
+        set((s) => {
+          const t = s.transfers.find((t) => t.id === id)
+          if (t) {
+            t.status = status
+            t.error = error
+          }
+        }),
+      dismissTransfer: (id) => set((s) => void (s.transfers = s.transfers.filter((t) => t.id !== id))),
 
       openSpawn: (projectId, mode, model) =>
         set((s) => {
