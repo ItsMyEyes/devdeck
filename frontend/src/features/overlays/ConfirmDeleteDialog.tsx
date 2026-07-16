@@ -16,6 +16,10 @@ import {
 } from '@/features/data/queries'
 import { findProject, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
 
+function titleFor(kind: string) {
+  return kind === 'ssh-group' ? 'group' : kind
+}
+
 function bodyFor(kind: string, name: string, groupHostCount: number) {
   if (kind === 'worktree')
     return `This removes the worktree, kills its terminal session and deletes the local working copy for branch "${name}". The branch itself is kept.`
@@ -148,7 +152,7 @@ export function ConfirmDeleteDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && cancelConfirm()} width={400} z={70} className="border-loom-red-tint">
       <div className="mb-2.5 flex items-center gap-2.5">
         <TriangleAlert size={15} className="text-loom-red-soft" />
-        <DialogTitle>Delete {confirm?.kind}</DialogTitle>
+        <DialogTitle>Delete {confirm ? titleFor(confirm.kind) : ''}</DialogTitle>
       </div>
       <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-loom-muted">
         {confirm ? bodyFor(confirm.kind, confirm.name, groupAffectedConnections.length) : ''}
