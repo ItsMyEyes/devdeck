@@ -10,11 +10,13 @@ import {
   useDeleteWorkspace,
   useDeleteWorktree,
   useMachines,
+  useSSHConnections,
+  useUpdateSSHConnection,
   useWorkspaces,
 } from '@/features/data/queries'
 import { findProject, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
 
-function bodyFor(kind: string, name: string) {
+function bodyFor(kind: string, name: string, groupHostCount: number) {
   if (kind === 'worktree')
     return `This removes the worktree, kills its terminal session and deletes the local working copy for branch "${name}". The branch itself is kept.`
   if (kind === 'workspace')
@@ -23,6 +25,8 @@ function bodyFor(kind: string, name: string) {
     return `This removes machine "${name}" from the registry. Projects still pointing at it will show as unreachable until reassigned.`
   if (kind === 'ssh')
     return `This removes SSH connection "${name}" and its stored credentials. The remote host itself is not touched.`
+  if (kind === 'ssh-group')
+    return `This removes group "${name}" — ${groupHostCount} host${groupHostCount === 1 ? '' : 's'} move back to Ungrouped. The hosts themselves and their credentials are not touched.`
   return `This removes project "${name}" and all of its worktrees from loom. Your files on disk are not touched.`
 }
 
@@ -42,8 +46,12 @@ export function ConfirmDeleteDialog() {
   const deleteWorkspace = useDeleteWorkspace()
   const deleteMachine = useDeleteMachine()
   const deleteSSHConnection = useDeleteSSHConnection()
+  const sshConnections = useSSHConnections().data ?? []
+  const updateSSHConnection = useUpdateSSHConnection()
 
   const open = !!confirm
+  const groupAffectedConnections =
+    confirm?.kind === 'ssh-group' ? sshConnections.filter((c) => c.group.trim() === confirm.name) : []
 
   function onDelete() {
     if (!confirm) return
@@ -108,6 +116,15 @@ export function ConfirmDeleteDialog() {
           toast()
         },
       })
+    } else if (kind === 'ssh-group') {
+      Promise.all(
+        groupAffectedConnections.map((c) => updateSSHConnection.mutateAsync({ id: c.id, patch: { group: '' } })),
+      )
+        .then(() => {
+          cancelConfirm()
+          showToast(`Removed group "${name}" — ${groupAffectedConnections.length} host(s) moved to Ungrouped`)
+        })
+        .catch((err) => showToast(err instanceof Error ? err.message : 'Failed to remove group'))
     } else {
       // Cascade-deletes every project in this workspace, and with it every worktree —
       // same layout-orphan concern as the project branch above, just one level higher.
@@ -134,7 +151,7 @@ export function ConfirmDeleteDialog() {
         <DialogTitle>Delete {confirm?.kind}</DialogTitle>
       </div>
       <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-loom-muted">
-        {confirm ? bodyFor(confirm.kind, confirm.name) : ''}
+        {confirm ? bodyFor(confirm.kind, confirm.name, groupAffectedConnections.length) : ''}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">
         <Button variant="secondary" onClick={cancelConfirm}>
