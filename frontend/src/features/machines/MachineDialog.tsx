@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useUpdateMachine } from '@/features/data/queries'
+import { parseConnectionString } from '@/features/machines/connectionString'
+import { useCreateMachine, useUpdateMachine } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 /** 32 random bytes as 64 lowercase hex chars — mirrors the desktop sidecar's generate_key(). */
@@ -28,15 +29,25 @@ export function MachineDialog() {
   const close = useLoomStore((s) => s.closeMachineDialog)
   const showToast = useLoomStore((s) => s.showToast)
   const updateMachine = useUpdateMachine()
+  const createMachine = useCreateMachine()
 
   const isEdit = dialog.editingId !== null
-  const busy = updateMachine.isPending
+  const busy = updateMachine.isPending || createMachine.isPending
   const canSubmit = dialog.name.trim().length > 0 && dialog.url.trim().length > 0 && dialog.key.trim().length > 0 && !busy
 
   const [runtimeKey, setRuntimeKey] = useState('')
+  const [pasteMode, setPasteMode] = useState(false)
+  const [pasteText, setPasteText] = useState('')
   useEffect(() => {
-    if (dialog.open && !isEdit) setRuntimeKey(generateRuntimeKey())
+    if (dialog.open && !isEdit) {
+      setRuntimeKey(generateRuntimeKey())
+      setPasteMode(false)
+      setPasteText('')
+    }
   }, [dialog.open, isEdit])
+
+  const parsedPaste = pasteText.trim().length > 0 ? parseConnectionString(pasteText) : null
+  const pasteInvalid = pasteText.trim().length > 0 && parsedPaste === null
 
   function copyCommand() {
     void navigator.clipboard.writeText(runtimeCommand(runtimeKey, dialog.name))
@@ -58,6 +69,17 @@ export function MachineDialog() {
     )
   }
 
+  function submitPaste() {
+    if (!parsedPaste || busy) return
+    createMachine.mutate(parsedPaste, {
+      onSuccess: () => {
+        close()
+        showToast(`Connected machine "${parsedPaste.name}"`)
+      },
+      onError: (err) => showToast(err instanceof Error ? err.message : 'Failed to connect machine'),
+    })
+  }
+
   return (
     <Dialog open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={480}>
       <DialogTitle>{isEdit ? 'Edit runtime' : 'Add runtime'}</DialogTitle>
@@ -65,17 +87,29 @@ export function MachineDialog() {
         Runtimes run worktrees, terminals, and git — reachable over your tailnet.
       </DialogDescription>
 
-      <Label>Name</Label>
-      <Input
-        value={dialog.name}
-        disabled={busy}
-        onChange={(e) => setDialog({ name: e.target.value })}
-        placeholder="builder"
-        className="mb-3 font-mono"
-      />
+      {!isEdit ? (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => setPasteMode((m) => !m)}
+            className="cursor-pointer font-mono text-[11px] text-loom-muted-2 underline decoration-dotted hover:text-loom-accent-soft"
+          >
+            {pasteMode ? 'Use the self-register command instead' : 'Have a connection string instead?'}
+          </button>
+        </div>
+      ) : null}
 
       {isEdit ? (
         <>
+          <Label>Name</Label>
+          <Input
+            value={dialog.name}
+            disabled={busy}
+            onChange={(e) => setDialog({ name: e.target.value })}
+            placeholder="builder"
+            className="mb-3 font-mono"
+          />
+
           <Label>URL</Label>
           <Input
             value={dialog.url}
@@ -95,8 +129,38 @@ export function MachineDialog() {
             className="mb-5 font-mono"
           />
         </>
+      ) : pasteMode ? (
+        <>
+          <Label>Connection string</Label>
+          <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
+            Paste the line from the runtime's <code>copy-this.md</code> (format: name|url|key).
+          </p>
+          <Input
+            value={pasteText}
+            disabled={busy}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder="builder|https://builder.tail-x.ts.net|a1b2c3..."
+            className="mb-1 font-mono"
+          />
+          <p className={`mb-5 font-mono text-[10.5px] ${pasteInvalid ? 'text-loom-red-soft' : 'text-loom-dim-2'}`}>
+            {pasteInvalid
+              ? 'Expected exactly 3 fields separated by "|": name, an https:// URL, and a key.'
+              : parsedPaste
+                ? `Will connect "${parsedPaste.name}" at ${parsedPaste.url}`
+                : ' '}
+          </p>
+        </>
       ) : (
         <>
+          <Label>Name</Label>
+          <Input
+            value={dialog.name}
+            disabled={busy}
+            onChange={(e) => setDialog({ name: e.target.value })}
+            placeholder="builder"
+            className="mb-3 font-mono"
+          />
+
           <Label>Runtime command</Label>
           <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
             Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
@@ -126,6 +190,11 @@ export function MachineDialog() {
           <Button onClick={submit} disabled={!canSubmit}>
             {busy && <Loader2 size={14} className="animate-spin" />}
             Save
+          </Button>
+        ) : pasteMode ? (
+          <Button onClick={submitPaste} disabled={!parsedPaste || busy}>
+            {busy && <Loader2 size={14} className="animate-spin" />}
+            Connect
           </Button>
         ) : (
           <Button onClick={copyCommand}>
