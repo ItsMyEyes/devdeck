@@ -115,6 +115,20 @@ func TestRequireAuthBlocksProtectedPathWithoutCookie(t *testing.T) {
 	}
 }
 
+func TestRequireAuthBlocksWhoamiWithoutCookie(t *testing.T) {
+	svc := newTestAuthServiceForMiddleware(t)
+	called := false
+	mw := RequireAuth(svc, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+	if called {
+		t.Error("RequireAuth let /api/whoami through without a session cookie or key (it must not be public like /api/health)")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
 func TestRequireAuthBlocksTerminalWebsocketPathWithoutCookie(t *testing.T) {
 	svc := newTestAuthServiceForMiddleware(t)
 	called := false

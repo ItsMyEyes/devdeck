@@ -49,6 +49,22 @@ func TestRequireKeyHealthIsPublic(t *testing.T) {
 	}
 }
 
+func TestRequireKeyProtectsWhoami(t *testing.T) {
+	rec := httptest.NewRecorder()
+	requireKeyServer(t).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (whoami must NOT be exempt like /api/health)", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	rec = httptest.NewRecorder()
+	requireKeyServer(t).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 with the correct key", rec.Code)
+	}
+}
+
 func TestRequireKeyAcceptsQueryKeyOnlyForWebSocketUpgrade(t *testing.T) {
 	// Plain GET with ?key= must be rejected (keys don't belong in URLs)…
 	rec := httptest.NewRecorder()

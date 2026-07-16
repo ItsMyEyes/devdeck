@@ -217,6 +217,7 @@ func main() {
 	gitSvc := service.NewWorktreeGitService(st)
 
 	healthH := handler.NewHealthHandler()
+	whoamiH := handler.NewWhoamiHandler()
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
@@ -284,6 +285,7 @@ func main() {
 	}
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
+	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
