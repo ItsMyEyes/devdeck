@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loom — runtime not registered</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #0d1017; color: #c0c6d4;
+        font: 13px/1.6 -apple-system, "Segoe UI", sans-serif; }
+      body { display: grid; place-items: center; }
+      main { max-width: 480px; padding: 0 24px; }
+      h1 { font-size: 15px; color: #d9a441; }
+      code { color: #8b93a7; word-break: break-all; }
+      button { display: block; margin-top: 16px; padding: 10px 12px;
+        background: #1a1f2b; color: #c0c6d4; border: 1px solid #2a3040;
+        border-radius: 6px; cursor: pointer; font: inherit; }
+      button:hover { background: #232936; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>This device couldn't register as a runtime</h1>
+      <p id="reason">Unknown reason.</p>
+      <p>Details are in the log:<br /><code id="logpath">app log directory / runtime-sidecar.log</code></p>
+      <p>Browsing the hub is unaffected — this only means the hub can't run terminals/git on this device.</p>
+      <button id="back-btn">Back to hub</button>
+    </main>
+    <script>
+      document.getElementById('back-btn').addEventListener('click', () => {
+        const url = document.body.dataset.hubUrl
+        if (url) window.location.href = url
+      })
+    </script>
+  </body>
+</html>

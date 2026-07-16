@@ -19,11 +19,15 @@ use tauri_plugin_shell::ShellExt;
 struct ServerProc(Mutex<Option<CommandChild>>);
 /// Current background remote-mode runtime child, so app exit can kill it.
 struct RuntimeServerProc(Mutex<Option<CommandChild>>);
+/// Last runtime-registration failure (reason, hub_url), if any, shown on
+/// demand via the "⚠ Runtime not registered" menu item.
+struct RuntimeWarning(Mutex<Option<(String, String)>>);
 /// Set on ExitRequested so the monitor loop stops respawning during shutdown.
 struct ShuttingDown(AtomicBool);
 
 const MAX_RESPAWNS: u32 = 3;
 const CHANGE_HUB_MENU_ID: &str = "change-hub";
+const RUNTIME_WARNING_MENU_ID: &str = "runtime-warning";
 
 enum LaunchEnd {
     /// Process exited; respawn unless shutting down or out of attempts.
@@ -70,12 +74,18 @@ pub fn run() {
             }
             app.manage(ServerProc(Mutex::new(None)));
             app.manage(RuntimeServerProc(Mutex::new(None)));
+            app.manage(RuntimeWarning(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
             let menu = MenuBuilder::new(app).text(CHANGE_HUB_MENU_ID, "Change Hub…").build()?;
             app.set_menu(menu)?;
             app.on_menu_event(move |app_handle, event| {
                 if event.id() == CHANGE_HUB_MENU_ID {
                     let _ = change_hub(app_handle.clone());
+                } else if event.id() == RUNTIME_WARNING_MENU_ID {
+                    let saved = app_handle.state::<RuntimeWarning>().0.lock().unwrap().clone();
+                    if let Some((reason, hub_url)) = saved {
+                        show_runtime_warning(app_handle, &reason, &hub_url);
+                    }
                 }
             });
             let handle = app.handle().clone();
@@ -165,11 +175,45 @@ async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     }
 }
 
-/// Records a runtime-registration failure and surfaces it to the operator.
-/// Stub for now (logs only) -- Task 5 replaces this with a menu-item swap
-/// and a bundled warning page the operator can open on demand.
-fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, _hub_url: &str) {
+/// Records a runtime-registration failure, logs it, and swaps the menu bar
+/// to surface a "⚠ Runtime not registered" item the operator can click for
+/// details — without ever blocking or interrupting whatever they're doing
+/// in the remote hub's UI.
+fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, hub_url: &str) {
     log_runtime_line(handle, reason);
+    *handle.state::<RuntimeWarning>().0.lock().unwrap() = Some((reason.to_string(), hub_url.to_string()));
+    if let Ok(menu) = MenuBuilder::new(handle)
+        .text(CHANGE_HUB_MENU_ID, "Change Hub…")
+        .text(RUNTIME_WARNING_MENU_ID, "⚠ Runtime not registered")
+        .build()
+    {
+        let _ = handle.set_menu(menu);
+    }
+}
+
+/// Navigates the main window to the bundled runtime-warning page, injecting
+/// the failure reason, log path, and the remote hub URL (for the page's own
+/// "Back to hub" button) via `win.eval` — same pattern as `show_error`.
+fn show_runtime_warning(handle: &AppHandle, reason: &str, hub_url: &str) {
+    let log_path = handle
+        .path()
+        .app_log_dir()
+        .map(|d| d.join("runtime-sidecar.log").to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "app log directory / runtime-sidecar.log".into());
+    #[cfg(not(windows))]
+    let warning_url = "tauri://localhost/runtime-warning.html";
+    #[cfg(windows)]
+    let warning_url = "http://tauri.localhost/runtime-warning.html";
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.navigate(warning_url.parse().expect("static runtime warning url"));
+        let _ = win.eval(format!(
+            "document.getElementById('reason').textContent = {}; document.getElementById('logpath').textContent = {}; document.body.dataset.hubUrl = {};",
+            serde_json::to_string(reason).unwrap_or_default(),
+            serde_json::to_string(&log_path).unwrap_or_default(),
+            serde_json::to_string(hub_url).unwrap_or_default(),
+        ));
+        let _ = win.show();
+    }
 }
 
 enum RuntimeLaunchEnd {
