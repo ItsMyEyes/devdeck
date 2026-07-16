@@ -115,12 +115,20 @@ async fn start(handle: &AppHandle) {
 /// Persists the choice, then proceeds the same way a saved-mode launch
 /// would (spawn the local sidecar, or navigate to the remote hub).
 #[tauri::command]
-async fn choose_hub_mode(app: AppHandle, mode: String, url: Option<String>) -> Result<(), String> {
+async fn choose_hub_mode(
+    app: AppHandle,
+    mode: String,
+    url: Option<String>,
+    key: Option<String>,
+) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let hub_mode = match mode.as_str() {
         "local" => hubmode::HubMode::Local,
-        "remote" => hubmode::HubMode::Remote { url: url.ok_or("url is required for remote mode")? },
+        "remote" => hubmode::HubMode::Remote {
+            url: url.ok_or("url is required for remote mode")?,
+            key: key.ok_or("key is required for remote mode")?,
+        },
         other => return Err(format!("unknown hub mode {other}")),
     };
     hubmode::save(&data_dir, &hub_mode).map_err(|e| e.to_string())?;
@@ -144,7 +152,7 @@ fn change_hub(app: AppHandle) -> Result<(), String> {
 
 async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     match mode {
-        hubmode::HubMode::Remote { url } => navigate_remote(handle, &url),
+        hubmode::HubMode::Remote { url, key: _ } => navigate_remote(handle, &url),
         hubmode::HubMode::Local => run_local_respawn_loop(handle).await,
     }
 }

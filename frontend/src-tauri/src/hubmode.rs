@@ -12,7 +12,7 @@ const MODE_FILE: &str = "hub-mode.json";
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum HubMode {
     Local,
-    Remote { url: String },
+    Remote { url: String, key: String },
 }
 
 fn mode_path(data_dir: &Path) -> PathBuf {
@@ -69,7 +69,10 @@ mod tests {
     #[test]
     fn save_then_load_roundtrips_remote() {
         let dir = temp_dir("remote");
-        let mode = HubMode::Remote { url: "https://hub.tail-xxxx.ts.net".into() };
+        let mode = HubMode::Remote {
+            url: "https://hub.tail-xxxx.ts.net".into(),
+            key: "hubkey123".into(),
+        };
         save(&dir, &mode).unwrap();
         assert_eq!(load(&dir), Some(mode));
         std::fs::remove_dir_all(&dir).ok();

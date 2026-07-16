@@ -27,6 +27,7 @@
       <button id="remote-btn">Connect to a hub I already host</button>
       <div id="remote-form">
         <input id="url" type="text" placeholder="https://hub.tail-xxxx.ts.net" />
+        <input id="hub-key" type="text" placeholder="hub bearer key" />
         <button id="connect-btn">Connect</button>
       </div>
       <p id="error"></p>
@@ -45,9 +46,10 @@
       })
       document.getElementById('connect-btn').addEventListener('click', () => {
         const url = document.getElementById('url').value.trim()
-        if (!url) return
+        const key = document.getElementById('hub-key').value.trim()
+        if (!url || !key) return
         errorEl.textContent = ''
-        invoke('choose_hub_mode', { mode: 'remote', url }).catch((e) => {
+        invoke('choose_hub_mode', { mode: 'remote', url, key }).catch((e) => {
           errorEl.textContent = String(e)
         })
       })
