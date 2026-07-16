@@ -80,3 +80,34 @@ func CheckHealth(ctx context.Context, m domain.Machine) HealthStatus {
 	resp.Body.Close()
 	return HealthStatus{Status: "online", LatencyMs: time.Since(start).Milliseconds()}
 }
+
+// Probe verifies a machine is reachable at rawURL and that key is accepted
+// by its key-gated routes. Unlike /api/health (deliberately open — see
+// RequireKey/RequireAuth's public-path allowlists), /api/whoami enforces
+// the normal auth middleware, so a 200 here proves both reachability and a
+// correct key. A 401 is reported distinctly from other failures so callers
+// (PostMachine, before registering a new machine) can tell "wrong key" from
+// "machine unreachable".
+func Probe(ctx context.Context, rawURL, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(rawURL, "/")+"/api/whoami", nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("machine unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("machine rejected the key")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("machine returned status %d", resp.StatusCode)
+	}
+	return nil
+}
