@@ -9,25 +9,32 @@ Today, deploying a new `--role runtime` machine requires the operator to
 manually install Tailscale, join the tailnet, figure out the machine's
 MagicDNS name, and hand-assemble a long flag/env list
 (`--role runtime --key ... --hub-url ... --hub-key ... --public-url ...
---name ... --enable-tailscale-serve`) before starting the binary. For the
-solo-operator model this project is built for ("one operator, many
-companies/machines"), that manual setup is repeated friction every time a
-new desktop is added as a runtime.
+--name ... --enable-tailscale-serve`) before starting the binary, and there
+is no way to actually add that machine to the hub's registry from the UI —
+the Add-machine dialog only shows a generated self-register command; the
+existing `POST /api/machines` create path is never called from the
+frontend today.
 
 This project packages the already-existing runtime binary together with an
 install script that runs a preflight checklist, joins Tailscale
-automatically, and starts the runtime as a background service — so adding
-a machine becomes: copy one folder, fill in a handful of values once, run
-one command.
+automatically, starts the runtime as a background service, and hands the
+operator a ready-to-paste connection string — plus a new "paste connection
+string" path in the hub's Add-machine dialog that verifies the machine is
+actually reachable (and the key actually correct) before registering it.
+So adding a machine becomes: copy one folder, fill in a handful of values
+once, run one command, paste one line into the hub.
 
-No backend Go changes are required. Every flag/env var this needs already
-exists and works today: `--role`, `--key` (`LOOM_KEY`), `--hub-url`
-(`LOOM_HUB_URL`), `--hub-key` (`LOOM_HUB_KEY`), `--public-url`
-(`LOOM_PUBLIC_URL`), `--name` (`LOOM_MACHINE_NAME`), and
-`--enable-tailscale-serve` (`LOOM_TAILSCALE_SERVE`) — see
+Almost everything this needs already exists and works today: `--role`,
+`--key` (`LOOM_KEY`), `--hub-url` (`LOOM_HUB_URL`), `--hub-key`
+(`LOOM_HUB_KEY`), `--public-url` (`LOOM_PUBLIC_URL`), `--name`
+(`LOOM_MACHINE_NAME`), `--enable-tailscale-serve`
+(`LOOM_TAILSCALE_SERVE`), and `POST /api/machines` — see
 `docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md` and
 `docs/superpowers/specs/2026-07-04-enable-tailscale-serve-design.md`. This
-project is purely a packaging + bootstrap layer on top of those.
+project is a packaging/bootstrap layer on top of those, plus one small,
+targeted backend change (a reachability+auth check on machine creation) and
+one small frontend addition (wiring the already-existing but unused
+`useCreateMachine` hook to a new paste-based UI).
 
 ## Decisions (from brainstorming)
 
@@ -54,6 +61,37 @@ project is purely a packaging + bootstrap layer on top of those.
    locally — not a single static key shared by every runtime. Slightly more
    setup than a shared key, but keeps one compromised machine's key from
    exposing every other runtime.
+7. **Public URL has no port:** since `--enable-tailscale-serve` fronts the
+   app with `tailscale serve`, which publishes over HTTPS on the tailnet's
+   implicit port 443, the externally-reachable URL is `https://<dnsname>`
+   — **not** `https://<dnsname>:<local-port>`. The local port
+   (`--addr`'s port) is only what `tailscale serve` proxies *to*; it never
+   appears in the advertised/pasted URL.
+8. **Two connection methods coexist:** self-registration
+   (`LOOM_HUB_URL`/`LOOM_HUB_KEY` in `runtime.env`, opt-in, unchanged from
+   the existing design) and a new manual "paste connection string" path
+   stay both available side by side. Self-registration requires
+   distributing the hub's own key to every runtime's env file; the paste
+   path avoids that entirely (the operator never puts the hub key on a
+   runtime machine) at the cost of one manual paste per machine. The
+   install script always generates the connection string regardless of
+   whether self-registration is configured, so it's available as a
+   fallback either way.
+9. **Connection-string format:** `name|url|key` (pipe-delimited), not
+   colon-delimited — the URL itself contains colons (`https://…`), so `:`
+   can't safely separate fields.
+10. **Reachability check is authenticated, not just a ping:** pasting a
+    connection string into the hub must confirm both that the machine is
+    reachable *and* that the key is correct, so a typo'd or stale key fails
+    immediately with a clear error rather than silently registering a
+    broken machine. Since `GET /api/health` is deliberately exempt from the
+    runtime's key middleware (see `backend/internal/handler/keyauth.go`),
+    the check must hit a different, authenticated route — plain
+    reachability alone would pass even with a wrong key.
+11. **Already-running detection:** the install script checks whether its
+    background service is already registered/running before touching it,
+    so re-running the installer (e.g. after editing `runtime.env`) updates
+    the existing service in place instead of erroring or double-registering.
 
 ## Architecture
 
@@ -74,21 +112,28 @@ then on copies that same folder — env included — to every new machine. Only
 ### `runtime.env.example`
 
 ```
-LOOM_HUB_URL=https://hub.tail-xxxx.ts.net
-LOOM_HUB_KEY=<hub's bearer key>
 TS_AUTHKEY=<reusable Tailscale auth key from the admin console>
 # LOOM_MACHINE_NAME=   (optional; defaults to OS hostname)
 # LOOM_ADDR=           (optional; defaults to 127.0.0.1:8989)
+
+# Optional: enables automatic self-registration on startup. Leave both
+# blank to skip self-registration and connect this machine manually
+# instead, by pasting copy-this.md's contents into the hub's Add Runtime
+# dialog once the installer finishes.
+# LOOM_HUB_URL=
+# LOOM_HUB_KEY=
 ```
 
 `LOOM_KEY` is deliberately not in this template — see Decision 6.
+`TS_AUTHKEY` is the only value strictly required; the hub fields are opt-in.
 
 ### Install script flow (`install.sh` macOS/Linux, `install.ps1` Windows)
 
 1. **Preflight** — confirm `runtime.env` exists next to the script and that
-   `LOOM_HUB_URL`, `LOOM_HUB_KEY`, `TS_AUTHKEY` are present and don't still
-   contain the placeholder text from the template. Missing/placeholder
-   values fail fast, naming the exact variable.
+   `TS_AUTHKEY` is present and isn't still the placeholder text. If exactly
+   one of `LOOM_HUB_URL`/`LOOM_HUB_KEY` is set (not both), fail fast — a
+   partial self-registration config is a misconfiguration, not a valid
+   "disabled" state.
 2. **Tailscale checklist:**
    - Detect the `tailscale` binary on `PATH`. If missing, auto-install:
      - macOS: `brew install tailscale` if Homebrew is present, else the
@@ -100,15 +145,21 @@ TS_AUTHKEY=<reusable Tailscale auth key from the admin console>
      `tailscale up --authkey=$TS_AUTHKEY --hostname=<machine-name>
      --ssh=false` non-interactively.
 3. **Derive the public URL** — `tailscale status --self --json`, read
-   `.Self.DNSName` (strip the trailing dot), combine with the port from
-   `LOOM_ADDR` (default `8989`) to build
-   `--public-url=https://<dnsname>:<port>`.
+   `.Self.DNSName` (strip the trailing dot), build
+   `https://<dnsname>` (see Decision 7 — no port suffix).
 4. **Generate & persist `LOOM_KEY`** — if a local key file
    (`./runtime.key`, `chmod 600`) doesn't already exist, generate 32 random
    bytes hex-encoded and write it; if it exists (re-run), reuse it. This
-   makes re-running the installer idempotent.
-5. **Register as a background service**, passing all config as environment
-   variables (`LOOM_ROLE=runtime`, `LOOM_KEY`, `LOOM_HUB_URL`,
+   makes re-running the installer idempotent, and means `copy-this.md`
+   stays stable across re-runs.
+5. **Detect an already-running service** (Decision 11) — check whether the
+   launchd label / systemd unit / scheduled task from a prior run exists
+   and is active. If so, stop it cleanly before re-registering, so a
+   changed `runtime.env` or regenerated key actually takes effect; report
+   "✓ found an existing installation, updating it in place" rather than
+   erroring on "already exists".
+6. **Register as a background service**, passing all config as environment
+   variables (`LOOM_ROLE=runtime`, `LOOM_KEY`, optional `LOOM_HUB_URL` /
    `LOOM_HUB_KEY`, `LOOM_PUBLIC_URL`, `LOOM_MACHINE_NAME`,
    `LOOM_TAILSCALE_SERVE=true`) so the bundled binary needs no CLI flags at
    all:
@@ -125,20 +176,31 @@ TS_AUTHKEY=<reusable Tailscale auth key from the admin console>
      (`schtasks /create` / `Register-ScheduledTask`), wrapping the binary
      with the environment variables set in the task action. This is not a
      true Windows Service (SCM) — see Out of scope.
-6. **Print a checklist summary** as each step completes (✓ Tailscale
+7. **Generate `copy-this.md`** in the bundle folder:
+   ```markdown
+   # Connect this runtime to your hub
+
+   Paste the line below into the hub's **Add Runtime** dialog →
+   **Paste connection string**:
+
+       <machine-name>|https://<dnsname>|<generated-key>
+   ```
+   Regenerated on every run with the current name/URL/key, so it's always
+   accurate even after a re-run changes any of them.
+8. **Print a checklist summary** as each step completes (✓ Tailscale
    installed / ✓ joined tailnet as `<dnsname>` / ✓ runtime key ready / ✓
-   background service registered), ending with the derived `.ts.net` URL.
-   Self-registration (already implemented) takes it from there — the
-   runtime's existing retry loop registers it with the hub in the
-   background; the install script does not need to wait for or verify that
-   call.
+   background service registered / ✓ `copy-this.md` written), ending with:
+   if self-registration is configured, a note that the hub should show
+   this machine shortly on its own; if not, a reminder to paste
+   `copy-this.md`'s contents into the hub UI to connect it.
 
 ### `--dry-run` mode
 
 Both scripts accept a `--dry-run` flag that runs the preflight and prints
 every action it *would* take (installs, `tailscale up`, service
-registration) without executing any of them. This is the only way to
-exercise the script's logic without mutating a real machine (see Testing).
+registration, generated `copy-this.md` content) without executing any of
+them. This is the only way to exercise the script's logic without mutating
+a real machine (see Testing).
 
 ### `uninstall.sh` / `uninstall.ps1`
 
@@ -161,44 +223,97 @@ registered).
   `dist/bundles/*` alongside the existing `backend-binaries` artifact, so
   bundles ship as release assets on every tagged release.
 
+### Hub UI: "paste connection string" (new)
+
+`frontend/src/features/machines/MachineDialog.tsx`'s Add mode currently
+only shows a Name input and a generated self-register shell command (no
+submit button — the existing `useCreateMachine` hook from
+`frontend/src/features/data/queries.ts` is wired up but never called
+anywhere). This project adds a second option to that same dialog:
+
+- A "paste connection string" textarea. The operator pastes the
+  `name|url|key` line from `copy-this.md`.
+- On submit, the frontend parses the three pipe-delimited fields client-side
+  and calls `useCreateMachine` → `POST /api/machines` (already implemented,
+  just newly invoked) with `{name, url, key}`.
+- The existing self-register-command option remains, unchanged, as the
+  other choice in the same dialog — the operator picks whichever matches
+  how they configured `runtime.env`.
+- Malformed paste (wrong number of fields, non-`https://` URL) is rejected
+  client-side before submit, reusing the dialog's existing validation
+  styling.
+
+### Backend: reachability + auth check on machine creation
+
+`backend/internal/handler/machine.go`'s `PostMachine` gains a pre-create
+check: before calling `st.CreateMachine`, it makes an HTTPS request to the
+submitted `url` against a route that *is* gated by the runtime's key
+middleware (not `GET /api/health`, which is deliberately open — see
+Decision 10), using `Authorization: Bearer <key>`, with a short timeout
+(e.g. 5s):
+
+- Success (200) → proceed to create the machine as today.
+- Network/TLS/timeout failure → reject with a distinct "machine
+  unreachable" error (`{"error":"..."}`, existing envelope).
+- 401 from that route → reject with a distinct "key rejected by machine"
+  error, so a typo'd key is obviously not a network problem.
+
+This check applies uniformly to every `POST /api/machines` call, including
+the existing self-registration path (the runtime calling this endpoint
+about itself) — which benefits too: a misconfigured `--public-url` on the
+runtime side now fails loudly against the hub instead of silently creating
+an unreachable registry entry.
+
 ## Error handling
 
-- Missing/placeholder `runtime.env` values → fail fast, name the exact
-  variable, exit non-zero before touching Tailscale or the service manager.
+- Missing/placeholder `runtime.env` values, or a partial
+  `LOOM_HUB_URL`/`LOOM_HUB_KEY` pair → fail fast, name the exact variable,
+  exit non-zero before touching Tailscale or the service manager.
 - Invalid or expired `TS_AUTHKEY` → surfaced verbatim from `tailscale up`'s
   own error output; script exits non-zero rather than retrying silently
   (the operator needs to generate a fresh key in the Tailscale admin
   console).
 - Re-running `install.sh` after a partial or full prior run is always safe:
-  the persisted `runtime.key` is reused, and service registration
-  overwrites the existing unit/plist/task cleanly rather than erroring on
-  "already exists".
+  the persisted `runtime.key` is reused, an already-running service is
+  stopped and re-registered rather than erroring, and `copy-this.md` is
+  simply rewritten.
 - Windows getting a Scheduled Task instead of a true SCM service is an
   explicit, documented v1 limitation (see Out of scope) — not a silent
   downgrade.
-- Hub unreachable at install time → not this script's problem; the
-  binary's own self-registration retry loop (already implemented) handles
-  it, logging and retrying until the hub is reachable.
+- Hub unreachable at install time → not this script's problem; if
+  self-registration is configured, the binary's own retry loop (already
+  implemented) handles it. If not, the operator pastes `copy-this.md`
+  whenever they're ready.
+- Pasting a connection string for an unreachable machine, or one with a
+  wrong key → the hub's new pre-create check rejects it with a specific
+  error (see above) instead of registering a broken entry.
 
 ## Testing
 
-- These are shell/PowerShell scripts, not Go — no unit test target. Two
-  layers of verification:
-  1. **`--dry-run` review** — run the script with `--dry-run` and confirm
-     the printed checklist matches expectations (right install commands
-     for the detected OS, right derived public URL format, right service
-     registration commands) without mutating anything.
+- Install/uninstall scripts (shell/PowerShell, no Go unit test target):
+  1. **`--dry-run` review** — run with `--dry-run` and confirm the printed
+     checklist matches expectations (right install commands for the
+     detected OS, correctly-derived no-port public URL, right service
+     registration commands, correct `copy-this.md` content) without
+     mutating anything.
   2. **Manual runbook** — on one throwaway VM/container per target OS:
      copy the bundle, fill in `runtime.env` against a real test hub, run
      `install.sh`/`install.ps1`, confirm the machine appears in the hub's
-     Machines page, reboot the VM, confirm the service auto-restarts and
-     the runtime re-appears reachable.
-- Existing backend tests (self-registration, key auth, tailscale-serve
-  flag) are unaffected — this project adds no Go code.
+     Machines page (via self-registration, if configured), reboot the VM,
+     confirm the service auto-restarts; separately, re-run the installer
+     and confirm it updates the existing service instead of erroring.
+- Backend: unit tests for `PostMachine`'s new reachability check —
+  success, network failure, and 401-from-key-mismatch cases, using
+  `httptest.Server` the same way existing machine tests do. Existing
+  self-registration tests (`machineclient` package) need reviewing since
+  their `httptest.Server` stubs now need to answer the authenticated probe
+  route too, not just `POST`/`PATCH /api/machines`.
+- Frontend: the paste-connection-string form's client-side parsing/
+  validation (malformed input rejected before submit) and that
+  `useCreateMachine` is actually invoked on valid submit.
 
 ## Out of scope
 
-- Any backend Go changes — every flag/env var needed already exists.
 - A true Windows Service (SCM) implementation — would require adding a Go
   service-wrapper dependency (e.g. `golang.org/x/sys/windows/svc`) to the
   binary itself. The Scheduled-Task-at-logon approach avoids that
@@ -216,3 +331,8 @@ registered).
 - Auto-updating an already-installed runtime — the existing `--updates`
   self-update flag (GitHub-token-based) already covers that once a runtime
   is running; this project only covers first-time bootstrap.
+- Removing or deprecating self-registration — it stays exactly as
+  implemented; this project only adds an alternative path alongside it.
+- A "test connection" preview before submit in the paste-string UI — the
+  reachability+auth check happens as part of the actual `POST
+  /api/machines` call itself, not as a separate dry-run probe endpoint.
