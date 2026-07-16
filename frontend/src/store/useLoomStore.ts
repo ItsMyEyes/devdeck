@@ -24,7 +24,7 @@ import type {
   Worktree,
 } from './types'
 
-export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh'
+export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh' | 'ssh-group'
 
 export interface Transfer {
   id: string
@@ -106,6 +106,11 @@ interface SSHDialogState {
   /** Flow step 3 (alternative to direct): another saved connection id this
    *  one bastions through. '' means connect directly. */
   jumpConnectionId: string
+}
+interface RenameSSHGroupState {
+  open: boolean
+  oldName: string
+  value: string
 }
 
 export interface BrowserProxyInfo {
@@ -303,6 +308,12 @@ interface LoomState {
   openEditSSHConnection: (conn: SSHConnection) => void
   closeSSHDialog: () => void
   setSSHDialog: (patch: Partial<SSHDialogState>) => void
+
+  // ssh group rename (delete reuses askDelete/confirmDelete with kind 'ssh-group')
+  renameSSHGroup: RenameSSHGroupState
+  openRenameSSHGroup: (group: string) => void
+  closeRenameSSHGroup: () => void
+  setRenameSSHGroupValue: (value: string) => void
 }
 
 // ---------- pure lookup helpers (operate on a workspaces array) ----------
@@ -375,6 +386,7 @@ export const useLoomStore = create<LoomState>()(
         executorMachineId: '',
         jumpConnectionId: '',
       },
+      renameSSHGroup: { open: false, oldName: '', value: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
       sshTileLayouts: {},
@@ -638,6 +650,11 @@ export const useLoomStore = create<LoomState>()(
         ),
       closeSSHDialog: () => set((s) => void (s.sshDialog.open = false)),
       setSSHDialog: (patch) => set((s) => void Object.assign(s.sshDialog, patch)),
+
+      openRenameSSHGroup: (group) =>
+        set((s) => void (s.renameSSHGroup = { open: true, oldName: group, value: group })),
+      closeRenameSSHGroup: () => set((s) => void (s.renameSSHGroup.open = false)),
+      setRenameSSHGroupValue: (value) => set((s) => void (s.renameSSHGroup.value = value)),
     })),
     {
       name: 'loom-ui-v2',
