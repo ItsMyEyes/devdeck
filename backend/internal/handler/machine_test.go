@@ -43,10 +43,19 @@ func TestPostMachineRejectsNonHTTPURL(t *testing.T) {
 }
 
 func TestMachineCRUDRoundtrip(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer rt-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
 	h := newTestMachineHandler(t)
 	rec := httptest.NewRecorder()
 	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
-		strings.NewReader(`{"name":"builder","url":"https://b.ts.net:8989","key":"rt-key"}`)))
+		strings.NewReader(`{"name":"builder","url":"`+backend.URL+`","key":"rt-key"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -92,10 +101,15 @@ func TestMachineHealthOffline(t *testing.T) {
 }
 
 func TestPostMachineAcceptsIsLocal(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
 	h := newTestMachineHandler(t)
 	rec := httptest.NewRecorder()
 	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
-		strings.NewReader(`{"name":"desktop","url":"http://127.0.0.1:9001","key":"k","isLocal":true}`)))
+		strings.NewReader(`{"name":"desktop","url":"`+backend.URL+`","key":"k","isLocal":true}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
@@ -105,15 +119,55 @@ func TestPostMachineAcceptsIsLocal(t *testing.T) {
 }
 
 func TestPostMachineDefaultsIsLocalFalse(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
 	h := newTestMachineHandler(t)
 	rec := httptest.NewRecorder()
 	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
-		strings.NewReader(`{"name":"builder","url":"https://b.ts.net","key":"k"}`)))
+		strings.NewReader(`{"name":"builder","url":"`+backend.URL+`","key":"k"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"isLocal":false`) {
 		t.Errorf("body = %s, want isLocal:false", rec.Body.String())
+	}
+}
+
+func TestPostMachineRejectsUnreachableURL(t *testing.T) {
+	h := newTestMachineHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
+		strings.NewReader(`{"name":"ghost","url":"http://127.0.0.1:1","key":"k"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an unreachable machine", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "could not connect") {
+		t.Errorf("body = %s, want it to mention the connection failure", rec.Body.String())
+	}
+}
+
+func TestPostMachineRejectsWrongKey(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer correct-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostMachine(rec, httptest.NewRequest(http.MethodPost, "/api/machines",
+		strings.NewReader(`{"name":"builder","url":"`+backend.URL+`","key":"wrong-key"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for a rejected key", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "rejected the key") {
+		t.Errorf("body = %s, want it to mention the key was rejected", rec.Body.String())
 	}
 }
 

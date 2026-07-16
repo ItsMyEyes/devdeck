@@ -55,6 +55,10 @@ func (h *MachineHandler) PostMachine(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "url must be an absolute http(s) URL")
 		return
 	}
+	if err := machineclient.Probe(r.Context(), str(body.URL), str(body.Key)); err != nil {
+		writeErr(w, http.StatusBadRequest, "could not connect to machine: "+err.Error())
+		return
+	}
 	m, err := h.st.CreateMachine(str(body.Name), str(body.URL), str(body.Key), body.IsLocal != nil && *body.IsLocal)
 	if handleStoreErr(w, err) {
 		return
