@@ -57,10 +57,18 @@ jobs:
       - name: Build portable binaries (hub + runtime)
         run: make portable-all
 
+      # Same binary runs as --role hub, runtime, or both — "-runtime" in the
+      # release asset name signals "this is the server binary", distinct
+      # from the "-desktop" Tauri app bundles built below.
+      - name: Rename binaries for release
+        run: |
+          cd dist
+          for f in loom-*; do mv "$f" "loom-runtime-${f#loom-}"; done
+
       - uses: actions/upload-artifact@v4
         with:
           name: backend-binaries
-          path: dist/loom-*
+          path: dist/loom-runtime-*
           if-no-files-found: error
 
   build-desktop:
@@ -105,6 +113,26 @@ jobs:
       - name: Build desktop bundle
         run: cd frontend && npm run tauri:build
 
+      # "-desktop" in the release asset name distinguishes these Tauri app
+      # installers from the "-runtime" server binaries built above.
+      - name: Rename macOS bundle
+        if: matrix.platform == 'macos-latest'
+        run: mv frontend/src-tauri/target/release/bundle/dmg/*.dmg frontend/src-tauri/target/release/bundle/dmg/loom-desktop-macos-aarch64.dmg
+
+      - name: Rename Linux bundles
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          mv frontend/src-tauri/target/release/bundle/deb/*.deb frontend/src-tauri/target/release/bundle/deb/loom-desktop-linux-amd64.deb
+          mv frontend/src-tauri/target/release/bundle/rpm/*.rpm frontend/src-tauri/target/release/bundle/rpm/loom-desktop-linux-amd64.rpm
+          mv frontend/src-tauri/target/release/bundle/appimage/*.AppImage frontend/src-tauri/target/release/bundle/appimage/loom-desktop-linux-amd64.AppImage
+
+      - name: Rename Windows bundles
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mv frontend/src-tauri/target/release/bundle/msi/*.msi frontend/src-tauri/target/release/bundle/msi/loom-desktop-windows-amd64.msi
+          mv frontend/src-tauri/target/release/bundle/nsis/*.exe frontend/src-tauri/target/release/bundle/nsis/loom-desktop-windows-amd64-setup.exe
+
       - name: Upload macOS bundle
         if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v4
@@ -148,10 +176,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/backend-binaries/*
-            artifacts/desktop-macos/*
-            artifacts/desktop-linux/*
-            artifacts/desktop-windows/*
+            artifacts/backend-binaries/**/*
+            artifacts/desktop-macos/**/*
+            artifacts/desktop-linux/**/*
+            artifacts/desktop-windows/**/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
