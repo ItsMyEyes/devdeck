@@ -17,6 +17,8 @@ use tauri_plugin_shell::ShellExt;
 
 /// Current sidecar child, so app exit can kill it (kill() consumes the child).
 struct ServerProc(Mutex<Option<CommandChild>>);
+/// Current background remote-mode runtime child, so app exit can kill it.
+struct RuntimeServerProc(Mutex<Option<CommandChild>>);
 /// Set on ExitRequested so the monitor loop stops respawning during shutdown.
 struct ShuttingDown(AtomicBool);
 
@@ -67,6 +69,7 @@ pub fn run() {
                 return Ok(());
             }
             app.manage(ServerProc(Mutex::new(None)));
+            app.manage(RuntimeServerProc(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
             let menu = MenuBuilder::new(app).text(CHANGE_HUB_MENU_ID, "Change Hub…").build()?;
             app.set_menu(menu)?;
@@ -153,9 +156,157 @@ fn change_hub(app: AppHandle) -> Result<(), String> {
 
 async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     match mode {
-        hubmode::HubMode::Remote { url, key: _ } => navigate_remote(handle, &url),
+        hubmode::HubMode::Remote { url, key } => {
+            navigate_remote(handle, &url);
+            let handle2 = handle.clone();
+            tauri::async_runtime::spawn(async move { run_remote_runtime_loop(&handle2, &url, &key).await });
+        }
         hubmode::HubMode::Local => run_local_respawn_loop(handle).await,
     }
+}
+
+/// Records a runtime-registration failure and surfaces it to the operator.
+/// Stub for now (logs only) -- Task 5 replaces this with a menu-item swap
+/// and a bundled warning page the operator can open on demand.
+fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, _hub_url: &str) {
+    log_runtime_line(handle, reason);
+}
+
+enum RuntimeLaunchEnd {
+    /// Process exited; respawn unless shutting down or out of attempts.
+    Crashed,
+    /// Never became ready — stop trying and surface the failure.
+    Failed(String),
+}
+
+/// Background loop for the desktop's remote-mode local runtime: derives a
+/// Tailscale public URL, then spawns/respawns the sidecar as `--role
+/// runtime` so it self-registers with the operator-supplied hub. Runs
+/// fully in the background — the main window has already navigated to the
+/// remote hub via `navigate_remote` and is never blocked by this.
+async fn run_remote_runtime_loop(handle: &AppHandle, hub_url: &str, hub_key: &str) {
+    let public_url = match tailscale::public_url().await {
+        Ok(u) => u,
+        Err(e) => {
+            let msg = format!("Tailscale lookup failed: {e}");
+            set_runtime_warning_menu(handle, &msg, hub_url);
+            return;
+        }
+    };
+    let mut respawns = 0;
+    loop {
+        match launch_runtime_once(handle, hub_url, hub_key, &public_url).await {
+            RuntimeLaunchEnd::Failed(msg) => {
+                set_runtime_warning_menu(handle, &msg, hub_url);
+                break;
+            }
+            RuntimeLaunchEnd::Crashed => {
+                if handle.state::<ShuttingDown>().0.load(Ordering::SeqCst) {
+                    break;
+                }
+                respawns += 1;
+                if respawns > MAX_RESPAWNS {
+                    set_runtime_warning_menu(handle, "runtime sidecar crashed repeatedly", hub_url);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Appends one line to the runtime log without an active child process
+/// (e.g. a pre-spawn Tailscale failure). Best-effort: logging failures are
+/// swallowed, matching this file's existing style for non-critical I/O.
+fn log_runtime_line(handle: &AppHandle, msg: &str) {
+    if let Ok(log_dir) = handle.path().app_log_dir() {
+        if let Ok(mut log) = sidecar::open_runtime_log(&log_dir) {
+            let _ = writeln!(log, "{msg}");
+        }
+    }
+}
+
+/// One full runtime sidecar lifetime: spawn, wait ready, then pump events
+/// until the process terminates. Unlike `launch_once`, there is no window
+/// navigation here — the main window is already showing the remote hub.
+async fn launch_runtime_once(
+    handle: &AppHandle,
+    hub_url: &str,
+    hub_key: &str,
+    public_url: &str,
+) -> RuntimeLaunchEnd {
+    let data_dir = match handle.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("resolve app data dir: {e}")),
+    };
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        return RuntimeLaunchEnd::Failed(format!("create app data dir: {e}"));
+    }
+    let log_dir = match handle.path().app_log_dir() {
+        Ok(d) => d,
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("resolve app log dir: {e}")),
+    };
+    let mut log = match sidecar::open_runtime_log(&log_dir) {
+        Ok(f) => f,
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("open runtime log: {e}")),
+    };
+
+    let key = match sidecar::persisted_runtime_key(&data_dir) {
+        Ok(k) => k,
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("persist runtime key: {e}")),
+    };
+    let name = hubapi::device_name();
+    let cmd = match handle.shell().sidecar("loom-server") {
+        Ok(c) => c.args(sidecar::runtime_args(&data_dir, &key, hub_url, hub_key, public_url, &name)),
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
+    };
+    let (mut rx, child) = match cmd.spawn() {
+        Ok(pair) => pair,
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("spawn loom-server (runtime): {e}")),
+    };
+    *handle.state::<RuntimeServerProc>().0.lock().unwrap() = Some(child);
+
+    // Phase 1: wait for the listen line (or early termination / timeout).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(sidecar::READY_TIMEOUT_SECS);
+    let mut port: Option<u16> = None;
+    while port.is_none() {
+        let event = match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Err(_) => {
+                return RuntimeLaunchEnd::Failed(
+                    "loom-server (runtime) produced no listen line in time".into(),
+                )
+            }
+            Ok(None) => return RuntimeLaunchEnd::Crashed,
+            Ok(Some(ev)) => ev,
+        };
+        match event {
+            CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
+                let line = String::from_utf8_lossy(&bytes);
+                let _ = writeln!(log, "{}", line.trim_end());
+                port = sidecar::parse_listen_port(&line);
+            }
+            CommandEvent::Terminated(_) => return RuntimeLaunchEnd::Crashed,
+            _ => {}
+        }
+    }
+    let port = port.unwrap();
+
+    // Phase 2: readiness. No navigation here — the window is already
+    // showing the remote hub via navigate_remote.
+    if let Err(msg) = hubapi::wait_healthy(port, Duration::from_secs(sidecar::READY_TIMEOUT_SECS)).await {
+        return RuntimeLaunchEnd::Failed(msg);
+    }
+
+    // Phase 3: pump output to the log until the process dies.
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
+                let _ = writeln!(log, "{}", String::from_utf8_lossy(&bytes).trim_end());
+            }
+            CommandEvent::Terminated(_) => break,
+            _ => {}
+        }
+    }
+    RuntimeLaunchEnd::Crashed
 }
 
 /// Navigates the main window straight at an operator-hosted hub URL and
@@ -208,13 +359,17 @@ fn show_choose_screen(handle: &AppHandle) {
     }
 }
 
-/// Marks shutdown (stops the respawn loop) and kills the sidecar child.
-/// Idempotent: the child is taken out of ServerProc, so a second call
+/// Marks shutdown (stops the respawn loop) and kills both the local-hub and
+/// background remote-mode runtime sidecar children, if either was spawned.
+/// Idempotent: each child is taken out of its state slot, so a second call
 /// (e.g. RunEvent::Exit firing after a signal handler already ran this) is
-/// a no-op. Also a no-op in remote mode (no child was ever spawned).
+/// a no-op.
 fn kill_sidecar(handle: &AppHandle) {
     handle.state::<ShuttingDown>().0.store(true, Ordering::SeqCst);
     if let Some(child) = handle.state::<ServerProc>().0.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+    if let Some(child) = handle.state::<RuntimeServerProc>().0.lock().unwrap().take() {
         let _ = child.kill();
     }
 }
