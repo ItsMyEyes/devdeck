@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Cable, KeyRound, Plus, Server } from 'lucide-react'
+import { Cable, KeyRound, Pencil, Plus, Server, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
 import { useSSHConnections } from '@/features/data/queries'
@@ -19,6 +19,8 @@ export function SSHGroupTree() {
   const activeGroup = useLoomStore((s) => s.sshActiveGroup)
   const setActiveGroup = useLoomStore((s) => s.setSSHActiveGroup)
   const openAddSSHConnection = useLoomStore((s) => s.openAddSSHConnection)
+  const openRenameSSHGroup = useLoomStore((s) => s.openRenameSSHGroup)
+  const askDelete = useLoomStore((s) => s.askDelete)
 
   const groups = Array.from(new Set(hosts.map(groupLabel))).sort((a, b) =>
     a === UNGROUPED ? 1 : b === UNGROUPED ? -1 : a.localeCompare(b),
@@ -65,25 +67,56 @@ export function SSHGroupTree() {
           {groups.map((group) => {
             const selected = activeGroup === group
             const count = hosts.filter((host) => groupLabel(host) === group).length
+            const manageable = group !== UNGROUPED
             return (
-              <button
-                key={group}
-                type="button"
-                onClick={() => selectGroup(group)}
-                aria-current={selected ? 'page' : undefined}
-                className={cn(
-                  'flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                  selected ? 'bg-loom-hover-wash text-loom-fg' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
-                )}
-              >
-                {group === UNGROUPED ? (
-                  <Server size={16} className="flex-none text-loom-dim" />
-                ) : (
-                  <KeyRound size={16} className="flex-none text-loom-dim" />
-                )}
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{group}</span>
-                <span className="font-mono text-[11.5px] font-semibold text-loom-dim">{count}</span>
-              </button>
+              <div key={group} className="group/row relative">
+                <button
+                  type="button"
+                  onClick={() => selectGroup(group)}
+                  aria-current={selected ? 'page' : undefined}
+                  className={cn(
+                    'flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                    selected ? 'bg-loom-hover-wash text-loom-fg' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+                  )}
+                >
+                  {group === UNGROUPED ? (
+                    <Server size={16} className="flex-none text-loom-dim" />
+                  ) : (
+                    <KeyRound size={16} className="flex-none text-loom-dim" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{group}</span>
+                  <span
+                    className={cn(
+                      'font-mono text-[11.5px] font-semibold text-loom-dim',
+                      manageable && 'group-hover/row:hidden',
+                    )}
+                  >
+                    {count}
+                  </span>
+                </button>
+                {manageable ? (
+                  <div className="absolute inset-y-0 right-2 hidden items-center gap-1 group-hover/row:flex">
+                    <button
+                      type="button"
+                      aria-label={`Rename group ${group}`}
+                      title="Rename group"
+                      onClick={() => openRenameSSHGroup(group)}
+                      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete group ${group}`}
+                      title="Delete group"
+                      onClick={() => askDelete('ssh-group', group, group)}
+                      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-red-tint hover:text-loom-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             )
           })}
         </div>
