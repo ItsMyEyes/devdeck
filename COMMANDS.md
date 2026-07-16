@@ -21,10 +21,12 @@ cd backend && go run ./cmd/server --db loom.db --open=false
 
 The Go backend accepts flags:
 - `--role` — server role: `hub` (organizational data + machine registry +
-  proxy + web UI) or `runtime` (headless execution daemon, key auth only)
-  (default `hub`, env `LOOM_ROLE`).
-- `--key` — static API key; required for `--role runtime`, optional bearer
-  auth for `--role hub` (desktop clients) (env `LOOM_KEY`).
+  proxy + web UI), `runtime` (headless execution daemon, key auth only), or
+  `both` (a hub that also self-registers itself as its own execution
+  machine — for solo self-hosting on a fixed address, no separate runtime
+  process or manual Machines-page step) (default `hub`, env `LOOM_ROLE`).
+- `--key` — static API key; required for `--role runtime`/`--role both`,
+  optional bearer auth for `--role hub` (desktop clients) (env `LOOM_KEY`).
 - `--hub-url` — hub base URL this runtime should self-register with on
   startup (env `LOOM_HUB_URL`, empty = self-registration disabled).
 - `--hub-key` — hub's bearer key, used to authenticate this runtime's
@@ -47,6 +49,12 @@ The Go backend accepts flags:
   spoofable) and the TCP peer address is used. Required for `--only-from` to
   see real public IPs when running behind a tunnel/reverse proxy — set it to
   the proxy's ingress address (e.g. `127.0.0.1` for a local tunnel daemon).
+- `--enable-tailscale-serve` — run `tailscale serve <port>` alongside the
+  server, exposing it on your tailnet at `https://<this-machine>.<tailnet>.ts.net`
+  (no port suffix — `tailscale serve` fronts it on the tailnet's implicit
+  port 443) without a second terminal (default `false`, env
+  `LOOM_TAILSCALE_SERVE`). Requires the `tailscale` CLI on `PATH`; fails
+  fast at startup if it's missing.
 - `--2fa` — require TOTP two-factor authentication for login (default `true`,
   env `LOOM_2FA`). With `--2fa=false`, registration skips TOTP enrollment and
   login completes with password only (the login response is `{"status":"ok"}`
@@ -84,12 +92,18 @@ The Go backend accepts flags:
 
 ## Hub / runtime roles
 
-One binary, two roles. `--role runtime` requires `--key` (fails fast at
+One binary, three roles. `--role runtime` requires `--key` (fails fast at
 startup otherwise) and serves only `GET /api/health` publicly — every other
 route needs the key via `Authorization: Bearer <key>` (or `?key=` on
 WebSocket upgrade requests only). `--role hub` (the default) keeps existing
 session-cookie auth and additionally accepts `Authorization: Bearer <key>`
-as an alternate credential (e.g. for a Tauri desktop client).
+as an alternate credential (e.g. for a Tauri desktop client). `--role both`
+is a hub that also requires `--key` and self-registers itself as its own
+execution Machine on startup — routing is identical to `--role hub`
+(execution routes are already registered unconditionally); the only
+difference is that self-registration loop. See TUTORIAL.md's
+["Deployment modes"](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop)
+for when to reach for which.
 
 ```bash
 # Start a headless runtime daemon:
@@ -113,6 +127,11 @@ cd backend && go run ./cmd/server --role hub --key hubk --addr 127.0.0.1:9198 --
 
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9198/api/workspaces        # 401 (no cookie, no key)
 curl -s -H 'Authorization: Bearer hubk' http://127.0.0.1:9198/api/workspaces       # 200 []
+
+# Solo self-hosting: one process, both roles, self-registered as its own machine:
+cd backend && go run ./cmd/server --role both --key soloK --addr 127.0.0.1:9197 --db /tmp/solo.db --open=false
+
+curl -s -H 'Authorization: Bearer soloK' http://127.0.0.1:9197/api/machines  # already includes this process itself
 ```
 
 See `ARCHITECTURE.md` for the roles paragraph and `CONTRACTS.md` for the
@@ -327,3 +346,19 @@ cd frontend && npx @tanstack/router-plugin --target react
 - Desktop data lives in the app-data dir (macOS:
   `~/Library/Application Support/dev.kiyora.loom/` — `loom.db`, `.env`,
   `local-machine-id`); sidecar logs in the app log dir (`sidecar.log`).
+- **Two hub modes, chosen on first launch** (revisit anytime via the app
+  menu's "Change Hub…"): "Host locally" spawns the bundled sidecar as
+  `--role hub` (as above), or "Connect to a hub" points the window at an
+  operator-hosted hub URL + key instead — no sidecar hub spawned, the
+  window just behaves like a browser tab against that hub's own login.
+- **"Connect to a hub" also self-registers this device as a runtime.** In
+  the background (never blocking the window's navigation), the shell
+  shells out to `tailscale status --self --json` for this device's tailnet
+  DNS name, then — if found — spawns the bundled backend as a *second*,
+  separate `--role runtime` process (persisted key at `<app data
+  dir>/runtime-key`, own `loom-runtime.db`, `--enable-tailscale-serve`) that
+  self-registers with the hub URL/key you provided. If Tailscale isn't
+  available, this step is skipped and logged to `<app log
+  dir>/runtime-sidecar.log`; the app menu swaps "Change Hub…" for "⚠ Runtime
+  not registered" until it's resolved. See
+  `docs/superpowers/specs/2026-07-16-desktop-remote-runtime-self-registration-design.md`.

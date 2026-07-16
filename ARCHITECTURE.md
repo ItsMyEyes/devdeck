@@ -40,16 +40,23 @@ Browser (fetch)    ──HTTP──────→ Vite proxy (:5173) → Go bac
 Loom is split into a **hub** (organizational source of truth: workspaces,
 projects, invoices, …, machine registry) and per-machine **runtime**
 backends (execution: git, worktrees, PTY) — one Go binary, selected at
-startup via `--role hub|runtime` (see `COMMANDS.md`). All traffic rides one
-Tailscale tailnet; clients connect direct-first to runtimes, with a hub
+startup via `--role hub|runtime|both` (see `COMMANDS.md`). All traffic rides
+one Tailscale tailnet; clients connect direct-first to runtimes, with a hub
 reverse proxy (`/api/machines/{id}/proxy/{rest...}`) as fallback for both
 REST and WebSocket. `--role runtime` requires a static `--key` and serves
 key-only auth (no session cookies, no embedded SPA, no auth/browser/seed
 routes); `--role hub` keeps session-cookie auth and additionally accepts
-that same style of bearer key for desktop (Tauri) clients. A runtime can
-also self-register with its hub on startup via `--hub-url`/`--hub-key`
-instead of being added by hand through the Machines UI — see
-`docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md`. See
+that same style of bearer key for desktop (Tauri) clients. `--role both` is
+a hub that also self-registers itself as its own execution Machine on
+startup, for solo self-hosting without a separate runtime process — see
+`docs/superpowers/specs/2026-07-14-hub-runtime-dual-role-and-polling-design.md`.
+A runtime can also self-register with its hub on startup via
+`--hub-url`/`--hub-key` instead of being added by hand through the Machines
+UI — see `docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md`.
+The Tauri desktop app can do the same in the background when pointed at a
+remote hub, deriving its own Tailscale public URL automatically — see
+`docs/superpowers/specs/2026-07-16-desktop-remote-runtime-self-registration-design.md`.
+See
 `docs/superpowers/specs/2026-07-09-hub-runtime-tauri-design.md` for the full
 design and `CONTRACTS.md` for the machines API and key-auth rules.
 

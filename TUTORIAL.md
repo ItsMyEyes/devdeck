@@ -41,7 +41,7 @@ Either way, you land on `/` — which, with no workspace yet, shows an onboardin
 A **workspace** is the top-level grouping — think "one client" or "one team." A **project** is a single repo living inside a workspace.
 
 1. Create a workspace (name only) from the onboarding screen or the workspace switcher at the top of the sidebar.
-2. Add a project: point it at a local folder (a folder picker browses the filesystem of whichever machine the project will run on) or clone a GitHub URL directly. If you've registered more than one machine (see [§13](#13-multi-machine-setup)), you'll also pick which machine this project's files should live on — leave it unassigned for "this machine."
+2. Add a project: point it at a local folder (a folder picker browses the filesystem of whichever machine the project will run on) or clone a GitHub URL directly. You'll also pick which registered **Machine** runs it — a brand-new hub starts with none, so if the dropdown is empty see [§13](#13-deployment-modes-hub-both-and-desktop) first (fastest fix: restart with `--role both`, which registers itself automatically).
 3. The project now appears in the sidebar's project tree, with **Worktrees** and **Issues** tabs.
 
 ## 5. Spawn your first agent worktree
@@ -116,31 +116,75 @@ The **Tools** sidebar item is a workspace-agnostic utility page. The two documen
 
 The rest of the page is everyday dev utilities: JWT decode, Base64, URL encode/decode, hashing, JSON/XML/CSV formatting, UUID generation, timestamp conversion.
 
-## 13. Multi-machine setup
+## 13. Deployment modes: hub, both, and desktop
 
-By default everything runs as a single **hub** — one process holding both the organizational data (workspaces/projects/invoices/…) and doing the execution work (git/worktrees/terminals) itself. If you want a second machine to handle execution — more CPU, a different OS, a machine physically closer to a particular repo — register it as a **runtime**.
+Loom is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.4](#134-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
 
-**Manually**, from the hub's **Machines** page: add a machine's name, URL, and a static key. The hub then talks to it directly (or falls back to proxying through itself if a direct connection fails) and distributes that key to your browser for direct connections.
+### The one rule that applies to every mode: a project needs a Machine
 
-**Automatically**, a runtime can register itself — no manual step in the Machines UI. Locally, this is exactly what `make dev-runtime` does:
+Every project is executed by a registered **Machine** (git/worktrees/terminals/LSP all run there) — you pick which one in the **New project** dialog's machine dropdown. A brand-new hub (`--role hub`, the default — what `make dev` runs) starts with an *empty* Machines registry, so that dropdown has nothing but "Select a machine…" in it, and you can't create a project yet. Every mode below is really just a different answer to "how does a Machine get into that registry" — from one extra flag to a whole second computer over Tailscale.
+
+### 13.1 Solo, one computer — `--role both`
+
+The simplest correct setup for a single operator on a single computer: one process does the organizational data *and* the execution work, and registers itself as a Machine on startup so you never have to touch the Machines page.
+
+```bash
+cd backend && go run ./cmd/server --role both --key <any-secret-string> --db loom.db
+```
+
+- Requires `--key`, same fail-fast rule as `--role runtime`.
+- On startup it self-registers itself (marked `isLocal`), so **New project**'s machine dropdown auto-selects it immediately.
+- Everything else — routes, auth, the UI — is identical to plain `--role hub` (§§1-12).
+- Same idea for a release build: `./loom --role both --key <secret>` (see [COMMANDS.md's Build section](COMMANDS.md#build) for `make portable`).
+
+### 13.2 Hub + one or more separate runtime machines
+
+Register a second machine when you want more CPU, a different OS, or a machine physically closer to a particular repo to do the execution work. All git/worktree/terminal/LSP activity for a project assigned to that machine happens there; the hub only holds organizational data and federates everything into one UI.
+
+From the hub's **Machines** page → **Add Runtime**, there are two ways to connect one:
+
+- **Self-register command** (for a runtime you're setting up now). The dialog shows a ready-to-run command with a generated key and your hub's own URL already filled in:
+  ```bash
+  ./loom.exe --role runtime --key <generated> --addr 0.0.0.0:9199 --db runtime.db --open=false \
+    --hub-url <your-hub-url> --hub-key <your-hub-key> --public-url http://<hostname>:9199 --name <name>
+  ```
+  Fill in `<your-hub-key>` (the hub's own `--key`) and `<hostname>` (this runtime's real reachable address), then run it on the target machine — it registers itself on startup. There's no submit button on the hub side; the machine just appears once it's registered.
+- **Paste a connection string** (for a runtime that's already running). Click "Have a connection string instead?" and paste one `name|url|key` line (e.g. `builder|https://builder.tail-x.ts.net|a1b2c3...`). Unlike the self-register path, the hub verifies this immediately — it calls the runtime's `/api/whoami` with the given key before creating the row, so a wrong key or an unreachable URL fails right away with a clear error instead of silently registering a dead machine.
+
+Either way ends the same: the machine shows up on the Machines page and becomes selectable in **New project**. Everything rides one Tailscale tailnet — hub and runtimes need to be on the same tailnet, and URLs should be the tailnet address (`https://<name>.<tailnet>.ts.net`), not `127.0.0.1`, once they're on different machines. See [ARCHITECTURE.md's "Hub / runtime roles"](ARCHITECTURE.md#hub--runtime-roles) for the full request-flow diagrams.
+
+Locally, without any real second machine, `make dev-runtime` exercises the self-register path against `make dev-hub`:
 
 ```bash
 make dev-hub       # terminal 1 — hub on :8989, with a fixed dev bearer key
 make dev-runtime   # terminal 2 — runtime on :9199, self-registers with the hub above
 ```
 
-Open the Machines page and the runtime is already there. For a real two-machine setup (both on the same Tailscale tailnet), the equivalent is:
+### 13.3 Desktop app
 
-```bash
-# on the runtime machine:
-go run ./cmd/server --role runtime --key <runtime-key> --addr <runtime-tailnet-ip>:8989 \
-  --hub-url https://hub.<your-tailnet>.ts.net --hub-key <hub-key> \
-  --public-url https://this-machine.<your-tailnet>.ts.net --name my-runtime
-```
+Loom also ships as a native app (macOS/Windows/Linux, via Tauri) — `make dev-tauri` for development, `cd frontend && npm run tauri:build` for a release bundle (see [COMMANDS.md's "Desktop app (Tauri)"](COMMANDS.md#desktop-app-tauri) for exact build commands). The first launch asks how to run it — revisit the choice anytime from the app menu's **Change Hub…** item.
 
-See [ARCHITECTURE.md's "Hub / runtime roles"](ARCHITECTURE.md#hub--runtime-roles) for the full request-flow diagrams, and `docs/superpowers/specs/2026-07-09-runtime-self-registration-design.md` for exactly how the self-registration handshake works.
+**Host locally on this device.** The app bundles the same Go backend as a background process (`--role hub`, ephemeral per-launch key, local SQLite database in the app's own data directory) — a complete, self-contained hub with nothing to configure. It registers itself automatically, exactly like `--role both` above, so **New project** works immediately.
 
-Once a project is assigned to a runtime machine, every worktree/terminal/LSP/git operation for that project's worktrees runs on that machine — the hub just federates the data into the same UI you already know.
+**Connect to a hub I already host.** For pointing the desktop app at a hub running elsewhere (a home server, a cheap VPS, another Loom install), you provide:
+
+- **Hub URL** — that hub's tailnet address (`https://hub.tail-x.ts.net`).
+- **Hub key** — that hub's own `--key`.
+
+The window then behaves like a plain browser tab logged into that hub — same login screen, same session. It also does one more thing in the background: it looks up this device's own Tailscale address and, if found, spawns the bundled backend as a second, separate `--role runtime` process that self-registers with the hub you pointed it at (fronted on the tailnet via `--enable-tailscale-serve`, so it's reachable at `https://<this-device>.<tailnet>.ts.net`, no port). In practice: type a hub URL and key once, and your own computer shows up as a usable runtime on that hub within a few seconds — no separate install, no command to copy anywhere.
+
+If Tailscale isn't installed (or this device isn't joined to a tailnet), that background step just doesn't happen — browsing the hub is completely unaffected, but the app menu swaps **Change Hub…** for **⚠ Runtime not registered**; click it for the reason and the log path (`<app log dir>/runtime-sidecar.log`), with a button back to the hub.
+
+Desktop data lives in the OS app-data directory (macOS: `~/Library/Application Support/dev.kiyora.loom/`) — separate databases per mode (`loom.db` for "Host locally", `loom-runtime.db` for the background runtime spawned by "Connect to a hub"), plus a persisted `runtime-key` so that background runtime keeps the same identity across restarts.
+
+### 13.4 Which one should I use?
+
+| Situation | Use |
+|---|---|
+| Just you, one computer, simplest setup | `--role both`, or the desktop app's "Host locally" |
+| You + a second/third machine for execution power | `--role hub` + one or more `--role runtime` machines |
+| You want a native app, and already host a hub elsewhere | Desktop app → "Connect to a hub" |
+| You want a native app and nothing else running anywhere | Desktop app → "Host locally" |
 
 ## 14. MCP issue-tracker server for agents
 
@@ -173,3 +217,6 @@ It exposes four tools: `list_projects`, `create_issue` (assignee is required —
 - **Tools page shows a 503 for a conversion.** The underlying CLI (`markitdown`/`pandoc`/`mmdc`) isn't installed — the error message includes the exact install command. See [COMMANDS.md](COMMANDS.md) for the full setup.
 - **Lost your 2FA device.** Use one of the one-time backup codes shown at enrollment. If you don't have those either, there's no self-service recovery — you'd need direct database access to clear the account's TOTP secret.
 - **A registered machine shows offline.** The hub polls `GET /api/machines/{id}/health` with a 3-second timeout — check the runtime process is actually running and reachable on the URL you registered it with, and that both machines are on the same tailnet if you're not on `127.0.0.1`.
+- **New project's machine dropdown is empty.** A brand-new `--role hub` process has no registered Machines yet — see [§13](#13-deployment-modes-hub-both-and-desktop): the fastest fix is restarting with `--role both`, which registers itself automatically.
+- **Pasting a connection string fails immediately.** The hub verifies the URL/key against the runtime's `/api/whoami` before registering it — "unreachable" means the URL isn't actually reachable from the hub (check the tailnet), and a rejected key means it doesn't match that runtime's own `--key`.
+- **Desktop app shows "⚠ Runtime not registered" instead of "Change Hub…".** This device couldn't self-register as a runtime with the hub you connected to — click the menu item for the reason and log path (`<app log dir>/runtime-sidecar.log`). Most commonly, Tailscale isn't installed or this device isn't joined to a tailnet; browsing the hub itself is unaffected either way.

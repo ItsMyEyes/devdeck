@@ -15,7 +15,7 @@ New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from 
 - **Issue tracker** — a drag-and-drop kanban board per project (attachments, comments, an auto-recorded activity log), plus a standalone MCP server so an agent working in a worktree can file and update its own issues.
 - **Invoices, Todos, News** — per-workspace, with recurring invoice templates and a finance-analysis view.
 - **Tools page** — document → Markdown (`markitdown`) and Markdown → Word/PDF (`pandoc`, with Mermaid diagrams rendered inline), plus a handful of everyday dev utilities (JWT/Base64/hash/UUID/etc).
-- **Multi-machine.** Split into a **hub** (organizational data — workspaces, projects, invoices, the machine registry) and any number of **runtime** machines (execution — git, worktrees, terminals, LSP), talking directly to each other over one Tailscale tailnet. A runtime can self-register with its hub on startup — see [TUTORIAL.md](TUTORIAL.md#multi-machine-setup).
+- **Multi-machine, or all-in-one.** Split into a **hub** (organizational data — workspaces, projects, invoices, the machine registry) and any number of **runtime** machines (execution — git, worktrees, terminals, LSP), talking directly to each other over one Tailscale tailnet, with self-registration so a runtime can add itself with no manual step; or run solo with one `--role both` process, or the desktop app, which can also self-register your own machine as a runtime against a hub you host elsewhere — see [TUTORIAL.md](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
 
 ## Quick start
 
