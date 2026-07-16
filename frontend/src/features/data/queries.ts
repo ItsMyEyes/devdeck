@@ -1,7 +1,8 @@
 // React-query hooks: backend is the source of truth for domain data.
 // Queries read the full nested workspace tree + settings; mutations invalidate on success.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import type { Machine, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
@@ -73,6 +74,7 @@ import type {
   CreateSSHConnectionBody,
   CreateTodoBody,
   CreateWorkspaceBody,
+  MachineHealth,
   SettingsPatch,
   UpdateBankBody,
   UpdateCommentBody,
@@ -142,6 +144,7 @@ import {
   deleteSSHPaths,
   fetchSSHFile,
   fetchSSHFiles,
+  searchSSHFiles,
   writeSSHFile,
 } from '@/lib/sshFileApi'
 import type { FilesTarget } from '@/features/terminal/filesTarget'
@@ -204,6 +207,27 @@ export function useMachineHealth(id: string | undefined) {
     staleTime: 5_000,
     refetchInterval: 15_000,
   })
+}
+
+/** Batched health lookup for machine pickers (Select/dropdown option lists) —
+ *  one query per machine, same cache entries `useMachineHealth` reads/writes,
+ *  reduced to a `machineId -> status` map so callers don't miss-index across
+ *  a `useQueries` result array in a machine's own list order. */
+export function useMachinesHealth(machines: Machine[]) {
+  const results = useQueries({
+    queries: machines.map((m) => ({
+      queryKey: qk.machineHealth(m.id),
+      queryFn: () => fetchMachineHealth(m.id),
+      staleTime: 5_000,
+      refetchInterval: 15_000,
+    })),
+  })
+  return useMemo(() => {
+    const byId = new Map<string, MachineHealth | undefined>()
+    machines.forEach((m, i) => byId.set(m.id, results[i]?.data))
+    return byId
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machines, results])
 }
 
 // ---- SSH connections ----
@@ -1014,22 +1038,6 @@ export function useWorktreeFile(machine: Machine, worktreeId: string, path: stri
   })
 }
 
-export function useWorktreeFileSearch(
-  machine: Machine,
-  worktreeId: string,
-  pattern: string,
-  enabled: boolean,
-  options: SearchWorktreeFilesOptions = {},
-) {
-  const mode = options.includeDirs ? 'with-dirs' : 'files-only'
-  return useQuery({
-    queryKey: [...qk.worktreeFileSearch(machine.id, worktreeId, pattern), mode] as const,
-    queryFn: () => searchWorktreeFiles(machine, worktreeId, pattern, options),
-    enabled: enabled && worktreeId.length > 0,
-    staleTime: 0,
-  })
-}
-
 export function useWriteWorktreeFile(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -1065,12 +1073,11 @@ export function useDeleteWorktreePaths(machine: Machine, worktreeId: string) {
 
 // ---- File source dispatch (worktree checkout | SSH connection over SFTP) ----
 //
-// TerminalExplorer.tsx and SSHFileEditor.tsx are shared across both file
-// sources; these hooks pick the right cache key + API call for whichever
-// FilesTarget they're handed, so the two sources never need their own
-// parallel copy of the shared UI. The plain worktree-only hooks above stay
-// untouched — FileEditor.tsx and FileQuickOpen.tsx keep calling those
-// directly.
+// TerminalExplorer.tsx, SSHFileEditor.tsx and FileQuickOpen.tsx are shared
+// across both file sources; these hooks pick the right cache key + API call
+// for whichever FilesTarget they're handed, so the two sources never need
+// their own parallel copy of the shared UI. The plain worktree-only hooks
+// above stay untouched — FileEditor.tsx keeps calling those directly.
 
 export function useFilesList(target: FilesTarget, path: string) {
   return useQuery({
@@ -1079,6 +1086,29 @@ export function useFilesList(target: FilesTarget, path: string) {
     queryFn: () =>
       target.kind === 'ssh' ? fetchSSHFiles(target.connectionId, path) : fetchWorktreeFiles(target.machine, target.worktreeId, path),
     enabled: target.kind === 'ssh' || target.worktreeId.length > 0,
+  })
+}
+
+export function useFileSearchTarget(
+  target: FilesTarget,
+  pattern: string,
+  enabled: boolean,
+  options: SearchWorktreeFilesOptions = {},
+) {
+  const mode = options.includeDirs ? 'with-dirs' : 'files-only'
+  return useQuery({
+    queryKey: [
+      ...(target.kind === 'ssh'
+        ? qk.sshFileSearch(target.connectionId, pattern)
+        : qk.worktreeFileSearch(target.machine.id, target.worktreeId, pattern)),
+      mode,
+    ] as const,
+    queryFn: () =>
+      target.kind === 'ssh'
+        ? searchSSHFiles(target.connectionId, pattern, options)
+        : searchWorktreeFiles(target.machine, target.worktreeId, pattern, options),
+    enabled: enabled && (target.kind === 'ssh' || target.worktreeId.length > 0),
+    staleTime: 0,
   })
 }
 

@@ -11,6 +11,7 @@ import {
   addContentToLeaf,
   allocateTerminalContent,
   closeTab,
+  collectTerminalSessionKeys,
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
@@ -27,7 +28,9 @@ import {
 import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from '@/features/terminal/paneTree'
 import { TerminalExplorer } from '@/features/terminal/TerminalExplorer'
 import { SSHFileEditor } from '@/features/terminal/SSHFileEditor'
+import { FileQuickOpen } from '@/features/terminal/FileQuickOpen'
 import { SSHTerminal } from './SSHTerminal'
+import { disposeSSHSession } from './sshTerminalRegistry'
 
 function basename(path: string) {
   return path.split('/').pop() ?? path
@@ -51,15 +54,17 @@ function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string
  * Tile body for the 'ssh-shell' tab kind — a scaled-down TerminalWorkspace
  * (ExpandedTerminal.tsx): Terminal + Explorer + File panes on the same
  * PaneCanvas tiling engine, minus everything that's specifically about a
- * local worktree checkout (Git panel, LSP-backed file editing, quick-open,
- * worktree mutations). File edits go over SFTP via SSHFileEditor instead of
- * FileEditor.
+ * local worktree checkout (Git panel, LSP-backed file editing, worktree
+ * mutations). File edits go over SFTP via SSHFileEditor instead of
+ * FileEditor; file quick-open (Ctrl/Cmd+P) works the same as the worktree
+ * side, backed by the SSH FilesTarget.
  */
 export function SSHShellPane({ connectionId }: { connectionId: string }) {
   const connections = useSSHConnections().data ?? []
   const connection = connections.find((c) => c.id === connectionId)
 
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(() => new Set())
+  const [quickOpen, setQuickOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const isDesktop = useIsDesktop()
 
@@ -75,6 +80,17 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
   function commitLayout(next: WorktreeLayout) {
     setSSHTileLayout(connectionId, next)
   }
+
+  // Real teardown for every live session still in this tree, but only when
+  // the whole SSH shell tab unmounts — not on every render, hence the ref
+  // (closing over the latest layout without retriggering the effect).
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
+  useEffect(() => {
+    return () => {
+      collectTerminalSessionKeys(layoutRef.current.root).forEach(disposeSSHSession)
+    }
+  }, [])
 
   useEffect(() => {
     setDirtyFileCount(dirtyFiles.size)
@@ -163,6 +179,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
       if (dirtyFiles.has(content.path) && !window.confirm(`Close ${basename(content.path)} without saving?`)) return
       cleanupFileBookkeeping(content.path)
     }
+    if (content?.kind === 'terminal') disposeSSHSession(content.sessionKey)
     commitLayout(closeTab(layout, paneId, contentId))
   }
 
@@ -176,6 +193,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
     for (const tab of pane.tabs) {
       next = closeTab(next, paneId, tab.id)
       if (tab.kind === 'file') cleanupFileBookkeeping(tab.path)
+      if (tab.kind === 'terminal') disposeSSHSession(tab.sessionKey)
     }
     commitLayout(next)
   }
@@ -250,6 +268,11 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
       if (containerRef.current?.offsetParent === null) return
       const primary = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
+      if (primary && key === 'p') {
+        event.preventDefault()
+        setQuickOpen(true)
+        return
+      }
       if (primary && key === 't') {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
@@ -313,7 +336,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
       if (content.kind !== 'terminal') return null
       return (
         <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-loom-terminal px-3 py-2">
-          <SSHTerminal key={content.sessionKey} connectionId={connectionId} />
+          <SSHTerminal key={content.sessionKey} connectionId={connectionId} sessionKey={content.sessionKey} />
         </div>
       )
     },
@@ -336,6 +359,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
         rootLabel={connection?.name ?? 'SSH'}
         onOpenFile={openFile}
         onFileDeleted={handleFilesDeleted}
+        onRequestQuickOpen={() => setQuickOpen(true)}
       />
     ),
   }
@@ -357,6 +381,13 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
         paneOverflowActions={renderOverflowActions}
         paneNewTabActions={renderNewTabActions}
         dragEnabled={isDesktop}
+      />
+
+      <FileQuickOpen
+        open={quickOpen}
+        target={{ kind: 'ssh', connectionId }}
+        onClose={() => setQuickOpen(false)}
+        onOpenFile={openFile}
       />
     </div>
   )

@@ -43,4 +43,5 @@ export const qk = {
   sshFilesRoot: (connectionId: string) => ['ssh', connectionId, 'files'] as const,
   sshFiles: (connectionId: string, path: string) => ['ssh', connectionId, 'files', path] as const,
   sshFile: (connectionId: string, path: string) => ['ssh', connectionId, 'file', path] as const,
+  sshFileSearch: (connectionId: string, pattern: string) => ['ssh', connectionId, 'file-search', pattern] as const,
 }

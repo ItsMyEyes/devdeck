@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { GitBranch, Grid2X2, House, List, Plus, Search, Server, Settings2, Trash2, X } from 'lucide-react'
-import { useMachines, useSettings } from '@/features/data/queries'
+import { StatusDot } from '@/components/ui/status-dot'
+import { Tooltip } from '@/components/ui/tooltip'
+import { useMachineHealth, useMachines, useSettings } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Project, Worktree } from '@/store/types'
@@ -193,6 +195,13 @@ function ProjectHostSection({
   const openSpawn = useLoomStore((s) => s.openSpawn)
   const { project, worktrees, color } = group
   const machine = useMachines().data?.find((m) => m.id === project.machineId)
+  const health = useMachineHealth(machine?.id)
+  // Unreachable covers both "machine offline" and "machine was deleted out
+  // from under this project" (see ConfirmDeleteDialog's "projects still
+  // pointing at it show as unreachable" copy) — either way there's nothing
+  // to connect to, so new-agent affordances are disabled the same way.
+  const unreachable = !machine || health.data?.status === 'offline'
+  const unreachableReason = machine ? `${machine.name} is offline — can't connect.` : 'No machine assigned to this project — can’t connect.'
 
   return (
     <section className="min-w-0">
@@ -204,15 +213,24 @@ function ProjectHostSection({
         </span>
         <span aria-hidden="true" className="font-mono text-[11px] text-loom-dim/50">/</span>
         <span className="truncate font-mono text-[11px] text-loom-dim">{project.path}</span>
+        <span aria-hidden="true" className="font-mono text-[11px] text-loom-dim/50">~</span>
         {machine ? (
-          <>
-            <span aria-hidden="true" className="font-mono text-[11px] text-loom-dim/50">~</span>
-            <span className="flex flex-none items-center gap-1 rounded-full bg-loom-surface-2 px-2 py-0.5 font-mono text-[10px] text-loom-dim">
-              <Server size={10} />
-              {machine.name}
-            </span>
-          </>
-        ) : null}
+          <span
+            className={cn(
+              'flex flex-none items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px]',
+              unreachable ? 'bg-loom-red-tint text-loom-red-soft' : 'bg-loom-surface-2 text-loom-dim',
+            )}
+          >
+            {unreachable ? <StatusDot color="#f87171" size={6} /> : <Server size={10} />}
+            {machine.name}
+            {unreachable ? ' · offline' : ''}
+          </span>
+        ) : (
+          <span className="flex flex-none items-center gap-1 rounded-full bg-loom-red-tint px-2 py-0.5 font-mono text-[10px] text-loom-red-soft">
+            <StatusDot color="#f87171" size={6} />
+            no machine
+          </span>
+        )}
         <div className="h-px min-w-6 flex-1 bg-loom-border" />
         <button
           type="button"
@@ -233,14 +251,22 @@ function ProjectHostSection({
       </div>
 
       {worktrees.length === 0 ? (
-        <button
-          type="button"
-          onClick={() => openSpawn(project.id, 'branch', defaultModel)}
-          className="flex min-h-[104px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[13px] border border-dashed border-loom-border-menu bg-loom-card/35 font-mono text-[12px] text-loom-dim transition-colors hover:border-loom-border-accent hover:bg-loom-card/60 hover:text-loom-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <Plus size={22} strokeWidth={1.5} />
-          <span>new agent in {project.name}</span>
-        </button>
+        <Tooltip label={unreachable ? unreachableReason : `New agent in ${project.name}`}>
+          <button
+            type="button"
+            aria-disabled={unreachable}
+            onClick={() => !unreachable && openSpawn(project.id, 'branch', defaultModel)}
+            className={cn(
+              'flex min-h-[104px] w-full flex-col items-center justify-center gap-2 rounded-[13px] border border-dashed font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              unreachable
+                ? 'cursor-not-allowed border-loom-border-menu bg-loom-card/15 text-loom-dim/50'
+                : 'cursor-pointer border-loom-border-menu bg-loom-card/35 text-loom-dim hover:border-loom-border-accent hover:bg-loom-card/60 hover:text-loom-muted',
+            )}
+          >
+            <Plus size={22} strokeWidth={1.5} />
+            <span>new agent in {project.name}</span>
+          </button>
+        </Tooltip>
       ) : view === 'cards' ? (
         <div className="grid content-start gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))' }}>
           {worktrees.map((worktree) => (

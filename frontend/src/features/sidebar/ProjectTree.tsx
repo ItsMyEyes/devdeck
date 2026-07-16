@@ -4,8 +4,9 @@ import { cn } from '@/lib/utils'
 import { STATE } from '@/lib/constants'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import { StatusDot } from '@/components/ui/status-dot'
+import { Tooltip } from '@/components/ui/tooltip'
 import { useScope } from '@/features/useScope'
-import { useUpdateProject, useWorkspace } from '@/features/data/queries'
+import { useMachineHealth, useMachines, useUpdateProject, useWorkspace } from '@/features/data/queries'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useLoomStore } from '@/store/useLoomStore'
@@ -82,83 +83,20 @@ export function ProjectTree() {
         </button>
 
         <div className="flex flex-col gap-1">
-          {projects.map((project, index) => {
-            const selected = view === 'agents' && projectId === project.id && !wtId
-            const containsActiveWorktree = project.worktrees.some((worktree) => worktree.id === wtId)
-            const expanded = project.expanded || containsActiveWorktree
-            const color = GROUP_COLORS[index % GROUP_COLORS.length]
-            return (
-              <div key={project.id}>
-                <div
-                  className={cn(
-                    'group relative flex h-10 items-center rounded-[10px] transition-colors',
-                    selected || containsActiveWorktree
-                      ? 'bg-loom-hover-wash text-loom-fg'
-                      : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleProject(project)}
-                    aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
-                    className="ml-1 flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-surface-2 hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    <ChevronRight size={14} className={cn('transition-transform', expanded && 'rotate-90')} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => goProject(project)}
-                    aria-current={selected ? 'page' : undefined}
-                    className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-[10px] pr-14 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    <Folder size={17} strokeWidth={2.1} className="flex-none" style={{ color }} />
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{project.name}</span>
-                    <span className="font-mono text-[11.5px] font-semibold text-loom-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
-                      {project.worktrees.length}
-                    </span>
-                  </button>
-                  <div className="pointer-events-none absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-                    <button
-                      type="button"
-                      title={`Edit project ${project.name}`}
-                      aria-label={`Edit project ${project.name}`}
-                      onClick={() => openEdit('project', project.id, { a: project.name, b: project.path })}
-                      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-accent-tint hover:text-loom-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                    >
-                      <Settings2 size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      title={`Delete project ${project.name}`}
-                      aria-label={`Delete project ${project.name}`}
-                      onClick={() => askDelete('project', project.id, project.name)}
-                      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-red-tint hover:text-loom-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-
-                {expanded ? (
-                  <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-loom-border-menu pl-2">
-                    {project.worktrees.length === 0 ? (
-                      <div className="px-2 py-1.5 font-mono text-[10.5px] text-loom-dim">no terminals yet</div>
-                    ) : (
-                      project.worktrees.map((worktree) => (
-                        <WorktreeRow
-                          key={worktree.id}
-                          project={project}
-                          worktree={worktree}
-                          active={worktree.id === wtId}
-                          onOpen={() => openWorktree(project, worktree)}
-                        />
-                      ))
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            )
-          })}
+          {projects.map((project, index) => (
+            <ProjectRow
+              key={project.id}
+              project={project}
+              color={GROUP_COLORS[index % GROUP_COLORS.length]}
+              selected={view === 'agents' && projectId === project.id && !wtId}
+              wtId={wtId}
+              onGoProject={() => goProject(project)}
+              onToggle={() => toggleProject(project)}
+              onOpenWorktree={(worktree) => openWorktree(project, worktree)}
+              onEdit={() => openEdit('project', project.id, { a: project.name, b: project.path })}
+              onDelete={() => askDelete('project', project.id, project.name)}
+            />
+          ))}
         </div>
 
         {projects.length === 0 ? (
@@ -178,35 +116,158 @@ export function ProjectTree() {
   )
 }
 
+function ProjectRow({
+  project,
+  color,
+  selected,
+  wtId,
+  onGoProject,
+  onToggle,
+  onOpenWorktree,
+  onEdit,
+  onDelete,
+}: {
+  project: Project
+  color: string
+  selected: boolean
+  wtId?: string
+  onGoProject: () => void
+  onToggle: () => void
+  onOpenWorktree: (worktree: Worktree) => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const containsActiveWorktree = project.worktrees.some((worktree) => worktree.id === wtId)
+  const expanded = project.expanded || containsActiveWorktree
+  const machine = useMachines().data?.find((m) => m.id === project.machineId)
+  const health = useMachineHealth(machine?.id)
+  // Same "unreachable" definition as the Agents page: no machine assigned,
+  // or the assigned machine is confirmed offline — either way navigating in
+  // would just hang on a dead connection, so opening the project is blocked.
+  const unreachable = !machine || health.data?.status === 'offline'
+  const unreachableReason = machine ? `${machine.name} is offline — can't connect.` : 'No machine assigned to this project — can’t connect.'
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'group relative flex h-10 items-center rounded-[10px] transition-colors',
+          selected || containsActiveWorktree
+            ? 'bg-loom-hover-wash text-loom-fg'
+            : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+        )}
+      >
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+          className="ml-1 flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-surface-2 hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ChevronRight size={14} className={cn('transition-transform', expanded && 'rotate-90')} />
+        </button>
+        <Tooltip label={unreachable ? unreachableReason : project.name}>
+          <button
+            type="button"
+            aria-disabled={unreachable}
+            aria-current={selected ? 'page' : undefined}
+            onClick={() => !unreachable && onGoProject()}
+            className={cn(
+              'flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[10px] pr-14 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              unreachable ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+            )}
+          >
+            <Folder size={17} strokeWidth={2.1} className="flex-none" style={{ color }} />
+            <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{project.name}</span>
+            {unreachable ? (
+              <StatusDot color="#f87171" size={7} />
+            ) : (
+              <span className="font-mono text-[11.5px] font-semibold text-loom-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                {project.worktrees.length}
+              </span>
+            )}
+          </button>
+        </Tooltip>
+        <div className="pointer-events-none absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+          <button
+            type="button"
+            title={`Edit project ${project.name}`}
+            aria-label={`Edit project ${project.name}`}
+            onClick={onEdit}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-accent-tint hover:text-loom-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <Settings2 size={13} />
+          </button>
+          <button
+            type="button"
+            title={`Delete project ${project.name}`}
+            aria-label={`Delete project ${project.name}`}
+            onClick={onDelete}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-red-tint hover:text-loom-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      {expanded ? (
+        <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-loom-border-menu pl-2">
+          {project.worktrees.length === 0 ? (
+            <div className="px-2 py-1.5 font-mono text-[10.5px] text-loom-dim">no terminals yet</div>
+          ) : (
+            project.worktrees.map((worktree) => (
+              <WorktreeRow
+                key={worktree.id}
+                project={project}
+                worktree={worktree}
+                active={worktree.id === wtId}
+                unreachable={unreachable}
+                unreachableReason={unreachableReason}
+                onOpen={() => onOpenWorktree(worktree)}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function WorktreeRow({
   project,
   worktree,
   active,
+  unreachable,
+  unreachableReason,
   onOpen,
 }: {
   project: Project
   worktree: Worktree
   active: boolean
+  unreachable: boolean
+  unreachableReason: string
   onOpen: () => void
 }) {
   const state = STATE[worktree.state]
   const label = worktreeLabel(project, worktree)
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-current={active ? 'page' : undefined}
-      title={label}
-      className={cn(
-        'flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-        active ? 'bg-loom-accent-tint text-loom-accent-soft' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
-      )}
-    >
-      <StatusDot color={state.color} size={6} />
-      <WorktreeGlyph root={worktree.root} size={12} />
-      <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{label}</span>
-      <span className="font-mono text-[9.5px] text-loom-dim">{state.label}</span>
-    </button>
+    <Tooltip label={unreachable ? unreachableReason : label} side="right">
+      <button
+        type="button"
+        onClick={() => !unreachable && onOpen()}
+        aria-current={active ? 'page' : undefined}
+        aria-disabled={unreachable}
+        className={cn(
+          'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          unreachable ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+          active ? 'bg-loom-accent-tint text-loom-accent-soft' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+        )}
+      >
+        <StatusDot color={unreachable ? '#f87171' : state.color} size={6} />
+        <WorktreeGlyph root={worktree.root} size={12} />
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{label}</span>
+        <span className="font-mono text-[9.5px] text-loom-dim">{state.label}</span>
+      </button>
+    </Tooltip>
   )
 }

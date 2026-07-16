@@ -422,6 +422,7 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/upload", sshFileH.Upload)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/delete", sshFileH.DeleteMany)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/zip", sshFileH.Archive)
+		mux.HandleFunc("GET /api/ssh/connections/{id}/files/search", sshFileH.Search)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/file", sshFileH.Read)
 		mux.HandleFunc("PUT /api/ssh/connections/{id}/file", sshFileH.Write)
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)

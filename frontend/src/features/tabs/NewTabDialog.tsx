@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import { useMachines } from '@/features/data/queries'
+import { useMachines, useMachinesHealth } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 import type { Project } from '@/store/types'
 
@@ -26,6 +26,7 @@ export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser
   const closeNewTab = useLoomStore((s) => s.closeNewTab)
   const setNewTab = useLoomStore((s) => s.setNewTab)
   const machines = useMachines().data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const open = newTab.open && newTab.wsId === wsId
 
   useEffect(() => {
@@ -34,7 +35,11 @@ export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser
     }
   }, [open, newTab.machineId, machines, setNewTab])
 
-  const machineOptions = machines.map((m) => ({ value: m.id, label: m.name }))
+  const machineOptions = machines.map((m) => ({
+    value: m.id,
+    label: m.name,
+    disabled: machineHealth.get(m.id)?.status === 'offline',
+  }))
   const shellProjects = projects.filter((p) => p.machineId === newTab.machineId)
   const shellProject = shellProjects.find((p) => p.id === currentProjectId) ?? shellProjects[0]
   const canCreate = !!newTab.machineId && (newTab.kind === 'browser' || !!shellProject)

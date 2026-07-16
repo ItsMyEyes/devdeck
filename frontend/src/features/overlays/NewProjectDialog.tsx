@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
-import { useCloneProject, useCreateProject, useMachines, useWorkspace } from '@/features/data/queries'
+import { useCloneProject, useCreateProject, useMachines, useMachinesHealth, useWorkspace } from '@/features/data/queries'
 import { useLoomStore } from '@/store/useLoomStore'
 
 function repoFolderName(repo: string) {
@@ -36,6 +36,7 @@ export function NewProjectDialog() {
   const openBrowse = useLoomStore((s) => s.openBrowse)
   const ws = useWorkspace(wsId).data
   const machines = useMachines().data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const createProject = useCreateProject()
   const cloneProject = useCloneProject()
 
@@ -135,11 +136,15 @@ export function NewProjectDialog() {
         className="mb-3.5 h-9 w-full rounded-lg border border-loom-border-strong bg-loom-bg px-2.5 font-mono text-[12.5px] text-loom-fg-2"
       >
         <option value="">Select a machine…</option>
-        {machines.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
+        {machines.map((m) => {
+          const offline = machineHealth.get(m.id)?.status === 'offline'
+          return (
+            <option key={m.id} value={m.id} disabled={offline} style={offline ? { color: '#f87171' } : undefined}>
+              {m.name}
+              {offline ? ' (offline)' : ''}
+            </option>
+          )
+        })}
       </select>
 
       {mode === 'local' ? (

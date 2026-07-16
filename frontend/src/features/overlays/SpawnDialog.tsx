@@ -13,6 +13,7 @@ import {
   useAgentModels,
   useCreateWorktree,
   useMachines,
+  useMachinesHealth,
   useProjectBranches,
   useWorkspaces,
 } from '@/features/data/queries'
@@ -32,14 +33,28 @@ export function SpawnDialog() {
   const workspaces = useWorkspaces().data ?? []
   const machinesQuery = useMachines()
   const machines = machinesQuery.data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const createWorktree = useCreateWorktree()
   const projectWorkspace = spawn.projectId
     ? workspaces.find((workspace) => workspace.projects.some((candidate) => candidate.id === spawn.projectId))
     : undefined
   const workspace = workspaces.find((candidate) => candidate.id === wsId) ?? projectWorkspace
-  const projectOptions = (workspace?.projects ?? []).map((candidate) => ({ value: candidate.id, label: candidate.name }))
+  // A project whose machine is offline (or missing) can't actually run
+  // anything — surfaced the same way an offline machine is in a Select:
+  // disabled and labeled, rather than silently letting the user pick it and
+  // fail on submit.
+  const projectOptions = (workspace?.projects ?? []).map((candidate) => {
+    const candidateMachine = machines.find((m) => m.id === candidate.machineId)
+    const candidateOffline = !candidateMachine || machineHealth.get(candidateMachine.id)?.status === 'offline'
+    return {
+      value: candidate.id,
+      label: candidateOffline ? `${candidate.name} (offline)` : candidate.name,
+      disabled: candidateOffline,
+    }
+  })
   const project = workspaces.flatMap((candidate) => candidate.projects).find((candidate) => candidate.id === spawn.projectId)
   const machine = machines.find((candidate) => candidate.id === project?.machineId)
+  const machineOnline = !!machine && machineHealth.get(machine.id)?.status !== 'offline'
   const branches = useProjectBranches(machine, project?.id, project?.path).data ?? []
 
   // Dynamic agent/model data from backend — reflects whichever machine this
@@ -54,15 +69,19 @@ export function SpawnDialog() {
   const models = useAgentModels(machine, agentId).data ?? []
 
   const branchMode = spawn.mode !== 'root'
-  const canSubmit = Boolean(project && machine) && !createWorktree.isPending
+  const canSubmit = Boolean(project && machine) && machineOnline && !createWorktree.isPending
 
   useEffect(() => {
     if (!spawn.open || !spawn.chooseProject || spawn.projectId || !workspace || machinesQuery.isPending) return
     const preferredProject =
+      workspace.projects.find((candidate) => {
+        const candidateMachine = machines.find((m) => m.id === candidate.machineId)
+        return candidateMachine && machineHealth.get(candidateMachine.id)?.status !== 'offline'
+      }) ??
       workspace.projects.find((candidate) => machines.some((candidateMachine) => candidateMachine.id === candidate.machineId)) ??
       workspace.projects[0]
     if (preferredProject) setSpawn({ projectId: preferredProject.id })
-  }, [machines, machinesQuery.isPending, setSpawn, spawn.chooseProject, spawn.open, spawn.projectId, workspace])
+  }, [machineHealth, machines, machinesQuery.isPending, setSpawn, spawn.chooseProject, spawn.open, spawn.projectId, workspace])
 
   useEffect(() => {
     if (!spawn.open || installedAgents.some((agent) => agent.id === agentId)) return
@@ -144,10 +163,14 @@ export function SpawnDialog() {
           )}
           {project && !machine ? (
             <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">Select a project with an assigned machine.</p>
+          ) : project && machine && !machineOnline ? (
+            <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">"{machine.name}" is offline — can't connect.</p>
           ) : null}
         </div>
       ) : project && !machine ? (
         <p className="mb-4 font-mono text-[11px] text-loom-red-soft">This project has no available machine.</p>
+      ) : project && machine && !machineOnline ? (
+        <p className="mb-4 font-mono text-[11px] text-loom-red-soft">"{machine.name}" is offline — can't connect.</p>
       ) : null}
 
       {/* mode tabs */}

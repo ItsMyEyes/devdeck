@@ -610,8 +610,7 @@ function TerminalWorkspace({
 
       <FileQuickOpen
         open={quickOpen}
-        worktreeId={worktree.id}
-        machine={machine}
+        target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         onClose={() => setQuickOpen(false)}
         onOpenFile={openFile}
       />

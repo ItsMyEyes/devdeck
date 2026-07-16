@@ -1,16 +1,15 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { FileSearch, Search, X } from 'lucide-react'
 import { ApiError } from '@/lib/api'
-import type { Machine } from '@/store/types'
-import { useWorktreeFileSearch } from '@/features/data/queries'
+import { useFileSearchTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useLoomStore } from '@/store/useLoomStore'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import type { FilesTarget } from './filesTarget'
 
 interface FileQuickOpenProps {
   open: boolean
-  worktreeId: string
-  machine: Machine
+  target: FilesTarget
   onClose: () => void
   onOpenFile: (path: string) => void
 }
@@ -30,8 +29,7 @@ function basename(path: string) {
 
 export function FileQuickOpen({
   open,
-  worktreeId,
-  machine,
+  target,
   onClose,
   onOpenFile,
 }: FileQuickOpenProps) {
@@ -39,7 +37,7 @@ export function FileQuickOpen({
   const [pattern, setPattern] = useState('')
   const [selected, setSelected] = useState(0)
   const deferredPattern = useDeferredValue(pattern)
-  const search = useWorktreeFileSearch(machine, worktreeId, deferredPattern, open, { includeDirs: true })
+  const search = useFileSearchTarget(target, deferredPattern, open, { includeDirs: true })
   const results = search.data ?? []
   const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
   const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)

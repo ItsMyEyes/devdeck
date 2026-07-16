@@ -1,10 +1,10 @@
 import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, Home, Maximize2, Minimize2, Plus, RefreshCw, Star, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Globe, Home, Maximize2, Minimize2, Plus, RefreshCw, Star, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { useMachines } from '@/features/data/queries'
+import { useMachines, useMachinesHealth } from '@/features/data/queries'
 import {
   addBrowserTileBookmark,
   groupBrowserTileBookmarks,
@@ -35,7 +35,7 @@ function normalizeAddress(value: string): string {
   if (!raw) return ''
   if (/^https?:\/\//i.test(raw)) return raw
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?([/?#].*)?$/.test(raw)) return `https://${raw}`
-  return `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`
+  return `https://google.com/?q=${encodeURIComponent(raw)}`
 }
 
 /** Readable placeholder shown the instant navigation starts, before the real
@@ -46,7 +46,7 @@ function normalizeAddress(value: string): string {
 function titleFor(url: string): string {
   try {
     const parsed = new URL(url)
-    const search = parsed.hostname.includes('duckduckgo.com') ? parsed.searchParams.get('q') : null
+    const search = parsed.hostname.includes('google.com') ? parsed.searchParams.get('q') : null
     if (search) return `Search: ${search}`
     return parsed.hostname.replace(/^www\./, '') || url
   } catch {
@@ -64,6 +64,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const setBrowserTileFullscreen = useLoomStore((s) => s.setBrowserTileFullscreen)
   const nativeOverlayBlockers = useLoomStore((s) => s.nativeOverlayBlockers)
   const machines = useMachines().data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const [draft, setDraft] = useState('')
   const [bookmarks, setBookmarks] = useState<BrowserTileBookmark[]>(loadBrowserTileBookmarks)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -247,10 +248,6 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     await reloadBrowserTile(tabId, doc.id)
   }
 
-  const openInRealBrowser = () => {
-    if (doc.url) window.open(doc.url, '_blank', 'noopener,noreferrer')
-  }
-
   const addBookmark = () => {
     if (!doc.url) return
     setBookmarks((current) => addBrowserTileBookmark(current, { title: doc.title, url: doc.url as string, group: 'Portal' }))
@@ -336,13 +333,14 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
         <Button size="icon-sm" variant="secondary" onClick={addBookmark} disabled={!doc.url} aria-label="Bookmark this page">
           <Star size={12} />
         </Button>
-        <Button size="icon-sm" variant="secondary" onClick={openInRealBrowser} disabled={!doc.url} aria-label="Open in real browser">
-          <ExternalLink size={12} />
-        </Button>
         <Select
           value={doc.machineId ?? ''}
           onValueChange={(machineId) => void selectMachine(machineId)}
-          options={machines.map((m) => ({ value: m.id, label: m.name }))}
+          options={machines.map((m) => ({
+            value: m.id,
+            label: m.name,
+            disabled: machineHealth.get(m.id)?.status === 'offline',
+          }))}
           triggerClassName="h-7 w-32"
           aria-label="Machine"
         />

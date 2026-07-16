@@ -41,6 +41,20 @@ export function deleteSSHPaths(connectionId: string, paths: readonly string[]): 
   return request<void>('POST', `/ssh/connections/${connectionId}/files/delete`, { paths })
 }
 
+export interface SearchSSHFilesOptions {
+  includeDirs?: boolean
+}
+
+export function searchSSHFiles(
+  connectionId: string,
+  pattern: string,
+  options: SearchSSHFilesOptions = {},
+): Promise<string[]> {
+  const params = new URLSearchParams({ pattern })
+  if (options.includeDirs) params.set('includeDirs', '1')
+  return request<string[]>('GET', `/ssh/connections/${connectionId}/files/search?${params}`)
+}
+
 interface XhrOpts {
   method: 'POST'
   path: string

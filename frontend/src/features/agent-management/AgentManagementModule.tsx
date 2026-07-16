@@ -4,7 +4,7 @@ import { Blocks, RefreshCw, ServerCog, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { qk } from '@/features/data/keys'
-import { useAgents, useMachines } from '@/features/data/queries'
+import { useAgents, useMachines, useMachinesHealth } from '@/features/data/queries'
 import { ModuleHeader } from '@/features/modules/ModuleHeader'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
@@ -23,6 +23,7 @@ export function AgentManagementModule() {
   const [tab, setTab] = useState<ManagementTab>('skills')
   const machinesQuery = useMachines()
   const machines = machinesQuery.data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const [machineId, setMachineId] = useState<string | null>(null)
   // Installed CLI agents/skills/MCP servers/env profiles all live on a
   // specific machine. Keep a valid selection, otherwise use the first machine
@@ -149,7 +150,11 @@ export function AgentManagementModule() {
                 value={machine.id}
                 onValueChange={setMachineId}
                 aria-label="Machine"
-                options={machines.map((m) => ({ value: m.id, label: m.isLocal ? `${m.name} (this device)` : m.name }))}
+                options={machines.map((m) => ({
+                  value: m.id,
+                  label: m.isLocal ? `${m.name} (this device)` : m.name,
+                  disabled: machineHealth.get(m.id)?.status === 'offline',
+                }))}
                 triggerClassName="h-8"
               />
             </div>

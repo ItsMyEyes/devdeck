@@ -29,6 +29,15 @@ func (h *SSHFileHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
+func (h *SSHFileHandler) Search(w http.ResponseWriter, r *http.Request) {
+	includeDirs := r.URL.Query().Get("includeDirs") == "1" || r.URL.Query().Get("includeDirs") == "true"
+	paths, err := h.svc.Search(r.Context(), r.PathValue("id"), r.URL.Query().Get("pattern"), includeDirs)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, paths)
+}
+
 func (h *SSHFileHandler) Read(w http.ResponseWriter, r *http.Request) {
 	content, err := h.svc.Read(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
 	if handleStoreErr(w, err) {

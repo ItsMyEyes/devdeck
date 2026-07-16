@@ -10,12 +10,20 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/pkg/sftp"
 
 	"loom/backend/internal/sshmgr"
 )
+
+// sshSearchBudget bounds how long Search walks the remote tree before
+// returning whatever it has found so far. Unlike WorktreeFileService.Search
+// (local disk, effectively free), every directory descended here costs one
+// SFTP round trip — a large or slow remote home directory could otherwise
+// keep an interactive quick-open search spinning indefinitely.
+const sshSearchBudget = 6 * time.Second
 
 // SSHFileEntry is one visible item in an SSH connection's remote directory.
 // Same shape as WorktreeFileEntry — kept as its own type since the two
@@ -100,6 +108,68 @@ func (svc *SSHFileService) List(ctx context.Context, connectionID, relativePath 
 			}
 			return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 		})
+		return result, nil
+	})
+}
+
+// Search returns remote file paths matched by the same fuzzy/regex matcher
+// as WorktreeFileService.Search (shared filePathMatcher, searchSkipDirs,
+// maxFileSearchResults — defined in worktree_file.go, same package), walked
+// over SFTP instead of the local filesystem.
+func (svc *SSHFileService) Search(ctx context.Context, connectionID, pattern string, includeDirs bool) ([]string, error) {
+	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]string, error) {
+		home, err := client.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home directory failed")
+		}
+		homePrefix := strings.TrimSuffix(home, "/") + "/"
+
+		matcher := newFilePathMatcher(pattern)
+		matches := make([]fileSearchMatch, 0)
+		deadline := time.Now().Add(sshSearchBudget)
+		walker := client.Walk(home)
+		for walker.Step() {
+			if time.Now().After(deadline) {
+				break // time's up — return the best matches found so far rather than hang
+			}
+			current := walker.Path()
+			if current == home {
+				continue
+			}
+			if walker.Err() != nil {
+				continue // permission-denied entries are skipped, mirroring the worktree walker's fs.ErrPermission handling
+			}
+			info := walker.Stat()
+			if info.IsDir() && searchSkipDirs[info.Name()] {
+				walker.SkipDir()
+				continue
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			relative := strings.TrimPrefix(current, homePrefix)
+			if info.IsDir() {
+				if includeDirs {
+					addFileSearchMatch(&matches, matcher, relative+"/", true)
+				}
+				continue
+			}
+			addFileSearchMatch(&matches, matcher, relative, false)
+		}
+
+		sort.Slice(matches, func(i, j int) bool {
+			if matches[i].score != matches[j].score {
+				return matches[i].score < matches[j].score
+			}
+			return matches[i].path < matches[j].path
+		})
+		if len(matches) > maxFileSearchResults {
+			matches = matches[:maxFileSearchResults]
+		}
+		result := make([]string, 0, len(matches))
+		for _, match := range matches {
+			result = append(result, match.path)
+		}
 		return result, nil
 	})
 }

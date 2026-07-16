@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 export interface SelectOption {
   value: string
   label: string
+  /** Item can't be picked — rendered in red (e.g. an offline machine). */
+  disabled?: boolean
 }
 
 interface SelectProps {
@@ -62,9 +64,11 @@ export function Select({ value, onValueChange, options, className, triggerClassN
               <BaseSelect.Item
                 key={o.value}
                 value={o.value}
+                disabled={o.disabled}
                 className={cn(
                   'flex h-8 cursor-pointer select-none items-center justify-between gap-3 rounded-md px-2.5 font-mono text-xs text-loom-fg-2 outline-none',
                   'data-[highlighted]:bg-white/[0.05] data-[highlighted]:text-loom-fg data-[selected]:text-loom-fg',
+                  'data-[disabled]:cursor-not-allowed data-[disabled]:text-loom-red-soft data-[disabled]:data-[highlighted]:bg-loom-red-tint',
                 )}
               >
                 <BaseSelect.ItemText>{o.label}</BaseSelect.ItemText>

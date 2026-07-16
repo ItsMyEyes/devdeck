@@ -5,7 +5,13 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import { useCreateSSHConnection, useMachines, useSSHConnections, useUpdateSSHConnection } from '@/features/data/queries'
+import {
+  useCreateSSHConnection,
+  useMachines,
+  useMachinesHealth,
+  useSSHConnections,
+  useUpdateSSHConnection,
+} from '@/features/data/queries'
 import type { CreateSSHConnectionBody, UpdateSSHConnectionBody } from '@/lib/api'
 import { useLoomStore } from '@/store/useLoomStore'
 
@@ -86,6 +92,7 @@ export function SSHConnectionDialog() {
   const createConnection = useCreateSSHConnection()
   const updateConnection = useUpdateSSHConnection()
   const machines = useMachines().data ?? []
+  const machineHealth = useMachinesHealth(machines)
   const connections = useSSHConnections().data ?? []
   const [generatedPublicKey, setGeneratedPublicKey] = useState<string | null>(null)
   const privateKeyInputRef = useRef<HTMLInputElement | null>(null)
@@ -107,7 +114,11 @@ export function SSHConnectionDialog() {
 
   const machineOptions = [
     { value: HUB_DECIDES, label: 'Hub decides' },
-    ...machines.map((m) => ({ value: m.id, label: m.isLocal ? `${m.name} (local)` : m.name })),
+    ...machines.map((m) => ({
+      value: m.id,
+      label: m.isLocal ? `${m.name} (local)` : m.name,
+      disabled: machineHealth.get(m.id)?.status === 'offline',
+    })),
   ]
   // A connection can't jump through itself. The backend re-validates the
   // full chain authoritatively (including deeper cycles); this just keeps
