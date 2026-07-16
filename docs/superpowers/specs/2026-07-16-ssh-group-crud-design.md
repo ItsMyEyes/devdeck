@@ -45,14 +45,16 @@ delete (`Trash2` icon) buttons, styled like the existing icon buttons on
 `HostCard` (`Settings2`/`Trash2`, `h-7 w-7 rounded-md` hover-background
 pattern).
 
-- **Rename**: clicking the pencil swaps the row's label for an inline text
-  input (autofocused, prefilled with the current name). Enter or blur-outside
-  commits; Escape cancels. On commit:
+- **Rename**: clicking the pencil opens a small dedicated dialog (`Rename
+  group`, autofocused text input prefilled with the current name) — matches
+  the codebase's existing convention of using a `Dialog` for renames
+  (`SSHConnectionDialog`, `ConfirmDeleteDialog`) rather than inline editing,
+  which has no precedent here. Enter or the Rename button commits; Cancel/
+  Escape closes without changes.
   - No-op if the trimmed value is empty or unchanged.
   - Otherwise, for every connection where `groupLabel(connection) === oldName`,
     call `useUpdateSSHConnection().mutateAsync({ id, patch: { group: newName } })`
-    in parallel (`Promise.all`). Toast on completion; toast + resync (existing
-    per-mutation `onError` convention) if any call fails.
+    in parallel (`Promise.all`). Toast on completion; toast on failure.
 - **Delete**: clicking the trash icon opens the existing global
   `ConfirmDeleteDialog` via a new `EditKind` value, `'ssh-group'` (added to
   the union in `useLoomStore.ts`). `confirmDelete.id` and `.name` both carry
