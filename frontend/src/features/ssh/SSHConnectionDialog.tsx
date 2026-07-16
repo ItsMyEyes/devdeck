@@ -1,6 +1,7 @@
-import { useRef, useState, type ChangeEvent } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -94,6 +95,10 @@ export function SSHConnectionDialog() {
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
   const connections = useSSHConnections().data ?? []
+  const groupOptions = useMemo(
+    () => Array.from(new Set(connections.map((c) => c.group.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [connections],
+  )
   const [generatedPublicKey, setGeneratedPublicKey] = useState<string | null>(null)
   const privateKeyInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -235,12 +240,13 @@ export function SSHConnectionDialog() {
       />
 
       <Label>Group</Label>
-      <Input
+      <Combobox
         value={dialog.group}
+        onChange={(group) => setDialog({ group })}
+        options={groupOptions}
         disabled={busy}
-        onChange={(e) => setDialog({ group: e.target.value })}
         placeholder="Production"
-        className="mb-3 font-mono"
+        className="mb-3"
       />
 
       <div className="mb-3 flex gap-3">
