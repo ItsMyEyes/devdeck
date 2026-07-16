@@ -2,6 +2,7 @@ mod browser_tiles;
 mod hubapi;
 mod hubmode;
 mod sidecar;
+mod tailscale;
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
