@@ -218,6 +218,7 @@ func main() {
 
 	healthH := handler.NewHealthHandler()
 	whoamiH := handler.NewWhoamiHandler()
+	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
@@ -286,6 +287,7 @@ func main() {
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
+	mux.HandleFunc("GET /api/tailscale-status", tailscaleStatusH.ServeHTTP)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
