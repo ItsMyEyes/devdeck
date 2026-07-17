@@ -6,7 +6,8 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseConnectionString } from '@/features/machines/connectionString'
-import { useCreateMachine, useUpdateMachine } from '@/features/data/queries'
+import { useCreateMachine, useTailscaleStatus, useUpdateMachine } from '@/features/data/queries'
+import type { TailscaleHubStatus } from '@/lib/api'
 import { useLoomStore } from '@/store/useLoomStore'
 
 /** 32 random bytes as 64 lowercase hex chars — mirrors the desktop sidecar's generate_key(). */
@@ -15,12 +16,39 @@ function generateRuntimeKey(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-function runtimeCommand(key: string, name: string): string {
-  const hubUrl = window.location.origin
+function runtimeCommand(key: string, hubUrl: string, name: string): string {
   return [
     `./loom.exe --role runtime --key ${key} --addr 0.0.0.0:9199 --db runtime.db --open=false \\`,
     `  --hub-url ${hubUrl} --hub-key <your-hub-key> --public-url http://<hostname>:9199 --name ${name.trim() || '<name>'}`,
   ].join('\n')
+}
+
+function tailscaleGuidance(reason: TailscaleHubStatus['reason']): {
+  title: string
+  body: string
+  copyLabel?: string
+  copyValue?: string
+} {
+  switch (reason) {
+    case 'not_installed':
+      return {
+        title: "Tailscale isn't installed on this machine",
+        body: 'Remote runtimes reach this hub over your tailnet. Install Tailscale here, then restart Loom.',
+        copyLabel: 'Copy Tailscale download link',
+        copyValue: 'https://tailscale.com/download',
+      }
+    case 'not_ready':
+      return {
+        title: "Tailscale isn't signed in",
+        body: "Open Tailscale (or run `tailscale up` in a terminal) and sign in with the same account you'll use on your runtime machines.",
+      }
+    case 'serve_disabled':
+    default:
+      return {
+        title: 'Restart Loom to expose this hub',
+        body: 'Tailscale looks ready, but this hub was started before it was set up. Restart Loom to pick it up.',
+      }
+  }
 }
 
 export function MachineDialog() {
@@ -46,12 +74,26 @@ export function MachineDialog() {
     }
   }, [dialog.open, isEdit])
 
+  const isLoopbackHub = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  const wantsTailscaleStatus = dialog.open && !isEdit && !pasteMode && isLoopbackHub
+  const tailscaleStatus = useTailscaleStatus(wantsTailscaleStatus)
+  const resolvedHubUrl = isLoopbackHub ? tailscaleStatus.data?.url : window.location.origin
+  const tailscaleNotReady =
+    isLoopbackHub && tailscaleStatus.data && !tailscaleStatus.data.ready
+      ? tailscaleGuidance(tailscaleStatus.data.reason)
+      : null
+
   const parsedPaste = pasteText.trim().length > 0 ? parseConnectionString(pasteText) : null
   const pasteInvalid = pasteText.trim().length > 0 && parsedPaste === null
 
   function copyCommand() {
-    void navigator.clipboard.writeText(runtimeCommand(runtimeKey, dialog.name))
+    void navigator.clipboard.writeText(runtimeCommand(runtimeKey, resolvedHubUrl ?? window.location.origin, dialog.name))
     toast.success('Command copied')
+  }
+
+  function copyTailscaleLink(value: string) {
+    void navigator.clipboard.writeText(value)
+    toast.success('Link copied')
   }
 
   function submit() {
@@ -161,24 +203,44 @@ export function MachineDialog() {
             className="mb-3 font-mono"
           />
 
-          <Label>Runtime command</Label>
-          <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
-            Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
-            this hub on startup.
-          </p>
-          <div className="relative mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-2.5 pr-9">
-            <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-loom-fg">
-              {runtimeCommand(runtimeKey, dialog.name)}
-            </pre>
-            <button
-              type="button"
-              onClick={copyCommand}
-              aria-label="Copy command"
-              className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
-            >
-              <Copy size={12} />
-            </button>
-          </div>
+          {tailscaleNotReady ? (
+            <div className="mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-3">
+              <p className="mb-1 font-mono text-[11px] text-loom-fg">{tailscaleNotReady.title}</p>
+              <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">{tailscaleNotReady.body}</p>
+              {tailscaleNotReady.copyValue ? (
+                <button
+                  type="button"
+                  onClick={() => copyTailscaleLink(tailscaleNotReady.copyValue!)}
+                  className="cursor-pointer font-mono text-[10.5px] text-loom-accent-soft underline decoration-dotted"
+                >
+                  {tailscaleNotReady.copyLabel}
+                </button>
+              ) : null}
+            </div>
+          ) : isLoopbackHub && tailscaleStatus.isLoading ? (
+            <p className="mb-5 font-mono text-[10.5px] text-loom-dim-2">Checking Tailscale…</p>
+          ) : (
+            <>
+              <Label>Runtime command</Label>
+              <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
+                Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
+                this hub on startup.
+              </p>
+              <div className="relative mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-2.5 pr-9">
+                <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-loom-fg">
+                  {runtimeCommand(runtimeKey, resolvedHubUrl ?? window.location.origin, dialog.name)}
+                </pre>
+                <button
+                  type="button"
+                  onClick={copyCommand}
+                  aria-label="Copy command"
+                  className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -196,7 +258,7 @@ export function MachineDialog() {
             {busy && <Loader2 size={14} className="animate-spin" />}
             Connect
           </Button>
-        ) : (
+        ) : tailscaleNotReady || (isLoopbackHub && tailscaleStatus.isLoading) ? null : (
           <Button onClick={copyCommand}>
             <Copy size={13} />
             Copy command
