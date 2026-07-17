@@ -462,8 +462,12 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     };
 
     let key = sidecar::generate_key();
+    // Non-blocking preflight: if Tailscale isn't installed/logged in, the
+    // local hub still starts (local-only) — see
+    // docs/superpowers/specs/2026-07-17-local-hub-tailscale-reachability-design.md.
+    let enable_tailscale_serve = tailscale::public_url().await.is_ok();
     let cmd = match handle.shell().sidecar("loom-server") {
-        Ok(c) => c.args(sidecar::sidecar_args(&data_dir, &key)),
+        Ok(c) => c.args(sidecar::sidecar_args(&data_dir, &key, enable_tailscale_serve)),
         Err(e) => return LaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
     };
     let (mut rx, child) = match cmd.spawn() {

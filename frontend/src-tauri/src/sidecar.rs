@@ -21,9 +21,12 @@ pub fn generate_key() -> String {
 /// loom-server args for desktop-sidecar mode. `--addr 127.0.0.1:0` makes the
 /// OS pick the port; parse_listen_port recovers it from the startup log line
 /// (the contract is marked with a NOTE next to the log.Printf in
-/// backend/cmd/server/main.go).
-pub fn sidecar_args(data_dir: &Path, key: &str) -> Vec<String> {
-    vec![
+/// backend/cmd/server/main.go). `enable_tailscale_serve` is true only when a
+/// preflight `tailscale::public_url()` check already succeeded — passing
+/// `--enable-tailscale-serve` when the tailscale binary is missing is fatal
+/// on the Go side (see docs/superpowers/specs/2026-07-04-enable-tailscale-serve-design.md).
+pub fn sidecar_args(data_dir: &Path, key: &str, enable_tailscale_serve: bool) -> Vec<String> {
+    let mut args = vec![
         "--role".into(), "hub".into(),
         "--addr".into(), "127.0.0.1:0".into(),
         "--key".into(), key.into(),
@@ -32,7 +35,11 @@ pub fn sidecar_args(data_dir: &Path, key: &str) -> Vec<String> {
         "--open=false".into(),
         "--2fa=false".into(),
         "--secure-cookies=false".into(),
-    ]
+    ];
+    if enable_tailscale_serve {
+        args.push("--enable-tailscale-serve".into());
+    }
+    args
 }
 
 /// Reads this device's persisted runtime key, generating and saving one on
@@ -132,7 +139,7 @@ mod tests {
 
     #[test]
     fn args_carry_the_desktop_contract() {
-        let args = sidecar_args(Path::new("/data"), "k0");
+        let args = sidecar_args(Path::new("/data"), "k0", false);
         let joined = args.join(" ");
         assert!(joined.contains("--role hub"));
         assert!(joined.contains("--addr 127.0.0.1:0"));
@@ -141,6 +148,13 @@ mod tests {
         assert!(joined.contains("--2fa=false"));
         assert!(joined.contains("--secure-cookies=false"));
         assert!(joined.contains("loom.db"));
+        assert!(!joined.contains("--enable-tailscale-serve"));
+    }
+
+    #[test]
+    fn args_include_tailscale_serve_flag_when_enabled() {
+        let args = sidecar_args(Path::new("/data"), "k0", true);
+        assert!(args.join(" ").contains("--enable-tailscale-serve"));
     }
 
     #[test]
