@@ -39,6 +39,7 @@ export const qk = {
   authConfig: ['authConfig'] as const,
   machines: ['machines'] as const,
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
+  tailscaleStatus: ['tailscaleStatus'] as const,
   sshConnections: ['sshConnections'] as const,
   sshFilesRoot: (connectionId: string) => ['ssh', connectionId, 'files'] as const,
   sshFiles: (connectionId: string, path: string) => ['ssh', connectionId, 'files', path] as const,

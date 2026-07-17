@@ -42,6 +42,7 @@ import {
   fetchMachines,
   fetchSettings,
   fetchSSHConnections,
+  fetchTailscaleStatus,
   fetchWorkspaces,
   markAllNewsRead,
   seed,
@@ -206,6 +207,19 @@ export function useMachineHealth(id: string | undefined) {
     enabled: !!id,
     staleTime: 5_000,
     refetchInterval: 15_000,
+  })
+}
+
+/** Only meaningful when the current page origin is a loopback address
+ *  (desktop "Host locally" mode) — MachineDialog gates `enabled` on that
+ *  check itself. See
+ *  docs/superpowers/specs/2026-07-17-local-hub-tailscale-reachability-design.md. */
+export function useTailscaleStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.tailscaleStatus,
+    queryFn: fetchTailscaleStatus,
+    enabled,
+    staleTime: 5_000,
   })
 }
 

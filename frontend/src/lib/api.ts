@@ -656,6 +656,16 @@ export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
 }
 
+export interface TailscaleHubStatus {
+  ready: boolean
+  reason?: 'not_installed' | 'not_ready' | 'serve_disabled'
+  url?: string
+}
+
+export function fetchTailscaleStatus(): Promise<TailscaleHubStatus> {
+  return request<TailscaleHubStatus>('GET', '/tailscale-status')
+}
+
 // ---- SSH connections (hub registry; secrets are write-only) ----
 
 export interface CreateSSHConnectionBody {
