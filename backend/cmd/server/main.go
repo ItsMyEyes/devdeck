@@ -212,7 +212,12 @@ func main() {
 	}
 	agentReg := registry.NewLocalRegistry(baseReg)
 
-	wsSvc := service.NewWorkspaceService(st)
+	var wsSvc *service.WorkspaceService
+	if isRuntime {
+		wsSvc = service.NewWorkspaceServiceForRuntime(st)
+	} else {
+		wsSvc = service.NewWorkspaceService(st)
+	}
 	pSvc := service.NewProjectService(st)
 	wtSvc := service.NewWorktreeService(st, terminal.KillWorktreeSessions)
 	agentSvc := service.NewAgentService(agentReg)

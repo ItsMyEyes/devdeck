@@ -12,12 +12,21 @@ import (
 
 // WorkspaceService wraps workspace operations with business logic.
 type WorkspaceService struct {
-	store port.Store
+	store   port.Store
+	runtime bool
 }
 
-// NewWorkspaceService creates a workspace service.
+// NewWorkspaceService creates a workspace service for the hub role.
 func NewWorkspaceService(s port.Store) *WorkspaceService {
 	return &WorkspaceService{store: s}
+}
+
+// NewWorkspaceServiceForRuntime creates a workspace service for the runtime
+// role, which serves its local replica directly. A runtime has no machine
+// registry to fan out to, and its worktrees are already local — the hub's
+// per-project fetch would be a network call to nowhere.
+func NewWorkspaceServiceForRuntime(s port.Store) *WorkspaceService {
+	return &WorkspaceService{store: s, runtime: true}
 }
 
 // List returns all workspaces with their full nested trees. Worktrees are
@@ -27,10 +36,17 @@ func NewWorkspaceService(s port.Store) *WorkspaceService {
 // with a live fetch from that machine, concurrently and best-effort — an
 // unreachable machine just leaves that project's worktrees empty, it does
 // not fail the whole request.
+//
+// On a runtime, this fanout is skipped entirely: there are no other machines
+// to ask, and the local replica's own worktrees are already attached by the
+// store.
 func (svc *WorkspaceService) List() ([]domain.Workspace, error) {
 	workspaces, err := svc.store.Workspaces()
 	if err != nil {
 		return nil, err
+	}
+	if svc.runtime {
+		return workspaces, nil
 	}
 
 	var wg sync.WaitGroup
