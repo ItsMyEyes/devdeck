@@ -195,6 +195,39 @@ CREATE TABLE IF NOT EXISTS ssh_secrets (
   PRIMARY KEY (connection_id, kind)
 );
 
+CREATE TABLE IF NOT EXISTS db_connections (
+  id                      TEXT PRIMARY KEY,
+  name                    TEXT NOT NULL DEFAULT '',
+  group_name              TEXT NOT NULL DEFAULT '',
+  engine                  TEXT NOT NULL DEFAULT 'postgres',
+  host                    TEXT NOT NULL DEFAULT '',
+  port                    INTEGER NOT NULL DEFAULT 5432,
+  username                TEXT NOT NULL DEFAULT '',
+  database_name           TEXT NOT NULL DEFAULT '',
+  ssl_mode                TEXT NOT NULL DEFAULT 'verify-full',
+  executor_machine_id     TEXT,
+  tunnel_connection_id    TEXT,
+  is_production           INTEGER NOT NULL DEFAULT 0,
+  server_cert_fingerprint TEXT
+);
+
+CREATE TABLE IF NOT EXISTS db_secrets (
+  connection_id TEXT NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL,
+  storage_kind  TEXT NOT NULL DEFAULT 'db',
+  cipher_text   TEXT NOT NULL DEFAULT '',
+  keychain_ref  TEXT,
+  PRIMARY KEY (connection_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS db_saved_queries (
+  id            TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL DEFAULT '',
+  sql_text      TEXT NOT NULL DEFAULT '',
+  updated_at    TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),
   active_workspace_id TEXT,

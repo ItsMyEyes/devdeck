@@ -95,6 +95,23 @@ type Store interface {
 	UpsertSSHSecret(connectionID, kind, cipherText string) error
 	SSHSecret(connectionID, kind string) (domain.SSHSecret, error)
 
+	// Database connections (Database module registry)
+	DBConnections() ([]domain.DBConnection, error)
+	DBConnectionByID(id string) (domain.DBConnection, error)
+	CreateDBConnection(name, group, engine, host string, portNum int, username, database, sslMode string, executorMachineID, tunnelConnectionID *string, isProduction bool) (domain.DBConnection, error)
+	UpdateDBConnection(id string, p DBConnectionPatch) (domain.DBConnection, error)
+	DeleteDBConnection(id string) error
+	SetDBServerCertFingerprint(id, fingerprint string) error
+
+	UpsertDBSecret(connectionID, kind, cipherText string) error
+	DBSecretRow(connectionID, kind string) (domain.DBSecret, error)
+	DeleteDBSecret(connectionID, kind string) error
+
+	DBSavedQueries(connectionID string) ([]domain.DBSavedQuery, error)
+	CreateDBSavedQuery(connectionID, name, sqlText, updatedAt string) (domain.DBSavedQuery, error)
+	UpdateDBSavedQuery(id, updatedAt string, p DBSavedQueryPatch) (domain.DBSavedQuery, error)
+	DeleteDBSavedQuery(id string) error
+
 	// Recurring invoice templates (workspace-scoped; auto-generate draft Invoices on schedule)
 	CreateRecurringTemplate(wsID, companyName, companyAddress string, items []domain.InvoiceItem, bankName, bankAccountName, bankAccountNumber string, dayOfMonth, paymentTermDays int, createdAt string) (domain.RecurringInvoiceTemplate, error)
 	UpdateRecurringTemplate(id string, p RecurringTemplatePatch) (domain.RecurringInvoiceTemplate, error)
@@ -212,6 +229,32 @@ type SSHConnectionPatch struct {
 	// from an explicit null (clears back to hub-decides).
 	ExecutorMachineID    *string
 	HasExecutorMachineID bool
+}
+
+// DBConnectionPatch carries optional fields for a partial database-connection
+// update. Secrets are not patched here — they go through DBSecretService.
+type DBConnectionPatch struct {
+	Name     *string
+	Group    *string
+	Engine   *string
+	Host     *string
+	Port     *int
+	Username *string
+	Database *string
+	SSLMode  *string
+
+	ExecutorMachineID     *string
+	HasExecutorMachineID  bool
+	TunnelConnectionID    *string
+	HasTunnelConnectionID bool
+
+	IsProduction *bool
+}
+
+// DBSavedQueryPatch carries optional fields for a partial saved-query update.
+type DBSavedQueryPatch struct {
+	Name *string
+	SQL  *string
 }
 
 // RecurringTemplatePatch carries optional fields for a partial recurring-template update.
