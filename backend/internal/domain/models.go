@@ -243,6 +243,56 @@ type SSHSecret struct {
 	KeychainRef  *string `json:"-"`
 }
 
+// DBConnection is a saved connection to an external SQL database — the
+// registry behind the Database module. Credentials live in DBSecret rows,
+// never on this struct, exactly like SSHConnection/SSHSecret.
+type DBConnection struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Group    string `json:"group"`
+	Engine   string `json:"engine"`   // "postgres" | "mysql" | "sqlite"
+	Host     string `json:"host"`     // ignored for sqlite
+	Port     int    `json:"port"`     // ignored for sqlite
+	Username string `json:"username"` // ignored for sqlite
+	Database string `json:"database"` // initial database; for sqlite: file path
+	SSLMode  string `json:"sslMode"`
+
+	// ExecutorMachineID selects which Machine dials this database;
+	// nil = the hub itself.
+	ExecutorMachineID *string `json:"executorMachineId"`
+	// TunnelConnectionID references an SSHConnection used as a tunnel;
+	// nil = direct connection.
+	TunnelConnectionID *string `json:"tunnelConnectionId"`
+	// IsProduction colors the tab, forces extra confirmation on commits and
+	// DDL, and rejects unverified TLS modes. An error-reduction affordance,
+	// NOT a security control — the operator holds full credentials either way.
+	IsProduction bool `json:"isProduction"`
+	// ServerCertFingerprint is a TOFU-pinned SHA256 fingerprint of the database
+	// server's TLS certificate, for private CAs. Mirrors
+	// SSHConnection.HostKeyFingerprint: set on first connect, mismatch blocks.
+	ServerCertFingerprint *string `json:"serverCertFingerprint"`
+}
+
+// DBSecret is one encrypted credential for a DBConnection. Every field is
+// json:"-": these never serialize into any API response.
+type DBSecret struct {
+	ConnectionID string  `json:"-"`
+	Kind         string  `json:"-"` // "password" | "ca_cert" | "client_cert" | "client_key"
+	StorageKind  string  `json:"-"` // "db" today; "keychain" with the Tauri phase
+	CipherText   string  `json:"-"` // base64 "nonce||ciphertext" (AES-256-GCM)
+	KeychainRef  *string `json:"-"`
+}
+
+// DBSavedQuery is a named SQL snippet attached to a connection — the
+// "Queries" node in the object tree.
+type DBSavedQuery struct {
+	ID           string `json:"id"`
+	ConnectionID string `json:"connectionId"`
+	Name         string `json:"name"`
+	SQL          string `json:"sql"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
 // FsEntry describes a single directory entry returned by the filesystem browser.
 type FsEntry struct {
 	Name  string `json:"name"`

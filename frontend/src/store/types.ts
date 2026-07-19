@@ -159,6 +159,35 @@ export interface SSHConnection {
   hostKeyFingerprint: string | null
 }
 
+export type DBEngine = 'postgres' | 'mysql' | 'sqlite'
+
+/** Mirrors backend domain.DBConnection. Secrets are write-only: they ride on
+ *  create/update bodies and never come back in a response. */
+export interface DBConnection {
+  id: string
+  name: string
+  group: string
+  engine: DBEngine
+  host: string
+  port: number
+  username: string
+  database: string
+  sslMode: string
+  executorMachineId: string | null
+  tunnelConnectionId: string | null
+  isProduction: boolean
+  serverCertFingerprint: string | null
+}
+
+/** Mirrors backend domain.DBSavedQuery. */
+export interface DBSavedQuery {
+  id: string
+  connectionId: string
+  name: string
+  sql: string
+  updatedAt: string
+}
+
 export interface InvoiceItem {
   description: string
   quantity: number
@@ -203,7 +232,7 @@ export interface Workspace {
   recurringTemplates: RecurringInvoiceTemplate[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh'
+export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {
