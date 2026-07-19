@@ -38,9 +38,15 @@ type Project struct {
 	Expanded bool   `json:"expanded"`
 	// MachineID links the project to a registered runtime machine (hub
 	// registry). Empty string = local/unassigned; existing rows default to it.
-	MachineID string     `json:"machineId"`
-	Worktrees []Worktree `json:"worktrees"`
-	Issues    []Issue    `json:"issues"`
+	MachineID string `json:"machineId"`
+	// WorkspaceID is the owning workspace. Populated by machine-scoped reads
+	// (store.ProjectsByMachine) that ship Project rows flattened outside a
+	// Workspace tree, e.g. in CatalogSnapshot; the pre-existing workspace-tree
+	// reads (Workspaces/ProjectByID) leave it unset since the parent is
+	// already implied by nesting there.
+	WorkspaceID string     `json:"workspaceId"`
+	Worktrees   []Worktree `json:"worktrees"`
+	Issues      []Issue    `json:"issues"`
 }
 
 // Issue mirrors the frontend Issue type.
@@ -181,6 +187,16 @@ type Workspace struct {
 	Todos              []Todo                     `json:"todos"`
 	Invoices           []Invoice                  `json:"invoices"`
 	RecurringTemplates []RecurringInvoiceTemplate `json:"recurringTemplates"`
+}
+
+// CatalogSnapshot is one runtime's slice of the hub's catalog: every
+// workspace (they are the grouping), but only the projects and SSH
+// connections bound to that machine. Rows for other machines are never
+// included — not merely hidden.
+type CatalogSnapshot struct {
+	Workspaces     []Workspace     `json:"workspaces"`
+	Projects       []Project       `json:"projects"`
+	SSHConnections []SSHConnection `json:"sshConnections"`
 }
 
 // Settings mirrors the frontend Settings type.

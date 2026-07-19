@@ -57,6 +57,10 @@ export interface Project {
   expanded: boolean
   /** Registered runtime machine this project runs on; empty = local/unassigned. */
   machineId: string
+  /** Owning workspace. Populated by machine-scoped reads (e.g. CatalogSnapshot);
+   *  unset when nested inside a Workspace's own `projects` list, where the
+   *  parent is already implied. */
+  workspaceId: string
   worktrees: Worktree[]
   issues: Issue[]
 }
@@ -230,6 +234,15 @@ export interface Workspace {
   todos: Todo[]
   invoices: Invoice[]
   recurringTemplates: RecurringInvoiceTemplate[]
+}
+
+/** One runtime's slice of the hub's catalog: every workspace (they are the
+ *  grouping), but only the projects and SSH connections bound to that
+ *  machine. Rows for other machines are never included — not merely hidden. */
+export interface CatalogSnapshot {
+  workspaces: Workspace[]
+  projects: Project[]
+  sshConnections: SSHConnection[]
 }
 
 export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database'

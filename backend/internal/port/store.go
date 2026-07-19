@@ -84,6 +84,12 @@ type Store interface {
 	MachineByID(id string) (domain.Machine, error)
 	MachineByKey(key string) (domain.Machine, error)
 
+	// Catalog (hub role only — a runtime's machine-scoped replica source).
+	// See docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md.
+	ProjectsByMachine(machineID string) ([]domain.Project, error)
+	SSHConnectionsByExecutor(machineID string) ([]domain.SSHConnection, error)
+	CatalogForMachine(machineID string) (domain.CatalogSnapshot, error)
+
 	// SSH connections (operator-global registry, hub role only — see
 	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets
 	// are stored separately, encrypted by the service layer.

@@ -422,6 +422,15 @@ func main() {
 		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 
+		// Catalog: a runtime pulls its own machine-scoped slice here, using
+		// its own key (never the hub key). The nested mux is deliberate:
+		// RequireMachineKey must wrap only this route, not the whole hub —
+		// every other hub route authenticates by session cookie or hub key.
+		catalogH := handler.NewCatalogHandler(st)
+		catalogMux := http.NewServeMux()
+		catalogMux.HandleFunc("GET /api/runtime/catalog", catalogH.GetCatalog)
+		mux.Handle("GET /api/runtime/catalog", handler.RequireMachineKey(st)(catalogMux))
+
 		// SSH connection registry — hub-scoped like the machine registry.
 		mux.HandleFunc("GET /api/ssh/connections", sshH.GetConnections)
 		mux.HandleFunc("POST /api/ssh/connections", sshH.PostConnection)
