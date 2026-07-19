@@ -474,6 +474,48 @@ func TestCompileGlobalSearchSkipsLOBColumns(t *testing.T) {
 	}
 }
 
+func TestCompileFiltersDowngradesILIKEOnSQLite(t *testing.T) {
+	// SQLite quotes with a double quote just like PostgreSQL but has no ILIKE
+	// operator. A downgrade guarded only on QuoteChar would leave ILIKE in
+	// place here and fail at runtime.
+	sqliteCaps := port.DBCaps{QuoteChar: `"`, Schemas: false}
+	f := []port.Filter{{Column: "name", Op: "ilike", Values: []any{"%a%"}}}
+	sql, _, err := CompileFilters(f, testCols, sqliteCaps, QuestionPlaceholder)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(strings.ToUpper(sql), "ILIKE") {
+		t.Fatalf("ILIKE not downgraded for SQLite: %s", sql)
+	}
+	if !strings.Contains(strings.ToUpper(sql), "LIKE") {
+		t.Fatalf("expected LIKE: %s", sql)
+	}
+}
+
+func TestCompileFiltersKeepsILIKEOnPostgres(t *testing.T) {
+	f := []port.Filter{{Column: "name", Op: "ilike", Values: []any{"%a%"}}}
+	sql, _, err := CompileFilters(f, testCols, pgCaps, DollarPlaceholder)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(strings.ToUpper(sql), "ILIKE") {
+		t.Fatalf("ILIKE lost on PostgreSQL: %s", sql)
+	}
+}
+
+func TestCompileGlobalSearchMatchesFilterDialectChoice(t *testing.T) {
+	// Both call sites must agree on whether the engine has ILIKE; they drifted
+	// apart once already.
+	sqliteCaps := port.DBCaps{QuoteChar: `"`, Schemas: false}
+	sql, _, err := CompileGlobalSearch("abc", testCols, sqliteCaps, QuestionPlaceholder)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(strings.ToUpper(sql), "ILIKE") {
+		t.Fatalf("global search used ILIKE on SQLite: %s", sql)
+	}
+}
+
 func TestQuoteIdentRejectsEmbeddedQuote(t *testing.T) {
 	// Defense in depth: even though callers validate against the column list,
 	// quoting must not be fooled by an embedded quote character.
@@ -665,7 +707,7 @@ func CompileFilters(filters []port.Filter, cols []port.ColumnMeta, caps port.DBC
 			// ILIKE is PostgreSQL-only. MySQL's LIKE is already
 			// case-insensitive under its default collations, and SQLite's
 			// LIKE is case-insensitive for ASCII.
-			if sqlOp == "ILIKE" && caps.QuoteChar != `"` {
+			if sqlOp == "ILIKE" && !supportsILIKE(caps) {
 				sqlOp = "LIKE"
 			}
 			p := ph(len(args) + 1)
@@ -685,7 +727,6 @@ func CompileGlobalSearch(term string, cols []port.ColumnMeta, caps port.DBCaps, 
 	if term == "" {
 		return "", nil, nil
 	}
-	isPostgres := caps.QuoteChar == `"` && caps.Schemas
 	var parts []string
 	var args []any
 	for _, c := range cols {
@@ -697,7 +738,7 @@ func CompileGlobalSearch(term string, cols []port.ColumnMeta, caps port.DBCaps, 
 			return "", nil, err
 		}
 		op := "LIKE"
-		if isPostgres {
+		if supportsILIKE(caps) {
 			op = "ILIKE"
 		}
 		p := ph(len(args) + 1)
@@ -710,6 +751,21 @@ func CompileGlobalSearch(term string, cols []port.ColumnMeta, caps port.DBCaps, 
 	return "(" + strings.Join(parts, " OR ") + ")", args, nil
 }
 
+// supportsILIKE reports whether the engine has the ILIKE operator.
+//
+// PostgreSQL is the only Piece-A engine that does. Both PostgreSQL and SQLite
+// quote with a double quote, so QuoteChar ALONE cannot tell them apart —
+// checking only the quote character would emit `ILIKE` against SQLite, which
+// has no such operator and fails at runtime. Schemas is what distinguishes
+// them today.
+//
+// This is a two-signal heuristic standing in for a real dialect tag. Both
+// call sites must use this one function; duplicating the condition inline is
+// how the two branches drifted apart in the first place.
+func supportsILIKE(caps port.DBCaps) bool {
+	return caps.QuoteChar == `"` && caps.Schemas
+}
+
 // textType is the engine's cast-to-text type name.
 func textType(caps port.DBCaps) string {
 	if caps.QuoteChar == "`" {
@@ -719,7 +775,11 @@ func textType(caps port.DBCaps) string {
 }
 ```
 
-Note the `isPostgres` / `textType` heuristics keyed off `QuoteChar`. If a later engine shares a quote character this becomes wrong — when adding Piece B or C, replace these with an explicit `caps.Dialect` field rather than extending the heuristic.
+The `supportsILIKE` / `textType` heuristics infer the dialect from capability
+flags rather than naming it. That is already fragile for the three Piece-A
+engines — PostgreSQL and SQLite share a quote character, so quote character
+alone is not a dialect. Adding a fourth engine must replace both with an
+explicit `DBCaps.Dialect` field instead of adding a third signal.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -2123,4 +2183,10 @@ Checked against `docs/superpowers/specs/2026-07-19-database-management-design.md
 
 **Type consistency.** `port.ResultSet`, `port.RowsRequest`, `port.ColumnMeta` field names in Task 1 match their use in Tasks 4, 6, 7, and 10. `dbquery.Placeholder` threading (`argOffset`) is consistent between `CompileFilters` and `BuildPagePlan`. `DBCaps.RowIdentifier` values asserted in Task 1's matrix match those returned in Tasks 4, 6, and 7.
 
-**Known weakness, flagged rather than hidden.** `dbquery` distinguishes engines by `QuoteChar` and `Schemas` (the `isPostgres` and `textType` heuristics in Task 2). This works for exactly the three engines in Piece A and will break when a fourth shares a quote character. Adding Piece B or C must replace it with an explicit `DBCaps.Dialect` field; the code comment says so at the point of use.
+**Known weakness — and a bug this plan originally shipped.** `dbquery` infers the dialect from capability flags (`supportsILIKE` and `textType` in Task 2) instead of naming it.
+
+The first draft of this plan got that wrong in a way worth recording. `CompileFilters` downgraded `ILIKE` to `LIKE` when `caps.QuoteChar != '"'`, while `CompileGlobalSearch` twenty lines away tested `QuoteChar == '"' && caps.Schemas`. **SQLite quotes with a double quote exactly like PostgreSQL**, so the filter path would have emitted `ILIKE` against SQLite — an operator SQLite does not have — failing at runtime. The self-review note here even claimed the heuristic "works for exactly the three engines in Piece A", which was false: it was already broken for one of them.
+
+Fixed by routing both call sites through a single `supportsILIKE(caps)`, with three tests pinning the behavior (`TestCompileFiltersDowngradesILIKEOnSQLite`, `TestCompileFiltersKeepsILIKEOnPostgres`, `TestCompileGlobalSearchMatchesFilterDialectChoice`).
+
+The remaining weakness is real: quote character is not a dialect, and two inferred signals are standing in for one explicit fact. Adding a fourth engine must introduce `DBCaps.Dialect` rather than a third signal.
