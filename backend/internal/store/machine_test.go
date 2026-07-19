@@ -89,3 +89,25 @@ func TestUpdateMachineCanSetIsLocal(t *testing.T) {
 		t.Errorf("UpdateMachine IsLocal = %v, want true", got.IsLocal)
 	}
 }
+
+func TestMachineByKeyResolvesAndRejectsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	want, _ := s.CreateMachine("builder", "https://a.ts.net", "rt-key-a", false)
+	s.CreateMachine("other", "https://b.ts.net", "rt-key-b", false)
+
+	got, err := s.MachineByKey("rt-key-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != want.ID {
+		t.Errorf("MachineByKey returned %q, want %q", got.ID, want.ID)
+	}
+
+	if _, err := s.MachineByKey("nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown key error = %v, want ErrNotFound", err)
+	}
+	// An empty key must never match a machine whose key column is blank.
+	if _, err := s.MachineByKey(""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("empty key error = %v, want ErrNotFound", err)
+	}
+}

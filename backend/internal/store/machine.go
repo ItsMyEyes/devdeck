@@ -38,6 +38,20 @@ func (s *Store) MachineByID(id string) (domain.Machine, error) {
 	return m, nil
 }
 
+// MachineByKey resolves a machine from its static API key. An empty key never
+// matches, so a machine row with a blank key cannot be impersonated by a
+// caller that presents no credential.
+func (s *Store) MachineByKey(key string) (domain.Machine, error) {
+	if key == "" {
+		return domain.Machine{}, ErrNotFound
+	}
+	m, err := scanMachine(s.db.QueryRow(`SELECT id, name, url, key, is_local FROM machines WHERE key = ?`, key))
+	if err != nil {
+		return domain.Machine{}, mapNotFound(err)
+	}
+	return m, nil
+}
+
 // CreateMachine registers a new runtime machine.
 func (s *Store) CreateMachine(name, url, key string, isLocal bool) (domain.Machine, error) {
 	id := idGen("m-")

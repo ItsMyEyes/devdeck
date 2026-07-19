@@ -82,6 +82,7 @@ type Store interface {
 	UpdateMachine(id string, p MachinePatch) (domain.Machine, error)
 	DeleteMachine(id string) error
 	MachineByID(id string) (domain.Machine, error)
+	MachineByKey(key string) (domain.Machine, error)
 
 	// SSH connections (operator-global registry, hub role only — see
 	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets
