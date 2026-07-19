@@ -534,14 +534,34 @@ func main() {
 		}
 	}
 	if (isRuntime || isBoth) && *hubURL != "" {
-		go machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
-			HubURL:    *hubURL,
-			HubKey:    *hubKey,
-			PublicURL: *publicURL,
-			Name:      *machineName,
-			Key:       *apiKey,
-			IsLocal:   isBoth,
-		}, 30*time.Second)
+		go func() {
+			machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
+				HubURL:    *hubURL,
+				HubKey:    *hubKey,
+				PublicURL: *publicURL,
+				Name:      *machineName,
+				Key:       *apiKey,
+				IsLocal:   isBoth,
+			}, 30*time.Second)
+
+			// CRITICAL: only a pure runtime syncs. A --role both process is
+			// its own hub, so `st` here IS the hub store — running the sync
+			// loop against it would make ApplyCatalogSnapshot delete every
+			// workspace and every project belonging to *other* machines,
+			// then repopulate from a snapshot scoped to itself. That is
+			// silent, permanent destruction of the hub's catalog. A both
+			// process already has the truth locally and has nothing to pull.
+			if !isRuntime {
+				return
+			}
+			// Registration has now succeeded at least once, so the hub can
+			// resolve this machine from its key. Only then can the catalog
+			// pull authenticate.
+			service.RunSyncLoop(context.Background(), st, service.SyncConfig{
+				HubURL:     *hubURL,
+				MachineKey: *apiKey,
+			}, 30*time.Second)
+		}()
 		log.Printf("self-register: will register with hub %s as %q (%s)", *hubURL, *machineName, *publicURL)
 	}
 	if !isRuntime && *openUI && webui.Available() {
