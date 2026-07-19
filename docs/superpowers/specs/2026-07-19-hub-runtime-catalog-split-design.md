@@ -107,14 +107,25 @@ One machine's catalog is small — tens of rows. The runtime pulls its
 self-healing, no version numbers, no change log, and no window in which the
 replica can be stuck half-applied.
 
-The loop already exists: `machineclient.RunSelfRegisterLoop` runs every 30s
-(`main.go:503-511`). We extend it rather than adding a second loop.
+**Correction from implementation review:** an earlier draft of this spec
+claimed `machineclient.RunSelfRegisterLoop` was already a 30s periodic loop
+we could extend. It is not. It retries every 30s *until it succeeds once* and
+then **returns** (`backend/internal/machineclient/selfregister.go:71-85`); the
+interval is a retry backoff, not a heartbeat. There is no existing periodic
+loop, so this design adds a genuine one.
+
+`RunSyncLoop` is new and runs for the process's lifetime, started from the
+same place `RunSelfRegisterLoop` is today (`main.go:503-511`). Registration
+must succeed before syncing can work — the hub cannot resolve a machine by a
+key it has never stored — so the sync loop starts only after
+`RunSelfRegisterLoop` returns.
 
 ```
-Every 30s, on runtime A:
-  1. self-register with hub          (exists today)
-  2. push projects WHERE origin='local'   (new — insert-only)
-  3. pull catalog, overwrite replica      (new — full snapshot)
+On runtime A:
+  RunSelfRegisterLoop   -> retries until registered once, returns  (exists)
+  RunSyncLoop           -> every 30s, forever                      (new)
+      1. push projects WHERE origin='local'   (insert-only)
+      2. pull catalog, overwrite replica      (full snapshot)
 ```
 
 Push precedes pull so a project created offline comes back as a hub row in
@@ -256,6 +267,22 @@ runtime redirects to a clean URL immediately after setting the cookie. The
 Clock skew is tolerated at ±30 seconds. If verification still fails, the
 sign-in page offers the key path.
 
+### The runtime session cookie must be SameSite=Lax, not Strict
+
+`setAuthCookie` currently sets `SameSite: http.SameSiteStrictMode`
+(`backend/internal/handler/auth.go:48-58`). That is correct for the hub,
+which is never navigated to from another origin as part of a flow, but it
+**breaks the handover**: arriving at `https://runtime-a/` from the hub is a
+cross-site top-level navigation, and Strict makes the browser withhold the
+cookie. The runtime would show its sign-in page to an operator who already
+holds a perfectly valid session, every single time they came from the hub.
+
+The runtime's session cookie therefore uses `SameSite=Lax`, which is sent on
+top-level GET navigations. This is a runtime-only change — **the hub's cookie
+stays Strict**. `setAuthCookie` gains a `sameSite` parameter rather than
+being switched globally, so the hub's posture is not weakened as a side
+effect of a runtime requirement.
+
 ### Runtime middleware
 
 `RequireKey` (`main.go:453-454`) becomes `RequireRuntimeAuth`, accepting:
@@ -277,6 +304,26 @@ Opening `https://runtime-a/` with no credential shows a small page with two
 options: *Sign in via hub* (redirects to the hub, which returns with a token)
 and a field to paste the static key. The second is what saves you when the
 hub is down.
+
+### Most of the key path already exists
+
+Implementation review found the key→cookie exchange is already built, just
+gated off runtimes:
+
+- `AuthService.KeySession()` (`backend/internal/service/auth.go:365-395`)
+  mints a session from key possession alone, deliberately bypassing password
+  and TOTP, creating a `operator@devdeck.desktop` account on first run.
+- `AuthHandler.PostKeySession` (`backend/internal/handler/auth.go:244-258`)
+  is exactly the exchange endpoint, re-verifying the bearer key itself rather
+  than trusting the middleware.
+- Both are mounted only when `!isRuntime` and `--key` is set
+  (`main.go:282-285`).
+
+So phase 1 largely **ungates and reuses** this rather than building it.
+The genuinely new pieces are: serving `webui.Handler()` on runtimes,
+`RequireRuntimeAuth`, the `SameSite=Lax` parameter, and the sign-in page.
+The runtime's `KeySession` account reuses the same `operator@devdeck.desktop`
+identity, which is correct — a runtime has exactly one operator.
 
 ### Accepted trade-off: revocation does not propagate
 
