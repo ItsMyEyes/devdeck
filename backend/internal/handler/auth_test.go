@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,14 +226,14 @@ func TestSetSecureCookiesTogglesSecureAttribute(t *testing.T) {
 	t.Cleanup(func() { SetSecureCookies(true) })
 
 	rec := httptest.NewRecorder()
-	setAuthCookie(rec, sessionCookieName, "tok", time.Hour)
+	setAuthCookie(rec, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
 	if c := rec.Result().Cookies()[0]; !c.Secure {
 		t.Fatal("expected Secure cookie by default")
 	}
 
 	SetSecureCookies(false)
 	rec = httptest.NewRecorder()
-	setAuthCookie(rec, sessionCookieName, "tok", time.Hour)
+	setAuthCookie(rec, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
 	if c := rec.Result().Cookies()[0]; c.Secure {
 		t.Fatal("expected non-Secure cookie after SetSecureCookies(false)")
 	}
@@ -292,5 +293,26 @@ func TestKeySessionRejectsWhenNoKeyConfigured(t *testing.T) {
 	h.PostKeySession(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestSetAuthCookieHonoursSameSite(t *testing.T) {
+	tests := []struct {
+		name     string
+		sameSite http.SameSite
+		want     string
+	}{
+		{"strict for hub", http.SameSiteStrictMode, "SameSite=Strict"},
+		{"lax for runtime", http.SameSiteLaxMode, "SameSite=Lax"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			setAuthCookie(rec, "devdeck_session", "tok", time.Hour, tt.sameSite)
+			got := rec.Header().Get("Set-Cookie")
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("Set-Cookie = %q, want it to contain %q", got, tt.want)
+			}
+		})
 	}
 }

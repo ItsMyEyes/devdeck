@@ -45,14 +45,14 @@ var secureCookies = true
 // SetSecureCookies toggles the Secure attribute on all auth cookies.
 func SetSecureCookies(enabled bool) { secureCookies = enabled }
 
-func setAuthCookie(w http.ResponseWriter, name, value string, maxAge time.Duration) {
+func setAuthCookie(w http.ResponseWriter, name, value string, maxAge time.Duration, sameSite http.SameSite) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secureCookies,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
 		MaxAge:   int(maxAge.Seconds()),
 	})
 }
@@ -96,11 +96,11 @@ func (h *AuthHandler) PostRegister(w http.ResponseWriter, r *http.Request) {
 		if handleStoreErr(w, err) {
 			return
 		}
-		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour, http.SameSiteStrictMode)
 		writeJSON(w, http.StatusCreated, sessUser)
 		return
 	}
-	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute)
+	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute, http.SameSiteStrictMode)
 	writeJSON(w, http.StatusCreated, user)
 }
 
@@ -143,11 +143,11 @@ func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 		if handleStoreErr(w, err) {
 			return
 		}
-		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+		setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour, http.SameSiteStrictMode)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute)
+	setAuthCookie(w, pendingCookieName, pendingToken, 2*time.Minute, http.SameSiteStrictMode)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "totp_required"})
 }
 
@@ -216,7 +216,7 @@ func (h *AuthHandler) PostTotpVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearAuthCookie(w, pendingCookieName)
-	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour, http.SameSiteStrictMode)
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -253,6 +253,6 @@ func (h *AuthHandler) PostKeySession(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour)
+	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour, http.SameSiteStrictMode)
 	writeJSON(w, http.StatusOK, user)
 }
