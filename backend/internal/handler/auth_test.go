@@ -296,6 +296,55 @@ func TestKeySessionRejectsWhenNoKeyConfigured(t *testing.T) {
 	}
 }
 
+func TestKeySessionDefaultsToThirtyDayMaxAge(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.SetDesktopKey("sekrit")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/key-session", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	rec := httptest.NewRecorder()
+	h.PostKeySession(rec, req)
+
+	var session *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			session = c
+		}
+	}
+	if session == nil {
+		t.Fatal("no session cookie set")
+	}
+	want := int(30 * 24 * time.Hour / time.Second)
+	if session.MaxAge != want {
+		t.Errorf("MaxAge = %d, want %d (30 days, the hub's desktop-sidecar key-session default)", session.MaxAge, want)
+	}
+}
+
+func TestKeySessionHonoursSessionMaxAgeOverride(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.SetDesktopKey("sekrit")
+	h.SetSessionMaxAge(12 * time.Hour)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/key-session", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	rec := httptest.NewRecorder()
+	h.PostKeySession(rec, req)
+
+	var session *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			session = c
+		}
+	}
+	if session == nil {
+		t.Fatal("no session cookie set")
+	}
+	want := int(12 * time.Hour / time.Second)
+	if session.MaxAge != want {
+		t.Errorf("MaxAge = %d, want %d (runtime override)", session.MaxAge, want)
+	}
+}
+
 func TestSetAuthCookieHonoursSameSite(t *testing.T) {
 	tests := []struct {
 		name     string

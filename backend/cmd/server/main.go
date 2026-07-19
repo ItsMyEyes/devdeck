@@ -289,6 +289,7 @@ func main() {
 		// runtime's own web UI works in a browser.
 		authH.SetDesktopKey(*apiKey)
 		authH.SetSessionSameSite(http.SameSiteLaxMode)
+		authH.SetSessionMaxAge(12 * time.Hour)
 		mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
 		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
 		mux.HandleFunc("GET /api/auth/me", authH.GetMe)

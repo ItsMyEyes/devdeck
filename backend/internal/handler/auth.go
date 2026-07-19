@@ -22,6 +22,7 @@ type AuthHandler struct {
 	clientIPHeader  string
 	desktopKey      string
 	sessionSameSite http.SameSite
+	sessionMaxAge   time.Duration
 }
 
 // NewAuthHandler creates an auth handler.
@@ -254,6 +255,22 @@ func (h *AuthHandler) sameSite() http.SameSite {
 	return h.sessionSameSite
 }
 
+// SetSessionMaxAge overrides the Max-Age of the session cookie minted by
+// PostKeySession. The hub keeps the default 30 days (the desktop-sidecar
+// flow documented in
+// docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md);
+// runtimes use a much shorter 12h, since a leaked runtime session cannot be
+// revoked by the hub (see the "Accepted trade-off" section of
+// docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md).
+func (h *AuthHandler) SetSessionMaxAge(d time.Duration) { h.sessionMaxAge = d }
+
+func (h *AuthHandler) maxAge() time.Duration {
+	if h.sessionMaxAge == 0 {
+		return 30 * 24 * time.Hour
+	}
+	return h.sessionMaxAge
+}
+
 // PostKeySession handles POST /api/auth/key-session. It re-verifies the
 // bearer key itself: the auth middleware also admits session cookies, and
 // key possession is the entire authorization for minting this session.
@@ -266,6 +283,6 @@ func (h *AuthHandler) PostKeySession(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	setAuthCookie(w, sessionCookieName, sessionToken, 12*time.Hour, h.sameSite())
+	setAuthCookie(w, sessionCookieName, sessionToken, h.maxAge(), h.sameSite())
 	writeJSON(w, http.StatusOK, user)
 }
