@@ -16,11 +16,12 @@ const (
 // AuthHandler handles registration, login, TOTP enrollment/verification,
 // logout, and the current-user endpoint.
 type AuthHandler struct {
-	svc            *service.AuthService
-	turnstile      *service.TurnstileVerifier
-	trustedProxies []*net.IPNet
-	clientIPHeader string
-	desktopKey     string
+	svc             *service.AuthService
+	turnstile       *service.TurnstileVerifier
+	trustedProxies  []*net.IPNet
+	clientIPHeader  string
+	desktopKey      string
+	sessionSameSite http.SameSite
 }
 
 // NewAuthHandler creates an auth handler.
@@ -241,6 +242,18 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 // see docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md).
 func (h *AuthHandler) SetDesktopKey(key string) { h.desktopKey = key }
 
+// SetSessionSameSite overrides the SameSite attribute on issued session
+// cookies. The hub keeps the default Strict; runtimes use Lax so a top-level
+// navigation from the hub still carries an existing runtime session.
+func (h *AuthHandler) SetSessionSameSite(mode http.SameSite) { h.sessionSameSite = mode }
+
+func (h *AuthHandler) sameSite() http.SameSite {
+	if h.sessionSameSite == 0 {
+		return http.SameSiteStrictMode
+	}
+	return h.sessionSameSite
+}
+
 // PostKeySession handles POST /api/auth/key-session. It re-verifies the
 // bearer key itself: the auth middleware also admits session cookies, and
 // key possession is the entire authorization for minting this session.
@@ -253,6 +266,6 @@ func (h *AuthHandler) PostKeySession(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	setAuthCookie(w, sessionCookieName, sessionToken, 30*24*time.Hour, http.SameSiteStrictMode)
+	setAuthCookie(w, sessionCookieName, sessionToken, 12*time.Hour, h.sameSite())
 	writeJSON(w, http.StatusOK, user)
 }

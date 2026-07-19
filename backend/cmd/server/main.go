@@ -283,6 +283,15 @@ func main() {
 			authH.SetDesktopKey(*apiKey)
 			mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
 		}
+	} else {
+		// Runtimes have no password/TOTP flow: possession of --key is the
+		// entire authorization, exchanged here for a session cookie so the
+		// runtime's own web UI works in a browser.
+		authH.SetDesktopKey(*apiKey)
+		authH.SetSessionSameSite(http.SameSiteLaxMode)
+		mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
+		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
+		mux.HandleFunc("GET /api/auth/me", authH.GetMe)
 	}
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
@@ -445,13 +454,11 @@ func main() {
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
-	if !isRuntime {
-		mux.Handle("/", webui.Handler())
-	}
+	mux.Handle("/", webui.Handler())
 
 	var authMW func(http.Handler) http.Handler
 	if isRuntime {
-		authMW = handler.RequireKey(*apiKey)
+		authMW = handler.RequireRuntimeAuth(authSvc, *apiKey)
 	} else {
 		authMW = handler.RequireAuth(authSvc, *apiKey)
 	}
