@@ -1,6 +1,12 @@
 package store
 
-import "devdeck/backend/internal/domain"
+import (
+	"database/sql"
+	"errors"
+	"time"
+
+	"devdeck/backend/internal/domain"
+)
 
 // ProjectsByMachine returns every project bound to one machine, flat. Unlike
 // projectsOf/ProjectByID (which nest inside a Workspace tree and therefore
@@ -69,4 +75,106 @@ func (s *Store) CatalogForMachine(machineID string) (domain.CatalogSnapshot, err
 		return domain.CatalogSnapshot{}, err
 	}
 	return domain.CatalogSnapshot{Workspaces: workspaces, Projects: projects, SSHConnections: conns}, nil
+}
+
+// MarkProjectLocal flags a project as created on this runtime and not yet
+// accepted by the hub, so snapshots leave it alone.
+func (s *Store) MarkProjectLocal(id string) error {
+	_, err := s.db.Exec(`UPDATE projects SET origin = 'local' WHERE id = ?`, id)
+	return err
+}
+
+// ApplyCatalogSnapshot replaces this runtime's replica with snap, in a single
+// transaction. Two invariants hold absolutely:
+//
+//   - Projects with origin='local' are never deleted. They exist only here
+//     until the hub accepts them.
+//   - Worktrees are never touched. A catalog row disappearing is cheap and
+//     reversible; deleting an unpushed worktree is permanent loss. The two
+//     must never be triggered by the same remote event, so orphaned
+//     worktrees simply outlive their project row.
+func (s *Store) ApplyCatalogSnapshot(snap domain.CatalogSnapshot, syncedAt time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM projects WHERE origin = 'hub'`); err != nil {
+		return err
+	}
+	// TODO(phase-5): host_key_fingerprint is runtime-owned (TOFU is a
+	// statement by the observer) and never sent by the hub, so this delete
+	// drops any locally-pinned fingerprint. Closed when the fingerprint moves
+	// to its own runtime-owned table.
+	if _, err := tx.Exec(`DELETE FROM ssh_connections`); err != nil {
+		return err
+	}
+	// Delete only workspaces no surviving project still points at.
+	// projects.workspace_id is REFERENCES workspaces(id) ON DELETE CASCADE
+	// (db.go), so a blanket "DELETE FROM workspaces" would cascade-delete any
+	// origin='local' project whose workspace happens to be reinserted right
+	// after — silently violating the "local projects are never deleted"
+	// invariant this function exists to uphold. Restricting the delete to
+	// workspaces with no remaining project (hub-origin ones were already
+	// purged above, so only local ones can still reference a row here) keeps
+	// that invariant intact while still fully replacing every workspace the
+	// snapshot doesn't need to preserve.
+	if _, err := tx.Exec(`DELETE FROM workspaces WHERE id NOT IN (SELECT DISTINCT workspace_id FROM projects)`); err != nil {
+		return err
+	}
+
+	for _, ws := range snap.Workspaces {
+		if _, err := tx.Exec(
+			`INSERT INTO workspaces (id, name) VALUES (?, ?)
+			 ON CONFLICT(id) DO UPDATE SET name = excluded.name`, ws.ID, ws.Name); err != nil {
+			return err
+		}
+	}
+	for _, p := range snap.Projects {
+		if _, err := tx.Exec(
+			`INSERT INTO projects (id, workspace_id, name, repo, path, expanded, machine_id, origin)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'hub')`,
+			p.ID, p.WorkspaceID, p.Name, p.Repo, p.Path, boolInt(p.Expanded), p.MachineID); err != nil {
+			return err
+		}
+	}
+	for _, c := range snap.SSHConnections {
+		if _, err := tx.Exec(
+			`INSERT INTO ssh_connections
+			 (id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			c.ID, c.Name, c.Group, c.Host, c.Port, c.Username, c.AuthType,
+			c.JumpConnectionID, c.ExecutorMachineID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO sync_state (id, last_synced_at) VALUES (1, ?)
+		 ON CONFLICT(id) DO UPDATE SET last_synced_at = excluded.last_synced_at`,
+		syncedAt.UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// LastSyncedAt reports when a snapshot last applied cleanly. A nil result
+// means never — which the UI must render distinctly from "no projects",
+// since a wrong hub key otherwise looks exactly like an empty account.
+func (s *Store) LastSyncedAt() (*time.Time, error) {
+	var raw *string
+	if err := s.db.QueryRow(`SELECT last_synced_at FROM sync_state WHERE id = 1`).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	at, err := time.Parse(time.RFC3339, *raw)
+	if err != nil {
+		return nil, err
+	}
+	return &at, nil
 }

@@ -89,6 +89,9 @@ type Store interface {
 	ProjectsByMachine(machineID string) ([]domain.Project, error)
 	SSHConnectionsByExecutor(machineID string) ([]domain.SSHConnection, error)
 	CatalogForMachine(machineID string) (domain.CatalogSnapshot, error)
+	MarkProjectLocal(id string) error
+	ApplyCatalogSnapshot(snap domain.CatalogSnapshot, syncedAt time.Time) error
+	LastSyncedAt() (*time.Time, error)
 
 	// SSH connections (operator-global registry, hub role only — see
 	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets

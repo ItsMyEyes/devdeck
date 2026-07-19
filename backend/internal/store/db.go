@@ -22,7 +22,12 @@ CREATE TABLE IF NOT EXISTS projects (
   repo         TEXT NOT NULL DEFAULT '',
   path         TEXT NOT NULL DEFAULT '',
   expanded     INTEGER NOT NULL DEFAULT 1,
-  machine_id   TEXT NOT NULL DEFAULT ''
+  machine_id   TEXT NOT NULL DEFAULT '',
+  -- origin distinguishes a runtime-replica row synced from the hub ('hub')
+  -- from one created locally while the hub was unreachable ('local'). Only
+  -- meaningful on a runtime; the hub itself never reads it. See
+  -- docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md.
+  origin       TEXT NOT NULL DEFAULT 'hub'
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
 
@@ -234,6 +239,15 @@ CREATE TABLE IF NOT EXISTS settings (
   default_model       TEXT NOT NULL DEFAULT 'claude-sonnet-5'
 );
 
+-- sync_state tracks the runtime replica's last successful catalog apply.
+-- A NULL last_synced_at means "never synced", which the UI must render
+-- distinctly from "no projects" (a wrong hub key otherwise looks identical
+-- to an empty account).
+CREATE TABLE IF NOT EXISTS sync_state (
+  id             INTEGER PRIMARY KEY CHECK (id = 1),
+  last_synced_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id                 TEXT PRIMARY KEY,
   email              TEXT NOT NULL UNIQUE,
@@ -311,6 +325,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := migrateSSHConnectionColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateProjectOrigin(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -404,6 +422,19 @@ func migrateMachineColumns(db *sql.DB) error {
 // gained host grouping) to pre-existing databases.
 func migrateSSHConnectionColumns(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE ssh_connections ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateProjectOrigin adds the origin column to pre-existing databases.
+// 'hub' means the row came from a catalog snapshot and is replaceable;
+// 'local' means it was created on this runtime while the hub was
+// unreachable and must survive snapshot overwrites until it is replayed.
+func migrateProjectOrigin(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN origin TEXT NOT NULL DEFAULT 'hub'"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
