@@ -19,11 +19,21 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // middleware: reaching it with a 200 proves both reachability and a
 // correct credential. Used by machineclient.Probe before registering a new
 // machine (see MachineHandler.PostMachine).
-type WhoamiHandler struct{}
+type WhoamiHandler struct {
+	role        string
+	machineName string
+}
 
-// NewWhoamiHandler creates a whoami handler.
-func NewWhoamiHandler() *WhoamiHandler { return &WhoamiHandler{} }
+// NewWhoamiHandler creates a whoami handler. role is "hub" or "runtime";
+// machineName is this process's display name when it is a runtime.
+func NewWhoamiHandler(role, machineName string) *WhoamiHandler {
+	return &WhoamiHandler{role: role, machineName: machineName}
+}
 
 func (h *WhoamiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":      "ok",
+		"role":        h.role,
+		"machineName": h.machineName,
+	})
 }

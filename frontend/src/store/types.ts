@@ -328,3 +328,11 @@ export interface User {
   totpEnabled: boolean
   createdAt: string
 }
+
+/** GET /api/whoami — an authenticated liveness probe that also reports this
+ * process's role, so the SPA can tell a hub apart from a runtime. */
+export interface Whoami {
+  status: string
+  role: 'hub' | 'runtime'
+  machineName: string
+}

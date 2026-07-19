@@ -20,6 +20,7 @@ import type {
   SSHConnection,
   Todo,
   User,
+  Whoami,
   Workspace,
 } from '@/store/types'
 
@@ -561,6 +562,11 @@ export function logout(): Promise<void> {
 
 export function fetchMe(): Promise<User> {
   return request<User>('GET', '/auth/me')
+}
+
+/** GET /api/whoami — reports this process's role (hub vs. runtime). */
+export function fetchWhoami(): Promise<Whoami> {
+  return request<Whoami>('GET', '/whoami')
 }
 
 // ---- Tools ----

@@ -43,6 +43,7 @@ import {
   fetchSettings,
   fetchSSHConnections,
   fetchTailscaleStatus,
+  fetchWhoami,
   fetchWorkspaces,
   markAllNewsRead,
   seed,
@@ -155,6 +156,11 @@ import { qk } from './keys'
 
 export function useWorkspaces() {
   return useQuery({ queryKey: qk.workspaces, queryFn: fetchWorkspaces })
+}
+
+/** Reports this process's role (hub vs. runtime); never goes stale on its own. */
+export function useWhoami() {
+  return useQuery({ queryKey: qk.whoami, queryFn: fetchWhoami, staleTime: Infinity, retry: false })
 }
 
 /** Convenience hook: the single workspace matching wsId, via a select on useWorkspaces. */
