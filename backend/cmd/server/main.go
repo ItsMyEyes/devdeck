@@ -246,6 +246,9 @@ func main() {
 	sshFileSvc := service.NewSSHFileService(sshmgr.NewFilePool(sshDialer))
 	sshFileH := handler.NewSSHFileHandler(sshFileSvc)
 
+	dbSecrets := service.NewDBSecretService(st, authKey)
+	dbH := handler.NewDBHandler(st, dbSecrets)
+
 	termSrv := terminal.NewServer(st)
 	termH := handler.NewTerminalHandler()
 	lspSrv := lsp.NewServer(st)
@@ -440,6 +443,19 @@ func main() {
 		mux.HandleFunc("GET /api/ssh/connections/{id}/file", sshFileH.Read)
 		mux.HandleFunc("PUT /api/ssh/connections/{id}/file", sshFileH.Write)
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)
+
+		// Database connection registry — hub-scoped like the SSH registry.
+		// Execution endpoints arrive in phase 2; this phase is registry only.
+		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
+		mux.HandleFunc("POST /api/db/connections", dbH.PostConnection)
+		mux.HandleFunc("PATCH /api/db/connections/{id}", dbH.PatchConnection)
+		mux.HandleFunc("DELETE /api/db/connections/{id}", dbH.DeleteConnection)
+		mux.HandleFunc("POST /api/db/connections/{id}/secret", dbH.PostSecret)
+
+		mux.HandleFunc("GET /api/db/connections/{id}/queries", dbH.GetSavedQueries)
+		mux.HandleFunc("POST /api/db/connections/{id}/queries", dbH.PostSavedQuery)
+		mux.HandleFunc("PATCH /api/db/queries/{qid}", dbH.PatchSavedQuery)
+		mux.HandleFunc("DELETE /api/db/queries/{qid}", dbH.DeleteSavedQuery)
 	}
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
