@@ -54,7 +54,7 @@ func buildSessionCmd(session, agentBin, workDir string, args []string) *exec.Cmd
 		cmd = platformCommand(pickShell())
 	}
 	cmd.Dir = resolveWorkDir(workDir)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "LOOM_SESSION="+session)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "DEVDECK_SESSION="+session)
 	return cmd
 }
 

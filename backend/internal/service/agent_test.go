@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 type skillContentRegistry struct {

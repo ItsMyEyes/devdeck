@@ -46,11 +46,11 @@ export function MarkitdownCard() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-loom-border-card bg-loom-card">
-      <div className="flex items-center justify-between gap-3 border-b border-loom-border-card px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+      <div className="flex items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
-          <div className="text-[12.5px] font-medium text-loom-fg">Convert to Markdown</div>
-          <div className="mt-0.5 text-[11px] text-loom-muted">
+          <div className="text-[12.5px] font-medium text-devdeck-fg">Convert to Markdown</div>
+          <div className="mt-0.5 text-[11px] text-devdeck-muted">
             PDF, Word, PowerPoint, Excel, images, audio, HTML → markdown via markitdown.
           </div>
         </div>
@@ -65,7 +65,7 @@ export function MarkitdownCard() {
         {result ? (
           <div className="flex h-full min-h-[220px] flex-col gap-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-mono text-[11px] text-loom-dim">{result.filename}</span>
+              <span className="truncate font-mono text-[11px] text-devdeck-dim">{result.filename}</span>
               <div className="flex flex-none items-center gap-1.5">
                 <Button variant="ghost" size="sm" onClick={copyMarkdown}>
                   <Copy size={12} />
@@ -77,7 +77,7 @@ export function MarkitdownCard() {
                 </Button>
               </div>
             </div>
-            <div className="min-h-[220px] flex-1 overflow-auto rounded-md border border-loom-border-card px-3 py-2">
+            <div className="min-h-[220px] flex-1 overflow-auto rounded-md border border-devdeck-border-card px-3 py-2">
               <MarkdownEditor
                 value={result.markdown}
                 onChange={(markdown) => setResult({ ...result, markdown })}
@@ -86,9 +86,9 @@ export function MarkitdownCard() {
             </div>
           </div>
         ) : (
-          <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-loom-border-card text-center">
-            <span className="text-[12px] text-loom-muted">No document converted yet</span>
-            <span className="text-[11px] text-loom-dim-2">Choose a file to see its markdown here</span>
+          <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-devdeck-border-card text-center">
+            <span className="text-[12px] text-devdeck-muted">No document converted yet</span>
+            <span className="text-[11px] text-devdeck-dim-2">Choose a file to see its markdown here</span>
           </div>
         )}
       </div>

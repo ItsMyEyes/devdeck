@@ -87,7 +87,7 @@ func TestAccessLogAuditsAPIRequests(t *testing.T) {
 		r.RemoteAddr = "203.0.113.7:4321"
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("User-Agent", "sqlmap/1.7")
-		r.Header.Set("Cookie", "loom_session=supersecret")
+		r.Header.Set("Cookie", "devdeck_session=supersecret")
 		mw.ServeHTTP(httptest.NewRecorder(), r)
 	})
 

@@ -31,8 +31,8 @@ function Key({ label, active, onClick, children }: KeyProps) {
       className={cn(
         'flex h-9 min-w-9 flex-none items-center justify-center rounded-md border px-2.5 font-mono text-[12px] transition-colors',
         active
-          ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
-          : 'border-loom-border-menu bg-transparent text-loom-muted active:bg-loom-popover',
+          ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft'
+          : 'border-devdeck-border-menu bg-transparent text-devdeck-muted active:bg-devdeck-popover',
       )}
     >
       {children ?? label}
@@ -49,7 +49,7 @@ interface Props {
 /** Touch-friendly key row for mobile browsers, whose keyboards lack Ctrl/Tab/Esc/arrows. */
 export function MobileKeyToolbar({ ctrlArmed, onToggleCtrl, onSend }: Props) {
   return (
-    <div className="flex flex-none items-center gap-1.5 overflow-x-auto border-t border-loom-border bg-loom-surface px-2 py-1.5 md:hidden">
+    <div className="flex flex-none items-center gap-1.5 overflow-x-auto border-t border-devdeck-border bg-devdeck-surface px-2 py-1.5 md:hidden">
       <Key label="Esc" onClick={() => onSend(ESC)} />
       <Key label="Tab" onClick={() => onSend(TAB)} />
       {/* Sticky modifier: arm here, then type a letter on the OS keyboard to send Ctrl+letter. */}
@@ -60,7 +60,7 @@ export function MobileKeyToolbar({ ctrlArmed, onToggleCtrl, onSend }: Props) {
       <Key label="Ctrl+V" onClick={() => onSend(CTRL_V)}>
         ^V
       </Key>
-      <div className="mx-1 h-5 w-px flex-none bg-loom-border" />
+      <div className="mx-1 h-5 w-px flex-none bg-devdeck-border" />
       <Key label="Left" onClick={() => onSend(ARROW.left)}>
         <ArrowLeft size={14} />
       </Key>

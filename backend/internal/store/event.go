@@ -3,7 +3,7 @@ package store
 import (
 	"database/sql"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // ListIssueEvents returns an issue's auto-recorded timeline, oldest first.

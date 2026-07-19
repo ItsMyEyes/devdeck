@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 
-	"loom/backend/internal/netproxy"
+	"devdeck/backend/internal/netproxy"
 )
 
 // ProxyStartResult is the bound state of an on-demand forward proxy pair.

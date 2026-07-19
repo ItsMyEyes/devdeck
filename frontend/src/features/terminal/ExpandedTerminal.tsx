@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { FileEditor } from './FileEditor'
 import { FileQuickOpen } from './FileQuickOpen'
@@ -78,7 +78,7 @@ export function useIsDesktop() {
 }
 
 const overflowItemClass =
-  'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-loom-fg-2 hover:bg-loom-hover-wash'
+  'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash'
 
 export function OverflowItem({
   onClick,
@@ -92,7 +92,7 @@ export function OverflowItem({
   return (
     <Popover.Close
       onClick={onClick}
-      className={cn(overflowItemClass, danger && 'text-loom-red-soft hover:bg-loom-red-tint-hover')}
+      className={cn(overflowItemClass, danger && 'text-devdeck-red-soft hover:bg-devdeck-red-tint-hover')}
     >
       {children}
     </Popover.Close>
@@ -106,7 +106,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId, onPrimaryExit }
 
   if (!machine) {
     return (
-      <div className="flex flex-1 items-center justify-center font-mono text-sm text-loom-dim">
+      <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-dim">
         no machine assigned to this project — add one from the Machines page
       </div>
     )
@@ -156,11 +156,11 @@ function TerminalWorkspace({
   const [definitionReveals, setDefinitionReveals] = useState<Record<string, DefinitionReveal>>({})
   const isDesktop = useIsDesktop()
 
-  const openEdit = useLoomStore((s) => s.openEdit)
-  const askDelete = useLoomStore((s) => s.askDelete)
-  const setDirtyFileCount = useLoomStore((s) => s.setDirtyFileCount)
-  const setWorktreeLayout = useLoomStore((s) => s.setWorktreeLayout)
-  const storedLayout = useLoomStore((s) => s.worktreeLayouts[worktree.id])
+  const openEdit = useDevDeckStore((s) => s.openEdit)
+  const askDelete = useDevDeckStore((s) => s.askDelete)
+  const setDirtyFileCount = useDevDeckStore((s) => s.setDirtyFileCount)
+  const setWorktreeLayout = useDevDeckStore((s) => s.setWorktreeLayout)
+  const storedLayout = useDevDeckStore((s) => s.worktreeLayouts[worktree.id])
   const updateWorktree = useUpdateWorktree()
   const killTerminalSession = useKillTerminalSession(machine)
 
@@ -305,7 +305,7 @@ function TerminalWorkspace({
       onPrimaryExit?.()
       return
     }
-    const current = deserializeLayout(useLoomStore.getState().worktreeLayouts[worktree.id]) ?? createDefaultLayout(worktree.id)
+    const current = deserializeLayout(useDevDeckStore.getState().worktreeLayouts[worktree.id]) ?? createDefaultLayout(worktree.id)
     const leaf = findLeafForContent(current.root, sessionKey)
     if (!leaf) return
     setWorktreeLayout(worktree.id, closeTab(current, leaf.id, sessionKey))
@@ -480,9 +480,9 @@ function TerminalWorkspace({
   }
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-loom-accent" />
-    if (content.kind === 'git') return <GitBranch size={13} className="text-loom-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-loom-accent" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
+    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />
   }
 
@@ -542,7 +542,7 @@ function TerminalWorkspace({
       if (content.kind !== 'terminal') return null
       const isFocusedTerminal = content.sessionKey === focusedTerminalSessionKey
       return (
-        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-loom-terminal px-3 py-2">
+        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-terminal px-3 py-2">
           <Terminal
             key={content.sessionKey}
             ref={(handle) => {
@@ -586,7 +586,7 @@ function TerminalWorkspace({
   }
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-loom-terminal">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-terminal">
       <PaneCanvas
         root={layout.root}
         focusedPaneId={layout.focusedPaneId}

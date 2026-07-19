@@ -15,9 +15,9 @@ import (
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 const (
@@ -155,7 +155,7 @@ func (a *AuthService) BeginTotpEnrollment(userID string) (secret, otpauthURI str
 		return "", "", err
 	}
 	key, err := totp.Generate(totp.GenerateOpts{
-		Issuer:      "Loom",
+		Issuer:      "DevDeck",
 		AccountName: user.Email,
 	})
 	if err != nil {
@@ -293,7 +293,7 @@ const sessionTTL = 30 * 24 * time.Hour
 
 const (
 	browserProxyTokenTTL     = 12 * time.Hour
-	browserProxyTokenPurpose = "loom/browser-proxy/v1"
+	browserProxyTokenPurpose = "devdeck/browser-proxy/v1"
 )
 
 func (a *AuthService) issueSession(userID string) (string, error) {
@@ -357,7 +357,7 @@ func (a *AuthService) CompleteLogin(pendingToken string) (string, domain.User, e
 
 // desktopOperatorEmail identifies the auto-created single-operator account
 // used by the desktop app's key-session bootstrap (POST /api/auth/key-session).
-const desktopOperatorEmail = "operator@loom.desktop"
+const desktopOperatorEmail = "operator@devdeck.desktop"
 
 // KeySession issues a session for the desktop operator account, creating it
 // on first run. The caller must already have proven possession of the hub's
@@ -421,7 +421,7 @@ func (a *AuthService) CurrentUser(sessionToken string) (domain.User, error) {
 // IssueBrowserProxyToken creates a short-lived bearer token for sandboxed
 // browser iframe requests. The iframe cannot safely use the app's session
 // cookie because allowing same-origin scripts in the sandbox would let remote
-// pages call Loom APIs directly.
+// pages call DevDeck APIs directly.
 func (a *AuthService) IssueBrowserProxyToken(sessionToken string) (string, error) {
 	if _, err := a.CurrentUser(sessionToken); err != nil {
 		return "", err
@@ -434,7 +434,7 @@ func (a *AuthService) IssueBrowserProxyToken(sessionToken string) (string, error
 }
 
 // ValidateBrowserProxyToken verifies that a browser proxy request came from an
-// authenticated Loom session without exposing the full session cookie to the
+// authenticated DevDeck session without exposing the full session cookie to the
 // sandboxed remote document.
 func (a *AuthService) ValidateBrowserProxyToken(token string) error {
 	parts := strings.Split(token, ".")

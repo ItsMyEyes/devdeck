@@ -16,13 +16,13 @@ import (
 	"text/template"
 	"time"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // This file manages Claude Code LLM-provider "environment profiles" — named
 // snapshots of the `env` block of ~/.claude/settings.json. Profiles are stored
-// as one JSON file per profile under ~/.claude/loom-envs/{id}.json; the single
-// active profile's id is recorded in ~/.claude/loom-envs/.active. Activating a
+// as one JSON file per profile under ~/.claude/devdeck-envs/{id}.json; the single
+// active profile's id is recorded in ~/.claude/devdeck-envs/.active. Activating a
 // profile writes its built env map into ~/.claude/settings.json (other top-level
 // keys preserved), so Claude Code picks up the provider on its next launch.
 
@@ -39,9 +39,9 @@ var defaultModelSlots = []struct {
 	{"sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"},
 }
 
-const envProfileDirName = "loom-envs"
+const envProfileDirName = "devdeck-envs"
 
-// envProfilesDir returns ~/.claude/loom-envs, creating it (0o700) if missing.
+// envProfilesDir returns ~/.claude/devdeck-envs, creating it (0o700) if missing.
 func envProfilesDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

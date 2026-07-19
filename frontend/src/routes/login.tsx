@@ -61,9 +61,9 @@ function LoginPage() {
   const lockedUntilMatch = error?.match(/until (.+): locked$/)
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-loom-bg text-loom-fg">
+    <div className="flex h-screen w-full items-center justify-center bg-devdeck-bg text-devdeck-fg">
       <div className="w-[360px]">
-        <h1 className="mb-6 text-lg font-medium">Sign in to Loom</h1>
+        <h1 className="mb-6 text-lg font-medium">Sign in to DevDeck</h1>
 
         {step === 'credentials' && (
           <>
@@ -87,7 +87,7 @@ function LoginPage() {
               <TurnstileWidget key={turnstileKey} siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
             )}
             {error && (
-              <p className="mb-4 text-[12px] text-loom-red-soft">
+              <p className="mb-4 text-[12px] text-devdeck-red-soft">
                 {lockedUntilMatch ? `Too many attempts. Try again after ${lockedUntilMatch[1]}.` : error}
               </p>
             )}
@@ -98,7 +98,7 @@ function LoginPage() {
             >
               {login.isPending ? 'Signing in…' : 'Continue →'}
             </Button>
-            <p className="mt-4 text-center text-[12px] text-loom-muted">
+            <p className="mt-4 text-center text-[12px] text-devdeck-muted">
               First time? <Link to="/register" className="underline">Create an account</Link>
             </p>
           </>
@@ -115,7 +115,7 @@ function LoginPage() {
               className="mb-5"
               autoFocus
             />
-            {error && <p className="mb-4 text-[12px] text-loom-red-soft">{error}</p>}
+            {error && <p className="mb-4 text-[12px] text-devdeck-red-soft">{error}</p>}
             <Button onClick={submitTotp} disabled={verifyTotp.isPending} className="w-full">
               {verifyTotp.isPending ? 'Verifying…' : 'Verify →'}
             </Button>

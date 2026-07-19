@@ -123,36 +123,36 @@ export function SkillsManagement({
 
   return (
     <div className="flex flex-none flex-col md:min-h-0 md:flex-1">
-      <div className="grid flex-none grid-cols-2 border-b border-loom-border bg-loom-surface/20 md:grid-cols-[minmax(220px,1.2fr)_minmax(150px,0.7fr)_minmax(150px,0.7fr)]">
-        <div className="col-span-2 border-b border-loom-border px-3 py-3 sm:px-4 md:col-span-1 md:border-r md:border-b-0">
-          <div className="text-[15px] font-semibold tracking-[-0.015em] text-loom-fg">
+      <div className="grid flex-none grid-cols-2 border-b border-devdeck-border bg-devdeck-surface/20 md:grid-cols-[minmax(220px,1.2fr)_minmax(150px,0.7fr)_minmax(150px,0.7fr)]">
+        <div className="col-span-2 border-b border-devdeck-border px-3 py-3 sm:px-4 md:col-span-1 md:border-r md:border-b-0">
+          <div className="text-[15px] font-semibold tracking-[-0.015em] text-devdeck-fg">
             Unified skill library
           </div>
-          <p className="mt-1 max-w-[56ch] text-[11.5px] leading-relaxed text-loom-muted-2">
+          <p className="mt-1 max-w-[56ch] text-[11.5px] leading-relaxed text-devdeck-muted-2">
             Discover local skills, compare coverage, and install one skill across every agent.
           </p>
         </div>
-        <div className="border-r border-loom-border px-3 py-3 sm:px-4">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-loom-dim">
+        <div className="border-r border-devdeck-border px-3 py-3 sm:px-4">
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-dim">
             Unique skills
           </div>
-          <div className="mt-1 font-mono text-[19px] font-semibold text-loom-fg">{catalog.length}</div>
+          <div className="mt-1 font-mono text-[19px] font-semibold text-devdeck-fg">{catalog.length}</div>
         </div>
         <div className="px-3 py-3 sm:px-4">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-loom-dim">
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-dim">
             Installations
           </div>
-          <div className="mt-1 font-mono text-[19px] font-semibold text-loom-accent-soft">
+          <div className="mt-1 font-mono text-[19px] font-semibold text-devdeck-accent-soft">
             {installedCount}
           </div>
         </div>
       </div>
 
-      <div className="grid flex-none gap-2.5 border-b border-loom-border px-3 py-3 sm:grid-cols-[minmax(0,1fr)_160px] sm:px-4 lg:grid-cols-[minmax(240px,420px)_160px_minmax(0,1fr)] lg:items-center">
+      <div className="grid flex-none gap-2.5 border-b border-devdeck-border px-3 py-3 sm:grid-cols-[minmax(0,1fr)_160px] sm:px-4 lg:grid-cols-[minmax(240px,420px)_160px_minmax(0,1fr)] lg:items-center">
         <div className="relative min-w-0 flex-1 lg:max-w-[420px]">
           <Search
             size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-loom-dim"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-devdeck-dim"
           />
           <Input
             value={query}
@@ -202,7 +202,7 @@ export function SkillsManagement({
       </div>
 
       {errors.length > 0 ? (
-        <div className="flex flex-none items-center gap-2 border-b border-loom-yellow-tint-border bg-loom-yellow-tint px-4 py-2 text-[11px] text-loom-yellow-tint-text">
+        <div className="flex flex-none items-center gap-2 border-b border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-4 py-2 text-[11px] text-devdeck-yellow-tint-text">
           <CircleAlert size={13} />
           Could not read skills from {errors.map((item) => item.agent.name).join(', ')}.
           Other agents remain available.
@@ -213,10 +213,10 @@ export function SkillsManagement({
         {loading && catalog.length === 0 ? (
           <SkillListSkeleton />
         ) : filtered.length === 0 ? (
-          <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-loom-border-strong text-center">
-            <Blocks size={24} strokeWidth={1.5} className="text-loom-dim-2" />
-            <div className="mt-3 text-[12.5px] font-medium text-loom-muted">No skills match this view</div>
-            <div className="mt-1 text-[11px] text-loom-dim">Clear the search or choose another agent.</div>
+          <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-devdeck-border-strong text-center">
+            <Blocks size={24} strokeWidth={1.5} className="text-devdeck-dim-2" />
+            <div className="mt-3 text-[12.5px] font-medium text-devdeck-muted">No skills match this view</div>
+            <div className="mt-1 text-[11px] text-devdeck-dim">Clear the search or choose another agent.</div>
           </div>
         ) : (
           <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-2">
@@ -226,35 +226,35 @@ export function SkillsManagement({
               return (
                 <article
                   key={skill.name}
-                  className="grid gap-3 rounded-xl border border-loom-border-card bg-loom-card px-3 py-3 transition-colors hover:border-loom-border-strong sm:px-3.5 md:grid-cols-[minmax(220px,1fr)_auto] md:items-center"
+                  className="grid gap-3 rounded-xl border border-devdeck-border-card bg-devdeck-card px-3 py-3 transition-colors hover:border-devdeck-border-strong sm:px-3.5 md:grid-cols-[minmax(220px,1fr)_auto] md:items-center"
                 >
                   <div className="flex min-w-0 items-start gap-3">
-                    <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-loom-border-card bg-loom-surface-2 text-loom-muted-2">
+                    <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-muted-2">
                       <Sparkles size={14} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate font-mono text-[12.5px] font-semibold text-loom-fg">
+                        <h3 className="truncate font-mono text-[12.5px] font-semibold text-devdeck-fg">
                           {skill.name}
                         </h3>
-                        <span className="rounded-md border border-loom-border-card bg-loom-surface-2 px-1.5 py-0.5 font-mono text-[9.5px] text-loom-muted-2">
+                        <span className="rounded-md border border-devdeck-border-card bg-devdeck-surface-2 px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-muted-2">
                           {titleCase(skill.category)}
                         </span>
                         {skill.readOnly ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-[9.5px] text-loom-dim">
+                          <span className="inline-flex items-center gap-1 font-mono text-[9.5px] text-devdeck-dim">
                             <LockKeyhole size={10} />
                             System
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-1 line-clamp-2 max-w-[72ch] text-[11.5px] leading-relaxed text-loom-muted-2">
+                      <p className="mt-1 line-clamp-2 max-w-[72ch] text-[11.5px] leading-relaxed text-devdeck-muted-2">
                         {skill.description || 'No description provided by this skill.'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-loom-border pt-3 md:justify-end md:border-t-0 md:pt-0">
-                    <span className="mr-1 whitespace-nowrap font-mono text-[9.5px] text-loom-dim">
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-devdeck-border pt-3 md:justify-end md:border-t-0 md:pt-0">
+                    <span className="mr-1 whitespace-nowrap font-mono text-[9.5px] text-devdeck-dim">
                       {skill.installations.size}/{agents.length}
                     </span>
                     {agents.map((agent) => {
@@ -297,8 +297,8 @@ export function SkillsManagement({
                               'flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 transition-colors sm:h-8',
                               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                               installed
-                                ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
-                                : 'border-loom-border-card bg-loom-surface-2 text-loom-dim hover:border-loom-border-strong hover:text-loom-muted',
+                                ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft'
+                                : 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-dim hover:border-devdeck-border-strong hover:text-devdeck-muted',
                               (locked || (!installed && !portable)) && 'cursor-not-allowed opacity-55',
                             )}
                           >
@@ -318,7 +318,7 @@ export function SkillsManagement({
                               }
                               aria-label={`Edit ${skill.name} SKILL.md for ${agent.name}`}
                               title={`Open ${skill.name}/SKILL.md in ${agent.name}`}
-                              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-loom-border-card bg-loom-surface-2 text-loom-dim transition-colors hover:border-loom-border-accent hover:text-loom-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:h-8 sm:w-8"
+                              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-dim transition-colors hover:border-devdeck-border-accent hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:h-8 sm:w-8"
                             >
                               <FilePenLine size={12} />
                             </button>
@@ -396,8 +396,8 @@ function agentFilterButton(active: boolean) {
     'flex h-9 flex-none cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-[11px] transition-colors sm:h-8',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
     active
-      ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
-      : 'border-loom-border-card bg-loom-surface-2 text-loom-muted hover:text-loom-fg',
+      ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft'
+      : 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-muted hover:text-devdeck-fg',
   )
 }
 
@@ -413,16 +413,16 @@ function SkillListSkeleton() {
       {[0, 1, 2, 3, 4].map((item) => (
         <div
           key={item}
-          className="grid animate-pulse gap-3 rounded-xl border border-loom-border-card bg-loom-card px-3.5 py-3 md:grid-cols-[minmax(220px,1fr)_280px]"
+          className="grid animate-pulse gap-3 rounded-xl border border-devdeck-border-card bg-devdeck-card px-3.5 py-3 md:grid-cols-[minmax(220px,1fr)_280px]"
         >
           <div className="flex gap-3">
-            <div className="h-8 w-8 rounded-lg bg-loom-elevated" />
+            <div className="h-8 w-8 rounded-lg bg-devdeck-elevated" />
             <div className="flex-1">
-              <div className="h-3 w-36 rounded bg-loom-elevated" />
-              <div className="mt-2 h-2.5 max-w-[440px] rounded bg-loom-surface-2" />
+              <div className="h-3 w-36 rounded bg-devdeck-elevated" />
+              <div className="mt-2 h-2.5 max-w-[440px] rounded bg-devdeck-surface-2" />
             </div>
           </div>
-          <div className="h-7 rounded-md bg-loom-surface-2" />
+          <div className="h-7 rounded-md bg-devdeck-surface-2" />
         </div>
       ))}
     </div>

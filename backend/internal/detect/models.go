@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // ReadModels reads installed models for the given agent from its local config.

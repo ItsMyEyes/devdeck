@@ -1,4 +1,4 @@
-// Typed fetch client for the loom Go + SQLite backend.
+// Typed fetch client for the devdeck Go + SQLite backend.
 // The backend is the source of truth; these functions mirror the REST contract.
 
 import type {

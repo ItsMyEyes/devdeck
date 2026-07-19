@@ -1,6 +1,6 @@
 package store
 
-import "loom/backend/internal/domain"
+import "devdeck/backend/internal/domain"
 
 // CreateAttachment stores a file uploaded to an issue's description editor.
 func (s *Store) CreateAttachment(issueID, filename, mimeType string, data []byte, createdAt string) (domain.Attachment, error) {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 const requestTimeout = 3 * time.Second

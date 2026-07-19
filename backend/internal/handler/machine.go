@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/port"
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 // MachineHandler handles the hub's runtime-machine registry.

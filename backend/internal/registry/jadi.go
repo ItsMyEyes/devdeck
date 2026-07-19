@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // JadiRegistry implements port.AgentRegistry by calling a Jadi backend over HTTP.

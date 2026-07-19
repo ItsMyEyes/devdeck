@@ -17,51 +17,51 @@ import (
 	"strings"
 	"time"
 
-	"loom/backend/internal/config"
-	"loom/backend/internal/handler"
-	"loom/backend/internal/lsp"
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/netproxy"
-	"loom/backend/internal/port"
-	"loom/backend/internal/registry"
-	"loom/backend/internal/selfupdate"
-	"loom/backend/internal/service"
-	"loom/backend/internal/sshmgr"
-	"loom/backend/internal/store"
-	"loom/backend/internal/terminal"
-	"loom/backend/internal/version"
-	"loom/backend/internal/webui"
+	"devdeck/backend/internal/config"
+	"devdeck/backend/internal/handler"
+	"devdeck/backend/internal/lsp"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/netproxy"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/registry"
+	"devdeck/backend/internal/selfupdate"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/sshmgr"
+	"devdeck/backend/internal/store"
+	"devdeck/backend/internal/terminal"
+	"devdeck/backend/internal/version"
+	"devdeck/backend/internal/webui"
 )
 
 func main() {
-	showVersion := flag.Bool("version", false, "print the loom version and exit")
-	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server (requires -github-token / LOOM_GITHUB_TOKEN)")
-	githubToken := flag.String("github-token", envOr("LOOM_GITHUB_TOKEN", ""), "GitHub token used to check for and download updates from the private release repo")
-	envFile := flag.String("env", envOr("LOOM_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
-	addr := flag.String("addr", envOr("LOOM_ADDR", "127.0.0.1:8989"), "listen address")
-	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path")
-	jadiURL := flag.String("jadi", envOr("LOOM_JADI_URL", ""), "jadi backend URL (empty = static registry)")
+	showVersion := flag.Bool("version", false, "print the devdeck version and exit")
+	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server (requires -github-token / DEVDECK_GITHUB_TOKEN)")
+	githubToken := flag.String("github-token", envOr("DEVDECK_GITHUB_TOKEN", ""), "GitHub token used to check for and download updates from the private release repo")
+	envFile := flag.String("env", envOr("DEVDECK_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
+	addr := flag.String("addr", envOr("DEVDECK_ADDR", "127.0.0.1:8989"), "listen address")
+	dbPath := flag.String("db", envOr("DEVDECK_DB", defaultDBPath()), "sqlite database path")
+	jadiURL := flag.String("jadi", envOr("DEVDECK_JADI_URL", ""), "jadi backend URL (empty = static registry)")
 	openUI := flag.Bool("open", true, "open the embedded UI in the default browser")
-	onlyFrom := flag.String("only-from", envOr("LOOM_ONLY_FROM", ""), "comma-separated IPs/CIDRs allowed to access the server (empty = no restriction)")
-	trustedProxies := flag.String("trusted-proxies", envOr("LOOM_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
-	clientIPHeader := flag.String("client-ip-header", envOr("LOOM_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
-	twoFA := flag.Bool("2fa", envBool("LOOM_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
-	secureCookiesFlag := flag.Bool("secure-cookies", envBool("LOOM_SECURE_COOKIES", true), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false)")
-	turnstileSiteKey := flag.String("turnstile-site-key", envOr("LOOM_TURNSTILE_SITE_KEY", ""), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge")
-	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("LOOM_TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify login challenges server-side")
-	pythonBin := flag.String("python-bin", envOr("LOOM_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
-	pandocBin := flag.String("pandoc-bin", envOr("LOOM_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
-	mmdcBin := flag.String("mmdc-bin", envOr("LOOM_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
-	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("LOOM_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
-	role := flag.String("role", envOr("LOOM_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address)")
-	apiKey := flag.String("key", envOr("LOOM_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
-	hubURL := flag.String("hub-url", envOr("LOOM_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
-	hubKey := flag.String("hub-key", envOr("LOOM_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
-	publicURL := flag.String("public-url", envOr("LOOM_PUBLIC_URL", ""), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>)")
-	machineName := flag.String("name", envOr("LOOM_MACHINE_NAME", ""), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname)")
-	socks5Addr := flag.String("socks5-addr", envOr("LOOM_SOCKS5_ADDR", ""), "listen address for a SOCKS5 forward proxy (empty = disabled); point a browser's SOCKS5 setting here to route its traffic through this app")
-	httpProxyAddr := flag.String("http-proxy-addr", envOr("LOOM_HTTP_PROXY_ADDR", ""), "listen address for an HTTP/HTTPS forward proxy (empty = disabled); point a browser's HTTP proxy setting here")
-	proxyKey := flag.String("proxy-key", envOr("LOOM_PROXY_KEY", ""), "credential required by --socks5-addr/--http-proxy-addr (SOCKS5 password or HTTP Proxy-Authorization password, any username); empty = no auth")
+	onlyFrom := flag.String("only-from", envOr("DEVDECK_ONLY_FROM", ""), "comma-separated IPs/CIDRs allowed to access the server (empty = no restriction)")
+	trustedProxies := flag.String("trusted-proxies", envOr("DEVDECK_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
+	clientIPHeader := flag.String("client-ip-header", envOr("DEVDECK_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
+	twoFA := flag.Bool("2fa", envBool("DEVDECK_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
+	secureCookiesFlag := flag.Bool("secure-cookies", envBool("DEVDECK_SECURE_COOKIES", true), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false)")
+	turnstileSiteKey := flag.String("turnstile-site-key", envOr("DEVDECK_TURNSTILE_SITE_KEY", ""), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge")
+	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("DEVDECK_TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify login challenges server-side")
+	pythonBin := flag.String("python-bin", envOr("DEVDECK_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
+	pandocBin := flag.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
+	mmdcBin := flag.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
+	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("DEVDECK_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
+	role := flag.String("role", envOr("DEVDECK_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address)")
+	apiKey := flag.String("key", envOr("DEVDECK_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
+	hubURL := flag.String("hub-url", envOr("DEVDECK_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
+	hubKey := flag.String("hub-key", envOr("DEVDECK_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
+	publicURL := flag.String("public-url", envOr("DEVDECK_PUBLIC_URL", ""), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>)")
+	machineName := flag.String("name", envOr("DEVDECK_MACHINE_NAME", ""), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname)")
+	socks5Addr := flag.String("socks5-addr", envOr("DEVDECK_SOCKS5_ADDR", ""), "listen address for a SOCKS5 forward proxy (empty = disabled); point a browser's SOCKS5 setting here to route its traffic through this app")
+	httpProxyAddr := flag.String("http-proxy-addr", envOr("DEVDECK_HTTP_PROXY_ADDR", ""), "listen address for an HTTP/HTTPS forward proxy (empty = disabled); point a browser's HTTP proxy setting here")
+	proxyKey := flag.String("proxy-key", envOr("DEVDECK_PROXY_KEY", ""), "credential required by --socks5-addr/--http-proxy-addr (SOCKS5 password or HTTP Proxy-Authorization password, any username); empty = no auth")
 	flag.Parse()
 
 	if *showVersion {
@@ -71,7 +71,7 @@ func main() {
 
 	if *updates {
 		if *githubToken == "" {
-			log.Fatalf("--updates requires --github-token or LOOM_GITHUB_TOKEN")
+			log.Fatalf("--updates requires --github-token or DEVDECK_GITHUB_TOKEN")
 		}
 		execPath, err := os.Executable()
 		if err != nil {
@@ -97,7 +97,7 @@ func main() {
 	isRuntime := *role == "runtime"
 	isBoth := *role == "both"
 	if (isRuntime || isBoth) && *apiKey == "" {
-		log.Fatalf("--role %s requires --key (or LOOM_KEY)", *role)
+		log.Fatalf("--role %s requires --key (or DEVDECK_KEY)", *role)
 	}
 	if isBoth {
 		// --role both self-registers with itself: default the self-register
@@ -110,7 +110,7 @@ func main() {
 		}
 	}
 	if *hubURL != "" && *hubKey == "" {
-		log.Fatalf("--hub-url requires --hub-key (or LOOM_HUB_KEY) to authenticate self-registration")
+		log.Fatalf("--hub-url requires --hub-key (or DEVDECK_HUB_KEY) to authenticate self-registration")
 	}
 
 	// publicURLWasDefaulted tracks whether the operator left --public-url
@@ -455,7 +455,7 @@ func main() {
 	} else {
 		authMW = handler.RequireAuth(authSvc, *apiKey)
 	}
-	log.Printf("loom role: %s", *role)
+	log.Printf("devdeck role: %s", *role)
 	var root http.Handler = handler.CorsMiddleware(handler.JSONErrorMiddleware(authMW(mux)))
 	if len(allowNets) > 0 {
 		root = handler.OnlyFrom(allowNets, proxyNets, *clientIPHeader)(root)
@@ -494,7 +494,7 @@ func main() {
 	}
 	// NOTE: the desktop shell (frontend/src-tauri/src/sidecar.rs) parses this
 	// exact line to discover the bound port when launched with --addr 127.0.0.1:0.
-	log.Printf("loom listening on %s (db: %s)", uiURL, *dbPath)
+	log.Printf("devdeck listening on %s (db: %s)", uiURL, *dbPath)
 	if *tailscaleServe {
 		if err := startTailscaleServe(listener.Addr()); err != nil {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
@@ -546,7 +546,7 @@ func startForwardProxies(socks5Addr, httpProxyAddr, proxyKey string) {
 
 // startTailscaleServe runs `tailscale serve <port>` as a foreground child
 // process: the serve config exists only while the child runs, so tailscaled
-// is left clean when loom exits, and ctrl-c reaches both through the shared
+// is left clean when devdeck exits, and ctrl-c reaches both through the shared
 // process group. The port comes from the bound listener, not --addr, so it
 // is correct even for ":0".
 func startTailscaleServe(addr net.Addr) error {
@@ -567,7 +567,7 @@ func startTailscaleServe(addr net.Addr) error {
 	log.Printf("tailscale: serving port %s on your tailnet (pid %d)", port, cmd.Process.Pid)
 	go func() {
 		if err := cmd.Wait(); err != nil {
-			log.Printf("tailscale serve exited: %v (loom keeps serving locally)", err)
+			log.Printf("tailscale serve exited: %v (devdeck keeps serving locally)", err)
 			return
 		}
 		log.Printf("tailscale serve exited")
@@ -578,9 +578,9 @@ func startTailscaleServe(addr net.Addr) error {
 func defaultDBPath() string {
 	executable, err := os.Executable()
 	if err != nil {
-		return filepath.Join("data", "loom.db")
+		return filepath.Join("data", "devdeck.db")
 	}
-	return filepath.Join(filepath.Dir(executable), "data", "loom.db")
+	return filepath.Join(filepath.Dir(executable), "data", "devdeck.db")
 }
 
 func envOr(key, fallback string) string {
@@ -619,14 +619,14 @@ func defaultPythonBin() string {
 }
 
 // loadOrCreateAuthKey resolves the AES-256 key used to encrypt TOTP secrets
-// at rest. LOOM_AUTH_KEY (base64, 32 bytes) takes precedence; otherwise a
+// at rest. DEVDECK_AUTH_KEY (base64, 32 bytes) takes precedence; otherwise a
 // key is generated once and persisted beside the database, matching the
 // app's zero-config local-app model (see defaultDBPath).
 func loadOrCreateAuthKey(dbPath string) ([]byte, error) {
-	if envKey := os.Getenv("LOOM_AUTH_KEY"); envKey != "" {
+	if envKey := os.Getenv("DEVDECK_AUTH_KEY"); envKey != "" {
 		key, err := base64.StdEncoding.DecodeString(envKey)
 		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("LOOM_AUTH_KEY must be a base64-encoded 32-byte key")
+			return nil, fmt.Errorf("DEVDECK_AUTH_KEY must be a base64-encoded 32-byte key")
 		}
 		return key, nil
 	}

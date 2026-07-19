@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { FolderTree, TerminalSquare } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { OverflowItem, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
 import { PaneCanvas } from '@/features/terminal/PaneCanvas'
@@ -68,9 +68,9 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const isDesktop = useIsDesktop()
 
-  const setDirtyFileCount = useLoomStore((s) => s.setDirtyFileCount)
-  const setSSHTileLayout = useLoomStore((s) => s.setSSHTileLayout)
-  const storedLayout = useLoomStore((s) => s.sshTileLayouts[connectionId])
+  const setDirtyFileCount = useDevDeckStore((s) => s.setDirtyFileCount)
+  const setSSHTileLayout = useDevDeckStore((s) => s.setSSHTileLayout)
+  const storedLayout = useDevDeckStore((s) => s.sshTileLayouts[connectionId])
 
   const layout = useMemo(
     () => deserializeLayout(storedLayout) ?? createDefaultLayout(connectionId),
@@ -299,8 +299,8 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
   }, [layout, dirtyFiles])
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-loom-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-loom-accent" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
     if (content.kind === 'file') return <MaterialFileIcon name={basename(content.path)} size={13} />
     return null
   }
@@ -335,7 +335,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
     terminal: ({ content }) => {
       if (content.kind !== 'terminal') return null
       return (
-        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-loom-terminal px-3 py-2">
+        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-terminal px-3 py-2">
           <SSHTerminal key={content.sessionKey} connectionId={connectionId} sessionKey={content.sessionKey} />
         </div>
       )
@@ -365,7 +365,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
   }
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-loom-terminal">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-terminal">
       <PaneCanvas
         root={layout.root}
         focusedPaneId={layout.focusedPaneId}

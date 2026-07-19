@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/port"
 )
 
 func TestCreateUserPersistsWithDefaults(t *testing.T) {

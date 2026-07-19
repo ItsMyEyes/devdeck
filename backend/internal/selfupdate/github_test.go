@@ -19,7 +19,7 @@ func TestClient_LatestRelease(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(Release{
 			TagName: "v1.2.3",
-			Assets:  []Asset{{Name: "loom-linux-amd64", ID: 42}},
+			Assets:  []Asset{{Name: "devdeck-linux-amd64", ID: 42}},
 		})
 	}))
 	defer server.Close()
@@ -32,8 +32,8 @@ func TestClient_LatestRelease(t *testing.T) {
 	if release.TagName != "v1.2.3" {
 		t.Errorf("TagName = %q, want v1.2.3", release.TagName)
 	}
-	if len(release.Assets) != 1 || release.Assets[0].Name != "loom-linux-amd64" {
-		t.Errorf("Assets = %+v, want one loom-linux-amd64 asset", release.Assets)
+	if len(release.Assets) != 1 || release.Assets[0].Name != "devdeck-linux-amd64" {
+		t.Errorf("Assets = %+v, want one devdeck-linux-amd64 asset", release.Assets)
 	}
 	if gotAuth != "Bearer test-token" {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer test-token")
@@ -66,7 +66,7 @@ func TestClient_DownloadAsset(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{BaseURL: server.URL, Owner: "acme", Repo: "widget", Token: "test-token"}
-	data, err := client.DownloadAsset(context.Background(), Asset{Name: "loom-linux-amd64", ID: 42})
+	data, err := client.DownloadAsset(context.Background(), Asset{Name: "devdeck-linux-amd64", ID: 42})
 	if err != nil {
 		t.Fatalf("DownloadAsset() error = %v", err)
 	}

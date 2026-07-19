@@ -39,7 +39,7 @@ func joinCmdArgs(args []string) string {
 }
 
 // quoteCmdArg keeps cmd.exe metacharacters inside double quotes and doubles
-// embedded quotes. Paths and task prompts originate from local Loom data.
+// embedded quotes. Paths and task prompts originate from local DevDeck data.
 func quoteCmdArg(arg string) string {
 	return `"` + strings.ReplaceAll(arg, `"`, `""`) + `"`
 }

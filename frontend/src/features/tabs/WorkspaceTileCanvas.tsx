@@ -219,7 +219,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
               role="separator"
               aria-orientation={isRow ? 'vertical' : 'horizontal'}
               className={cn(
-                'flex-none touch-none bg-loom-border transition-colors hover:bg-loom-accent active:bg-loom-accent',
+                'flex-none touch-none bg-devdeck-border transition-colors hover:bg-devdeck-accent active:bg-devdeck-accent',
                 isRow ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
               )}
               onPointerDown={(event) => {
@@ -283,7 +283,7 @@ function TileTabButton({
     cn(
       'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-lg font-mono active:cursor-grabbing',
       compact ? 'h-6 max-w-[150px] pl-2 pr-1 text-[11px]' : 'h-7 max-w-[180px] pl-2.5 pr-1.5 text-[11.5px]',
-      active ? 'bg-loom-elevated text-loom-fg' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+      active ? 'bg-devdeck-elevated text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
       dragging && 'opacity-40',
     )
 
@@ -296,7 +296,7 @@ function TileTabButton({
           onClose()
         }}
         aria-label={`Close ${label}`}
-        className="flex-none rounded p-0.5 text-loom-dim opacity-0 hover:bg-loom-hover-wash hover:text-loom-fg group-hover:opacity-100"
+        className="flex-none rounded p-0.5 text-devdeck-dim opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100"
       >
         <X size={11} />
       </button>
@@ -388,7 +388,7 @@ function TileLeafHeader({
       ref={setHeaderDropRef}
       style={headerStyle}
       className={cn(
-        'flex items-center overflow-x-auto border-b border-loom-border bg-loom-surface',
+        'flex items-center overflow-x-auto border-b border-devdeck-border bg-devdeck-surface',
         topChrome
           ? // Every leaf touching the workspace's top edge gets a real chrome
             // strip. The first one starts at the true viewport edge so it
@@ -399,7 +399,7 @@ function TileLeafHeader({
           : // Lower split panes keep the lighter in-pane header; they don't
             // compete with the app chrome or steal vertical space from top panes.
             'h-8 flex-none',
-        topChrome && !isTopLeft && 'border-l border-loom-border',
+        topChrome && !isTopLeft && 'border-l border-devdeck-border',
       )}
     >
       {topChrome && isTopLeft ? (
@@ -420,7 +420,7 @@ function TileLeafHeader({
           />
           {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
           {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
-            <div className="mx-1.5 h-4 w-px flex-none bg-loom-border-menu" />
+            <div className="mx-1.5 h-4 w-px flex-none bg-devdeck-border-menu" />
           ) : null}
         </Fragment>
       ))}
@@ -429,7 +429,7 @@ function TileLeafHeader({
         onClick={() => ctx.onNewTab(leaf.id)}
         aria-label="New tab"
         className={cn(
-          'ml-1 flex flex-none items-center justify-center rounded-lg text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg',
+          'ml-1 flex flex-none items-center justify-center rounded-lg text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
           topChrome ? 'h-7 w-7' : 'h-6 w-6',
         )}
       >
@@ -438,7 +438,7 @@ function TileLeafHeader({
       {topChrome ? (
         <div data-tauri-drag-region className="flex h-full flex-1 items-center justify-center overflow-hidden px-2">
           {isTopLeft && ctx.workspaceTitle ? (
-            <span className="truncate font-mono text-[11px] text-loom-dim">{ctx.workspaceTitle}</span>
+            <span className="truncate font-mono text-[11px] text-devdeck-dim">{ctx.workspaceTitle}</span>
           ) : null}
         </div>
       ) : null}
@@ -474,7 +474,7 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
         ))}
         {hoverZone ? (
           <div
-            className="pointer-events-none absolute z-10 border-2 border-loom-accent bg-loom-accent/15"
+            className="pointer-events-none absolute z-10 border-2 border-devdeck-accent bg-devdeck-accent/15"
             style={zoneStyle(hoverZone)}
           />
         ) : null}
@@ -647,7 +647,7 @@ export function WorkspaceTileCanvas({
       </div>
       <DragOverlay>
         {dragTab ? (
-          <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-loom-border bg-loom-terminal px-3 font-mono text-[11px] text-loom-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
+          <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-devdeck-border bg-devdeck-terminal px-3 font-mono text-[11px] text-devdeck-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
             {dragTab.kind === 'agents' ? (
               <LayoutGrid size={12} />
             ) : dragTab.kind === 'worktree' ? (

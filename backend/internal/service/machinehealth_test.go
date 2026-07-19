@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/store"
 )
 
 func TestMachineHealthCacheGetMissReturnsFalse(t *testing.T) {

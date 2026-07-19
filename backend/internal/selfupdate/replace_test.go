@@ -8,7 +8,7 @@ import (
 
 func TestReplaceSelf_Unix(t *testing.T) {
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "loom-api")
+	execPath := filepath.Join(dir, "devdeck-api")
 	if err := os.WriteFile(execPath, []byte("old-contents"), 0o755); err != nil {
 		t.Fatalf("seed exec file: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestReplaceSelf_Unix(t *testing.T) {
 
 func TestReplaceSelf_Windows(t *testing.T) {
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "loom-api.exe")
+	execPath := filepath.Join(dir, "devdeck-api.exe")
 	if err := os.WriteFile(execPath, []byte("old-contents"), 0o755); err != nil {
 		t.Fatalf("seed exec file: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestReplaceSelf_Windows(t *testing.T) {
 
 func assertNoLeftoverTempFiles(t *testing.T, dir string) {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(dir, ".loom-update-*"))
+	matches, err := filepath.Glob(filepath.Join(dir, ".devdeck-update-*"))
 	if err != nil {
 		t.Fatalf("glob temp files: %v", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 const maxWorktreeUploadBytes = 256 << 20
@@ -125,7 +125,7 @@ func (h *WorktreeFileHandler) Archive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	tmp, err := os.CreateTemp("", "loom-selection-*.zip")
+	tmp, err := os.CreateTemp("", "devdeck-selection-*.zip")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "create archive failed")
 		return

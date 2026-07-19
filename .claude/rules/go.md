@@ -6,7 +6,7 @@ paths:
 
 ## Project-specific rules
 
-- Module path is `loom/backend`. All internal packages are under `loom/backend/internal/`.
+- Module path is `devdeck/backend`. All internal packages are under `devdeck/backend/internal/`.
 - Use Go 1.22+ enhanced `http.ServeMux` with method+path patterns.
 - Handlers return void; they write the response directly via `writeJSON()` / `writeErr()`.
 - Use `handleStoreErr(w, err)` to map store errors to HTTP responses.

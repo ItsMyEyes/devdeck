@@ -7,7 +7,7 @@
  *
  * Every mutation function is pure: it takes a tree (or a `WorktreeLayout`)
  * and returns a new one, structurally sharing untouched subtrees. Nothing
- * here touches `useLoomStore` — the store slice that persists
+ * here touches `useDevDeckStore` — the store slice that persists
  * `WorktreeLayout` per worktree is a separate, later integration step.
  */
 
@@ -543,7 +543,7 @@ export function resizeSplitInLayout(layout: WorktreeLayout, splitId: string, siz
 // ---------------------------------------------------------------------------
 
 /** Deep-clones a layout into a plain JSON-safe value, ready to hand to
- *  `useLoomStore`'s `zustand/persist` slice. */
+ *  `useDevDeckStore`'s `zustand/persist` slice. */
 export function serializeLayout(layout: WorktreeLayout): WorktreeLayout {
   return JSON.parse(JSON.stringify(layout)) as WorktreeLayout
 }

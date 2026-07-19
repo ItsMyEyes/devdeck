@@ -54,12 +54,12 @@ export function SidebarNav({ compact: _compact }: SidebarNavProps = {}) {
                 'group relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[11px] transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 active
-                  ? 'bg-loom-accent-tint text-loom-accent-soft ring-1 ring-inset ring-loom-border-accent'
-                  : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+                  ? 'bg-devdeck-accent-tint text-devdeck-accent-soft ring-1 ring-inset ring-devdeck-border-accent'
+                  : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
               )}
             >
               <item.Icon size={18} strokeWidth={active ? 2.2 : 1.9} />
-              {item.badge ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-loom-accent-soft" /> : null}
+              {item.badge ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-devdeck-accent-soft" /> : null}
             </button>
           </Tooltip>
         )

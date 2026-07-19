@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 func TestNormalizeBrowserURL(t *testing.T) {
@@ -182,7 +182,7 @@ func TestBrowserProxyPersistsUpstreamCookiesPerToken(t *testing.T) {
 	if got := otherTokenRec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/css") {
 		t.Fatalf("other token content type = %q, want CSS fallback", got)
 	}
-	if got := otherTokenRec.Header().Get("X-Loom-Browser-Content-Mismatch"); got != "style-was-html" {
+	if got := otherTokenRec.Header().Get("X-DevDeck-Browser-Content-Mismatch"); got != "style-was-html" {
 		t.Fatalf("mismatch header = %q, want style-was-html", got)
 	}
 }
@@ -313,7 +313,7 @@ func TestBrowserProxyReturnsScriptStubWhenUpstreamServesHTMLForModule(t *testing
 	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/javascript") {
 		t.Fatalf("Content-Type = %q, want application/javascript", got)
 	}
-	if got := rec.Header().Get("X-Loom-Browser-Content-Mismatch"); got != "script-was-html" {
+	if got := rec.Header().Get("X-DevDeck-Browser-Content-Mismatch"); got != "script-was-html" {
 		t.Fatalf("mismatch header = %q, want script-was-html", got)
 	}
 	if body := rec.Body.String(); !strings.Contains(body, "upstream returned HTML for script") {

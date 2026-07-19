@@ -80,7 +80,7 @@ const candidateExtensions = [
   'sql',
 ]
 
-export const loomCodeTheme = EditorView.theme(
+export const devdeckCodeTheme = EditorView.theme(
   {
     '&': {
       height: '100%',
@@ -697,7 +697,7 @@ export function CodeFileEditor({
       }}
       extensions={[
         oneDark,
-        loomCodeTheme,
+        devdeckCodeTheme,
         explicitHistoryKeymap,
         completionExtension,
         syntaxDiagnostics,

@@ -43,7 +43,7 @@ interface BrowserBookmark {
 
 const HOME_URL = 'https://example.com'
 const SEARCH_URL = 'https://duckduckgo.com/?q='
-const BOOKMARKS_STORAGE_KEY = 'loom.browser.bookmarks'
+const BOOKMARKS_STORAGE_KEY = 'devdeck.browser.bookmarks'
 const HTTP_SCHEME = /^https?:\/\//i
 const ANY_SCHEME = /^[a-z][a-z0-9+.-]*:/i
 const HOST_LIKE = /^(\[[0-9a-f:]+\]|localhost|[\w-]+(\.[\w-]+)+|\d{1,3}(\.\d{1,3}){3})(:\d+)?([/?#].*)?$/i
@@ -189,7 +189,7 @@ export function BrowserModule() {
       if (event.source !== iframeRef.current?.contentWindow) return
       if (typeof event.data !== 'object' || event.data === null) return
       const data = event.data as { type?: unknown; url?: unknown }
-      if (data.type !== 'loom-browser:navigate' || typeof data.url !== 'string' || !HTTP_SCHEME.test(data.url)) {
+      if (data.type !== 'devdeck-browser:navigate' || typeof data.url !== 'string' || !HTTP_SCHEME.test(data.url)) {
         return
       }
       const nextUrl = data.url
@@ -332,7 +332,7 @@ export function BrowserModule() {
   }
 
   return (
-    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col bg-loom-bg">
+    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-bg">
       {!focusMode && (
         <>
           <ModuleHeader
@@ -365,7 +365,7 @@ export function BrowserModule() {
             }
           />
 
-          <div className="flex flex-none items-center gap-1 border-b border-loom-border bg-loom-surface px-2 py-1.5">
+          <div className="flex flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-surface px-2 py-1.5">
             <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
               {tabs.map((tab) => {
                 const selected = tab.id === active.id
@@ -375,8 +375,8 @@ export function BrowserModule() {
                     className={cn(
                       'group/tab flex h-8 min-w-[150px] max-w-[240px] items-center rounded-lg border text-[12px]',
                       selected
-                        ? 'border-loom-border-accent bg-loom-card text-loom-fg shadow-sm shadow-black/10'
-                        : 'border-transparent bg-transparent text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+                        ? 'border-devdeck-border-accent bg-devdeck-card text-devdeck-fg shadow-sm shadow-black/10'
+                        : 'border-transparent bg-transparent text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
                     )}
                   >
                     <button
@@ -391,7 +391,7 @@ export function BrowserModule() {
                       type="button"
                       onClick={() => closeTab(tab.id)}
                       aria-label="Close tab"
-                      className="mr-1 cursor-pointer rounded p-1 text-loom-muted-2 opacity-70 hover:bg-loom-popover hover:text-loom-fg group-hover/tab:opacity-100"
+                      className="mr-1 cursor-pointer rounded p-1 text-devdeck-muted-2 opacity-70 hover:bg-devdeck-popover hover:text-devdeck-fg group-hover/tab:opacity-100"
                     >
                       <X size={12} />
                     </button>
@@ -404,7 +404,7 @@ export function BrowserModule() {
             </Button>
           </div>
 
-          <form onSubmit={submit} className="flex flex-none items-center gap-1.5 border-b border-loom-border bg-loom-bg px-3 py-2">
+          <form onSubmit={submit} className="flex flex-none items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-3 py-2">
             <Button size="icon-sm" variant="secondary" onClick={() => goHistory(-1)} disabled={!canGoBack} aria-label="Back">
               <ArrowLeft size={13} />
             </Button>
@@ -440,20 +440,20 @@ export function BrowserModule() {
           </form>
 
           {detailsOpen && (
-            <div className="flex flex-none flex-col border-b border-loom-border bg-loom-surface">
+            <div className="flex flex-none flex-col border-b border-devdeck-border bg-devdeck-surface">
               <div className="flex items-center gap-2 px-3 py-1.5">
                 <button
                   type="button"
                   onClick={() => setPortalOpen((open) => !open)}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-loom-muted hover:bg-loom-popover hover:text-loom-fg"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg"
                   aria-expanded={portalOpen}
                 >
                   <Bookmark size={13} />
                   Portal
-                  <span className="rounded bg-loom-popover px-1.5 py-0.5 font-mono text-[10px] text-loom-dim">{bookmarks.length}</span>
+                  <span className="rounded bg-devdeck-popover px-1.5 py-0.5 font-mono text-[10px] text-devdeck-dim">{bookmarks.length}</span>
                 </button>
-                <div className="h-4 w-px bg-loom-border" />
-                <label className="flex items-center gap-1.5 text-[11px] text-loom-dim">
+                <div className="h-4 w-px bg-devdeck-border" />
+                <label className="flex items-center gap-1.5 text-[11px] text-devdeck-dim">
                   Save group
                   <Input
                     value={bookmarkGroup}
@@ -463,7 +463,7 @@ export function BrowserModule() {
                   />
                 </label>
                 <div className="min-w-0 flex-1" />
-                <span className="hidden text-[10.5px] text-loom-dim md:inline">Click bookmark to open, hover for actions</span>
+                <span className="hidden text-[10.5px] text-devdeck-dim md:inline">Click bookmark to open, hover for actions</span>
               </div>
 
               {portalOpen && (
@@ -471,18 +471,18 @@ export function BrowserModule() {
                   {bookmarkGroups.map(([group, items]) => (
                     <div
                       key={group}
-                      className="flex flex-none items-center gap-1.5 rounded-lg border border-loom-border-menu bg-loom-bg/40 px-2 py-1"
+                      className="flex flex-none items-center gap-1.5 rounded-lg border border-devdeck-border-menu bg-devdeck-bg/40 px-2 py-1"
                     >
-                      <span className="mr-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-loom-dim">{group}</span>
+                      <span className="mr-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</span>
                       {items.map((bookmark) => (
                         <div
                           key={bookmark.id}
-                          className="group/bookmark flex items-center rounded-full bg-loom-popover ring-1 ring-transparent hover:ring-loom-border"
+                          className="group/bookmark flex items-center rounded-full bg-devdeck-popover ring-1 ring-transparent hover:ring-devdeck-border"
                         >
                           <button
                             type="button"
                             onClick={() => openBookmark(bookmark, false)}
-                            className="max-w-[150px] cursor-pointer truncate px-2.5 py-1 text-left text-[11.5px] text-loom-fg-2 hover:text-loom-accent-soft"
+                            className="max-w-[150px] cursor-pointer truncate px-2.5 py-1 text-left text-[11.5px] text-devdeck-fg-2 hover:text-devdeck-accent-soft"
                             title={bookmark.url}
                           >
                             {bookmark.title}
@@ -492,7 +492,7 @@ export function BrowserModule() {
                               type="button"
                               onClick={() => openBookmark(bookmark, true)}
                               aria-label={`Open ${bookmark.title} in a new tab`}
-                              className="cursor-pointer px-1 py-1 text-loom-muted-2 hover:text-loom-accent-soft"
+                              className="cursor-pointer px-1 py-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
                             >
                               <Plus size={11} />
                             </button>
@@ -500,7 +500,7 @@ export function BrowserModule() {
                               type="button"
                               onClick={() => removeBookmark(bookmark.id)}
                               aria-label={`Remove ${bookmark.title}`}
-                              className="cursor-pointer px-1.5 py-1 text-loom-muted-2 hover:text-loom-red-soft"
+                              className="cursor-pointer px-1.5 py-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
                             >
                               <Trash2 size={11} />
                             </button>
@@ -516,10 +516,10 @@ export function BrowserModule() {
         </>
       )}
 
-      <div className={cn('relative min-h-0 flex-1 bg-loom-terminal', focusMode ? 'p-0' : 'p-2')}>
+      <div className={cn('relative min-h-0 flex-1 bg-devdeck-terminal', focusMode ? 'p-0' : 'p-2')}>
         {focusMode && (
           <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5">
-            <Button size="sm" variant="secondary" onClick={() => setFocusMode(false)} className="bg-loom-bg/90 backdrop-blur">
+            <Button size="sm" variant="secondary" onClick={() => setFocusMode(false)} className="bg-devdeck-bg/90 backdrop-blur">
               Show controls
             </Button>
             <Button
@@ -528,18 +528,18 @@ export function BrowserModule() {
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
               title={isFullscreen ? 'Exit full screen' : 'Full screen'}
-              className="bg-loom-bg/90 backdrop-blur"
+              className="bg-devdeck-bg/90 backdrop-blur"
             >
               {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </Button>
           </div>
         )}
         {proxyError ? (
-          <div className="flex h-full w-full items-center justify-center rounded-lg border border-loom-border bg-loom-surface text-[12px] text-loom-muted">
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-surface text-[12px] text-devdeck-muted">
             Browser proxy unavailable: {proxyError}
           </div>
         ) : !frameSrc ? (
-          <div className="flex h-full w-full items-center justify-center rounded-lg border border-loom-border bg-loom-surface text-[12px] text-loom-muted">
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-surface text-[12px] text-devdeck-muted">
             Preparing browser proxy session…
           </div>
         ) : (
@@ -551,15 +551,15 @@ export function BrowserModule() {
             sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
             referrerPolicy="no-referrer"
             onLoad={() => updateTab(active.id, (tab) => ({ ...tab, loading: false }))}
-            className={cn('h-full w-full border border-loom-border bg-white', focusMode ? 'rounded-none border-0' : 'rounded-lg')}
+            className={cn('h-full w-full border border-devdeck-border bg-white', focusMode ? 'rounded-none border-0' : 'rounded-lg')}
           />
         )}
       </div>
 
       {!focusMode && detailsOpen && (
-        <div className="flex flex-none items-center gap-2 border-t border-loom-border px-3 py-1.5 font-mono text-[10.5px] text-loom-dim">
-          <span className="h-1.5 w-1.5 rounded-full bg-loom-accent" />
-          <span>Requests leave from the Loom server network. Some sites with strict embed or bot protection may not render fully.</span>
+        <div className="flex flex-none items-center gap-2 border-t border-devdeck-border px-3 py-1.5 font-mono text-[10.5px] text-devdeck-dim">
+          <span className="h-1.5 w-1.5 rounded-full bg-devdeck-accent" />
+          <span>Requests leave from the DevDeck server network. Some sites with strict embed or bot protection may not render fully.</span>
         </div>
       )}
     </div>

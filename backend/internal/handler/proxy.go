@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 // ProxyHandler exposes ProxyService's on-demand SOCKS5/HTTP forward proxy

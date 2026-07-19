@@ -1,6 +1,6 @@
 // Standalone bookmark store for the machine-proxied workspace Browser tile.
 // Deliberately separate from the sandboxed-iframe BrowserModule's own
-// `loom.browser.bookmarks` — starring a page in one surface does not appear
+// `devdeck.browser.bookmarks` — starring a page in one surface does not appear
 // in the other. See
 // docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md.
 
@@ -11,7 +11,7 @@ export interface BrowserTileBookmark {
   group: string
 }
 
-const STORAGE_KEY = 'loom.workspaceBrowser.bookmarks'
+const STORAGE_KEY = 'devdeck.workspaceBrowser.bookmarks'
 const HTTP_SCHEME = /^https?:\/\//i
 
 function newBookmarkId(): string {

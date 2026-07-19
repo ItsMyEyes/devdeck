@@ -1,4 +1,4 @@
-// loom terminal gateway — bridges xterm.js (browser) to a real PTY (node-pty).
+// devdeck terminal gateway — bridges xterm.js (browser) to a real PTY (node-pty).
 //
 // Protocol
 //   client → server : JSON control frames  { t: 'i', d }  (stdin)  |  { t: 'r', cols, rows }  (resize)
@@ -140,12 +140,12 @@ function attachPty(ws, session, cols, rows) {
     cols,
     rows,
     cwd: os.homedir(),
-    env: { ...process.env, TERM: 'xterm-256color', LOOM_SESSION: session },
+    env: { ...process.env, TERM: 'xterm-256color', DEVDECK_SESSION: session },
   })
   log(`session ${session}: spawned ${shell} (pid ${child.pid})`)
 
   const banner =
-    `${A.dim}loom terminal · session ${session} · ${shell}${A.reset}\r\n` +
+    `${A.dim}devdeck terminal · session ${session} · ${shell}${A.reset}\r\n` +
     `${A.dim}connected to a live PTY on this machine.${A.reset}\r\n\r\n`
   ws.send(banner)
 
@@ -182,9 +182,9 @@ function attachPty(ws, session, cols, rows) {
 function attachMock(ws, session) {
   let buf = ''
   const send = (s) => ws.readyState === ws.OPEN && ws.send(s)
-  const prompt = () => send(`\r\n${A.green}loom:${session}${A.reset} ${A.blue}›${A.reset} `)
+  const prompt = () => send(`\r\n${A.green}devdeck:${session}${A.reset} ${A.blue}›${A.reset} `)
 
-  send(`${A.dim}loom terminal · session ${session} · simulated agent (node-pty unavailable)${A.reset}\r\n\r\n`)
+  send(`${A.dim}devdeck terminal · session ${session} · simulated agent (node-pty unavailable)${A.reset}\r\n\r\n`)
   let i = 0
   const heartbeat = setInterval(() => {
     const [k, t] = MOCK_POOL[i++ % MOCK_POOL.length]

@@ -8,7 +8,7 @@ interface StatusDotProps {
   style?: CSSProperties
 }
 
-/** Static colored status dot used throughout Loom (cards, tree, drawer, breadcrumb). */
+/** Static colored status dot used throughout DevDeck (cards, tree, drawer, breadcrumb). */
 export function StatusDot({ color, size = 8, className, style }: StatusDotProps) {
   return (
     <span

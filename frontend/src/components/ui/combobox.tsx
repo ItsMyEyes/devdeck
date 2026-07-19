@@ -83,7 +83,7 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
         <div
           className={cn(
             'absolute left-0 right-0 top-[calc(100%+5px)] z-[100] max-h-[220px] overflow-auto rounded-[11px]',
-            'border border-loom-border-menu bg-loom-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none',
+            'border border-devdeck-border-menu bg-devdeck-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none',
           )}
         >
           {matches.map((option, index) => (
@@ -93,8 +93,8 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => commit(option)}
               className={cn(
-                'flex h-8 w-full cursor-pointer select-none items-center rounded-md px-2.5 text-left font-mono text-xs text-loom-fg-2 outline-none',
-                index === highlighted ? 'bg-white/[0.05] text-loom-fg' : 'hover:bg-white/[0.05] hover:text-loom-fg',
+                'flex h-8 w-full cursor-pointer select-none items-center rounded-md px-2.5 text-left font-mono text-xs text-devdeck-fg-2 outline-none',
+                index === highlighted ? 'bg-white/[0.05] text-devdeck-fg' : 'hover:bg-white/[0.05] hover:text-devdeck-fg',
               )}
             >
               {option}

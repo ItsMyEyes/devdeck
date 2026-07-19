@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 // EventHandler serves an issue's auto-recorded Activity timeline. Read-only —

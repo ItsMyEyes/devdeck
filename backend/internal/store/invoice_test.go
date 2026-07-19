@@ -3,8 +3,8 @@ package store
 import (
 	"testing"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 func TestCreateInvoiceComputesAmountFromItems(t *testing.T) {

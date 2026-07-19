@@ -38,12 +38,12 @@ func TestHandleWSSpawnsNativeShell(t *testing.T) {
 	if _, _, err := conn.Read(ctx); err != nil {
 		t.Fatalf("read terminal banner: %v", err)
 	}
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"t":"i","d":"echo LOOM_NATIVE_PTY_OK\r"}`)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"t":"i","d":"echo DEVDECK_NATIVE_PTY_OK\r"}`)); err != nil {
 		t.Fatalf("write terminal input: %v", err)
 	}
 
 	var output []byte
-	for !bytes.Contains(output, []byte("LOOM_NATIVE_PTY_OK")) {
+	for !bytes.Contains(output, []byte("DEVDECK_NATIVE_PTY_OK")) {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
 			t.Fatalf("read terminal output: %v", err)

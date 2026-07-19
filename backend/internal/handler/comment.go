@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 // CommentHandler handles issue comment CRUD endpoints — both top-level

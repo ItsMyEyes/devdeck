@@ -5,8 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * loom design tokens - dark-only, neutral developer-workspace palette.
- * Raw palette is exposed as --loom-* for pixel-faithful spots; semantic tokens
+ * devdeck design tokens - dark-only, neutral developer-workspace palette.
+ * Raw palette is exposed as --devdeck-* for pixel-faithful spots; semantic tokens
  * (--background, --primary, …) drive the shadcn/base-ui component layer.
  */
 :root {
@@ -17,86 +17,86 @@
      brief window before that effect's first run. */
   --app-height: 100dvh;
 
-  /* raw loom palette */
-  --loom-bg: #191a1c;
-  --loom-surface: #161719; /* header / sidebar */
-  --loom-surface-2: #1d1e21; /* drawer / sidebar cards */
-  --loom-card: #202124;
-  --loom-terminal: #111214;
-  --loom-popover: #242629;
-  --loom-elevated: #2a2c30;
+  /* raw devdeck palette */
+  --devdeck-bg: #191a1c;
+  --devdeck-surface: #161719; /* header / sidebar */
+  --devdeck-surface-2: #1d1e21; /* drawer / sidebar cards */
+  --devdeck-card: #202124;
+  --devdeck-terminal: #111214;
+  --devdeck-popover: #242629;
+  --devdeck-elevated: #2a2c30;
 
-  --loom-border: #292b2f; /* hairline */
-  --loom-border-strong: #35383d; /* inputs */
-  --loom-border-card: #303237;
-  --loom-border-menu: #3b3f45;
-  --loom-border-accent: #315b59;
+  --devdeck-border: #292b2f; /* hairline */
+  --devdeck-border-strong: #35383d; /* inputs */
+  --devdeck-border-card: #303237;
+  --devdeck-border-menu: #3b3f45;
+  --devdeck-border-accent: #315b59;
 
-  --loom-fg: #eeeeeb;
-  --loom-fg-2: #d4d6d3;
-  --loom-muted: #a4a8aa;
-  --loom-muted-2: #83898d;
-  --loom-dim: #686e73;
-  --loom-dim-2: #555b60;
-  --loom-dim-3: #42474c;
+  --devdeck-fg: #eeeeeb;
+  --devdeck-fg-2: #d4d6d3;
+  --devdeck-muted: #a4a8aa;
+  --devdeck-muted-2: #83898d;
+  --devdeck-dim: #686e73;
+  --devdeck-dim-2: #555b60;
+  --devdeck-dim-3: #42474c;
 
-  --loom-accent: #39c6bd;
-  --loom-accent-hover: #55d2ca;
-  --loom-accent-soft: #7fd9d3;
-  --loom-accent-ink: #0d1717;
+  --devdeck-accent: #39c6bd;
+  --devdeck-accent-hover: #55d2ca;
+  --devdeck-accent-soft: #7fd9d3;
+  --devdeck-accent-ink: #0d1717;
 
-  --loom-green: #56d58a;
-  --loom-green-soft: #8fd99f;
-  --loom-yellow: #f5c451;
-  --loom-yellow-soft: #ffd66a;
-  --loom-red: #f87171;
-  --loom-red-soft: #f08a8a;
-  --loom-purple: #c7a3ff;
-  --loom-gray: #6b7280;
+  --devdeck-green: #56d58a;
+  --devdeck-green-soft: #8fd99f;
+  --devdeck-yellow: #f5c451;
+  --devdeck-yellow-soft: #ffd66a;
+  --devdeck-red: #f87171;
+  --devdeck-red-soft: #f08a8a;
+  --devdeck-purple: #c7a3ff;
+  --devdeck-gray: #6b7280;
 
   /* tint tokens — background/border/text colours for soft, warning, success,
      destructive, and ghost surface variants (button cva + feature-level alerts).
      Hoisted from raw hexes so a single source drives every tint. */
-  --loom-accent-tint: #18302f;
-  --loom-accent-tint-hover: #1e3b39;
-  --loom-warning-ink: #1a1606;
-  --loom-green-tint: #1a1f17;
-  --loom-green-tint-border: #2c3a29;
-  --loom-green-tint-hover: #20271c;
-  --loom-red-tint: #3a2626;
-  --loom-red-tint-hover: #241818;
-  --loom-red-tint-strong: #3a1f1f;
-  --loom-red-tint-strong-border: #5a2c2c;
-  --loom-red-tint-strong-hover: #4a2424;
-  --loom-red-tint-strong-text: #f5a3a3;
-  --loom-yellow-tint: #241e0f;
-  --loom-yellow-tint-border: #3d331a;
-  --loom-yellow-tint-text: #d1a52c;
-  --loom-yellow-ink: #1e1604;
-  --loom-hover-wash: rgba(255, 255, 255, 0.035);
-  --loom-hover-wash-menu: rgba(255, 255, 255, 0.06);
-  --loom-accent-gradient: linear-gradient(135deg, var(--loom-accent), #238d87);
+  --devdeck-accent-tint: #18302f;
+  --devdeck-accent-tint-hover: #1e3b39;
+  --devdeck-warning-ink: #1a1606;
+  --devdeck-green-tint: #1a1f17;
+  --devdeck-green-tint-border: #2c3a29;
+  --devdeck-green-tint-hover: #20271c;
+  --devdeck-red-tint: #3a2626;
+  --devdeck-red-tint-hover: #241818;
+  --devdeck-red-tint-strong: #3a1f1f;
+  --devdeck-red-tint-strong-border: #5a2c2c;
+  --devdeck-red-tint-strong-hover: #4a2424;
+  --devdeck-red-tint-strong-text: #f5a3a3;
+  --devdeck-yellow-tint: #241e0f;
+  --devdeck-yellow-tint-border: #3d331a;
+  --devdeck-yellow-tint-text: #d1a52c;
+  --devdeck-yellow-ink: #1e1604;
+  --devdeck-hover-wash: rgba(255, 255, 255, 0.035);
+  --devdeck-hover-wash-menu: rgba(255, 255, 255, 0.06);
+  --devdeck-accent-gradient: linear-gradient(135deg, var(--devdeck-accent), #238d87);
 
   /* semantic (shadcn-style) */
-  --background: var(--loom-bg);
-  --foreground: var(--loom-fg);
-  --card: var(--loom-card);
-  --card-foreground: var(--loom-fg);
-  --popover: var(--loom-popover);
-  --popover-foreground: var(--loom-fg);
-  --primary: var(--loom-accent);
-  --primary-foreground: var(--loom-accent-ink);
-  --secondary: var(--loom-elevated);
-  --secondary-foreground: var(--loom-fg-2);
+  --background: var(--devdeck-bg);
+  --foreground: var(--devdeck-fg);
+  --card: var(--devdeck-card);
+  --card-foreground: var(--devdeck-fg);
+  --popover: var(--devdeck-popover);
+  --popover-foreground: var(--devdeck-fg);
+  --primary: var(--devdeck-accent);
+  --primary-foreground: var(--devdeck-accent-ink);
+  --secondary: var(--devdeck-elevated);
+  --secondary-foreground: var(--devdeck-fg-2);
   --muted: #14161b;
-  --muted-foreground: var(--loom-muted);
-  --accent: var(--loom-popover);
-  --accent-foreground: var(--loom-fg);
-  --destructive: var(--loom-red);
-  --destructive-foreground: var(--loom-accent-ink);
-  --border: var(--loom-border-strong);
-  --input: var(--loom-border-strong);
-  --ring: var(--loom-border-accent);
+  --muted-foreground: var(--devdeck-muted);
+  --accent: var(--devdeck-popover);
+  --accent-foreground: var(--devdeck-fg);
+  --destructive: var(--devdeck-red);
+  --destructive-foreground: var(--devdeck-accent-ink);
+  --border: var(--devdeck-border-strong);
+  --input: var(--devdeck-border-strong);
+  --ring: var(--devdeck-border-accent);
 
   --radius: 0.45rem;
 }
@@ -122,58 +122,58 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* raw loom palette, usable as e.g. text-loom-accent, bg-loom-card */
-  --color-loom-bg: var(--loom-bg);
-  --color-loom-surface: var(--loom-surface);
-  --color-loom-surface-2: var(--loom-surface-2);
-  --color-loom-card: var(--loom-card);
-  --color-loom-terminal: var(--loom-terminal);
-  --color-loom-popover: var(--loom-popover);
-  --color-loom-elevated: var(--loom-elevated);
-  --color-loom-border: var(--loom-border);
-  --color-loom-border-strong: var(--loom-border-strong);
-  --color-loom-border-card: var(--loom-border-card);
-  --color-loom-border-menu: var(--loom-border-menu);
-  --color-loom-border-accent: var(--loom-border-accent);
-  --color-loom-fg: var(--loom-fg);
-  --color-loom-fg-2: var(--loom-fg-2);
-  --color-loom-muted: var(--loom-muted);
-  --color-loom-muted-2: var(--loom-muted-2);
-  --color-loom-dim: var(--loom-dim);
-  --color-loom-dim-2: var(--loom-dim-2);
-  --color-loom-dim-3: var(--loom-dim-3);
-  --color-loom-accent: var(--loom-accent);
-  --color-loom-accent-hover: var(--loom-accent-hover);
-  --color-loom-accent-soft: var(--loom-accent-soft);
-  --color-loom-accent-ink: var(--loom-accent-ink);
-  --color-loom-green: var(--loom-green);
-  --color-loom-green-soft: var(--loom-green-soft);
-  --color-loom-yellow: var(--loom-yellow);
-  --color-loom-yellow-soft: var(--loom-yellow-soft);
-  --color-loom-red: var(--loom-red);
-  --color-loom-red-soft: var(--loom-red-soft);
-  --color-loom-purple: var(--loom-purple);
-  --color-loom-gray: var(--loom-gray);
+  /* raw devdeck palette, usable as e.g. text-devdeck-accent, bg-devdeck-card */
+  --color-devdeck-bg: var(--devdeck-bg);
+  --color-devdeck-surface: var(--devdeck-surface);
+  --color-devdeck-surface-2: var(--devdeck-surface-2);
+  --color-devdeck-card: var(--devdeck-card);
+  --color-devdeck-terminal: var(--devdeck-terminal);
+  --color-devdeck-popover: var(--devdeck-popover);
+  --color-devdeck-elevated: var(--devdeck-elevated);
+  --color-devdeck-border: var(--devdeck-border);
+  --color-devdeck-border-strong: var(--devdeck-border-strong);
+  --color-devdeck-border-card: var(--devdeck-border-card);
+  --color-devdeck-border-menu: var(--devdeck-border-menu);
+  --color-devdeck-border-accent: var(--devdeck-border-accent);
+  --color-devdeck-fg: var(--devdeck-fg);
+  --color-devdeck-fg-2: var(--devdeck-fg-2);
+  --color-devdeck-muted: var(--devdeck-muted);
+  --color-devdeck-muted-2: var(--devdeck-muted-2);
+  --color-devdeck-dim: var(--devdeck-dim);
+  --color-devdeck-dim-2: var(--devdeck-dim-2);
+  --color-devdeck-dim-3: var(--devdeck-dim-3);
+  --color-devdeck-accent: var(--devdeck-accent);
+  --color-devdeck-accent-hover: var(--devdeck-accent-hover);
+  --color-devdeck-accent-soft: var(--devdeck-accent-soft);
+  --color-devdeck-accent-ink: var(--devdeck-accent-ink);
+  --color-devdeck-green: var(--devdeck-green);
+  --color-devdeck-green-soft: var(--devdeck-green-soft);
+  --color-devdeck-yellow: var(--devdeck-yellow);
+  --color-devdeck-yellow-soft: var(--devdeck-yellow-soft);
+  --color-devdeck-red: var(--devdeck-red);
+  --color-devdeck-red-soft: var(--devdeck-red-soft);
+  --color-devdeck-purple: var(--devdeck-purple);
+  --color-devdeck-gray: var(--devdeck-gray);
 
   /* tint tokens */
-  --color-loom-accent-tint: var(--loom-accent-tint);
-  --color-loom-accent-tint-hover: var(--loom-accent-tint-hover);
-  --color-loom-warning-ink: var(--loom-warning-ink);
-  --color-loom-green-tint: var(--loom-green-tint);
-  --color-loom-green-tint-border: var(--loom-green-tint-border);
-  --color-loom-green-tint-hover: var(--loom-green-tint-hover);
-  --color-loom-red-tint: var(--loom-red-tint);
-  --color-loom-red-tint-hover: var(--loom-red-tint-hover);
-  --color-loom-red-tint-strong: var(--loom-red-tint-strong);
-  --color-loom-red-tint-strong-border: var(--loom-red-tint-strong-border);
-  --color-loom-red-tint-strong-hover: var(--loom-red-tint-strong-hover);
-  --color-loom-red-tint-strong-text: var(--loom-red-tint-strong-text);
-  --color-loom-yellow-tint: var(--loom-yellow-tint);
-  --color-loom-yellow-tint-border: var(--loom-yellow-tint-border);
-  --color-loom-yellow-tint-text: var(--loom-yellow-tint-text);
-  --color-loom-yellow-ink: var(--loom-yellow-ink);
-  --color-loom-hover-wash: var(--loom-hover-wash);
-  --color-loom-hover-wash-menu: var(--loom-hover-wash-menu);
+  --color-devdeck-accent-tint: var(--devdeck-accent-tint);
+  --color-devdeck-accent-tint-hover: var(--devdeck-accent-tint-hover);
+  --color-devdeck-warning-ink: var(--devdeck-warning-ink);
+  --color-devdeck-green-tint: var(--devdeck-green-tint);
+  --color-devdeck-green-tint-border: var(--devdeck-green-tint-border);
+  --color-devdeck-green-tint-hover: var(--devdeck-green-tint-hover);
+  --color-devdeck-red-tint: var(--devdeck-red-tint);
+  --color-devdeck-red-tint-hover: var(--devdeck-red-tint-hover);
+  --color-devdeck-red-tint-strong: var(--devdeck-red-tint-strong);
+  --color-devdeck-red-tint-strong-border: var(--devdeck-red-tint-strong-border);
+  --color-devdeck-red-tint-strong-hover: var(--devdeck-red-tint-strong-hover);
+  --color-devdeck-red-tint-strong-text: var(--devdeck-red-tint-strong-text);
+  --color-devdeck-yellow-tint: var(--devdeck-yellow-tint);
+  --color-devdeck-yellow-tint-border: var(--devdeck-yellow-tint-border);
+  --color-devdeck-yellow-tint-text: var(--devdeck-yellow-tint-text);
+  --color-devdeck-yellow-ink: var(--devdeck-yellow-ink);
+  --color-devdeck-hover-wash: var(--devdeck-hover-wash);
+  --color-devdeck-hover-wash-menu: var(--devdeck-hover-wash-menu);
 
   --font-sans: 'Geist', system-ui, -apple-system, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
@@ -223,8 +223,8 @@
 
   body {
     margin: 0;
-    background: var(--loom-bg);
-    color: var(--loom-fg);
+    background: var(--devdeck-bg);
+    color: var(--devdeck-fg);
     font-family: var(--font-sans);
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
@@ -251,75 +251,75 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--loom-dim-2);
+    color: var(--devdeck-dim-2);
   }
 }
 
-.loom-markdown h1,
-.loom-markdown h2,
-.loom-markdown h3 {
+.devdeck-markdown h1,
+.devdeck-markdown h2,
+.devdeck-markdown h3 {
   font-weight: 600;
-  color: var(--loom-fg);
+  color: var(--devdeck-fg);
   line-height: 1.3;
 }
-.loom-markdown h1 {
+.devdeck-markdown h1 {
   font-size: 18px;
 }
-.loom-markdown h2 {
+.devdeck-markdown h2 {
   font-size: 15.5px;
 }
-.loom-markdown h3 {
+.devdeck-markdown h3 {
   font-size: 13.5px;
 }
-.loom-markdown p {
+.devdeck-markdown p {
   margin: 0;
 }
-.loom-markdown ul,
-.loom-markdown ol {
+.devdeck-markdown ul,
+.devdeck-markdown ol {
   padding-left: 1.25em;
   display: flex;
   flex-direction: column;
   gap: 0.25em;
 }
-.loom-markdown a {
-  color: var(--loom-accent);
+.devdeck-markdown a {
+  color: var(--devdeck-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.loom-markdown code {
+.devdeck-markdown code {
   font-family: var(--font-mono);
   font-size: 0.92em;
-  background: var(--loom-popover);
-  border: 1px solid var(--loom-border-strong);
+  background: var(--devdeck-popover);
+  border: 1px solid var(--devdeck-border-strong);
   border-radius: 4px;
   padding: 0.1em 0.35em;
 }
-.loom-markdown pre {
+.devdeck-markdown pre {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  background: var(--loom-popover);
-  border: 1px solid var(--loom-border-strong);
+  background: var(--devdeck-popover);
+  border: 1px solid var(--devdeck-border-strong);
   border-radius: 8px;
   padding: 0.75em 1em;
   overflow-x: auto;
 }
-.loom-markdown pre code {
+.devdeck-markdown pre code {
   background: none;
   border: none;
   padding: 0;
 }
-.loom-markdown table {
+.devdeck-markdown table {
   border-collapse: collapse;
   font-size: 0.9em;
 }
-.loom-markdown th,
-.loom-markdown td {
-  border: 1px solid var(--loom-border-strong);
+.devdeck-markdown th,
+.devdeck-markdown td {
+  border: 1px solid var(--devdeck-border-strong);
   padding: 0.35em 0.6em;
 }
-.loom-markdown blockquote {
-  border-left: 2px solid var(--loom-border-accent);
+.devdeck-markdown blockquote {
+  border-left: 2px solid var(--devdeck-border-accent);
   padding-left: 0.75em;
-  color: var(--loom-dim);
+  color: var(--devdeck-dim);
   margin: 0;
 }

@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri dev-tauri-full e2e-tauri-smoke
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -6,7 +6,7 @@ DIST_DIR := dist
 WEBUI_DIR := backend/internal/webui/dist
 WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X loom/backend/internal/version.Version=$(VERSION)
+LDFLAGS := -X devdeck/backend/internal/version.Version=$(VERSION)
 
 # Shared dev hub bearer key: gives the hub started by `make dev`/`make
 # dev-api` a --key, purely as an additional auth path alongside the
@@ -28,7 +28,7 @@ TAILSCALE := $(shell command -v tailscale 2>/dev/null || echo /Applications/Tail
 # https://<this-machine>.<tailnet>.ts.net — see allowedHosts in vite.config.ts.
 dev:
 	$(TAILSCALE) serve --bg 5173
-	cd frontend && LOOM_KEY=$(DEV_HUB_KEY) npm run dev
+	cd frontend && DEVDECK_KEY=$(DEV_HUB_KEY) npm run dev
 
 # Frontend only (Vite :5173)
 dev-web:
@@ -38,14 +38,14 @@ dev-web:
 # --role runtime --key <key> to run this as a runtime instead; see the
 # "Hub / runtime roles" section in COMMANDS.md for the two-node example.
 dev-api:
-	cd backend && LOOM_KEY=$(DEV_HUB_KEY) go run ./cmd/server --db loom.db --open=false --env .env --secure-cookies=false
+	cd backend && DEVDECK_KEY=$(DEV_HUB_KEY) go run ./cmd/server --db devdeck.db --open=false --env .env --secure-cookies=false
 
 # Same as dev-api, but spells out --role hub --key explicitly instead of
-# relying on the default role + LOOM_KEY env var — pairs by name with
+# relying on the default role + DEVDECK_KEY env var — pairs by name with
 # dev-runtime for a two-process hub+runtime dev setup. Same port/db as
-# dev-api (:8989, loom.db), so don't run both at once.
+# dev-api (:8989, devdeck.db), so don't run both at once.
 dev-hub:
-	cd backend && go run ./cmd/server --role hub --key $(DEV_HUB_KEY) --db loom.db --open=false --env .env --secure-cookies=false
+	cd backend && go run ./cmd/server --role hub --key $(DEV_HUB_KEY) --db devdeck.db --open=false --env .env --secure-cookies=false
 
 # Second backend process (Go :9199), --role runtime, self-registering with
 # the hub started by `make dev`/`make dev-api` on :8989 — no manual step in
@@ -67,7 +67,7 @@ free-ports:
 # Delete the dev databases (wipes seed/demo data used by `make dev-api`,
 # plus the `make dev-runtime` runtime db and its self-registered machine row)
 seed-clean:
-	rm -f backend/loom.db backend/loom.db-wal backend/loom.db-shm
+	rm -f backend/devdeck.db backend/devdeck.db-wal backend/devdeck.db-shm
 	rm -f backend/runtime.db backend/runtime.db-wal backend/runtime.db-shm
 
 # ── Build ────────────────────────────────────────────────────
@@ -82,30 +82,30 @@ prepare-webui: build-web
 	cp -R frontend/dist/. $(WEBUI_DIR)/
 
 build-api: prepare-webui
-	cd backend && go build -ldflags "$(LDFLAGS)" -o loom-api ./cmd/server
+	cd backend && go build -ldflags "$(LDFLAGS)" -o devdeck-api ./cmd/server
 
 # MCP stdio server exposing the issue tracker to coding agents (list_projects,
 # create_issue, upload_attachment, mark_issue_done). Reads the same --db file
 # the main server uses.
 build-mcp:
-	cd backend && go build -o loom-mcp-server ./cmd/mcp-server
+	cd backend && go build -o devdeck-mcp-server ./cmd/mcp-server
 
 # Portable binary for the selected GOOS/GOARCH (defaults to the host).
 portable: portable-current
 
 portable-current: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
 
 # Release matrix: macOS, Linux, and Windows on Intel/AMD and ARM64.
 portable-all: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-darwin-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-darwin-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-linux-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-linux-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-amd64.exe ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/loom-windows-arm64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-amd64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-arm64.exe ./cmd/server
 
 # ── Desktop (Tauri) ──────────────────────────────────────────
 # Sidecar binaries for the desktop app, named by Rust target triple as
@@ -115,22 +115,58 @@ TAURI_BIN_DIR := frontend/src-tauri/binaries
 
 prepare-sidecar: prepare-webui
 	mkdir -p $(TAURI_BIN_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-aarch64-apple-darwin ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-x86_64-pc-windows-msvc.exe ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-x86_64-unknown-linux-gnu ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-aarch64-apple-darwin ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-pc-windows-msvc.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-unknown-linux-gnu ./cmd/server
 
 sidecar-host: prepare-webui
 	mkdir -p $(TAURI_BIN_DIR)
-	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/loom-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
+	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
 
 # Run the desktop app in dev mode: builds the host-triple sidecar, then
 # `tauri dev` opens a native window against the Vite dev server (:5173) —
 # beforeDevCommand in tauri.conf.json runs `npm run dev`, which also starts
 # the Go backend (:8989) as --role both, so no separate `make dev`/`dev-api`
 # is needed. Hot-reloads on frontend changes; rerun this target after Go/Rust
-# changes.
+# changes. `setup()` in lib.rs skips the hub-mode/sidecar flow entirely here
+# (cfg!(debug_assertions) is true) — use dev-tauri-full to exercise that.
 dev-tauri:
-	cd frontend && LOOM_ROLE=both LOOM_KEY=$(DEV_HUB_KEY) npm run tauri:dev
+	cd frontend && npm run tauri:dev
+
+# Same as dev-tauri, but exercises the real desktop flow instead of hot-
+# reloading to the Vite dev server: the hub-mode chooser (or saved choice),
+# sidecar spawn/respawn loop, and Tailscale-backed remote-mode runtime — the
+# same Rust code a production install runs (DEVDECK_TAURI_DEV_FULL=1 lets it
+# past the debug_assertions guard in lib.rs), just still a debug build.
+# tauri.dev-full.conf.json drops devUrl/beforeDevCommand and uses a separate
+# `identifier`, so hub-mode.json/devdeck.db/runtime-key never touch a real
+# installed app's data. --no-dev-server is REQUIRED (see tauri:dev-full in
+# frontend/package.json): with devUrl unset, `tauri dev` would otherwise spin
+# up its own built-in dev server (port 1430) for frontendDist and load the
+# window from http://localhost:1430 — but lib.rs navigates the placeholder/
+# choose/error pages via the tauri://localhost custom protocol, which that
+# dev server doesn't back, so show_choose_screen would hit "asset not found:
+# choose.html". --no-dev-server makes Tauri serve the embedded frontendDist
+# (ui/) straight from the custom protocol the Rust code targets. No frontend
+# HMR here — the sidecar serves whatever `prepare-webui` last built into
+# backend/internal/webui/dist.
+dev-tauri-full:
+	cd frontend && npm run tauri:dev-full
+
+# Scripted smoke test for dev-tauri-full's real local-hub-mode flow (sidecar
+# spawn -> health check -> machine registration -> clean process teardown)
+# without a human clicking through the native window: builds a plain, non-
+# watching debug binary (`tauri build --no-bundle --debug`, no file-watcher
+# so the "asset not found: choose.html" `tauri dev` race can't happen)
+# against a throwaway dev.kiyora.devdeck.e2e app identifier
+# (tauri.e2e.conf.json) and pre-seeds hub-mode.json so the one-time choose-
+# hub-mode screen is skipped. That screen stays a manual, one-glance check
+# via `make dev-tauri-full` — this target deliberately does not cover it.
+# Opt-in, not part of `test`/`lint` (needs a full Tauri/Cargo build and a
+# real Go sidecar build); macOS only for now. See
+# docs/superpowers/specs/2026-07-17-tauri-desktop-e2e-smoke-harness-design.md.
+e2e-tauri-smoke:
+	./frontend/src-tauri/scripts/e2e-smoke.sh
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check
@@ -164,7 +200,7 @@ tag:
 
 # ── Clean ────────────────────────────────────────────────────
 clean:
-	rm -f backend/loom-api
+	rm -f backend/devdeck-api
 	rm -rf frontend/dist
 	find $(WEBUI_DIR) -mindepth 1 ! -name .placeholder -exec rm -rf {} +
 	rm -rf $(DIST_DIR)

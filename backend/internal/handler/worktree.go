@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/service"
 )
 
 // WorktreeHandler handles worktree CRUD endpoints.

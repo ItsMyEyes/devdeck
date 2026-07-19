@@ -13,11 +13,11 @@ export function ToolCard({
   children: ReactNode
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-loom-border-card bg-loom-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-loom-border-card px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
-          <div className="text-[12.5px] font-medium text-loom-fg">{title}</div>
-          <div className="mt-0.5 text-[11px] text-loom-muted">{description}</div>
+          <div className="text-[12.5px] font-medium text-devdeck-fg">{title}</div>
+          <div className="mt-0.5 text-[11px] text-devdeck-muted">{description}</div>
         </div>
         {actions ? <div className="flex flex-none items-center gap-1.5">{actions}</div> : null}
       </div>

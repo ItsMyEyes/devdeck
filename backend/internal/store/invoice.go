@@ -3,8 +3,8 @@ package store
 import (
 	"encoding/json"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const invoiceColumns = `id, number, company_name, company_address, items_json, amount, status, due_date, created_at, bank_name, bank_account_name, bank_account_number`

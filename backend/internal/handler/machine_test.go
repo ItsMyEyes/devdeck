@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 func newTestMachineHandler(t *testing.T) *MachineHandler {

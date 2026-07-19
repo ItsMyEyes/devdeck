@@ -3,8 +3,8 @@ package store
 import (
 	"database/sql"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 // Settings returns the singleton settings row.

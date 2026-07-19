@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {

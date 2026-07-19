@@ -47,7 +47,7 @@ export interface PanelHeaderProps {
 }
 
 const iconButtonClass =
-  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg'
+  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
 
 /** Compact per-pane header: tab strip + split/overflow/close controls. Purely presentational — knows nothing about Terminal/GitPanel/FileEditor. */
 export function PanelHeader({
@@ -68,7 +68,7 @@ export function PanelHeader({
   return (
     <div
       className={cn(
-        'flex h-8 flex-none items-stretch border-b border-loom-border bg-loom-surface-2',
+        'flex h-8 flex-none items-stretch border-b border-devdeck-border bg-devdeck-surface-2',
         className,
       )}
     >
@@ -96,7 +96,7 @@ export function PanelHeader({
               <Popover.Positioner side="bottom" align="start" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
                 <Popover.Popup
                   className={cn(
-                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-loom-border-menu bg-loom-popover p-1.5',
+                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
                     'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
                     'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
                     'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -145,7 +145,7 @@ export function PanelHeader({
               <Popover.Positioner side="bottom" align="end" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
                 <Popover.Popup
                   className={cn(
-                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-loom-border-menu bg-loom-popover p-1.5',
+                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
                     'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
                     'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
                     'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -204,10 +204,10 @@ function PanelHeaderTabButton({
         }
       }}
       className={cn(
-        'group flex h-full max-w-[200px] flex-none touch-none cursor-grab items-center gap-1.5 border-r border-loom-border pl-3 pr-1 font-mono text-[11px] active:cursor-grabbing',
+        'group flex h-full max-w-[200px] flex-none touch-none cursor-grab items-center gap-1.5 border-r border-devdeck-border pl-3 pr-1 font-mono text-[11px] active:cursor-grabbing',
         active
-          ? 'bg-loom-terminal text-loom-fg'
-          : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg-2',
+          ? 'bg-devdeck-terminal text-devdeck-fg'
+          : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
         isDragging && 'opacity-40',
       )}
     >
@@ -219,7 +219,7 @@ function PanelHeaderTabButton({
       >
         {tab.icon}
         <span className="truncate">{tab.label}</span>
-        {tab.dirty ? <span className="text-loom-yellow">*</span> : null}
+        {tab.dirty ? <span className="text-devdeck-yellow">*</span> : null}
       </button>
       <button
         type="button"
@@ -228,7 +228,7 @@ function PanelHeaderTabButton({
           onCloseTab()
         }}
         aria-label={`Close ${tab.label}`}
-        className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-loom-dim opacity-60 hover:bg-loom-hover-wash hover:text-loom-fg group-hover:opacity-100"
+        className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-60 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100"
       >
         <X size={10} />
       </button>

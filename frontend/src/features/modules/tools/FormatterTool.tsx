@@ -25,8 +25,8 @@ const FORMAT_OPTIONS = [
 ]
 
 const SAMPLES: Record<DataFormat, string> = {
-  json: '{"id":"ws-1","name":"Loom","active":true,"tags":["dashboard","agents"],"stats":{"projects":3,"todos":null}}',
-  xml: '<workspace id="ws-1"><name>Loom</name><projects><project active="true">agent</project><project active="false">web</project></projects></workspace>',
+  json: '{"id":"ws-1","name":"DevDeck","active":true,"tags":["dashboard","agents"],"stats":{"projects":3,"todos":null}}',
+  xml: '<workspace id="ws-1"><name>DevDeck</name><projects><project active="true">agent</project><project active="false">web</project></projects></workspace>',
   csv: 'id,name,role,active\n1,Andi Syahruddin,Engineer,true\n2,Budi Santoso,Designer,false',
 }
 
@@ -119,11 +119,11 @@ export function FormatterTool() {
       : null
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-loom-border-card bg-loom-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-loom-border-card px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
-          <div className="text-[12.5px] font-medium text-loom-fg">JSON / XML / CSV Beautifier</div>
-          <div className="mt-0.5 text-[11px] text-loom-muted">
+          <div className="text-[12.5px] font-medium text-devdeck-fg">JSON / XML / CSV Beautifier</div>
+          <div className="mt-0.5 text-[11px] text-devdeck-muted">
             Paste or upload data — formats, validates, and lets you explore it as a tree or table.
           </div>
         </div>
@@ -149,11 +149,11 @@ export function FormatterTool() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3.5 lg:grid-cols-2">
         <div className="flex min-h-[220px] flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10.5px] tracking-wide text-loom-dim uppercase">Input</span>
+            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Input</span>
             <button
               onClick={() => setInput('')}
               disabled={!input}
-              className="flex cursor-pointer items-center gap-1 font-mono text-[10.5px] text-loom-muted-2 hover:text-loom-red-soft disabled:pointer-events-none disabled:opacity-40"
+              className="flex cursor-pointer items-center gap-1 font-mono text-[10.5px] text-devdeck-muted-2 hover:text-devdeck-red-soft disabled:pointer-events-none disabled:opacity-40"
             >
               <Trash2 size={11} />
               Clear
@@ -171,22 +171,22 @@ export function FormatterTool() {
         <div className="flex min-h-[220px] flex-col gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10.5px] tracking-wide text-loom-dim uppercase">Output</span>
+              <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Output</span>
               {resolvedFormat && input.trim() ? (
-                <span className="rounded-md bg-loom-accent-tint px-1.5 py-0.5 font-mono text-[10px] text-loom-accent-soft uppercase">
+                <span className="rounded-md bg-devdeck-accent-tint px-1.5 py-0.5 font-mono text-[10px] text-devdeck-accent-soft uppercase">
                   {resolvedFormat}
                 </span>
               ) : null}
-              {meta ? <span className="font-mono text-[10.5px] text-loom-dim">{meta}</span> : null}
+              {meta ? <span className="font-mono text-[10.5px] text-devdeck-dim">{meta}</span> : null}
             </div>
             <div className="flex items-center gap-1">
               {hasStructuredView ? (
-                <div className="flex rounded-md border border-loom-border-menu p-0.5">
+                <div className="flex rounded-md border border-devdeck-border-menu p-0.5">
                   <button
                     onClick={() => setView('text')}
                     className={cn(
                       'flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10.5px] transition-colors',
-                      view === 'text' ? 'bg-loom-accent/10 text-loom-fg' : 'text-loom-muted hover:text-loom-fg',
+                      view === 'text' ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg',
                     )}
                   >
                     <WrapText size={11} />
@@ -196,7 +196,7 @@ export function FormatterTool() {
                     onClick={() => setView('structured')}
                     className={cn(
                       'flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10.5px] transition-colors',
-                      view === 'structured' ? 'bg-loom-accent/10 text-loom-fg' : 'text-loom-muted hover:text-loom-fg',
+                      view === 'structured' ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg',
                     )}
                   >
                     {outcome?.format === 'csv' ? <Table2 size={11} /> : <ListTree size={11} />}
@@ -216,16 +216,16 @@ export function FormatterTool() {
           </div>
 
           {!outcome ? (
-            <div className="flex h-full min-h-[220px] flex-1 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-loom-border-card text-center">
-              <span className="text-[12px] text-loom-muted">Nothing to format yet</span>
-              <span className="text-[11px] text-loom-dim-2">Paste data on the left to see it beautified here</span>
+            <div className="flex h-full min-h-[220px] flex-1 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-devdeck-border-card text-center">
+              <span className="text-[12px] text-devdeck-muted">Nothing to format yet</span>
+              <span className="text-[11px] text-devdeck-dim-2">Paste data on the left to see it beautified here</span>
             </div>
           ) : outcome.error ? (
-            <div className="flex min-h-[220px] flex-1 items-start gap-2 rounded-lg border border-loom-red-tint bg-loom-red-tint/40 p-3">
-              <AlertTriangle size={14} className="mt-0.5 flex-none text-loom-red-soft" />
+            <div className="flex min-h-[220px] flex-1 items-start gap-2 rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 p-3">
+              <AlertTriangle size={14} className="mt-0.5 flex-none text-devdeck-red-soft" />
               <div>
-                <div className="text-[12px] font-medium text-loom-red-soft">Invalid {resolvedFormat.toUpperCase()}</div>
-                <div className="mt-0.5 font-mono text-[11px] text-loom-muted">{outcome.error}</div>
+                <div className="text-[12px] font-medium text-devdeck-red-soft">Invalid {resolvedFormat.toUpperCase()}</div>
+                <div className="mt-0.5 font-mono text-[11px] text-devdeck-muted">{outcome.error}</div>
               </div>
             </div>
           ) : view === 'structured' && outcome.format === 'json' ? (
@@ -234,12 +234,12 @@ export function FormatterTool() {
             <CsvTableView rows={outcome.csvRows} />
           ) : highlightedHtml ? (
             <pre
-              className="min-h-[220px] flex-1 overflow-auto rounded-lg border border-loom-border-card bg-loom-terminal p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap"
+              className="min-h-[220px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap"
               // eslint-disable-next-line react/no-danger -- highlightedHtml is generated by highlightJsonHtml/highlightXmlHtml, which HTML-escapes the source text before wrapping matched tokens in fixed-class spans; no user string reaches the DOM unescaped.
               dangerouslySetInnerHTML={{ __html: highlightedHtml }}
             />
           ) : (
-            <pre className="min-h-[220px] flex-1 overflow-auto rounded-lg border border-loom-border-card bg-loom-terminal p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">
+            <pre className="min-h-[220px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">
               {outcome.pretty}
             </pre>
           )}

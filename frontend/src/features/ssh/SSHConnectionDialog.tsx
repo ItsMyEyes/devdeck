@@ -14,7 +14,7 @@ import {
   useUpdateSSHConnection,
 } from '@/features/data/queries'
 import type { CreateSSHConnectionBody, UpdateSSHConnectionBody } from '@/lib/api'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 const AUTH_OPTIONS = [
   { value: 'password', label: 'Password' },
@@ -82,14 +82,14 @@ function sshRsaPublicKey(jwk: JsonWebKey) {
     sshString(sshMpint(base64UrlToBytes(jwk.e))),
     sshString(sshMpint(base64UrlToBytes(jwk.n))),
   )
-  return `ssh-rsa ${bytesToBase64(body)} loom-generated`
+  return `ssh-rsa ${bytesToBase64(body)} devdeck-generated`
 }
 
 export function SSHConnectionDialog() {
-  const dialog = useLoomStore((s) => s.sshDialog)
-  const setDialog = useLoomStore((s) => s.setSSHDialog)
-  const close = useLoomStore((s) => s.closeSSHDialog)
-  const showToast = useLoomStore((s) => s.showToast)
+  const dialog = useDevDeckStore((s) => s.sshDialog)
+  const setDialog = useDevDeckStore((s) => s.setSSHDialog)
+  const close = useDevDeckStore((s) => s.closeSSHDialog)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const createConnection = useCreateSSHConnection()
   const updateConnection = useUpdateSSHConnection()
   const machines = useMachines().data ?? []
@@ -329,18 +329,18 @@ export function SSHConnectionDialog() {
             onChange={(e) => setDialog({ privateKey: e.target.value, privateKeyPath: '' })}
             placeholder={isEdit ? 'unchanged' : 'select ~/.ssh/id_ed25519, paste PEM, or generate a key'}
             rows={4}
-            className="w-full resize-y rounded-lg border border-loom-border-strong bg-loom-bg px-2.5 py-2 font-mono text-[11px] text-loom-fg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="w-full resize-y rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5 py-2 font-mono text-[11px] text-devdeck-fg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
           {generatedPublicKey ? (
-            <div className="mt-2.5 rounded-lg border border-loom-border-strong bg-loom-bg p-2.5">
+            <div className="mt-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-loom-muted">Generated public key</span>
+                <span className="text-[11px] font-medium text-devdeck-muted">Generated public key</span>
                 <Button variant="ghost" size="sm" onClick={copyGeneratedPublicKey}>
                   Copy
                 </Button>
               </div>
-              <code className="block break-all font-mono text-[10.5px] leading-relaxed text-loom-fg-2">{generatedPublicKey}</code>
-              <p className="mt-1.5 text-[10.5px] leading-snug text-loom-dim">
+              <code className="block break-all font-mono text-[10.5px] leading-relaxed text-devdeck-fg-2">{generatedPublicKey}</code>
+              <p className="mt-1.5 text-[10.5px] leading-snug text-devdeck-dim">
                 Add this public key to the host's ~/.ssh/authorized_keys before connecting.
               </p>
             </div>
@@ -357,8 +357,8 @@ export function SSHConnectionDialog() {
         </div>
       )}
 
-      <div className="mb-5 rounded-[12px] border border-loom-border-card bg-loom-surface-2 p-3">
-        <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-loom-dim">Connection flow</div>
+      <div className="mb-5 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
+        <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">Connection flow</div>
 
         <Label>1. Executor machine</Label>
         <Select
@@ -378,7 +378,7 @@ export function SSHConnectionDialog() {
           disabled={busy}
           aria-label="Connect via"
         />
-        <p className="mt-1.5 text-[11px] leading-snug text-loom-dim">
+        <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
           {dialog.jumpConnectionId
             ? 'The executor dials the jump host first, then tunnels the SSH handshake through it to reach this host.'
             : 'The executor dials this host directly.'}

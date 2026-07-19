@@ -118,21 +118,21 @@ export function SkillContentDialog({
       width={900}
       className="flex h-[min(82vh,760px)] flex-col overflow-hidden p-0"
     >
-      <div className="flex flex-none items-start gap-3 border-b border-loom-border px-4 py-3.5">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft">
+      <div className="flex flex-none items-start gap-3 border-b border-devdeck-border px-4 py-3.5">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft">
           <FilePenLine size={17} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <DialogTitle className="truncate">{skillName}/SKILL.md</DialogTitle>
             {contentQuery.data?.readOnly ? (
-              <span className="rounded-md border border-loom-yellow-tint-border bg-loom-yellow-tint px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-loom-yellow-tint-text">
+              <span className="rounded-md border border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-devdeck-yellow-tint-text">
                 Read-only
               </span>
             ) : dirty ? (
-              <span className="font-mono text-[9.5px] text-loom-yellow">Modified</span>
+              <span className="font-mono text-[9.5px] text-devdeck-yellow">Modified</span>
             ) : initialized ? (
-              <span className="font-mono text-[9.5px] text-loom-green-soft">Synced</span>
+              <span className="font-mono text-[9.5px] text-devdeck-green-soft">Synced</span>
             ) : null}
           </div>
           <DialogDescription className="mt-1">
@@ -143,17 +143,17 @@ export function SkillContentDialog({
           type="button"
           onClick={() => requestOpenChange(false)}
           aria-label="Close skill editor"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
         >
           <X size={15} />
         </button>
       </div>
 
       {contentQuery.data?.linked ? (
-        <div className="flex flex-none items-start gap-2 border-b border-loom-yellow-tint-border bg-loom-yellow-tint px-4 py-2 text-[11px] leading-relaxed text-loom-yellow-tint-text">
+        <div className="flex flex-none items-start gap-2 border-b border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-4 py-2 text-[11px] leading-relaxed text-devdeck-yellow-tint-text">
           {contentQuery.data.readOnly ? <AlertTriangle size={13} className="mt-0.5 flex-none" /> : <Link2 size={13} className="mt-0.5 flex-none" />}
           {contentQuery.data.readOnly
-            ? 'This linked skill points outside Loom-managed writable skill roots, so it is view-only.'
+            ? 'This linked skill points outside DevDeck-managed writable skill roots, so it is view-only.'
             : 'This is a linked skill. Saving updates the shared source used by its other installations.'}
         </div>
       ) : null}
@@ -165,8 +165,8 @@ export function SkillContentDialog({
           </div>
         ) : contentQuery.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <AlertTriangle size={22} className="text-loom-yellow" />
-            <p className="max-w-lg font-mono text-[11px] leading-relaxed text-loom-muted">
+            <AlertTriangle size={22} className="text-devdeck-yellow" />
+            <p className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
               {contentQuery.error instanceof Error
                 ? contentQuery.error.message
                 : 'Could not load SKILL.md'}
@@ -200,8 +200,8 @@ export function SkillContentDialog({
         )}
       </div>
 
-      <div className="flex flex-none items-center gap-2 border-t border-loom-border bg-loom-card px-4 py-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-loom-dim">
+      <div className="flex flex-none items-center gap-2 border-t border-devdeck-border bg-devdeck-card px-4 py-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-devdeck-dim">
           {contentQuery.data?.path ?? 'SKILL.md'}
         </span>
         <Button

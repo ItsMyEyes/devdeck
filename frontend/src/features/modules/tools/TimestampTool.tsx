@@ -32,7 +32,7 @@ export function TimestampTool() {
         spellCheck={false}
       />
       {invalid ? (
-        <div className="rounded-lg border border-loom-red-tint bg-loom-red-tint/40 px-3 py-2 font-mono text-[11px] text-loom-muted">
+        <div className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 px-3 py-2 font-mono text-[11px] text-devdeck-muted">
           Couldn't parse that as a timestamp or date
         </div>
       ) : result ? (

@@ -16,7 +16,7 @@ cd frontend && npm run dev:web
 # Backend only
 cd frontend && npm run dev:api
 # or directly:
-cd backend && go run ./cmd/server --db loom.db --open=false
+cd backend && go run ./cmd/server --db devdeck.db --open=false
 ```
 
 The Go backend accepts flags:
@@ -24,27 +24,27 @@ The Go backend accepts flags:
   proxy + web UI), `runtime` (headless execution daemon, key auth only), or
   `both` (a hub that also self-registers itself as its own execution
   machine — for solo self-hosting on a fixed address, no separate runtime
-  process or manual Machines-page step) (default `hub`, env `LOOM_ROLE`).
+  process or manual Machines-page step) (default `hub`, env `DEVDECK_ROLE`).
 - `--key` — static API key; required for `--role runtime`/`--role both`,
-  optional bearer auth for `--role hub` (desktop clients) (env `LOOM_KEY`).
+  optional bearer auth for `--role hub` (desktop clients) (env `DEVDECK_KEY`).
 - `--hub-url` — hub base URL this runtime should self-register with on
-  startup (env `LOOM_HUB_URL`, empty = self-registration disabled).
+  startup (env `DEVDECK_HUB_URL`, empty = self-registration disabled).
 - `--hub-key` — hub's bearer key, used to authenticate this runtime's
-  self-registration call; required if `--hub-url` is set (env `LOOM_HUB_KEY`).
+  self-registration call; required if `--hub-url` is set (env `DEVDECK_HUB_KEY`).
 - `--public-url` — this runtime's own reachable URL, advertised to the hub
-  during self-registration (env `LOOM_PUBLIC_URL`, default `http://<--addr>`).
+  during self-registration (env `DEVDECK_PUBLIC_URL`, default `http://<--addr>`).
 - `--name` — display name for this machine in the hub's Machines UI during
-  self-registration (env `LOOM_MACHINE_NAME`, default: OS hostname).
-- `--addr` — listen address (default `127.0.0.1:8989`, env `LOOM_ADDR`)
-- `--db` — SQLite path (default `data/loom.db` beside the executable, env `LOOM_DB`)
-- `--jadi` — remote agent registry URL (env `LOOM_JADI_URL`, empty = static built-in)
+  self-registration (env `DEVDECK_MACHINE_NAME`, default: OS hostname).
+- `--addr` — listen address (default `127.0.0.1:8989`, env `DEVDECK_ADDR`)
+- `--db` — SQLite path (default `data/devdeck.db` beside the executable, env `DEVDECK_DB`)
+- `--jadi` — remote agent registry URL (env `DEVDECK_JADI_URL`, empty = static built-in)
 - `--open` — open the embedded UI in the default browser (default true)
 - `--only-from` — comma-separated IPs/CIDRs allowed to access the server
-  (env `LOOM_ONLY_FROM`, empty = no restriction). Blocked API/WebSocket
+  (env `DEVDECK_ONLY_FROM`, empty = no restriction). Blocked API/WebSocket
   requests get a 403 JSON error; blocked page loads get a standalone
   access-denied page. Include `127.0.0.0/8` if local access should keep working.
 - `--trusted-proxies` — comma-separated proxy IPs/CIDRs whose `X-Forwarded-For`
-  is trusted when resolving the client IP (env `LOOM_TRUSTED_PROXIES`).
+  is trusted when resolving the client IP (env `DEVDECK_TRUSTED_PROXIES`).
   Without this, forwarding headers are ignored entirely (they are trivially
   spoofable) and the TCP peer address is used. Required for `--only-from` to
   see real public IPs when running behind a tunnel/reverse proxy — set it to
@@ -53,40 +53,40 @@ The Go backend accepts flags:
   server, exposing it on your tailnet at `https://<this-machine>.<tailnet>.ts.net`
   (no port suffix — `tailscale serve` fronts it on the tailnet's implicit
   port 443) without a second terminal (default `false`, env
-  `LOOM_TAILSCALE_SERVE`). Requires the `tailscale` CLI on `PATH`; fails
+  `DEVDECK_TAILSCALE_SERVE`). Requires the `tailscale` CLI on `PATH`; fails
   fast at startup if it's missing.
 - `--2fa` — require TOTP two-factor authentication for login (default `true`,
-  env `LOOM_2FA`). With `--2fa=false`, registration skips TOTP enrollment and
+  env `DEVDECK_2FA`). With `--2fa=false`, registration skips TOTP enrollment and
   login completes with password only (the login response is `{"status":"ok"}`
   instead of `{"status":"totp_required"}`); `GET /api/auth/config` exposes the
   setting to the SPA.
-- `LOOM_AUTH_KEY` — base64-encoded 32-byte AES key used to encrypt TOTP
+- `DEVDECK_AUTH_KEY` — base64-encoded 32-byte AES key used to encrypt TOTP
   secrets at rest (env only, no flag). If unset, a key is generated once and
   stored as `auth.key` beside the database.
 - `--env` — path to a `.env` file loaded into the process environment before
-  startup (default `.env`, env `LOOM_ENV_FILE`); a missing file is not an
+  startup (default `.env`, env `DEVDECK_ENV_FILE`); a missing file is not an
   error. Used for LLM credentials consumed by the Tools module (see below).
 - `--python-bin` / `--pandoc-bin` / `--mmdc-bin` — external binaries the Tools
-  module shells out to (env `LOOM_PYTHON_BIN` / `LOOM_PANDOC_BIN` /
-  `LOOM_MMDC_BIN`). `--python-bin` defaults to `./tools/venv/bin/python3` if
+  module shells out to (env `DEVDECK_PYTHON_BIN` / `DEVDECK_PANDOC_BIN` /
+  `DEVDECK_MMDC_BIN`). `--python-bin` defaults to `./tools/venv/bin/python3` if
   that venv exists (see Tools module setup below), else `python3` on PATH.
 - `--version` — print the running build's version (embedded at build time
   from the git tag, see Versioning below) and exit.
 - `--updates` — check the latest GitHub release against the running version
   and, if newer, download and install it in place, then exit (it does not
   restart the server — restart it yourself once it prints the new version).
-  Requires `--github-token` / `LOOM_GITHUB_TOKEN` since the release repo is
+  Requires `--github-token` / `DEVDECK_GITHUB_TOKEN` since the release repo is
   private.
 - `--github-token` — GitHub token used by `--updates` to read releases and
-  download assets from the private repo (env `LOOM_GITHUB_TOKEN`).
+  download assets from the private repo (env `DEVDECK_GITHUB_TOKEN`).
 - `--socks5-addr` — listen address for a SOCKS5 forward proxy (env
-  `LOOM_SOCKS5_ADDR`, empty = disabled); point a browser's SOCKS5 setting
+  `DEVDECK_SOCKS5_ADDR`, empty = disabled); point a browser's SOCKS5 setting
   here to route its traffic through this app.
 - `--http-proxy-addr` — listen address for an HTTP/HTTPS forward proxy (env
-  `LOOM_HTTP_PROXY_ADDR`, empty = disabled); point a browser's HTTP proxy
+  `DEVDECK_HTTP_PROXY_ADDR`, empty = disabled); point a browser's HTTP proxy
   setting here.
 - `--proxy-key` — credential required by `--socks5-addr`/`--http-proxy-addr`
-  (env `LOOM_PROXY_KEY`; SOCKS5 password or HTTP `Proxy-Authorization`
+  (env `DEVDECK_PROXY_KEY`; SOCKS5 password or HTTP `Proxy-Authorization`
   password, any username accepted; empty = no auth). See "Forward proxy for
   remote dev servers" below.
 
@@ -149,7 +149,7 @@ points its proxy settings at the runtime dials out from the runtime's own
 network namespace — reaching that machine's `127.0.0.1:5173` (or any other
 loopback port) as if the browser were running there. This is unrelated to
 the `/api/machines/.../proxy` REST/WS reverse proxy in "Hub / runtime roles"
-above — that one forwards Loom's own API traffic; this one forwards
+above — that one forwards DevDeck's own API traffic; this one forwards
 arbitrary browser traffic the user points at it. Neither listener is a
 route on the main API mux — both are separate `net.Listen`/`http.Server`
 TCP listeners, opt-in via empty-string-disables flags, started from
@@ -215,18 +215,18 @@ MARKITDOWN_LLM_MODEL=gpt-4o-mini
 
 ## MCP server (agent-facing issue tracker)
 
-`backend/cmd/mcp-server` exposes Loom's issues as MCP tools over stdio, so a
-coding agent (e.g. one running inside a Loom-managed worktree) can file its
+`backend/cmd/mcp-server` exposes DevDeck's issues as MCP tools over stdio, so a
+coding agent (e.g. one running inside a DevDeck-managed worktree) can file its
 own tickets: `list_projects`, `create_issue` (assignee is required — the
 calling agent should ask if it isn't obvious), `upload_attachment` (attaches
 a local file and, by default, appends its link to the issue description),
 and `mark_issue_done` (moves an issue to `in_review`). It opens the **same**
 `--db` file as the main server (WAL mode makes that safe) — point it at
-`loom.db` beside your running instance, not a separate database.
+`devdeck.db` beside your running instance, not a separate database.
 
 ```bash
-cd backend && go run ./cmd/mcp-server --db loom.db
-# or: make build-mcp   (writes backend/loom-mcp-server)
+cd backend && go run ./cmd/mcp-server --db devdeck.db
+# or: make build-mcp   (writes backend/devdeck-mcp-server)
 ```
 
 Point an MCP client at it, e.g. in `.mcp.json`:
@@ -234,9 +234,9 @@ Point an MCP client at it, e.g. in `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "loom-issues": {
-      "command": "/path/to/loom-mcp-server",
-      "args": ["--db", "/path/to/loom.db"]
+    "devdeck-issues": {
+      "command": "/path/to/devdeck-mcp-server",
+      "args": ["--db", "/path/to/devdeck.db"]
     }
   }
 }
@@ -255,15 +255,15 @@ make portable
 make portable-all
 ```
 
-`make build` writes `backend/loom-api`. Portable builds are written to `dist/`.
-The executable creates `data/loom.db` beside itself on first launch. Node.js and
+`make build` writes `backend/devdeck-api`. Portable builds are written to `dist/`.
+The executable creates `data/devdeck.db` beside itself on first launch. Node.js and
 Go are build-time dependencies only; end users still need Git and their selected
 coding-agent CLI installed.
 
 ## Versioning / releases
 
 Every build embeds a version string via `-ldflags -X
-loom/backend/internal/version.Version=...`, computed by the `Makefile` from
+devdeck/backend/internal/version.Version=...`, computed by the `Makefile` from
 `git describe --tags --always --dirty` (falls back to `dev` for an untagged
 build). `--version` prints it; `--updates` uses it to decide whether a newer
 release is available.
@@ -333,6 +333,36 @@ cd frontend && npx @tanstack/router-plugin --target react
   needed). This is normal username/password login, not the release sidecar's ephemeral-key
   bootstrap (`setup()` in `lib.rs` skips spawning the sidecar entirely when
   `cfg!(debug_assertions)` is true).
+- `make dev-tauri-full` (or `cd frontend && npm run tauri:dev-full`) — same
+  desktop shell, but exercises the real hub-mode chooser / sidecar
+  spawn-respawn loop / Tailscale remote-runtime code instead of skipping it.
+  `DEVDECK_TAURI_DEV_FULL=1` lets `setup()` in `lib.rs` past the
+  `cfg!(debug_assertions)` guard, and `tauri.dev-full.conf.json` drops
+  `devUrl`/`beforeDevCommand` (so Tauri serves `frontendDist`'s
+  placeholder/choose/error pages itself, same as a production install,
+  instead of starting Vite + a `--role both` Go backend) and overrides
+  `identifier` to `dev.kiyora.devdeck.devfull` so its app-data dir
+  (`hub-mode.json`, `devdeck.db`, `runtime-key`) never collides with a real
+  installed app's. Trade-off: no frontend HMR — the sidecar serves whatever
+  `prepare-webui` last built into `backend/internal/webui/dist`, so re-run
+  the target after frontend changes you want to see.
+- `make e2e-tauri-smoke` (or `frontend/src-tauri/scripts/e2e-smoke.sh`) — a
+  scripted smoke test of `dev-tauri-full`'s real local-hub-mode flow: builds
+  a plain, non-watching debug binary (`tauri build --no-bundle --debug
+  --config tauri.e2e.conf.json`, its own throwaway `dev.kiyora.devdeck.e2e`
+  identifier so it never collides with a developer's `dev-tauri-full`
+  session or a real installed app), pre-seeds `hub-mode.json` so the
+  choose-hub-mode screen is skipped, then launches the built app and
+  observes sidecar spawn → `/api/health` → machine registration
+  (`local-machine-id` matching `^m-[0-9a-f]+$`) → clean process teardown
+  (confirms the `devdeck-server` child also exits, no orphan) end to end,
+  printing a PASS/FAIL per step. **macOS only for now**, and it deliberately
+  does **not** cover the one thing that still needs a human: visually
+  confirming `choose.html` itself renders correctly — that stays a manual,
+  one-glance check via `make dev-tauri-full`, unaffected by this target. Not
+  part of `test`/`lint` (needs a full Tauri/Cargo build and a real Go
+  sidecar build), so it's opt-in. See
+  `docs/superpowers/specs/2026-07-17-tauri-desktop-e2e-smoke-harness-design.md`.
 - The dev backend (`dev:api` in `frontend/package.json`, and `make
   dev-api`/`dev-hub`) always passes `--secure-cookies=false`. Without it,
   login appears to succeed but every following request 401s: WebKit's
@@ -344,7 +374,7 @@ cd frontend && npx @tanstack/router-plugin --target react
   embedded into the Go sidecars (`make prepare-sidecar`, 3 target triples) →
   platform bundles under `frontend/src-tauri/target/release/bundle/`.
 - Desktop data lives in the app-data dir (macOS:
-  `~/Library/Application Support/dev.kiyora.loom/` — `loom.db`, `.env`,
+  `~/Library/Application Support/dev.kiyora.devdeck/` — `devdeck.db`, `.env`,
   `local-machine-id`); sidecar logs in the app log dir (`sidecar.log`).
 - **Two hub modes, chosen on first launch** (revisit anytime via the app
   menu's "Change Hub…"): "Host locally" spawns the bundled sidecar as
@@ -356,7 +386,7 @@ cd frontend && npx @tanstack/router-plugin --target react
   shells out to `tailscale status --self --json` for this device's tailnet
   DNS name, then — if found — spawns the bundled backend as a *second*,
   separate `--role runtime` process (persisted key at `<app data
-  dir>/runtime-key`, own `loom-runtime.db`, `--enable-tailscale-serve`) that
+  dir>/runtime-key`, own `devdeck-runtime.db`, `--enable-tailscale-serve`) that
   self-registers with the hub URL/key you provided. If Tailscale isn't
   available, this step is skipped and logged to `<app log
   dir>/runtime-sidecar.log`; the app menu swaps "Change Hub…" for "⚠ Runtime

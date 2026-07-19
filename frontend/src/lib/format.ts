@@ -1,4 +1,4 @@
-// Formatting helpers — ported verbatim from the Loom v2 mockup so numbers read
+// Formatting helpers — ported verbatim from the DevDeck v2 mockup so numbers read
 // identically to the design.
 
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns'

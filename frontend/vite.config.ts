@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // Go backend port (handles both REST /api and WebSocket /ws/terminal).
-const API_PORT = process.env.LOOM_API_PORT ?? '8989'
+const API_PORT = process.env.DEVDECK_API_PORT ?? '8989'
 
 // https://vite.dev/config/
 export default defineConfig({

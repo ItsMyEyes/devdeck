@@ -1,7 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { SidebarNav } from './SidebarNav'
@@ -18,16 +18,16 @@ interface SidebarProps {
 
 /** Left sidebar: a compact agent rail, with an expanded groups panel for agents. */
 export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
-  const sidebarOpen = useLoomStore((s) => s.sidebarOpen)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const railExpanded = useLoomStore((s) => s.railExpanded)
-  const toggleRailExpanded = useLoomStore((s) => s.toggleRailExpanded)
+  const sidebarOpen = useDevDeckStore((s) => s.sidebarOpen)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const railExpanded = useDevDeckStore((s) => s.railExpanded)
+  const toggleRailExpanded = useDevDeckStore((s) => s.toggleRailExpanded)
   const { view } = useScope()
   const canExpandPanel = view === 'agents' || view === 'ssh'
   const hasSidebarPanel = canExpandPanel && railExpanded
 
   const railControlClass =
-    'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-loom-muted transition-colors hover:bg-loom-hover-wash hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+    'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-devdeck-muted transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
 
   const toggleButton = canExpandPanel ? (
     <button
@@ -50,7 +50,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
       )}
       <aside
         className={cn(
-          'flex flex-none overflow-hidden border-r border-loom-border bg-loom-surface',
+          'flex flex-none overflow-hidden border-r border-devdeck-border bg-devdeck-surface',
           hasSidebarPanel ? 'w-[306px]' : 'w-[56px]',
           mobileDrawer &&
             cn(
@@ -60,7 +60,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
             ),
         )}
       >
-        <div className={cn('flex flex-none flex-col items-center bg-loom-surface py-2.5', hasSidebarPanel ? 'w-[56px] border-r border-loom-border' : 'w-full')}>
+        <div className={cn('flex flex-none flex-col items-center bg-devdeck-surface py-2.5', hasSidebarPanel ? 'w-[56px] border-r border-devdeck-border' : 'w-full')}>
           {toggleButton ? (
             <div className="mb-1 flex flex-col items-center gap-1">
               {toggleButton ? (
@@ -74,7 +74,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
           <SidebarNav compact />
         </div>
         {hasSidebarPanel ? (
-          <div className="flex min-w-0 flex-1 flex-col bg-loom-surface">
+          <div className="flex min-w-0 flex-1 flex-col bg-devdeck-surface">
             {view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />}
           </div>
         ) : null}

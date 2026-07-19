@@ -1,6 +1,6 @@
 // Package netproxy implements generic SOCKS5 and HTTP forward-proxy
 // servers for the app's own outbound networking needs — e.g. letting a
-// real browser route its traffic through the Loom backend to reach a
+// real browser route its traffic through the DevDeck backend to reach a
 // dev server on a remote runtime machine. It is not a security or
 // anonymization tool.
 package netproxy

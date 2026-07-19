@@ -16,7 +16,7 @@ import (
 // code paths are exercised in tests regardless of the host running them.
 func ReplaceSelf(goos, execPath string, data []byte) error {
 	dir := filepath.Dir(execPath)
-	tmp, err := os.CreateTemp(dir, ".loom-update-*")
+	tmp, err := os.CreateTemp(dir, ".devdeck-update-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}

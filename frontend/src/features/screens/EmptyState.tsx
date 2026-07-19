@@ -15,10 +15,10 @@ export function EmptyState({
 }) {
   return (
     <div className="flex-1 overflow-auto p-4">
-      <div className="flex h-[60vh] flex-col items-center justify-center gap-3.5 rounded-[14px] border border-dashed border-loom-border-strong font-mono text-[13px] text-loom-dim">
-        {icon ? <div className="text-loom-dim-2">{icon}</div> : null}
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-3.5 rounded-[14px] border border-dashed border-devdeck-border-strong font-mono text-[13px] text-devdeck-dim">
+        {icon ? <div className="text-devdeck-dim-2">{icon}</div> : null}
         <span>{title}</span>
-        {hint ? <span className="text-[12px] text-loom-dim-2">{hint}</span> : null}
+        {hint ? <span className="text-[12px] text-devdeck-dim-2">{hint}</span> : null}
         {action ? (
           <Button onClick={action.onClick} className="px-3.5">{action.label}</Button>
         ) : null}

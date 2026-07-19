@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 func newToolsHandlerForTest(t *testing.T) *ToolsHandler {

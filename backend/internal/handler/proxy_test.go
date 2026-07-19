@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 func TestProxyHandlerPostStartReturnsBoundAddresses(t *testing.T) {

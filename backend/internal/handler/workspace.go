@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 // WorkspaceHandler handles workspace CRUD endpoints.

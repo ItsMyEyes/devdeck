@@ -6,7 +6,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 // MachineProxyHandler forwards /api/machines/{id}/proxy/{rest...} to the

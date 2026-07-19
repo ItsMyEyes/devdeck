@@ -67,9 +67,11 @@ pub fn run() {
             change_hub,
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
+            if cfg!(debug_assertions) && std::env::var_os("DEVDECK_TAURI_DEV_FULL").is_none() {
                 // `tauri dev`: window already points at the Vite dev server
-                // (devUrl); the Go backend comes from `npm run dev`.
+                // (devUrl); the Go backend comes from `npm run dev`. Set
+                // DEVDECK_TAURI_DEV_FULL=1 (see `make dev-tauri-full`) to run
+                // this same hub-mode/sidecar/respawn flow in dev instead.
                 return Ok(());
             }
             app.manage(ServerProc(Mutex::new(None)));
@@ -299,13 +301,13 @@ async fn launch_runtime_once(
         Err(e) => return RuntimeLaunchEnd::Failed(format!("persist runtime key: {e}")),
     };
     let name = hubapi::device_name();
-    let cmd = match handle.shell().sidecar("loom-server") {
+    let cmd = match handle.shell().sidecar("devdeck-server") {
         Ok(c) => c.args(sidecar::runtime_args(&data_dir, &key, hub_url, hub_key, public_url, &name)),
         Err(e) => return RuntimeLaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
     };
     let (mut rx, child) = match cmd.spawn() {
         Ok(pair) => pair,
-        Err(e) => return RuntimeLaunchEnd::Failed(format!("spawn loom-server (runtime): {e}")),
+        Err(e) => return RuntimeLaunchEnd::Failed(format!("spawn devdeck-server (runtime): {e}")),
     };
     *handle.state::<RuntimeServerProc>().0.lock().unwrap() = Some(child);
 
@@ -316,7 +318,7 @@ async fn launch_runtime_once(
         let event = match tokio::time::timeout_at(deadline, rx.recv()).await {
             Err(_) => {
                 return RuntimeLaunchEnd::Failed(
-                    "loom-server (runtime) produced no listen line in time".into(),
+                    "devdeck-server (runtime) produced no listen line in time".into(),
                 )
             }
             Ok(None) => return RuntimeLaunchEnd::Crashed,
@@ -383,7 +385,7 @@ async fn run_local_respawn_loop(handle: &AppHandle) {
                 }
                 respawns += 1;
                 if respawns > MAX_RESPAWNS {
-                    show_error(handle, "loom-server crashed repeatedly");
+                    show_error(handle, "devdeck-server crashed repeatedly");
                     break;
                 }
             }
@@ -466,13 +468,13 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     // local hub still starts (local-only) — see
     // docs/superpowers/specs/2026-07-17-local-hub-tailscale-reachability-design.md.
     let enable_tailscale_serve = tailscale::public_url().await.is_ok();
-    let cmd = match handle.shell().sidecar("loom-server") {
+    let cmd = match handle.shell().sidecar("devdeck-server") {
         Ok(c) => c.args(sidecar::sidecar_args(&data_dir, &key, enable_tailscale_serve)),
         Err(e) => return LaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
     };
     let (mut rx, child) = match cmd.spawn() {
         Ok(pair) => pair,
-        Err(e) => return LaunchEnd::Failed(format!("spawn loom-server: {e}")),
+        Err(e) => return LaunchEnd::Failed(format!("spawn devdeck-server: {e}")),
     };
     *handle.state::<ServerProc>().0.lock().unwrap() = Some(child);
 
@@ -481,7 +483,7 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     let mut port: Option<u16> = None;
     while port.is_none() {
         let event = match tokio::time::timeout_at(deadline, rx.recv()).await {
-            Err(_) => return LaunchEnd::Failed("loom-server produced no listen line in time".into()),
+            Err(_) => return LaunchEnd::Failed("devdeck-server produced no listen line in time".into()),
             Ok(None) => return LaunchEnd::Crashed,
             Ok(Some(ev)) => ev,
         };
@@ -507,7 +509,7 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     if let Some(win) = handle.get_webview_window("main") {
         let url = format!("http://127.0.0.1:{port}/?key={key}");
         if let Err(e) = win.navigate(url.parse().expect("static loopback url")) {
-            return LaunchEnd::Failed(format!("navigate to loom ui: {e}"));
+            return LaunchEnd::Failed(format!("navigate to devdeck ui: {e}"));
         }
         let _ = win.show();
     }

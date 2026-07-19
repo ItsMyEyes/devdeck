@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const maxSkillContentBytes = 2 << 20
@@ -304,7 +304,7 @@ func InstallSkill(agentID, skillName string) error {
 }
 
 // RemoveSkill uninstalls a skill from one agent. Real directories are moved to
-// ~/.loom/trash/skills instead of being permanently deleted.
+// ~/.devdeck/trash/skills instead of being permanently deleted.
 func RemoveSkill(agentID, skillName string) error {
 	if err := validateSkillName(skillName); err != nil {
 		return err
@@ -348,7 +348,7 @@ func RemoveSkill(agentID, skillName string) error {
 	if err != nil {
 		return err
 	}
-	trashRoot := filepath.Join(home, ".loom", "trash", "skills", agentID)
+	trashRoot := filepath.Join(home, ".devdeck", "trash", "skills", agentID)
 	if err := os.MkdirAll(trashRoot, 0o700); err != nil {
 		return fmt.Errorf("create skill trash: %w", err)
 	}

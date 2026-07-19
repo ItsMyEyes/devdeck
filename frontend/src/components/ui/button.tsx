@@ -9,23 +9,23 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        /** loom-blue primary CTA */
-        default: 'bg-primary text-primary-foreground font-semibold hover:bg-loom-accent-hover',
+        /** devdeck-blue primary CTA */
+        default: 'bg-primary text-primary-foreground font-semibold hover:bg-devdeck-accent-hover',
         /** hairline outline — the workhorse toolbar button */
         secondary:
-          'bg-transparent text-loom-muted border border-loom-border-menu hover:bg-loom-popover hover:text-loom-fg',
-        ghost: 'bg-transparent text-loom-muted hover:bg-white/[0.04] hover:text-loom-fg',
+          'bg-transparent text-devdeck-muted border border-devdeck-border-menu hover:bg-devdeck-popover hover:text-devdeck-fg',
+        ghost: 'bg-transparent text-devdeck-muted hover:bg-white/[0.04] hover:text-devdeck-fg',
         /** blue-tinted (e.g. terminal "Send") */
-        soft: 'bg-loom-accent-tint text-loom-accent-soft border border-loom-border-accent hover:bg-loom-accent-tint-hover',
+        soft: 'bg-devdeck-accent-tint text-devdeck-accent-soft border border-devdeck-border-accent hover:bg-devdeck-accent-tint-hover',
         /** approve / warning */
-        warning: 'bg-loom-yellow text-loom-warning-ink font-semibold hover:bg-loom-yellow-soft',
+        warning: 'bg-devdeck-yellow text-devdeck-warning-ink font-semibold hover:bg-devdeck-yellow-soft',
         /** merge / success */
-        success: 'bg-loom-green-tint text-loom-green-soft border border-loom-green-tint-border hover:bg-loom-green-tint-hover',
+        success: 'bg-devdeck-green-tint text-devdeck-green-soft border border-devdeck-green-tint-border hover:bg-devdeck-green-tint-hover',
         /** destructive outline (kill / delete) */
-        destructive: 'bg-transparent text-loom-red-soft border border-loom-red-tint hover:bg-loom-red-tint-hover',
+        destructive: 'bg-transparent text-devdeck-red-soft border border-devdeck-red-tint hover:bg-devdeck-red-tint-hover',
         /** solid destructive (confirm delete) */
         'destructive-solid':
-          'bg-loom-red-tint-strong text-loom-red-tint-strong-text font-semibold border border-loom-red-tint-strong-border hover:bg-loom-red-tint-strong-hover',
+          'bg-devdeck-red-tint-strong text-devdeck-red-tint-strong-text font-semibold border border-devdeck-red-tint-strong-border hover:bg-devdeck-red-tint-strong-hover',
       },
       size: {
         sm: 'h-7 px-2.5 text-xs',

@@ -3,8 +3,8 @@ package service
 import (
 	"errors"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 // SSHSecretService encrypts SSH credentials into the ssh_secrets table and

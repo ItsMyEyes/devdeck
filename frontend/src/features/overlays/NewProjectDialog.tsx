@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
 import { useCloneProject, useCreateProject, useMachines, useMachinesHealth, useWorkspace } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 function repoFolderName(repo: string) {
   const trimmed = repo.trim().replace(/\/+$/, '').replace(/\.git$/, '')
@@ -28,12 +28,12 @@ function joinPath(parent: string, child: string) {
 export function NewProjectDialog() {
   const navigate = useNavigate()
   const { wsId } = useScope()
-  const np = useLoomStore((s) => s.newProject)
-  const setNewProject = useLoomStore((s) => s.setNewProject)
-  const closeNewProject = useLoomStore((s) => s.closeNewProject)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const showToast = useLoomStore((s) => s.showToast)
-  const openBrowse = useLoomStore((s) => s.openBrowse)
+  const np = useDevDeckStore((s) => s.newProject)
+  const setNewProject = useDevDeckStore((s) => s.setNewProject)
+  const closeNewProject = useDevDeckStore((s) => s.closeNewProject)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const showToast = useDevDeckStore((s) => s.showToast)
+  const openBrowse = useDevDeckStore((s) => s.openBrowse)
   const ws = useWorkspace(wsId).data
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
@@ -57,7 +57,7 @@ export function NewProjectDialog() {
     !busy &&
     np.machineId.length > 0 &&
     (mode === 'local' ? np.path.trim().length > 0 : np.repo.trim().length > 0 && cloneFolder.length > 0)
-  const localHint = np.path ? `loom will scan ${np.path} for a .git directory` : 'pick a folder that contains a git repository'
+  const localHint = np.path ? `devdeck will scan ${np.path} for a .git directory` : 'pick a folder that contains a git repository'
   const cloneHint =
     np.repo.trim() && cloneFolder
       ? `clone target · ${cloneTarget}`
@@ -98,19 +98,19 @@ export function NewProjectDialog() {
   return (
     <Dialog open={np.open} onOpenChange={(o) => !o && !busy && closeNewProject()} width={560}>
       <div className="mb-1 flex items-center gap-2.5">
-        <span className="h-[13px] w-[13px] rounded border-[1.5px] border-loom-accent" />
+        <span className="h-[13px] w-[13px] rounded border-[1.5px] border-devdeck-accent" />
         <DialogTitle>New project</DialogTitle>
       </div>
       <DialogDescription className="mb-[18px]">into workspace · {ws?.name ?? '—'}</DialogDescription>
 
-      <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl border border-loom-border-strong bg-loom-bg p-1">
+      <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl border border-devdeck-border-strong bg-devdeck-bg p-1">
         <button
           type="button"
           disabled={busy}
           onClick={() => setNewProject({ mode: 'local' })}
           className={cn(
             'h-8 rounded-lg font-mono text-[11.5px] transition-colors',
-            mode === 'local' ? 'bg-loom-popover text-loom-fg' : 'text-loom-muted hover:text-loom-fg-2',
+            mode === 'local' ? 'bg-devdeck-popover text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg-2',
           )}
         >
           Local folder
@@ -121,7 +121,7 @@ export function NewProjectDialog() {
           onClick={() => setNewProject({ mode: 'clone' })}
           className={cn(
             'h-8 rounded-lg font-mono text-[11.5px] transition-colors',
-            mode === 'clone' ? 'bg-loom-popover text-loom-fg' : 'text-loom-muted hover:text-loom-fg-2',
+            mode === 'clone' ? 'bg-devdeck-popover text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg-2',
           )}
         >
           Clone from GitHub
@@ -133,7 +133,7 @@ export function NewProjectDialog() {
         value={np.machineId}
         disabled={busy}
         onChange={(e) => setNewProject({ machineId: e.target.value })}
-        className="mb-3.5 h-9 w-full rounded-lg border border-loom-border-strong bg-loom-bg px-2.5 font-mono text-[12.5px] text-loom-fg-2"
+        className="mb-3.5 h-9 w-full rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5 font-mono text-[12.5px] text-devdeck-fg-2"
       >
         <option value="">Select a machine…</option>
         {machines.map((m) => {
@@ -168,13 +168,13 @@ export function NewProjectDialog() {
               variant="secondary"
               size="lg"
               disabled={busy}
-              className="flex-none bg-loom-elevated"
+              className="flex-none bg-devdeck-elevated"
               onClick={() => openBrowse('newPath', np.path, np.machineId)}
             >
               Browse…
             </Button>
           </div>
-          <div className="mb-3.5 font-mono text-[10.5px] text-loom-dim-2">{localHint}</div>
+          <div className="mb-3.5 font-mono text-[10.5px] text-devdeck-dim-2">{localHint}</div>
         </>
       ) : (
         <>
@@ -206,7 +206,7 @@ export function NewProjectDialog() {
               variant="secondary"
               size="lg"
               disabled={busy}
-              className="flex-none bg-loom-elevated"
+              className="flex-none bg-devdeck-elevated"
               onClick={() => openBrowse('cloneParent', np.cloneParent, np.machineId)}
             >
               Browse…
@@ -227,7 +227,7 @@ export function NewProjectDialog() {
             placeholder={repoFolderName(np.repo) || 'repo-folder'}
             className="mb-1.5 font-mono"
           />
-          <div className="mb-3.5 font-mono text-[10.5px] text-loom-dim-2">{cloneHint}</div>
+          <div className="mb-3.5 font-mono text-[10.5px] text-devdeck-dim-2">{cloneHint}</div>
         </>
       )}
 

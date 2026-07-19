@@ -1,4 +1,4 @@
-// Package webui serves the production frontend embedded in the Loom binary.
+// Package webui serves the production frontend embedded in the DevDeck binary.
 package webui
 
 import (
@@ -31,7 +31,7 @@ func Available() bool {
 func Handler() http.Handler {
 	if !Available() {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "Loom UI is not embedded; run `make build` or use the Vite development server", http.StatusServiceUnavailable)
+			http.Error(w, "DevDeck UI is not embedded; run `make build` or use the Vite development server", http.StatusServiceUnavailable)
 		})
 	}
 

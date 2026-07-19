@@ -23,10 +23,10 @@ export function AgentMark({
         id === 'claude' && active
           ? 'border-[#d97757]/35 bg-[#d97757]/10 text-[#e89576]'
           : id === 'codex' && active
-            ? 'border-loom-border-strong bg-loom-surface-2 text-loom-fg'
+            ? 'border-devdeck-border-strong bg-devdeck-surface-2 text-devdeck-fg'
             : active
-              ? 'border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft'
-              : 'border-loom-border-card bg-loom-surface-2 text-loom-muted-2',
+              ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft'
+              : 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-muted-2',
       )}
       aria-hidden="true"
     >

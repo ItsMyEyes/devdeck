@@ -1,6 +1,6 @@
 # Tutorial
 
-A walkthrough from a fresh clone to your first agent worktree, then a tour of everything else Loom does. See [README.md](README.md) for the one-paragraph pitch and [COMMANDS.md](COMMANDS.md) for the exhaustive flag/command reference this tutorial links out to.
+A walkthrough from a fresh clone to your first agent worktree, then a tour of everything else DevDeck does. See [README.md](README.md) for the one-paragraph pitch and [COMMANDS.md](COMMANDS.md) for the exhaustive flag/command reference this tutorial links out to.
 
 ## 1. Prerequisites
 
@@ -8,7 +8,7 @@ A walkthrough from a fresh clone to your first agent worktree, then a tour of ev
 |---|---|---|
 | Go | 1.25+ | running/building the backend |
 | Node.js | 22+ | running/building the frontend |
-| git | any recent version | cloning, and Loom's own worktree management |
+| git | any recent version | cloning, and DevDeck's own worktree management |
 | A coding-agent CLI (`claude`, `codex`, `gemini`, `pi`, or `opencode`) | any | only for spawning an agent in a worktree — optional, the app runs fine without one |
 | Tailscale CLI | any | only for `make dev`'s tailnet-serve convenience, and for multi-machine setups — optional for plain local dev |
 
@@ -48,10 +48,10 @@ A **workspace** is the top-level grouping — think "one client" or "one team." 
 
 From the project's **Worktrees** tab, click spawn and choose **branch mode**:
 
-- **Branch name** — a new branch to check out (Loom runs a real `git worktree add` under `<project>/.wt/<worktree-id>`, so your main checkout is never touched).
+- **Branch name** — a new branch to check out (DevDeck runs a real `git worktree add` under `<project>/.wt/<worktree-id>`, so your main checkout is never touched).
 - **Base branch** — which existing branch to branch from.
 - **Task** — a short description; if an agent is attached, this is passed to it as its initial prompt.
-- **Agent / Model** — pick from whichever agent CLIs Loom detected on your `$PATH` (see [§11](#11-agent-management)). If you don't have any installed yet, you can still spawn one — it just won't have an agent binary to launch, and Loom falls back to a plain shell.
+- **Agent / Model** — pick from whichever agent CLIs DevDeck detected on your `$PATH` (see [§11](#11-agent-management)). If you don't have any installed yet, you can still spawn one — it just won't have an agent binary to launch, and DevDeck falls back to a plain shell.
 
 The new worktree shows up as a live card (running / waiting / error, with token and diff stats once the agent starts working). Click it to open the full terminal view.
 
@@ -82,7 +82,7 @@ Each project has an **Issues** tab: a drag-and-drop kanban board across four col
 
 - Edit its title, Markdown description, assignee, status, and priority inline.
 - Upload attachments (images render as thumbnails).
-- Post comments and single-level replies, interleaved chronologically with an auto-recorded activity log (status/priority/assignee changes show up here automatically — you don't create these, Loom does).
+- Post comments and single-level replies, interleaved chronologically with an auto-recorded activity log (status/priority/assignee changes show up here automatically — you don't create these, DevDeck does).
 
 An agent working in a worktree can file and update these issues itself — see [§14](#14-mcp-issue-tracker-server-for-agents).
 
@@ -118,7 +118,7 @@ The rest of the page is everyday dev utilities: JWT decode, Base64, URL encode/d
 
 ## 13. Deployment modes: hub, both, and desktop
 
-Loom is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.4](#134-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
+DevDeck is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.4](#134-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
 
 ### The one rule that applies to every mode: a project needs a Machine
 
@@ -129,13 +129,13 @@ Every project is executed by a registered **Machine** (git/worktrees/terminals/L
 The simplest correct setup for a single operator on a single computer: one process does the organizational data *and* the execution work, and registers itself as a Machine on startup so you never have to touch the Machines page.
 
 ```bash
-cd backend && go run ./cmd/server --role both --key <any-secret-string> --db loom.db
+cd backend && go run ./cmd/server --role both --key <any-secret-string> --db devdeck.db
 ```
 
 - Requires `--key`, same fail-fast rule as `--role runtime`.
 - On startup it self-registers itself (marked `isLocal`), so **New project**'s machine dropdown auto-selects it immediately.
 - Everything else — routes, auth, the UI — is identical to plain `--role hub` (§§1-12).
-- Same idea for a release build: `./loom --role both --key <secret>` (see [COMMANDS.md's Build section](COMMANDS.md#build) for `make portable`).
+- Same idea for a release build: `./devdeck --role both --key <secret>` (see [COMMANDS.md's Build section](COMMANDS.md#build) for `make portable`).
 
 ### 13.2 Hub + one or more separate runtime machines
 
@@ -145,7 +145,7 @@ From the hub's **Machines** page → **Add Runtime**, there are two ways to conn
 
 - **Self-register command** (for a runtime you're setting up now). The dialog shows a ready-to-run command with a generated key and your hub's own URL already filled in:
   ```bash
-  ./loom.exe --role runtime --key <generated> --addr 0.0.0.0:9199 --db runtime.db --open=false \
+  ./devdeck.exe --role runtime --key <generated> --addr 0.0.0.0:9199 --db runtime.db --open=false \
     --hub-url <your-hub-url> --hub-key <your-hub-key> --public-url http://<hostname>:9199 --name <name>
   ```
   Fill in `<your-hub-key>` (the hub's own `--key`) and `<hostname>` (this runtime's real reachable address), then run it on the target machine — it registers itself on startup. There's no submit button on the hub side; the machine just appears once it's registered.
@@ -162,11 +162,11 @@ make dev-runtime   # terminal 2 — runtime on :9199, self-registers with the hu
 
 ### 13.3 Desktop app
 
-Loom also ships as a native app (macOS/Windows/Linux, via Tauri) — `make dev-tauri` for development, `cd frontend && npm run tauri:build` for a release bundle (see [COMMANDS.md's "Desktop app (Tauri)"](COMMANDS.md#desktop-app-tauri) for exact build commands). The first launch asks how to run it — revisit the choice anytime from the app menu's **Change Hub…** item.
+DevDeck also ships as a native app (macOS/Windows/Linux, via Tauri) — `make dev-tauri` for development, `cd frontend && npm run tauri:build` for a release bundle (see [COMMANDS.md's "Desktop app (Tauri)"](COMMANDS.md#desktop-app-tauri) for exact build commands). The first launch asks how to run it — revisit the choice anytime from the app menu's **Change Hub…** item.
 
 **Host locally on this device.** The app bundles the same Go backend as a background process (`--role hub`, ephemeral per-launch key, local SQLite database in the app's own data directory) — a complete, self-contained hub with nothing to configure. It registers itself automatically, exactly like `--role both` above, so **New project** works immediately.
 
-**Connect to a hub I already host.** For pointing the desktop app at a hub running elsewhere (a home server, a cheap VPS, another Loom install), you provide:
+**Connect to a hub I already host.** For pointing the desktop app at a hub running elsewhere (a home server, a cheap VPS, another DevDeck install), you provide:
 
 - **Hub URL** — that hub's tailnet address (`https://hub.tail-x.ts.net`).
 - **Hub key** — that hub's own `--key`.
@@ -175,7 +175,7 @@ The window then behaves like a plain browser tab logged into that hub — same l
 
 If Tailscale isn't installed (or this device isn't joined to a tailnet), that background step just doesn't happen — browsing the hub is completely unaffected, but the app menu swaps **Change Hub…** for **⚠ Runtime not registered**; click it for the reason and the log path (`<app log dir>/runtime-sidecar.log`), with a button back to the hub.
 
-Desktop data lives in the OS app-data directory (macOS: `~/Library/Application Support/dev.kiyora.loom/`) — separate databases per mode (`loom.db` for "Host locally", `loom-runtime.db` for the background runtime spawned by "Connect to a hub"), plus a persisted `runtime-key` so that background runtime keeps the same identity across restarts.
+Desktop data lives in the OS app-data directory (macOS: `~/Library/Application Support/dev.kiyora.devdeck/`) — separate databases per mode (`devdeck.db` for "Host locally", `devdeck-runtime.db` for the background runtime spawned by "Connect to a hub"), plus a persisted `runtime-key` so that background runtime keeps the same identity across restarts.
 
 ### 13.4 Which one should I use?
 
@@ -188,10 +188,10 @@ Desktop data lives in the OS app-data directory (macOS: `~/Library/Application S
 
 ## 14. MCP issue-tracker server for agents
 
-`backend/cmd/mcp-server` is a separate binary that exposes Loom's issues to a coding agent over MCP (stdio) — handy for having the agent working *inside* a worktree file its own tickets against the same project. It opens the same SQLite `--db` file the main server uses (safe to share, WAL mode).
+`backend/cmd/mcp-server` is a separate binary that exposes DevDeck's issues to a coding agent over MCP (stdio) — handy for having the agent working *inside* a worktree file its own tickets against the same project. It opens the same SQLite `--db` file the main server uses (safe to share, WAL mode).
 
 ```bash
-make build-mcp   # writes backend/loom-mcp-server
+make build-mcp   # writes backend/devdeck-mcp-server
 ```
 
 Point an MCP client at it (e.g. in a worktree's own `.mcp.json`):
@@ -199,9 +199,9 @@ Point an MCP client at it (e.g. in a worktree's own `.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "loom-issues": {
-      "command": "/path/to/loom-mcp-server",
-      "args": ["--db", "/path/to/loom.db"]
+    "devdeck-issues": {
+      "command": "/path/to/devdeck-mcp-server",
+      "args": ["--db", "/path/to/devdeck.db"]
     }
   }
 }
@@ -213,7 +213,7 @@ It exposes four tools: `list_projects`, `create_issue` (assignee is required —
 
 - **`make dev` fails immediately, mentions `tailscale`.** You don't have the Tailscale CLI installed. Run `cd frontend && npm run dev` instead.
 - **Port already in use.** `make free-ports` kills whatever's listening on `8989`, `5173`, and `9199` (frontend, hub, and the `dev-runtime` port).
-- **A worktree opens to a plain shell instead of an agent.** The agent CLI you picked isn't on the backend process's `$PATH` (or its login-shell `$PATH` — Loom checks both). Install it, or pick a different agent.
+- **A worktree opens to a plain shell instead of an agent.** The agent CLI you picked isn't on the backend process's `$PATH` (or its login-shell `$PATH` — DevDeck checks both). Install it, or pick a different agent.
 - **Tools page shows a 503 for a conversion.** The underlying CLI (`markitdown`/`pandoc`/`mmdc`) isn't installed — the error message includes the exact install command. See [COMMANDS.md](COMMANDS.md) for the full setup.
 - **Lost your 2FA device.** Use one of the one-time backup codes shown at enrollment. If you don't have those either, there's no self-service recovery — you'd need direct database access to clear the account's TOTP secret.
 - **A registered machine shows offline.** The hub polls `GET /api/machines/{id}/health` with a 3-second timeout — check the runtime process is actually running and reachable on the URL you registered it with, and that both machines are on the same tailnet if you're not on `127.0.0.1`.

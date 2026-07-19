@@ -11,8 +11,8 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 func TestHandleStoreErrMapsValidationTo400(t *testing.T) {

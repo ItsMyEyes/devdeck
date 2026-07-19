@@ -5,9 +5,9 @@ import (
 	"log"
 	"sync"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/port"
 )
 
 // WorkspaceService wraps workspace operations with business logic.

@@ -1,0 +1,8 @@
+{
+  "identifier": "dev.kiyora.devdeck.e2e",
+  "build": {
+    "beforeDevCommand": null,
+    "devUrl": null,
+    "beforeBuildCommand": "cd .. && make sidecar-host"
+  }
+}

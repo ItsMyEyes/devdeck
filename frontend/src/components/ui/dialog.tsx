@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export const DialogPrimitive = BaseDialog
 
@@ -16,10 +16,10 @@ interface DialogProps {
   className?: string
 }
 
-/** Centered modal card matching the loom overlay style. */
+/** Centered modal card matching the devdeck overlay style. */
 export function Dialog({ open, onOpenChange, children, width = 480, z = 60, className }: DialogProps) {
-  const pushNativeOverlayBlocker = useLoomStore((s) => s.pushNativeOverlayBlocker)
-  const popNativeOverlayBlocker = useLoomStore((s) => s.popNativeOverlayBlocker)
+  const pushNativeOverlayBlocker = useDevDeckStore((s) => s.pushNativeOverlayBlocker)
+  const popNativeOverlayBlocker = useDevDeckStore((s) => s.popNativeOverlayBlocker)
 
   React.useEffect(() => {
     if (!open) return
@@ -41,7 +41,7 @@ export function Dialog({ open, onOpenChange, children, width = 480, z = 60, clas
           style={{ maxWidth: width, zIndex: z + 1 }}
           className={cn(
             'fixed left-1/2 top-1/2 w-[calc(100vw-36px)] -translate-x-1/2 -translate-y-1/2',
-            'rounded-2xl border border-loom-border-menu bg-loom-card p-[21px] text-loom-fg outline-none',
+            'rounded-2xl border border-devdeck-border-menu bg-devdeck-card p-[21px] text-devdeck-fg outline-none',
             'shadow-[0_24px_60px_rgba(0,0,0,0.55)] transition-all duration-150',
             'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
             'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -60,7 +60,7 @@ export const DialogTitle = React.forwardRef<
   HTMLHeadingElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
-  <BaseDialog.Title ref={ref} className={cn('text-[15px] font-semibold text-loom-fg', className)} {...props} />
+  <BaseDialog.Title ref={ref} className={cn('text-[15px] font-semibold text-devdeck-fg', className)} {...props} />
 ))
 DialogTitle.displayName = 'DialogTitle'
 
@@ -70,7 +70,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <BaseDialog.Description
     ref={ref}
-    className={cn('font-mono text-xs text-loom-dim', className)}
+    className={cn('font-mono text-xs text-devdeck-dim', className)}
     {...props}
   />
 ))

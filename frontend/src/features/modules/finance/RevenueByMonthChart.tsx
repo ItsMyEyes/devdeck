@@ -26,13 +26,13 @@ export function RevenueByMonthChart({ invoices }: { invoices: Invoice[] }) {
   const data = months.map((ym) => ({ month: monthLabel(ym), revenue: totals.get(ym) ?? 0 }))
 
   return (
-    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-loom-border-card bg-loom-surface-2 p-4">
-      <span className="font-mono text-[11px] text-loom-dim uppercase">Revenue per month</span>
+    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 p-4">
+      <span className="font-mono text-[11px] text-devdeck-dim uppercase">Revenue per month</span>
       <ChartContainer config={config} className="flex-1">
         <BarChart data={data}>
-          <CartesianGrid vertical={false} stroke="var(--loom-border-card)" />
-          <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={10} stroke="var(--loom-dim)" />
-          <YAxis tickLine={false} axisLine={false} fontSize={10} stroke="var(--loom-dim)" tickFormatter={(v) => fmtRupiah(v)} width={80} />
+          <CartesianGrid vertical={false} stroke="var(--devdeck-border-card)" />
+          <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-dim)" />
+          <YAxis tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-dim)" tickFormatter={(v) => fmtRupiah(v)} width={80} />
           <ChartTooltip content={<ChartTooltipContent formatter={(v) => fmtRupiah(Number(v))} />} />
           <Bar dataKey="revenue" fill="var(--color-revenue)" radius={4} />
         </BarChart>

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 func TestCloneOnMachineSendsRepoAndPathWithBearerKey(t *testing.T) {

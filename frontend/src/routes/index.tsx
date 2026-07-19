@@ -32,14 +32,14 @@ function IndexRoute() {
 
   if (workspaces.isPending) {
     return (
-      <div className="flex h-screen w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-screen w-full flex-col bg-devdeck-bg text-devdeck-fg">
         <DataLoading label="loading workspaces…" />
       </div>
     )
   }
   if (workspaces.isError) {
     return (
-      <div className="flex h-screen w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-screen w-full flex-col bg-devdeck-bg text-devdeck-fg">
         <DataError error={workspaces.error} onRetry={() => workspaces.refetch()} />
       </div>
     )

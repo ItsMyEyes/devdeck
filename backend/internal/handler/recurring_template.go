@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 // RecurringTemplateHandler handles recurring-invoice-template CRUD endpoints.

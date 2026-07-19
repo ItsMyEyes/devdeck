@@ -1,17 +1,17 @@
 import { Check, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { LoomLogo } from '@/features/branding/LoomLogo'
+import { DevDeckLogo } from '@/features/branding/DevDeckLogo'
 import { useScope } from '@/features/useScope'
 import { useMarkAllNewsRead, useSettings, useWorkspace } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function Header() {
   const { wsId, projectId, view } = useScope()
   const ws = useWorkspace(wsId).data
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const openSpawn = useLoomStore((s) => s.openSpawn)
-  const showToast = useLoomStore((s) => s.showToast)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const openSpawn = useDevDeckStore((s) => s.openSpawn)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const markAll = useMarkAllNewsRead()
 
   const worktrees = ws ? ws.projects.flatMap((p) => p.worktrees) : []
@@ -36,40 +36,40 @@ export function Header() {
   }
 
   return (
-    <header className="flex h-[54px] flex-none items-center gap-3.5 border-b border-loom-border bg-loom-surface px-3.5">
+    <header className="flex h-[54px] flex-none items-center gap-3.5 border-b border-devdeck-border bg-devdeck-surface px-3.5">
       {/* mobile sidebar toggle */}
       <button
         onClick={() => setSidebarOpen(true)}
         aria-label="Open sidebar"
-        className="flex h-[34px] w-[34px] flex-none cursor-pointer flex-col items-center justify-center gap-[3.5px] rounded-lg border border-loom-border-strong bg-transparent md:hidden"
+        className="flex h-[34px] w-[34px] flex-none cursor-pointer flex-col items-center justify-center gap-[3.5px] rounded-lg border border-devdeck-border-strong bg-transparent md:hidden"
       >
-        <span className="h-[1.6px] w-[15px] rounded-sm bg-loom-fg-2" />
-        <span className="h-[1.6px] w-[15px] rounded-sm bg-loom-fg-2" />
-        <span className="h-[1.6px] w-[15px] rounded-sm bg-loom-fg-2" />
+        <span className="h-[1.6px] w-[15px] rounded-sm bg-devdeck-fg-2" />
+        <span className="h-[1.6px] w-[15px] rounded-sm bg-devdeck-fg-2" />
+        <span className="h-[1.6px] w-[15px] rounded-sm bg-devdeck-fg-2" />
       </button>
 
       {/* brand */}
       <div className="flex items-center gap-2.5">
-        <LoomLogo />
-        <span className="text-[15px] font-semibold tracking-[-0.02em]">loom</span>
-        <span className="ml-0.5 hidden rounded-[5px] border border-loom-border-strong px-1.5 py-0.5 font-mono text-[10.5px] text-loom-dim md:inline">
+        <DevDeckLogo />
+        <span className="text-[15px] font-semibold tracking-[-0.02em]">devdeck</span>
+        <span className="ml-0.5 hidden rounded-[5px] border border-devdeck-border-strong px-1.5 py-0.5 font-mono text-[10.5px] text-devdeck-dim md:inline">
           one operator · many companies
         </span>
       </div>
 
       {/* live agent counts */}
       {agents && (
-        <div className="ml-1 hidden items-center gap-3.5 font-mono text-[11.5px] text-loom-muted md:flex">
+        <div className="ml-1 hidden items-center gap-3.5 font-mono text-[11.5px] text-devdeck-muted md:flex">
           <span className="flex items-center gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full bg-loom-green" />
+            <span className="h-[7px] w-[7px] rounded-full bg-devdeck-green" />
             {running} running
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full bg-loom-yellow" />
+            <span className="h-[7px] w-[7px] rounded-full bg-devdeck-yellow" />
             {waiting} waiting
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full bg-loom-red" />
+            <span className="h-[7px] w-[7px] rounded-full bg-devdeck-red" />
             {errors} error
           </span>
         </div>

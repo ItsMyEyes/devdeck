@@ -48,7 +48,7 @@ func (s *Server) attachMock(ctx context.Context, conn *websocket.Conn, session s
 	i := 0
 
 	// Prompt
-	writeText(ctx, conn, fmt.Sprintf("\r\n%sloom:%s%s %s›%s ",
+	writeText(ctx, conn, fmt.Sprintf("\r\n%sdevdeck:%s%s %s›%s ",
 		ansi.Green, session, ansi.Reset, ansi.Blue, ansi.Reset))
 
 	buf := strings.Builder{}
@@ -68,7 +68,7 @@ func (s *Server) attachMock(ctx context.Context, conn *websocket.Conn, session s
 
 			// Write prompt after most lines
 			if i%3 != 0 {
-				writeText(ctx, conn, fmt.Sprintf("%sloom:%s%s %s›%s %s",
+				writeText(ctx, conn, fmt.Sprintf("%sdevdeck:%s%s %s›%s %s",
 					ansi.Green, session, ansi.Reset, ansi.Blue, ansi.Reset, buf.String()))
 			}
 		default:
@@ -94,7 +94,7 @@ func (s *Server) attachMock(ctx context.Context, conn *websocket.Conn, session s
 						writeText(ctx, conn, fmt.Sprintf("%srunning: %s%s\r\n", ansi.Dim, cmd, ansi.Reset))
 						writeText(ctx, conn, fmt.Sprintf("%s✓ done%s\r\n", ansi.Green, ansi.Reset))
 					}
-					writeText(ctx, conn, fmt.Sprintf("%sloom:%s%s %s›%s ",
+					writeText(ctx, conn, fmt.Sprintf("%sdevdeck:%s%s %s›%s ",
 						ansi.Green, session, ansi.Reset, ansi.Blue, ansi.Reset))
 				} else if ch == '\x7f' {
 					s := buf.String()

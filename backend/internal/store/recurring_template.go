@@ -3,8 +3,8 @@ package store
 import (
 	"encoding/json"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const recurringTemplateColumns = `id, company_name, company_address, items_json, bank_name, bank_account_name, bank_account_number, day_of_month, payment_term_days, active, last_generated_ym, created_at`

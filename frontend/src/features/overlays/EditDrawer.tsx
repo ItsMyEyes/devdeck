@@ -21,7 +21,7 @@ import {
   useUpdateWorktree,
   useWorkspaces,
 } from '@/features/data/queries'
-import { findProject, findWorktree, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
+import { findProject, findWorktree, findWs, projectOfWorktree, useDevDeckStore, wsOfProject } from '@/store/useDevDeckStore'
 
 interface EditView {
   title: string
@@ -33,12 +33,12 @@ interface EditView {
 }
 
 export function EditDrawer() {
-  const edit = useLoomStore((s) => s.edit)
-  const setEdit = useLoomStore((s) => s.setEdit)
-  const askDelete = useLoomStore((s) => s.askDelete)
-  const closeEdit = useLoomStore((s) => s.closeEdit)
-  const openBrowse = useLoomStore((s) => s.openBrowse)
-  const showToast = useLoomStore((s) => s.showToast)
+  const edit = useDevDeckStore((s) => s.edit)
+  const setEdit = useDevDeckStore((s) => s.setEdit)
+  const askDelete = useDevDeckStore((s) => s.askDelete)
+  const closeEdit = useDevDeckStore((s) => s.closeEdit)
+  const openBrowse = useDevDeckStore((s) => s.openBrowse)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const workspaces = useWorkspaces().data ?? []
   const updateWorktree = useUpdateWorktree()
   const updateProject = useUpdateProject()
@@ -112,19 +112,19 @@ export function EditDrawer() {
       {view && (
         <>
           {/* header */}
-          <div className="flex flex-none items-start gap-2.5 border-b border-loom-border px-[18px] pb-3.5 pt-[18px]">
+          <div className="flex flex-none items-start gap-2.5 border-b border-devdeck-border px-[18px] pb-3.5 pt-[18px]">
             <StatusDot color={view.dotColor} style={{ marginTop: 4 }} />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 truncate font-mono text-[14px] font-semibold text-loom-fg">
+              <div className="flex items-center gap-1.5 truncate font-mono text-[14px] font-semibold text-devdeck-fg">
                 {view.isWorktree && <WorktreeGlyph root={view.isRoot} size={13} />}
                 <span className="truncate">{view.title}</span>
               </div>
-              <div className="mt-1 font-mono text-[11px] text-loom-dim">{view.sub}</div>
+              <div className="mt-1 font-mono text-[11px] text-devdeck-dim">{view.sub}</div>
             </div>
             <button
               onClick={closeEdit}
               aria-label="Close"
-              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-loom-border-strong text-loom-muted hover:bg-loom-popover hover:text-loom-fg"
+              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg"
             >
               <X size={14} />
             </button>
@@ -133,11 +133,11 @@ export function EditDrawer() {
           {/* body */}
           <div className="flex-1 overflow-auto p-[18px]">
             {view.meta.length > 0 && (
-              <div className="mb-[18px] rounded-[11px] border border-loom-border-card bg-loom-bg px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-loom-muted">
+              <div className="mb-[18px] rounded-[11px] border border-devdeck-border-card bg-devdeck-bg px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-devdeck-muted">
                 {view.meta.map((row) => (
                   <div key={row.k} className="flex gap-2.5">
-                    <span className="w-[70px] flex-none text-loom-dim">{row.k}</span>
-                    <span className="truncate text-loom-fg-2">{row.v}</span>
+                    <span className="w-[70px] flex-none text-devdeck-dim">{row.k}</span>
+                    <span className="truncate text-devdeck-fg-2">{row.v}</span>
                   </div>
                 ))}
               </div>
@@ -155,7 +155,7 @@ export function EditDrawer() {
                       disabled={branchLocked}
                     />
                     {branchLocked && (
-                      <div className="mt-1.5 font-mono text-[10.5px] text-loom-dim">pause to change branch</div>
+                      <div className="mt-1.5 font-mono text-[10.5px] text-devdeck-dim">pause to change branch</div>
                     )}
                   </div>
                 )}
@@ -182,7 +182,7 @@ export function EditDrawer() {
                   <Button
                     variant="secondary"
                     size="lg"
-                    className="flex-none bg-loom-elevated"
+                    className="flex-none bg-devdeck-elevated"
                     onClick={() => openBrowse('edit', edit.b, editProject?.machineId)}
                   >
                     Browse…
@@ -200,7 +200,7 @@ export function EditDrawer() {
           </div>
 
           {/* footer */}
-          <div className="flex flex-none items-center gap-2.5 border-t border-loom-border px-[18px] py-3.5">
+          <div className="flex flex-none items-center gap-2.5 border-t border-devdeck-border px-[18px] py-3.5">
             <Button variant="destructive" onClick={onAskDelete}>
               Delete
             </Button>

@@ -4,16 +4,16 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSSHConnections, useUpdateSSHConnection } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 /** Bulk-renames every SSH connection currently tagged with `oldName` — a
  *  "group" has no id of its own (see the design spec), so renaming it means
  *  PATCHing every connection that shares the tag. */
 export function RenameSSHGroupDialog() {
-  const dialog = useLoomStore((s) => s.renameSSHGroup)
-  const setValue = useLoomStore((s) => s.setRenameSSHGroupValue)
-  const close = useLoomStore((s) => s.closeRenameSSHGroup)
-  const showToast = useLoomStore((s) => s.showToast)
+  const dialog = useDevDeckStore((s) => s.renameSSHGroup)
+  const setValue = useDevDeckStore((s) => s.setRenameSSHGroupValue)
+  const close = useDevDeckStore((s) => s.closeRenameSSHGroup)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const connections = useSSHConnections().data ?? []
   const updateConnection = useUpdateSSHConnection()
 

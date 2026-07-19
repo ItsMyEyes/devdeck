@@ -58,7 +58,7 @@ function isTerminalExitedFrame(data: string) {
   }
 }
 
-/** xterm.js terminal wired to the loom WebSocket gateway for one session. */
+/** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   { session, machine, ctrlArmed = false, onCtrlConsumed, onExit },
   ref,
@@ -331,7 +331,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
       {searchOpen ? (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-loom-border bg-loom-surface px-2 py-1 shadow-lg">
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-devdeck-border bg-devdeck-surface px-2 py-1 shadow-lg">
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -347,13 +347,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               }
             }}
             placeholder="Find…"
-            className="w-40 bg-transparent font-mono text-[11px] text-loom-fg outline-none"
+            className="w-40 bg-transparent font-mono text-[11px] text-devdeck-fg outline-none"
           />
           <button
             type="button"
             onClick={() => searchAddonRef.current?.findPrevious(searchQuery)}
             aria-label="Previous match"
-            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
           >
             <ChevronUp size={12} />
           </button>
@@ -361,7 +361,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             type="button"
             onClick={() => searchAddonRef.current?.findNext(searchQuery)}
             aria-label="Next match"
-            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
           >
             <ChevronDown size={12} />
           </button>
@@ -369,7 +369,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             type="button"
             onClick={closeSearch}
             aria-label="Close search"
-            className="cursor-pointer text-loom-muted hover:text-loom-fg"
+            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
           >
             <X size={12} />
           </button>

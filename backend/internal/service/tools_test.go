@@ -25,7 +25,7 @@ func TestToolsService_ToMarkdown(t *testing.T) {
 		t.Fatalf("NewToolsService: %v", err)
 	}
 
-	md, err := svc.ToMarkdown(context.Background(), "note.txt", []byte("Hello, Loom Tools."))
+	md, err := svc.ToMarkdown(context.Background(), "note.txt", []byte("Hello, DevDeck Tools."))
 	if err != nil {
 		var unavailable *ToolUnavailableError
 		if errAs(err, &unavailable) {
@@ -33,7 +33,7 @@ func TestToolsService_ToMarkdown(t *testing.T) {
 		}
 		t.Fatalf("ToMarkdown: %v", err)
 	}
-	if !strings.Contains(md, "Hello, Loom Tools.") {
+	if !strings.Contains(md, "Hello, DevDeck Tools.") {
 		t.Fatalf("expected converted markdown to contain source text, got: %q", md)
 	}
 }

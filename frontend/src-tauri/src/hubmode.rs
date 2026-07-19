@@ -46,7 +46,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(suffix: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("loom-hubmode-test-{}-{suffix}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devdeck-hubmode-test-{}-{suffix}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

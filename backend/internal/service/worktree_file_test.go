@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 func TestWorktreeFileServiceCRUDAndRegexSearch(t *testing.T) {

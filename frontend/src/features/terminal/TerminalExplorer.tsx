@@ -233,23 +233,23 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-loom-surface" onKeyDown={handleKeyDown} onPaste={handlePaste}>
+    <aside className="flex min-h-0 flex-1 flex-col bg-devdeck-surface" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
-      <div className="flex h-9 flex-none items-center border-b border-loom-border bg-loom-surface-2">
+      <div className="flex h-9 flex-none items-center border-b border-devdeck-border bg-devdeck-surface-2">
         <div
           title={rootLabel}
-          className="flex h-full max-w-[45%] items-center truncate border-r border-loom-border bg-loom-surface px-3 font-mono text-[11px] text-loom-fg"
+          className="flex h-full max-w-[45%] items-center truncate border-r border-devdeck-border bg-devdeck-surface px-3 font-mono text-[11px] text-devdeck-fg"
         >
           {rootLabel}
         </div>
         {selectedCount > 0 ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 font-mono text-[10.5px] text-loom-muted">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 font-mono text-[10.5px] text-devdeck-muted">
             <span className="truncate">{selectedCount} selected</span>
             <button
               type="button"
               onClick={clearSelection}
               title="Clear selection"
-              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg"
+              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
             >
               <X size={12} />
             </button>
@@ -262,7 +262,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           onClick={() => uploadInputRef.current?.click()}
           disabled={uploading}
           title={`Upload files to ${uploadTargetLabel}`}
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-fg disabled:cursor-wait"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
           {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
         </button>
@@ -271,7 +271,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           onClick={zipSelected}
           disabled={selectedCount === 0 || zipping}
           title="Zip selected files and folders"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-fg disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
           {zipping ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
         </button>
@@ -280,7 +280,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           onClick={removeSelected}
           disabled={selectedCount === 0 || deletePaths.isPending}
           title="Delete selected files and folders"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-red-soft disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-red-soft disabled:cursor-not-allowed disabled:opacity-40"
         >
           {deletePaths.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
         </button>
@@ -289,7 +289,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           onClick={createFile}
           disabled={writeFile.isPending}
           title="New file"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-fg disabled:cursor-wait"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
           {writeFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus2 size={13} />}
         </button>
@@ -298,7 +298,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           onClick={invalidateFiles}
           disabled={isFetching}
           title="Refresh files"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-loom-dim hover:text-loom-fg disabled:cursor-wait"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
           <RefreshCw size={13} className={cn(isFetching && 'animate-spin')} />
         </button>
@@ -311,7 +311,7 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
         onDrop={handleTreeDrop}
         className={cn(
           'min-h-0 flex-1 overflow-auto py-1',
-          isDragOver && 'outline outline-2 outline-dashed outline-loom-accent -outline-offset-2',
+          isDragOver && 'outline outline-2 outline-dashed outline-devdeck-accent -outline-offset-2',
         )}
       >
         <TreeLevel
@@ -336,11 +336,11 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
         <button
           type="button"
           onClick={onRequestQuickOpen}
-          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-loom-border bg-loom-surface-2 px-3 text-left font-mono text-[10.5px] text-loom-muted hover:text-loom-fg-2"
+          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-surface-2 px-3 text-left font-mono text-[10.5px] text-devdeck-muted hover:text-devdeck-fg-2"
         >
           <Search size={12} />
           <span>Search files / folders</span>
-          <kbd className="ml-auto rounded border border-loom-border-strong bg-loom-terminal px-1.5 py-0.5 text-[9.5px] text-loom-dim">
+          <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
             Ctrl P
           </kbd>
         </button>
@@ -385,7 +385,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
         <DataLoading compact label="loading files…" />
       </div>
     ) : (
-      <div className="flex h-[29px] items-center gap-2 text-loom-dim" style={{ paddingLeft: indent + 18 }}>
+      <div className="flex h-[29px] items-center gap-2 text-devdeck-dim" style={{ paddingLeft: indent + 18 }}>
         <Loader2 size={11} className="animate-spin" />
       </div>
     )
@@ -395,11 +395,11 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
     const message = error instanceof ApiError ? error.message : 'Could not read this folder'
     return depth === 0 ? (
       <div className="flex h-32 flex-col items-center justify-center gap-3 px-4 text-center">
-        <span className="font-mono text-[10.5px] leading-relaxed text-loom-muted">{message}</span>
+        <span className="font-mono text-[10.5px] leading-relaxed text-devdeck-muted">{message}</span>
         <button
           type="button"
           onClick={() => refetch()}
-          className="rounded border border-loom-border-strong px-2.5 py-1 text-[11px] text-loom-fg-2 hover:bg-loom-hover-wash"
+          className="rounded border border-devdeck-border-strong px-2.5 py-1 text-[11px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash"
         >
           Retry
         </button>
@@ -409,7 +409,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
         type="button"
         onClick={() => refetch()}
         title={message}
-        className="flex h-[29px] w-full cursor-pointer items-center gap-1.5 truncate font-mono text-[10.5px] text-loom-red-soft hover:bg-loom-hover-wash"
+        className="flex h-[29px] w-full cursor-pointer items-center gap-1.5 truncate font-mono text-[10.5px] text-devdeck-red-soft hover:bg-devdeck-hover-wash"
         style={{ paddingLeft: indent + 18 }}
       >
         {message} · retry
@@ -419,11 +419,11 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
 
   if (entries.length === 0) {
     return depth === 0 ? (
-      <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-loom-dim">
+      <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-devdeck-dim">
         Empty folder
       </div>
     ) : (
-      <div className="flex h-[29px] items-center font-mono text-[10.5px] text-loom-dim" style={{ paddingLeft: indent + 18 }}>
+      <div className="flex h-[29px] items-center font-mono text-[10.5px] text-devdeck-dim" style={{ paddingLeft: indent + 18 }}>
         empty
       </div>
     )
@@ -459,9 +459,9 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 rest.onDropFilesToFolder(entry.path, Array.from(event.dataTransfer.files ?? []))
               }}
               className={cn(
-                'group flex h-[29px] items-center pr-1.5 hover:bg-loom-hover-wash',
-                isSelected && 'bg-loom-accent/10',
-                rest.dropTargetPath === entry.path && 'outline outline-2 outline-dashed outline-loom-accent -outline-offset-2',
+                'group flex h-[29px] items-center pr-1.5 hover:bg-devdeck-hover-wash',
+                isSelected && 'bg-devdeck-accent/10',
+                rest.dropTargetPath === entry.path && 'outline outline-2 outline-dashed outline-devdeck-accent -outline-offset-2',
               )}
               style={{ paddingLeft: indent }}
             >
@@ -482,20 +482,20 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 <ChevronRight
                   size={11}
                   className={cn(
-                    'flex-none text-loom-dim-3 transition-transform duration-100',
+                    'flex-none text-devdeck-dim-3 transition-transform duration-100',
                     isOpen && 'rotate-90',
                     !entry.isDir && 'invisible',
                   )}
                 />
                 <MaterialFileIcon name={entry.name} isDir={entry.isDir} size={16} />
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-loom-fg-2">{entry.name}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg-2">{entry.name}</span>
               </button>
               <button
                 type="button"
                 onClick={() => rest.onRemovePath(selectedEntry)}
                 disabled={rest.deletePending}
                 title={`Delete ${entry.name}`}
-                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-loom-dim opacity-0 hover:bg-loom-red-tint-hover hover:text-loom-red-soft group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
               >
                 <Trash2 size={11} />
               </button>

@@ -15,7 +15,7 @@ import (
 )
 
 func TestPTYUTF8HelperProcess(t *testing.T) {
-	if os.Getenv("LOOM_TEST_UTF8_HELPER") != "1" {
+	if os.Getenv("DEVDECK_TEST_UTF8_HELPER") != "1" {
 		return
 	}
 	_, _ = os.Stdout.Write([]byte{0xE2, 0x96})
@@ -42,7 +42,7 @@ func TestPumpForwardsSplitUTF8IntactAsBinary(t *testing.T) {
 	// of coalescing them into one — mirroring how a 4096-byte ptmx.Read or a
 	// ring-buffer chunk eviction can split a multi-byte character in two.
 	cmd := exec.Command(os.Args[0], "-test.run=TestPTYUTF8HelperProcess")
-	cmd.Env = append(os.Environ(), "LOOM_TEST_UTF8_HELPER=1")
+	cmd.Env = append(os.Environ(), "DEVDECK_TEST_UTF8_HELPER=1")
 	sess, err := activeRegistry.spawn(session, cmd, 80, 24)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)

@@ -3,7 +3,7 @@ package store
 import (
 	"database/sql"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // CreateIssueComment adds a comment to an issue's Activity timeline, or —

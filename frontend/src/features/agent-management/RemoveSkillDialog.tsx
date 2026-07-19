@@ -25,14 +25,14 @@ export function RemoveSkillDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} width={440}>
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-loom-yellow-tint-border bg-loom-yellow-tint text-loom-yellow">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-yellow-tint-border bg-devdeck-yellow-tint text-devdeck-yellow">
           <AlertTriangle size={17} />
         </div>
         <div className="min-w-0">
           <DialogTitle>Remove {skillName}?</DialogTitle>
           <DialogDescription className="mt-1.5 leading-relaxed">
             This removes the skill from {agentName}. Linked skills are detached immediately. Local
-            skill folders are moved to Loom&apos;s trash when possible.
+            skill folders are moved to DevDeck&apos;s trash when possible.
           </DialogDescription>
         </div>
       </div>

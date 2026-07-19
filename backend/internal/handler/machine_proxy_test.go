@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 
 	"nhooyr.io/websocket"
 )
@@ -52,7 +52,7 @@ func TestProxyInjectsRuntimeKeyAndStripsClientCredentials(t *testing.T) {
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID(t, st)+"/proxy/api/health", nil)
 	req.Header.Set("Authorization", "Bearer hub-key")
-	req.Header.Set("Cookie", "loom_session=secret")
+	req.Header.Set("Cookie", "devdeck_session=secret")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if gotAuth != "Bearer rt-key" {

@@ -2,55 +2,353 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Loom — choose a hub</title>
+    <title>DevDeck — choose a hub</title>
     <style>
-      html, body { height: 100%; margin: 0; background: #0d1017; color: #c0c6d4;
-        font: 13px/1.6 -apple-system, "Segoe UI", sans-serif; }
-      body { display: grid; place-items: center; }
-      main { max-width: 420px; width: 100%; padding: 0 24px; }
-      h1 { font-size: 15px; margin-bottom: 16px; }
-      button { display: block; width: 100%; margin: 8px 0; padding: 10px 12px;
-        background: #1a1f2b; color: #c0c6d4; border: 1px solid #2a3040;
-        border-radius: 6px; cursor: pointer; font: inherit; text-align: left; }
-      button:hover { background: #232936; }
-      input { width: 100%; padding: 8px 10px; margin: 8px 0; box-sizing: border-box;
-        background: #1a1f2b; color: #c0c6d4; border: 1px solid #2a3040;
-        border-radius: 6px; font: inherit; }
-      #remote-form { display: none; }
-      #error { color: #e46962; min-height: 18px; }
+      :root {
+        color-scheme: dark;
+        --bg: #0d1017;
+        --surface: #151922;
+        --surface-hover: #1a1f2b;
+        --surface-active: #1f2531;
+        --border: #262c3a;
+        --border-strong: #38415a;
+        --text: #dfe3ec;
+        --text-muted: #8b93a7;
+        --text-dim: #5b6478;
+        --accent: #39c6bd;
+        --accent-hover: #55d2ca;
+        --accent-ink: #06201e;
+        --danger: #e46962;
+        --danger-bg: rgba(228, 105, 98, 0.1);
+        --danger-border: rgba(228, 105, 98, 0.3);
+        --radius-lg: 12px;
+        --radius: 8px;
+        --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.6 var(--font-sans);
+        position: relative;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(circle at 22% 18%, rgba(57, 198, 189, 0.10), transparent 42%),
+          radial-gradient(circle at 82% 88%, rgba(57, 198, 189, 0.06), transparent 40%);
+        pointer-events: none;
+      }
+
+      main.shell { position: relative; max-width: 440px; width: 100%; padding: 0 24px; }
+
+      .brand { display: flex; align-items: center; gap: 7px; margin-bottom: 32px; color: var(--text-dim); }
+      .brand svg { flex: none; color: var(--accent); }
+      .brand span { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+
+      h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 6px; color: var(--text); }
+      .subtitle { margin: 0 0 24px; color: var(--text-muted); }
+
+      .modes { display: grid; gap: 10px; }
+
+      /* --- local (standalone) card --- */
+      .mode-card {
+        display: block; width: 100%; text-align: left; appearance: none;
+        background: var(--surface); color: inherit; border: 1px solid var(--border);
+        border-radius: var(--radius-lg); padding: 14px 16px; cursor: pointer; font: inherit;
+        max-height: 200px; overflow: hidden;
+        transition: background 140ms ease, border-color 140ms ease, transform 100ms ease,
+          opacity 220ms ease, max-height 260ms ease, padding 260ms ease, margin 260ms ease;
+      }
+      .mode-card:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+      .mode-card:active { transform: scale(0.995); }
+      .mode-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .mode-card:disabled { cursor: default; opacity: 0.5; }
+
+      .modes.remote-open #local-btn {
+        max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0;
+        opacity: 0; pointer-events: none;
+      }
+
+      .mode-row { display: flex; align-items: center; gap: 12px; }
+      .mode-icon {
+        position: relative; flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+        background: var(--surface-active); border: 1px solid var(--border); border-radius: 8px; color: var(--accent);
+      }
+      .mode-copy { flex: 1; min-width: 0; }
+      .mode-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+      .mode-desc { margin-top: 2px; color: var(--text-muted); font-size: 12px; }
+      .mode-chevron { flex: none; color: var(--text-dim); transition: transform 160ms ease, color 160ms ease; }
+      .mode-card:hover .mode-chevron { transform: translateX(2px); color: var(--text-muted); }
+
+      /* --- remote (expanding) card --- */
+      .mode-card-wrap {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+        overflow: hidden; transition: border-color 160ms ease, background 160ms ease;
+      }
+      #remote-btn {
+        display: block; width: 100%; text-align: left; appearance: none;
+        background: transparent; color: inherit; border: 0; padding: 14px 16px;
+        cursor: pointer; font: inherit; transition: background 140ms ease;
+      }
+      #remote-btn:hover { background: var(--surface-hover); }
+      #remote-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+      #remote-btn:disabled { cursor: default; opacity: 0.5; }
+      #remote-btn[aria-expanded="true"] .mode-chevron { transform: rotate(90deg); color: var(--accent); }
+      #remote-btn[aria-expanded="true"] .mode-desc { display: none; }
+
+      .reveal {
+        display: grid; grid-template-rows: 0fr;
+        transition: grid-template-rows 260ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms ease;
+      }
+      .reveal.open { grid-template-rows: 1fr; border-top: 1px solid var(--border); }
+      .reveal > form { overflow: hidden; min-height: 0; }
+
+      .remote-body { padding: 14px 16px 16px; }
+      .field { margin-bottom: 10px; }
+      .field label {
+        display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+        color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;
+      }
+      .field input {
+        width: 100%; padding: 9px 11px; background: var(--bg); color: var(--text);
+        border: 1px solid var(--border); border-radius: var(--radius); font: inherit;
+        font-family: var(--font-mono); font-size: 12.5px;
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+      .field input::placeholder { color: var(--text-dim); }
+      .field input:hover { border-color: var(--border-strong); }
+      .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(57, 198, 189, 0.15); }
+      .field input:disabled { opacity: 0.5; }
+
+      .input-wrap { position: relative; }
+      .input-wrap input { padding-right: 34px; }
+      .key-toggle {
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        width: 26px; height: 26px; display: grid; place-items: center;
+        background: none; border: 0; border-radius: 6px; color: var(--text-dim); cursor: pointer;
+        transition: background 140ms ease, color 140ms ease;
+      }
+      .key-toggle:hover { background: var(--surface-hover); color: var(--text-muted); }
+      .key-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .key-toggle svg { display: block; }
+      .key-toggle .icon-eye-off { display: none; }
+      .key-toggle[aria-pressed="true"] .icon-eye { display: none; }
+      .key-toggle[aria-pressed="true"] .icon-eye-off { display: block; }
+
+      .remote-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+      button.btn {
+        appearance: none; font: inherit; border-radius: var(--radius); cursor: pointer;
+        border: 1px solid transparent; padding: 9px 14px; font-weight: 600; font-size: 12.5px;
+        transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease, transform 100ms ease;
+      }
+      button.btn:active:not(:disabled) { transform: scale(0.98); }
+      button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      .btn-primary { flex: 1; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-ink); }
+      .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+      .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+      .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
+      .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+      .btn-ghost:disabled { opacity: 0.4; cursor: default; }
+
+      .spinner {
+        width: 13px; height: 13px; border-radius: 50%; flex: none;
+        border: 2px solid rgba(6, 32, 30, 0.35); border-top-color: var(--accent-ink);
+        animation: spin 0.7s linear infinite; margin-right: 7px;
+      }
+      .spinner-muted { border-color: var(--border-strong); border-top-color: var(--accent); }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      #error {
+        margin-top: 12px; padding: 10px 12px;
+        background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius);
+        color: #f0a8a3; font-size: 12.5px; line-height: 1.5;
+      }
+      #error:empty { display: none; padding: 0; margin: 0; border: 0; }
     </style>
   </head>
   <body>
-    <main>
-      <h1>How do you want to run Loom?</h1>
-      <button id="local-btn">Host locally on this device</button>
-      <button id="remote-btn">Connect to a hub I already host</button>
-      <div id="remote-form">
-        <input id="url" type="text" placeholder="https://hub.tail-xxxx.ts.net" />
-        <input id="hub-key" type="text" placeholder="hub bearer key" />
-        <button id="connect-btn">Connect</button>
+    <main class="shell">
+      <div class="brand">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path d="M1 1v12M5 1v12M9 1v12M13 1v12" stroke="currentColor" stroke-width="1.1"/>
+          <path d="M1 4.5h12M1 9.5h12" stroke="currentColor" stroke-width="1.1"/>
+        </svg>
+        <span>DevDeck</span>
       </div>
-      <p id="error"></p>
+
+      <h1>How do you want to run DevDeck?</h1>
+      <p class="subtitle">Pick where the hub backend runs.</p>
+
+      <div class="modes" id="modes">
+        <button type="button" class="mode-card" id="local-btn">
+          <div class="mode-row">
+            <span class="mode-icon">
+              <svg id="local-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg>
+              <span class="spinner spinner-muted" id="local-spinner" hidden aria-hidden="true"></span>
+            </span>
+            <span class="mode-copy">
+              <span class="mode-title">Run locally</span>
+              <span class="mode-desc">Host the hub and everything it manages on this device.</span>
+            </span>
+            <svg class="mode-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+        </button>
+
+        <div class="mode-card-wrap" id="remote-wrap">
+          <button type="button" id="remote-btn" aria-expanded="false" aria-controls="remote-panel">
+            <div class="mode-row">
+              <span class="mode-icon">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1 1"/><path d="M14 11a5 5 0 0 0-7.07 0l-2 2a5 5 0 0 0 7.07 7.07l1-1"/></svg>
+              </span>
+              <span class="mode-copy">
+                <span class="mode-title">Connect to a hub</span>
+                <span class="mode-desc">Use a hub you already host somewhere else.</span>
+              </span>
+              <svg class="mode-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+            </div>
+          </button>
+
+          <div class="reveal" id="remote-panel">
+            <form id="remote-form" novalidate>
+              <fieldset id="remote-fields" style="border:0;margin:0;padding:0;">
+                <div class="remote-body">
+                  <div class="field">
+                    <label for="url">Hub URL</label>
+                    <input id="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://hub.tail-xxxx.ts.net" />
+                  </div>
+                  <div class="field">
+                    <label for="hub-key">Bearer key</label>
+                    <div class="input-wrap">
+                      <input id="hub-key" type="password" autocomplete="off" spellcheck="false" placeholder="hub bearer key" />
+                      <button type="button" class="key-toggle" id="key-toggle" aria-pressed="false" aria-label="Show key">
+                        <svg class="icon-eye" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="icon-eye-off" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.6 20.6 0 0 1 5.06-5.94M9.9 4.24A10.4 10.4 0 0 1 12 5c7 0 11 7 11 7a20.6 20.6 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="remote-actions">
+                    <button type="submit" class="btn btn-primary" id="connect-btn" disabled>
+                      <span class="spinner" id="connect-spinner" hidden aria-hidden="true"></span>
+                      <span id="connect-label">Connect</span>
+                    </button>
+                    <button type="button" class="btn btn-ghost" id="cancel-btn">Cancel</button>
+                  </div>
+                </div>
+              </fieldset>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <p id="error" role="alert" aria-live="polite"></p>
     </main>
     <script>
       const invoke = window.__TAURI__.core.invoke
-      const errorEl = document.getElementById('error')
-      document.getElementById('local-btn').addEventListener('click', () => {
-        errorEl.textContent = ''
+      const $ = (id) => document.getElementById(id)
+
+      const modesEl = $('modes')
+      const localBtn = $('local-btn')
+      const localIcon = $('local-icon')
+      const localSpinner = $('local-spinner')
+      const remoteBtn = $('remote-btn')
+      const remotePanel = $('remote-panel')
+      const remoteForm = $('remote-form')
+      const remoteFields = $('remote-fields')
+      const urlInput = $('url')
+      const keyInput = $('hub-key')
+      const keyToggle = $('key-toggle')
+      const connectBtn = $('connect-btn')
+      const connectSpinner = $('connect-spinner')
+      const connectLabel = $('connect-label')
+      const cancelBtn = $('cancel-btn')
+      const errorEl = $('error')
+
+      function setError(msg) {
+        errorEl.textContent = msg || ''
+      }
+
+      function updateConnectState() {
+        connectBtn.disabled = !(urlInput.value.trim() && keyInput.value.trim())
+      }
+
+      function toggleRemote(open) {
+        remoteBtn.setAttribute('aria-expanded', String(open))
+        remotePanel.classList.toggle('open', open)
+        modesEl.classList.toggle('remote-open', open)
+        setError('')
+        if (open) {
+          requestAnimationFrame(() => urlInput.focus())
+        }
+      }
+
+      function setBusy(busy, which) {
+        localBtn.disabled = busy
+        remoteBtn.disabled = busy
+        remoteFields.disabled = busy
+        cancelBtn.disabled = busy
+
+        const localBusy = busy && which === 'local'
+        localIcon.style.display = localBusy ? 'none' : ''
+        localSpinner.hidden = !localBusy
+
+        const remoteBusy = busy && which === 'remote'
+        connectSpinner.hidden = !remoteBusy
+        connectLabel.textContent = remoteBusy ? 'Connecting…' : 'Connect'
+
+        if (!busy) updateConnectState()
+      }
+
+      localBtn.addEventListener('click', () => {
+        setError('')
+        setBusy(true, 'local')
         invoke('choose_hub_mode', { mode: 'local' }).catch((e) => {
-          errorEl.textContent = String(e)
+          setError(String(e))
+          setBusy(false)
         })
       })
-      document.getElementById('remote-btn').addEventListener('click', () => {
-        document.getElementById('remote-form').style.display = 'block'
+
+      remoteBtn.addEventListener('click', () => {
+        toggleRemote(remoteBtn.getAttribute('aria-expanded') !== 'true')
       })
-      document.getElementById('connect-btn').addEventListener('click', () => {
-        const url = document.getElementById('url').value.trim()
-        const key = document.getElementById('hub-key').value.trim()
+
+      cancelBtn.addEventListener('click', () => toggleRemote(false))
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && remoteBtn.getAttribute('aria-expanded') === 'true') {
+          toggleRemote(false)
+        }
+      })
+
+      urlInput.addEventListener('input', updateConnectState)
+      keyInput.addEventListener('input', updateConnectState)
+
+      keyToggle.addEventListener('click', () => {
+        const show = keyInput.type === 'password'
+        keyInput.type = show ? 'text' : 'password'
+        keyToggle.setAttribute('aria-pressed', String(show))
+        keyToggle.setAttribute('aria-label', show ? 'Hide key' : 'Show key')
+      })
+
+      remoteForm.addEventListener('submit', (e) => {
+        e.preventDefault()
+        const url = urlInput.value.trim()
+        const key = keyInput.value.trim()
         if (!url || !key) return
-        errorEl.textContent = ''
+        setError('')
+        setBusy(true, 'remote')
         invoke('choose_hub_mode', { mode: 'remote', url, key }).catch((e) => {
-          errorEl.textContent = String(e)
+          setError(String(e))
+          setBusy(false)
         })
       })
     </script>

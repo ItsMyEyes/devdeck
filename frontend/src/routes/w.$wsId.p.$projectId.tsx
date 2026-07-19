@@ -36,7 +36,7 @@ function ProjectLayout() {
     <div className="flex min-h-0 flex-1 flex-col">
       <AgentsBreadcrumb />
       {inWorktree ? null : (
-        <div className="flex flex-none items-center gap-1 border-b border-loom-border px-4 py-1.5">
+        <div className="flex flex-none items-center gap-1 border-b border-devdeck-border px-4 py-1.5">
           {TABS.map((tab) => (
             <button
               key={tab.to}
@@ -44,7 +44,7 @@ function ProjectLayout() {
               onClick={() => navigate({ to: tab.to, params: { wsId, projectId } })}
               className={cn(
                 'cursor-pointer rounded-md px-2.5 py-1 font-mono text-[11.5px] transition-colors',
-                tab.match(pathname) ? 'bg-loom-popover text-loom-fg' : 'text-loom-dim hover:text-loom-fg-2',
+                tab.match(pathname) ? 'bg-devdeck-popover text-devdeck-fg' : 'text-devdeck-dim hover:text-devdeck-fg-2',
               )}
             >
               {tab.label}

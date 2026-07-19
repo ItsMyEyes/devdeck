@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 func TestProjectListBranchesReturnsRealBranches(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // cloneTimeout is generous compared to requestTimeout (used for quick reads

@@ -162,7 +162,7 @@ function createBrowserTileState(machineId: string | null = null): BrowserTileSta
  * sidebar and the toast relay. Domain mutations happen in components via the
  * react-query hooks in src/features/data/queries.ts.
  */
-interface LoomState {
+interface DevDeckState {
   // ---- transient UI ----
   sidebarOpen: boolean
   wsMenuOpen: boolean
@@ -354,7 +354,7 @@ function browsePathSegments(path: string | undefined) {
     .filter(Boolean)
 }
 
-export const useLoomStore = create<LoomState>()(
+export const useDevDeckStore = create<DevDeckState>()(
   persist(
     immer((set) => ({
       sidebarOpen: false,
@@ -657,7 +657,7 @@ export const useLoomStore = create<LoomState>()(
       setRenameSSHGroupValue: (value) => set((s) => void (s.renameSSHGroup.value = value)),
     })),
     {
-      name: 'loom-ui-v2',
+      name: 'devdeck-ui-v2',
       version: 3,
       // Persist only harmless UI preferences; no domain data ever touches
       // localStorage now that the backend is the source of truth.
@@ -684,7 +684,7 @@ export const useLoomStore = create<LoomState>()(
           worktreeLayouts: old.worktreeLayouts ?? {},
           railExpanded: old.railExpanded ?? false,
           workspaceTileLayouts: {},
-        } as LoomState
+        } as DevDeckState
       },
     },
   ),

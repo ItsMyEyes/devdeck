@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 func TestFsListDirReturnsVisibleFoldersThenFiles(t *testing.T) {

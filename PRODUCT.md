@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Loom is for one operator managing many company/client coding-agent workspaces. They move between projects, git worktrees, terminals, browser panes, SSH machines, and agent task state while staying oriented across parallel work.
+DevDeck is for one operator managing many company/client coding-agent workspaces. They move between projects, git worktrees, terminals, browser panes, SSH machines, and agent task state while staying oriented across parallel work.
 
 ## Product Purpose
 
-Loom is a multi-project control room for coding agents: it keeps workspaces, worktrees, terminals, browser tiles, machines, and agent surfaces visible and actionable from one app. Success means the operator can split, switch, monitor, and recover work without losing context.
+DevDeck is a multi-project control room for coding agents: it keeps workspaces, worktrees, terminals, browser tiles, machines, and agent surfaces visible and actionable from one app. Success means the operator can split, switch, monitor, and recover work without losing context.
 
 ## Brand Personality
 

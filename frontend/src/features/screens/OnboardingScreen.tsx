@@ -1,17 +1,17 @@
 import { Button } from '@/components/ui/button'
-import { LoomLogo } from '@/features/branding/LoomLogo'
+import { DevDeckLogo } from '@/features/branding/DevDeckLogo'
 import { NewWorkspaceDialog } from '@/features/overlays/NewWorkspaceDialog'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 /** Shown when there are no workspaces at all (fresh / everything deleted). */
 export function OnboardingScreen() {
-  const openNewWorkspace = useLoomStore((s) => s.openNewWorkspace)
+  const openNewWorkspace = useDevDeckStore((s) => s.openNewWorkspace)
 
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center gap-[18px] bg-loom-bg p-6 text-center text-loom-fg">
-      <LoomLogo size={44} gap={4} radius={5} />
-      <div className="text-[22px] font-semibold tracking-[-0.02em]">Welcome to loom</div>
-      <div className="max-w-[440px] text-[13.5px] leading-relaxed text-loom-muted">
+    <div className="flex h-screen w-full flex-col items-center justify-center gap-[18px] bg-devdeck-bg p-6 text-center text-devdeck-fg">
+      <DevDeckLogo size={44} radius={9} />
+      <div className="text-[22px] font-semibold tracking-[-0.02em]">Welcome to devdeck</div>
+      <div className="max-w-[440px] text-[13.5px] leading-relaxed text-devdeck-muted">
         Run every company you operate from one place — coding agents, news, todos and invoices, organized per
         workspace. Create a workspace for each company you manage.
       </div>

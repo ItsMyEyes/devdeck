@@ -8,18 +8,18 @@ import { MarkdownPreview } from './MarkdownPreview'
 
 function CommentBubble({ comment, onDelete, deleting }: { comment: IssueComment; onDelete: () => void; deleting: boolean }) {
   return (
-    <div className="group flex flex-col gap-1.5 rounded-lg border border-loom-border bg-loom-card px-3 py-2.5">
+    <div className="group flex flex-col gap-1.5 rounded-lg border border-devdeck-border bg-devdeck-card px-3 py-2.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-medium text-loom-fg-2">{comment.author}</span>
-          <span className="text-[10.5px] text-loom-dim">{fmtTimeAgo(comment.createdAt)}</span>
+          <span className="text-[12px] font-medium text-devdeck-fg-2">{comment.author}</span>
+          <span className="text-[10.5px] text-devdeck-dim">{fmtTimeAgo(comment.createdAt)}</span>
         </div>
         <button
           type="button"
           onClick={onDelete}
           disabled={deleting}
           aria-label="Delete comment"
-          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-md text-loom-dim opacity-0 transition-opacity hover:bg-loom-red-tint-strong hover:text-loom-red-soft focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
+          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-md text-devdeck-dim opacity-0 transition-opacity hover:bg-devdeck-red-tint-strong hover:text-devdeck-red-soft focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
         >
           {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
         </button>
@@ -59,7 +59,7 @@ export function CommentThread({
       />
 
       {replies.length > 0 ? (
-        <div className="ml-4 flex flex-col gap-2 border-l border-loom-border pl-3.5">
+        <div className="ml-4 flex flex-col gap-2 border-l border-devdeck-border pl-3.5">
           {replies.map((reply) => (
             <CommentBubble
               key={reply.id}
@@ -84,7 +84,7 @@ export function CommentThread({
           <button
             type="button"
             onClick={() => setReplying(true)}
-            className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2"
+            className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
           >
             <Reply size={11} />
             Reply

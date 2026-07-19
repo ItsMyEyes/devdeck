@@ -7,7 +7,7 @@ import { routeTree } from './routeTree.gen'
 import { qk } from './features/data/keys'
 import './styles/globals.css'
 
-// Every mutation surfaces its failure through sonner, and the loom query cache is
+// Every mutation surfaces its failure through sonner, and the devdeck query cache is
 // re-fetched so the UI resyncs after a failed create/update/delete (e.g. a backend
 // restart or a 404 from a concurrent delete) instead of staying silently stale.
 const queryClient = new QueryClient({

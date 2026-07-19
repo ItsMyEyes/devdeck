@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"unicode/utf8"
 
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 const (

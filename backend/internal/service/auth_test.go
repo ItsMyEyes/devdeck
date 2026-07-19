@@ -8,7 +8,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 func newTestAuthService(t *testing.T) *AuthService {
@@ -386,8 +386,8 @@ func TestKeySessionCreatesDesktopOperatorOnFirstRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KeySession: %v", err)
 	}
-	if user.Email != "operator@loom.desktop" {
-		t.Fatalf("email = %q, want operator@loom.desktop", user.Email)
+	if user.Email != "operator@devdeck.desktop" {
+		t.Fatalf("email = %q, want operator@devdeck.desktop", user.Email)
 	}
 	got, err := svc.CurrentUser(token)
 	if err != nil || got.ID != user.ID {

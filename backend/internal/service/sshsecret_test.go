@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 func newTestSSHSecretService(t *testing.T) (*SSHSecretService, *store.Store) {

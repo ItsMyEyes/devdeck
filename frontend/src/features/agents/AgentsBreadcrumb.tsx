@@ -5,15 +5,15 @@ import { worktreeLabel } from '@/lib/worktreeLabel'
 import { WorktreeGlyph } from './WorktreeGlyph'
 import { useScope } from '@/features/useScope'
 import { useWorkspace } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function AgentsBreadcrumb() {
   const navigate = useNavigate()
   const { wsId, projectId, wtId } = useScope()
   const ws = useWorkspace(wsId).data
-  const toggleWsMenu = useLoomStore((s) => s.toggleWsMenu)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const openEdit = useLoomStore((s) => s.openEdit)
+  const toggleWsMenu = useDevDeckStore((s) => s.toggleWsMenu)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const openEdit = useDevDeckStore((s) => s.openEdit)
 
   const project = ws?.projects.find((p) => p.id === projectId) ?? null
   const worktree = project?.worktrees.find((w) => w.id === wtId) ?? null
@@ -26,35 +26,35 @@ export function AgentsBreadcrumb() {
   }
 
   return (
-    <div className="flex min-h-12 flex-none flex-wrap items-center gap-x-[9px] gap-y-1.5 border-b border-loom-border px-4 py-2.5">
+    <div className="flex min-h-12 flex-none flex-wrap items-center gap-x-[9px] gap-y-1.5 border-b border-devdeck-border px-4 py-2.5">
       <button
         type="button"
         onClick={openWorkspaceMenu}
-        className="cursor-pointer whitespace-nowrap font-mono text-[11.5px] text-loom-muted-2 hover:text-loom-fg-2"
+        className="cursor-pointer whitespace-nowrap font-mono text-[11.5px] text-devdeck-muted-2 hover:text-devdeck-fg-2"
       >
         {ws?.name ?? '—'}
       </button>
-      <span className="text-loom-dim-3">/</span>
+      <span className="text-devdeck-dim-3">/</span>
       <button
         type="button"
         onClick={() => project && wsId && navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId: project.id } })}
-        className="cursor-pointer whitespace-nowrap text-[13px] font-semibold text-loom-fg-2"
+        className="cursor-pointer whitespace-nowrap text-[13px] font-semibold text-devdeck-fg-2"
       >
         {project?.name ?? '—'}
       </button>
-      {project && <span className="whitespace-nowrap font-mono text-[11px] text-loom-dim-2">{project.path}</span>}
+      {project && <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-dim-2">{project.path}</span>}
 
       {worktree ? (
         <>
-          <span className="text-loom-dim-3">/</span>
+          <span className="text-devdeck-dim-3">/</span>
           <WorktreeGlyph root={worktree.root} size={12} />
-          <span className="max-w-[200px] truncate whitespace-nowrap font-mono text-[12px] text-loom-fg-2">
+          <span className="max-w-[200px] truncate whitespace-nowrap font-mono text-[12px] text-devdeck-fg-2">
             {worktreeLabel(project ?? undefined, worktree)}
           </span>
         </>
       ) : (
         project && (
-          <span className="whitespace-nowrap font-mono text-[11px] text-loom-dim">
+          <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-dim">
             · {project.worktrees.length} worktrees
           </span>
         )

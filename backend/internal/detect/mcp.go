@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const mcpCommandTimeout = 20 * time.Second

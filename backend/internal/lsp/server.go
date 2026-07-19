@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"strings"
 
-	"loom/backend/internal/detect"
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/detect"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/port"
 
 	"nhooyr.io/websocket"
 )
@@ -255,8 +255,8 @@ type controlMessage struct {
 
 func writeControl(ctx context.Context, conn *websocket.Conn, message controlMessage) error {
 	payload, err := json.Marshal(struct {
-		LoomLSP controlMessage `json:"loomLsp"`
-	}{LoomLSP: message})
+		DevDeckLSP controlMessage `json:"devdeckLsp"`
+	}{DevDeckLSP: message})
 	if err != nil {
 		return err
 	}

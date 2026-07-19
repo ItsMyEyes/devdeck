@@ -29,11 +29,11 @@ func TestHandleWSRunsInteractiveShell(t *testing.T) {
 	}
 	t.Cleanup(func() { conn.CloseNow() })
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"t":"i","d":"LOOM_SSH_ECHO_OK"}`)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"t":"i","d":"DEVDECK_SSH_ECHO_OK"}`)); err != nil {
 		t.Fatalf("write stdin frame: %v", err)
 	}
 	var output []byte
-	for !bytes.Contains(output, []byte("LOOM_SSH_ECHO_OK")) {
+	for !bytes.Contains(output, []byte("DEVDECK_SSH_ECHO_OK")) {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
 			t.Fatalf("read ssh output (got %q so far): %v", output, err)

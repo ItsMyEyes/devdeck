@@ -73,11 +73,11 @@ All data access goes through `port.Store` (defined in `backend/internal/port/sto
   `?key=` is rejected with 401; keys must not otherwise travel in URLs.
 - `--role hub` (dual auth): the existing session cookie continues to work
   unchanged; `Authorization: Bearer <hubKey>` is accepted as an alternate
-  credential when `--key`/`LOOM_KEY` is configured. An empty configured hub
+  credential when `--key`/`DEVDECK_KEY` is configured. An empty configured hub
   key never matches any bearer token (cookie-only behavior is preserved).
 - `POST /api/auth/key-session` (hub with `--key` only): exchanges
-  `Authorization: Bearer <hub key>` for a regular `loom_session` cookie tied
-  to the auto-created `operator@loom.desktop` account. Desktop (Tauri)
+  `Authorization: Bearer <hub key>` for a regular `devdeck_session` cookie tied
+  to the auto-created `operator@devdeck.desktop` account. Desktop (Tauri)
   bootstrap only — the SPA calls it once at startup when launched with
   `?key=`. Returns the user JSON; 401 on a wrong/absent key.
 - `--secure-cookies=false` drops the `Secure` attribute on auth cookies for
@@ -182,7 +182,7 @@ same types. When adding a field:
 Use the `@/*` alias for all imports from `src/`:
 
 ```ts
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Terminal } from '@/features/terminal/Terminal'
 ```
 

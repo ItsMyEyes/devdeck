@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 // IssueHandler handles issue CRUD endpoints.

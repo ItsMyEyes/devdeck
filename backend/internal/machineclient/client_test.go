@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 func TestCheckHealthOnline(t *testing.T) {

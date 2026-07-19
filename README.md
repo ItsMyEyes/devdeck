@@ -1,8 +1,8 @@
-# Loom
+# DevDeck
 
 > One operator, many companies. A multi-project dashboard for coding agents — git worktrees + real terminals, in the browser.
 
-Loom lets a single operator run several codebases across several client workspaces from one dashboard: spin up a git worktree, attach a coding agent to it in a real PTY terminal, edit files with LSP-backed intelligence, review the diff, and track the work as kanban issues — without leaving the browser. It also handles the business side of running client work: todos, invoices (with recurring billing and finance reporting), and a news feed.
+DevDeck lets a single operator run several codebases across several client workspaces from one dashboard: spin up a git worktree, attach a coding agent to it in a real PTY terminal, edit files with LSP-backed intelligence, review the diff, and track the work as kanban issues — without leaving the browser. It also handles the business side of running client work: todos, invoices (with recurring billing and finance reporting), and a news feed.
 
 New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from `git clone` to your first agent worktree.
 

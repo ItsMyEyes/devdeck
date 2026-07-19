@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 
 	"nhooyr.io/websocket"
 )
@@ -76,7 +76,7 @@ func TestResolveWorktreeRoot(t *testing.T) {
 }
 
 func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
-	t.Setenv("LOOM_LSP_HELPER", "1")
+	t.Setenv("DEVDECK_LSP_HELPER", "1")
 	original := languageServers["go"]
 	languageServers["go"] = serverSpec{
 		binary: os.Args[0],
@@ -121,13 +121,13 @@ func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
 		t.Fatalf("read ready control message: %v", err)
 	}
 	var ready struct {
-		LoomLSP controlMessage `json:"loomLsp"`
+		DevDeckLSP controlMessage `json:"devdeckLsp"`
 	}
 	if err := json.Unmarshal(readyPayload, &ready); err != nil {
 		t.Fatalf("decode ready control message: %v", err)
 	}
-	if ready.LoomLSP.Type != "ready" || ready.LoomLSP.RootURI == "" {
-		t.Fatalf("ready control message = %+v", ready.LoomLSP)
+	if ready.DevDeckLSP.Type != "ready" || ready.DevDeckLSP.RootURI == "" {
+		t.Fatalf("ready control message = %+v", ready.DevDeckLSP)
 	}
 
 	request := []byte(`{"jsonrpc":"2.0","id":7,"method":"initialize","params":{}}`)
@@ -151,7 +151,7 @@ func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
 }
 
 func TestLSPHelperProcess(t *testing.T) {
-	if os.Getenv("LOOM_LSP_HELPER") != "1" {
+	if os.Getenv("DEVDECK_LSP_HELPER") != "1" {
 		return
 	}
 	payload, err := readFrame(bufio.NewReader(os.Stdin))

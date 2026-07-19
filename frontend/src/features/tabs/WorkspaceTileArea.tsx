@@ -9,7 +9,7 @@ import { useSSHConnections, useWorkspace } from '@/features/data/queries'
 import { SSHShellPane } from '@/features/ssh/SSHShellPane'
 import { STATE } from '@/lib/constants'
 import { worktreeLabel } from '@/lib/worktreeLabel'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { NewTabDialog } from './NewTabDialog'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
 import { createDefaultTileLayout, findTileLeaf, findTileTab, firstLeafId, focusTileLeaf, selectTileTab } from './tileTree'
@@ -31,14 +31,14 @@ interface WorkspaceTileAreaProps {
 export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAreaProps) {
   const navigate = useNavigate()
   const { projectId: currentProjectId } = useParams({ strict: false }) as { projectId?: string }
-  const layout = useLoomStore((s) => s.workspaceTileLayouts[wsId]) ?? createDefaultTileLayout()
-  const setWorkspaceTileLayout = useLoomStore((s) => s.setWorkspaceTileLayout)
-  const closeWorktreeTab = useLoomStore((s) => s.closeWorktreeTab)
-  const pruneWorktreeTabs = useLoomStore((s) => s.pruneWorktreeTabs)
-  const removeBrowserTile = useLoomStore((s) => s.removeBrowserTile)
-  const openSpawn = useLoomStore((s) => s.openSpawn)
-  const openNewTab = useLoomStore((s) => s.openNewTab)
-  const openBrowserTab = useLoomStore((s) => s.openBrowserTab)
+  const layout = useDevDeckStore((s) => s.workspaceTileLayouts[wsId]) ?? createDefaultTileLayout()
+  const setWorkspaceTileLayout = useDevDeckStore((s) => s.setWorkspaceTileLayout)
+  const closeWorktreeTab = useDevDeckStore((s) => s.closeWorktreeTab)
+  const pruneWorktreeTabs = useDevDeckStore((s) => s.pruneWorktreeTabs)
+  const removeBrowserTile = useDevDeckStore((s) => s.removeBrowserTile)
+  const openSpawn = useDevDeckStore((s) => s.openSpawn)
+  const openNewTab = useDevDeckStore((s) => s.openNewTab)
+  const openBrowserTab = useDevDeckStore((s) => s.openBrowserTab)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
   const sshConnections = useSSHConnections().data ?? []
@@ -106,7 +106,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   async function handleCloseTab(_leafId: string, tabId: string) {
     const tab = findTileTab(layout.root, tabId)
     if (tab?.kind === 'browser') {
-      const tile = useLoomStore.getState().browserTiles[tabId]
+      const tile = useDevDeckStore.getState().browserTiles[tabId]
       if (tile) {
         await Promise.all(
           tile.docs.filter((d) => d.url).map((d) => closeNativeBrowserTile(tabId, d.id)),
@@ -115,7 +115,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
       removeBrowserTile(tabId)
     }
     closeWorktreeTab(wsId, tabId)
-    const next = useLoomStore.getState().workspaceTileLayouts[wsId]
+    const next = useDevDeckStore.getState().workspaceTileLayouts[wsId]
     if (!next) return
     const leaf = findTileLeaf(next.root, next.focusedLeafId)
     const activeTab = leaf?.type === 'leaf' ? leaf.tabs.find((t) => t.id === leaf.activeTabId) : undefined
@@ -151,7 +151,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   }
 
   function resolveBrowserTab(tab: BrowserTileTab) {
-    const tile = useLoomStore.getState().browserTiles[tab.id]
+    const tile = useDevDeckStore.getState().browserTiles[tab.id]
     const doc = tile?.docs.find((d) => d.id === tile.activeDocId)
     return { label: doc?.title ?? 'Web' }
   }

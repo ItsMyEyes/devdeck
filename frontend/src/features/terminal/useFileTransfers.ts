@@ -7,7 +7,7 @@ import {
 } from '@/lib/machineApi'
 import { downloadSSHZipWithProgress, uploadSSHFileWithProgress } from '@/lib/sshFileApi'
 import { qk } from '@/features/data/keys'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { FilesTarget } from './filesTarget'
 
 const UPLOAD_CONCURRENCY = 3
@@ -16,9 +16,9 @@ const UPLOAD_CONCURRENCY = 3
  *  calls and cache-invalidation key are the only things that differ. */
 export function useFileTransfers(target: FilesTarget) {
   const queryClient = useQueryClient()
-  const startTransfer = useLoomStore((s) => s.startTransfer)
-  const updateTransferProgress = useLoomStore((s) => s.updateTransferProgress)
-  const finishTransfer = useLoomStore((s) => s.finishTransfer)
+  const startTransfer = useDevDeckStore((s) => s.startTransfer)
+  const updateTransferProgress = useDevDeckStore((s) => s.updateTransferProgress)
+  const finishTransfer = useDevDeckStore((s) => s.finishTransfer)
   const [uploading, setUploading] = useState(false)
   const [zipping, setZipping] = useState(false)
 

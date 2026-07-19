@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Loom** — one operator, many companies. Multi-project dashboard for coding agents
+**DevDeck** — one operator, many companies. Multi-project dashboard for coding agents
 (git worktrees + terminals). Go backend (SQLite + WebSocket PTY) + React 19 SPA
 (Vite 8, TanStack Router, @base-ui/react, Tailwind v4, zustand, xterm.js).
 
@@ -32,7 +32,7 @@ Subagents inherit only a snapshot of CLAUDE.md + always-on rules; they do NOT ge
 the detail files, files you read, or mid-session edits. So:
 - Brief each subagent explicitly — name the detail file it must read.
 - Never edit these convergence files from parallel agents: `frontend/src/routeTree.gen.ts`,
-  `frontend/src/store/useLoomStore.ts`, `frontend/src/store/types.ts`,
+  `frontend/src/store/useDevDeckStore.ts`, `frontend/src/store/types.ts`,
   `backend/internal/domain/models.go`, `backend/cmd/server/main.go`,
   `backend/internal/port/store.go`. Serialize them, or do them in one integration step.
 - Isolate parallel file-mutating agents in git worktrees; run codegen once.

@@ -3,7 +3,7 @@ package store
 import (
 	"encoding/json"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // Seed wipes all tables and inserts the demo dataset.

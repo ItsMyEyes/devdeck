@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/store"
 )
 
 // maxAttachmentSize caps a single description-editor file upload.

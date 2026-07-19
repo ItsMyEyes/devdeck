@@ -3,8 +3,8 @@ package store
 import (
 	"database/sql"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const sshConnCols = `id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id, host_key_fingerprint`

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 const maxSSHUploadBytes = 256 << 20
@@ -136,7 +136,7 @@ func (h *SSHFileHandler) Archive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	tmp, err := os.CreateTemp("", "loom-ssh-selection-*.zip")
+	tmp, err := os.CreateTemp("", "devdeck-ssh-selection-*.zip")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "create archive failed")
 		return

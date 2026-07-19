@@ -3,7 +3,7 @@ package store
 import (
 	"database/sql"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // ── Workspaces (full nested tree) ──────────────────────────────────────────

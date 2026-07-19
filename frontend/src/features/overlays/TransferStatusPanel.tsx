@@ -1,13 +1,13 @@
 import { useEffect } from 'react'
 import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 const AUTO_DISMISS_MS = 4000
 
 export function TransferStatusPanel() {
-  const transfers = useLoomStore((s) => s.transfers)
-  const dismissTransfer = useLoomStore((s) => s.dismissTransfer)
+  const transfers = useDevDeckStore((s) => s.transfers)
+  const dismissTransfer = useDevDeckStore((s) => s.dismissTransfer)
 
   useEffect(() => {
     const timers = transfers
@@ -26,32 +26,32 @@ export function TransferStatusPanel() {
         return (
           <div
             key={t.id}
-            className="rounded-lg border border-loom-border-menu bg-loom-card p-3 text-loom-fg shadow-[0_12px_30px_rgba(0,0,0,0.45)]"
+            className="rounded-lg border border-devdeck-border-menu bg-devdeck-card p-3 text-devdeck-fg shadow-[0_12px_30px_rgba(0,0,0,0.45)]"
           >
             <div className="mb-1.5 flex items-center gap-2">
-              {t.status === 'active' && <Loader2 size={13} className="flex-none animate-spin text-loom-accent" />}
-              {t.status === 'done' && <CheckCircle2 size={13} className="flex-none text-loom-green-soft" />}
-              {t.status === 'error' && <XCircle size={13} className="flex-none text-loom-red-soft" />}
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-loom-fg-2">
+              {t.status === 'active' && <Loader2 size={13} className="flex-none animate-spin text-devdeck-accent" />}
+              {t.status === 'done' && <CheckCircle2 size={13} className="flex-none text-devdeck-green-soft" />}
+              {t.status === 'error' && <XCircle size={13} className="flex-none text-devdeck-red-soft" />}
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-devdeck-fg-2">
                 {t.kind === 'upload' ? 'Uploading to' : 'Downloading'} {t.label}
               </span>
               {t.status !== 'active' && (
                 <button
                   type="button"
                   onClick={() => dismissTransfer(t.id)}
-                  className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg"
+                  className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
                 >
                   <X size={11} />
                 </button>
               )}
             </div>
-            <div className="h-1 w-full overflow-hidden rounded-full bg-loom-border-strong">
+            <div className="h-1 w-full overflow-hidden rounded-full bg-devdeck-border-strong">
               <div
-                className={cn('h-full rounded-full transition-[width]', t.status === 'error' ? 'bg-loom-red-soft' : 'bg-loom-accent')}
+                className={cn('h-full rounded-full transition-[width]', t.status === 'error' ? 'bg-devdeck-red-soft' : 'bg-devdeck-accent')}
                 style={{ width: `${percent}%` }}
               />
             </div>
-            <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-loom-dim">
+            <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-devdeck-dim">
               <span>
                 {t.completedFiles}/{t.totalFiles} file{t.totalFiles === 1 ? '' : 's'}
               </span>

@@ -1,9 +1,9 @@
-# loom
+# devdeck
 
 > one operator · many companies
 
 A multi-project dashboard for running coding agents across git worktrees, with a
-real terminal per worktree. Built from the **Loom v2** design.
+real terminal per worktree. Built from the **DevDeck v2** design.
 
 This is the **core** build: the agents dashboard (workspaces → projects →
 worktrees), the worktree cards, and the expanded **xterm.js** terminal, plus the
@@ -70,9 +70,9 @@ npm run build:api      # production Go binary with embedded frontend
 
 - Serves `/api/*` (proxied through Vite in dev; set `VITE_API_BASE` to point
   elsewhere).
-- Listen address from `-addr` flag / `LOOM_ADDR` env (default
-  `127.0.0.1:8989`); SQLite path from `-db` flag / `LOOM_DB` env (default
-  `data/loom.db` beside the portable executable).
+- Listen address from `-addr` flag / `DEVDECK_ADDR` env (default
+  `127.0.0.1:8989`); SQLite path from `-db` flag / `DEVDECK_DB` env (default
+  `data/devdeck.db` beside the portable executable).
 - **The database starts EMPTY** — there is no auto-seed. On first run the app
   shows empty states everywhere.
 - Load the demo dataset (two workspaces with projects, worktrees, news, todos

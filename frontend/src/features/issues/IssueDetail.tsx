@@ -25,7 +25,7 @@ const PRI_OPTIONS = (Object.keys(PRI) as Priority[]).map((p) => ({ value: p, lab
 function PropRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="w-[68px] flex-none font-mono text-[11px] text-loom-dim">{label}</span>
+      <span className="w-[68px] flex-none font-mono text-[11px] text-devdeck-dim">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">{children}</div>
     </div>
   )
@@ -34,7 +34,7 @@ function PropRow({ label, children }: { label: string; children: ReactNode }) {
 function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-2.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-loom-dim-2">
+      <div className="mb-2.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
         {title}
       </div>
       <div className="flex flex-col gap-2">{children}</div>
@@ -83,17 +83,17 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-11 flex-none items-center gap-1 border-b border-loom-border px-3">
+      <div className="flex h-11 flex-none items-center gap-1 border-b border-devdeck-border px-3">
         <button
           type="button"
           onClick={goBack}
           aria-label="Back to issues"
-          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[11.5px] text-loom-muted-2 hover:bg-loom-hover-wash hover:text-loom-fg-2"
+          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[11.5px] text-devdeck-muted-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
         >
           <ChevronLeft size={14} />
           Issues
         </button>
-        <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-loom-dim">{issue.title}</span>
+        <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-devdeck-dim">{issue.title}</span>
         <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleteIssue.isPending}>
           <Trash2 size={13} />
           Delete
@@ -108,7 +108,7 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
               onChange={(e) => setTitle(e.target.value)}
               onBlur={saveTitle}
               placeholder="Issue title…"
-              className="h-auto w-full border-none bg-transparent px-0 py-0 text-2xl font-bold leading-snug tracking-tight text-loom-fg focus-visible:ring-0"
+              className="h-auto w-full border-none bg-transparent px-0 py-0 text-2xl font-bold leading-snug tracking-tight text-devdeck-fg focus-visible:ring-0"
             />
             <MarkdownEditor
               value={description}
@@ -121,7 +121,7 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
             <ActivitySection issueId={issue.id} />
           </div>
 
-          <div className="w-full flex-none border-t border-loom-border pt-6 md:w-64 md:border-l md:border-t-0 md:pl-8 md:pt-0">
+          <div className="w-full flex-none border-t border-devdeck-border pt-6 md:w-64 md:border-l md:border-t-0 md:pl-8 md:pt-0">
             <div className="flex flex-col gap-6">
               <SidebarSection title="Properties">
                 <PropRow label="Status">
@@ -154,10 +154,10 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
 
               <SidebarSection title="Details">
                 <PropRow label="Created">
-                  <span className="text-[12px] text-loom-muted">{fmtDate(issue.createdAt)}</span>
+                  <span className="text-[12px] text-devdeck-muted">{fmtDate(issue.createdAt)}</span>
                 </PropRow>
                 <PropRow label="Updated">
-                  <span className="text-[12px] text-loom-muted">{fmtDate(issue.updatedAt)}</span>
+                  <span className="text-[12px] text-devdeck-muted">{fmtDate(issue.updatedAt)}</span>
                 </PropRow>
               </SidebarSection>
             </div>

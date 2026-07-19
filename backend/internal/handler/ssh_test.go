@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 func newTestSSHHandler(t *testing.T) *SSHHandler {

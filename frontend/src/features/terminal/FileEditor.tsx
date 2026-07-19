@@ -103,17 +103,17 @@ export function FileEditor({
   return (
     <div
       className={cn(
-        'min-h-0 flex-1 flex-col bg-loom-terminal',
+        'min-h-0 flex-1 flex-col bg-devdeck-terminal',
         active ? 'flex' : 'hidden',
       )}
     >
-      <div className="flex h-10 flex-none items-center gap-2 border-b border-loom-border bg-loom-surface px-3">
+      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface px-3">
         <MaterialFileIcon name={basename(path)} size={16} />
-        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-loom-muted">
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-muted">
           {path}
         </span>
         {dirty ? (
-          <span className="font-mono text-[9.5px] text-loom-yellow">
+          <span className="font-mono text-[9.5px] text-devdeck-yellow">
             Modified
           </span>
         ) : null}
@@ -122,7 +122,7 @@ export function FileEditor({
           onClick={() => file.data && setDraft(file.data.content)}
           disabled={!dirty || writeFile.isPending}
           title="Revert changes"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg disabled:cursor-default disabled:opacity-30"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-30"
         >
           <RotateCcw size={13} />
         </button>
@@ -131,7 +131,7 @@ export function FileEditor({
           onClick={save}
           disabled={!dirty || writeFile.isPending}
           title="Save file (Ctrl+S)"
-          className="flex h-7 items-center gap-1.5 rounded border border-loom-border-strong bg-loom-elevated px-2.5 text-[11px] text-loom-fg-2 hover:border-loom-border-accent hover:text-loom-accent-soft disabled:cursor-default disabled:opacity-40"
+          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-elevated px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent-soft disabled:cursor-default disabled:opacity-40"
         >
           {writeFile.isPending ? (
             <Loader2 size={12} className="animate-spin" />
@@ -145,7 +145,7 @@ export function FileEditor({
           onClick={remove}
           disabled={deleteFile.isPending}
           title="Delete file"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-red-tint-hover hover:text-loom-red-soft disabled:cursor-wait disabled:opacity-50"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft disabled:cursor-wait disabled:opacity-50"
         >
           {deleteFile.isPending ? (
             <Loader2 size={12} className="animate-spin" />
@@ -161,8 +161,8 @@ export function FileEditor({
         </div>
       ) : file.error ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <FileWarning size={22} className="text-loom-yellow" />
-          <span className="max-w-lg font-mono text-[11px] leading-relaxed text-loom-muted">
+          <FileWarning size={22} className="text-devdeck-yellow" />
+          <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
             {file.error instanceof ApiError
               ? file.error.message
               : 'Could not open this file'}
@@ -170,7 +170,7 @@ export function FileEditor({
           <button
             type="button"
             onClick={() => file.refetch()}
-            className="rounded border border-loom-border-strong px-3 py-1.5 text-[11px] text-loom-fg-2 hover:bg-loom-hover-wash"
+            className="rounded border border-devdeck-border-strong px-3 py-1.5 text-[11px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash"
           >
             Retry
           </button>

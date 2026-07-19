@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // StaticRegistry implements port.AgentRegistry with built-in agent definitions.

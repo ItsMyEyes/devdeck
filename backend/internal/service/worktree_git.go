@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/port"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/port"
 )
 
 const maxCommitMessageLen = 4096

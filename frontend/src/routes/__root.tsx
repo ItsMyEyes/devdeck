@@ -32,9 +32,9 @@ function RootComponent() {
         position="bottom-center"
         toastOptions={{
           style: {
-            background: 'var(--loom-elevated)',
-            border: '1px solid var(--loom-border-accent)',
-            color: 'var(--loom-fg-2)',
+            background: 'var(--devdeck-elevated)',
+            border: '1px solid var(--devdeck-border-accent)',
+            color: 'var(--devdeck-fg-2)',
             fontSize: '12.5px',
             fontFamily: 'var(--font-sans)',
           },

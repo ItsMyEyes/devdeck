@@ -14,7 +14,7 @@ import (
 )
 
 func TestReplayHelperProcess(t *testing.T) {
-	if os.Getenv("LOOM_TEST_REPLAY_HELPER") != "1" {
+	if os.Getenv("DEVDECK_TEST_REPLAY_HELPER") != "1" {
 		return
 	}
 	_, _ = os.Stdout.Write([]byte("replay-marker-7f3a"))
@@ -31,7 +31,7 @@ func TestAttachDeliversBannerAndBufferedReplay(t *testing.T) {
 	session := testSessionID(t)
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestReplayHelperProcess")
-	cmd.Env = append(os.Environ(), "LOOM_TEST_REPLAY_HELPER=1")
+	cmd.Env = append(os.Environ(), "DEVDECK_TEST_REPLAY_HELPER=1")
 	sess, err := activeRegistry.spawn(session, cmd, 80, 24)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)

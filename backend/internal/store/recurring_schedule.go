@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // daysInMonth returns the number of days in the given month of the given year.

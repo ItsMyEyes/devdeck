@@ -1,6 +1,6 @@
 # Compiled binaries
 /server
-/loom-api
+/devdeck-api
 *.exe
 *.test
 

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"loom/backend/internal/domain"
-	gitpkg "loom/backend/internal/git"
+	"devdeck/backend/internal/domain"
+	gitpkg "devdeck/backend/internal/git"
 )
 
 // FsHandler handles filesystem-browsing endpoints.

@@ -11,7 +11,7 @@ import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { cn } from '@/lib/utils'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 /** Matches only the worktree route, e.g. /w/abc/p/def/wt/ghi (the ExpandedTerminal screen). */
 const WORKSPACE_MODE_PATTERN = /^\/w\/[^/]+\/p\/[^/]+\/wt\/[^/]+/
@@ -41,7 +41,7 @@ export const Route = createFileRoute('/w/$wsId')({
 
 function WorkspaceLayout() {
   const { wsId } = Route.useParams()
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
   const pathname = useLocation({ select: (l) => l.pathname })
   const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
   const isTauri = useIsTauri()
@@ -67,14 +67,14 @@ function WorkspaceLayout() {
 
   if (workspaces.isPending) {
     return (
-      <div className="flex h-[var(--app-height)] w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-bg text-devdeck-fg">
         <DataLoading label="loading workspace…" />
       </div>
     )
   }
   if (workspaces.isError) {
     return (
-      <div className="flex h-[var(--app-height)] w-full flex-col bg-loom-bg text-loom-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-bg text-devdeck-fg">
         <DataError error={workspaces.error} onRetry={() => workspaces.refetch()} />
       </div>
     )
@@ -83,7 +83,7 @@ function WorkspaceLayout() {
   return (
     <div
       className={cn(
-        'flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-loom-bg text-loom-fg',
+        'flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-devdeck-bg text-devdeck-fg',
         // Reserves space for WorkspaceTileCanvas's top-left leaf strip,
         // which is `fixed` to the true viewport top (see
         // WorkspaceTileCanvas.tsx) so it visually merges with macOS's
@@ -100,7 +100,7 @@ function WorkspaceLayout() {
       {!workspaceMode && !isTauri && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar mobileDrawer={!workspaceMode && !isTauri} />
-        <section className="flex min-w-0 flex-1 flex-col bg-loom-bg">
+        <section className="flex min-w-0 flex-1 flex-col bg-devdeck-bg">
           {isTauri ? (
             // Always mounted so the pinned strip never disappears; only its
             // tiling body is suppressed off the tile-owned routes

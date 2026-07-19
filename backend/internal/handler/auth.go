@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 const (
-	sessionCookieName = "loom_session"
-	pendingCookieName = "loom_pending"
+	sessionCookieName = "devdeck_session"
+	pendingCookieName = "devdeck_pending"
 )
 
 // AuthHandler handles registration, login, TOTP enrollment/verification,

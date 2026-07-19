@@ -6,7 +6,7 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { useMachines, useMachinesHealth } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Project } from '@/store/types'
 
 interface NewTabDialogProps {
@@ -22,9 +22,9 @@ interface NewTabDialogProps {
  *  registered machine so Create isn't blocked on an empty selection the
  *  moment machines are available. */
 export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser, onCreateShell }: NewTabDialogProps) {
-  const newTab = useLoomStore((s) => s.newTab)
-  const closeNewTab = useLoomStore((s) => s.closeNewTab)
-  const setNewTab = useLoomStore((s) => s.setNewTab)
+  const newTab = useDevDeckStore((s) => s.newTab)
+  const closeNewTab = useDevDeckStore((s) => s.closeNewTab)
+  const setNewTab = useDevDeckStore((s) => s.setNewTab)
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
   const open = newTab.open && newTab.wsId === wsId
@@ -56,7 +56,7 @@ export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser
       <DialogTitle>New tab</DialogTitle>
       <DialogDescription className="mb-4">Choose what to open and which machine to run it on.</DialogDescription>
 
-      <div className="mb-4 flex gap-1.5 rounded-lg border border-loom-border-strong bg-loom-bg p-1">
+      <div className="mb-4 flex gap-1.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-1">
         <KindTab active={newTab.kind === 'browser'} onClick={() => setNewTab({ kind: 'browser' })}>
           <Globe size={13} />
           Browser
@@ -70,7 +70,7 @@ export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser
       <div className="mb-5">
         <Label>Machine</Label>
         {machines.length === 0 ? (
-          <p className="mt-1 font-mono text-[11px] text-loom-dim">Add a machine first.</p>
+          <p className="mt-1 font-mono text-[11px] text-devdeck-dim">Add a machine first.</p>
         ) : (
           <Select
             value={newTab.machineId}
@@ -80,7 +80,7 @@ export function NewTabDialog({ wsId, projects, currentProjectId, onCreateBrowser
           />
         )}
         {newTab.kind === 'shell' && newTab.machineId && !shellProject ? (
-          <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">No project on this machine yet.</p>
+          <p className="mt-1.5 font-mono text-[11px] text-devdeck-red-soft">No project on this machine yet.</p>
         ) : null}
       </div>
 
@@ -102,7 +102,7 @@ function KindTab({ active, onClick, children }: { active: boolean; onClick: () =
       onClick={onClick}
       className={cn(
         'flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-[12px] font-medium transition-colors',
-        active ? 'bg-primary text-primary-foreground' : 'bg-transparent text-loom-muted hover:text-loom-fg',
+        active ? 'bg-primary text-primary-foreground' : 'bg-transparent text-devdeck-muted hover:text-devdeck-fg',
       )}
     >
       {children}

@@ -63,7 +63,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
         meta={todos.length ? `${todos.length - doneCount} active · ${doneCount} done` : undefined}
         actions={
           <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-0.5 rounded-lg border border-loom-border-strong p-0.5">
+            <div className="flex items-center gap-0.5 rounded-lg border border-devdeck-border-strong p-0.5">
               {FILTERS.map((f) => (
                 <button
                   key={f}
@@ -71,8 +71,8 @@ export function TodosModule({ wsId }: { wsId: string }) {
                   className={cn(
                     'h-6 rounded-md px-2 font-mono text-[11px] capitalize transition-colors',
                     filter === f
-                      ? 'bg-loom-popover text-loom-fg'
-                      : 'text-loom-dim hover:text-loom-fg-2',
+                      ? 'bg-devdeck-popover text-devdeck-fg'
+                      : 'text-devdeck-dim hover:text-devdeck-fg-2',
                   )}
                 >
                   {f}
@@ -119,7 +119,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
       ) : (
         <div className="flex-1 overflow-auto p-4 pt-3">
           {visible.length === 0 ? (
-            <div className="py-10 text-center font-mono text-[12px] text-loom-dim">nothing here</div>
+            <div className="py-10 text-center font-mono text-[12px] text-devdeck-dim">nothing here</div>
           ) : (
             <div className="flex flex-col gap-1.5">
               {visible.map((t) => {
@@ -127,7 +127,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                 return (
                   <div
                     key={t.id}
-                    className="flex items-center gap-3 rounded-[11px] border border-loom-border-card bg-loom-card px-3 py-2.5"
+                    className="flex items-center gap-3 rounded-[11px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5"
                   >
                     <button
                       onClick={() => updateTodo.mutate({ id: t.id, patch: { done: !t.done } })}
@@ -135,8 +135,8 @@ export function TodosModule({ wsId }: { wsId: string }) {
                       className={cn(
                         'flex h-[17px] w-[17px] flex-none items-center justify-center rounded-[5px] border transition-colors',
                         t.done
-                          ? 'border-loom-accent bg-primary text-primary-foreground'
-                          : 'border-loom-border-strong text-transparent hover:border-loom-border-accent',
+                          ? 'border-devdeck-accent bg-primary text-primary-foreground'
+                          : 'border-devdeck-border-strong text-transparent hover:border-devdeck-border-accent',
                       )}
                     >
                       <Check size={11} strokeWidth={3} />
@@ -144,7 +144,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                     <span
                       className={cn(
                         'flex-1 text-[12.5px] leading-snug',
-                        t.done ? 'text-loom-dim line-through' : 'text-loom-fg',
+                        t.done ? 'text-devdeck-dim line-through' : 'text-devdeck-fg',
                       )}
                     >
                       {t.text}
@@ -153,7 +153,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                     <button
                       onClick={() => deleteTodo.mutate(t.id)}
                       aria-label="Delete task"
-                      className="flex-none cursor-pointer p-1 text-loom-muted-2 hover:text-loom-red-soft"
+                      className="flex-none cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
                     >
                       <Trash2 size={14} />
                     </button>

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 func newTestSvc(t *testing.T, kill func(string) error) (*WorktreeService, port.Store) {

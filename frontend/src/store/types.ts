@@ -1,4 +1,4 @@
-// Domain model for loom — mirrors the Loom v2 mockup's data shapes.
+// Domain model for devdeck — mirrors the DevDeck v2 mockup's data shapes.
 
 export type WorktreeState = 'running' | 'waiting' | 'idle' | 'stopped' | 'error'
 export type Priority = 'high' | 'normal' | 'low'
@@ -292,7 +292,7 @@ export interface FsEntry {
   git: boolean
 }
 
-/** The single Loom operator account. Never carries a password or TOTP secret. */
+/** The single DevDeck operator account. Never carries a password or TOTP secret. */
 export interface User {
   id: string
   email: string

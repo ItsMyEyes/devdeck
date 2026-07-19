@@ -27,16 +27,16 @@ export function AttachmentList({ issueId }: { issueId: string }) {
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-loom-dim-2">
+      <div className="flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
         <Paperclip size={11} />
         Attachments
-        {attachments && attachments.length > 0 ? <span className="text-loom-dim-3">{attachments.length}</span> : null}
+        {attachments && attachments.length > 0 ? <span className="text-devdeck-dim-3">{attachments.length}</span> : null}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={upload.isPending}
           aria-label="Upload attachment"
-          className="ml-0.5 flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 normal-case tracking-normal text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
+          className="ml-0.5 flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 normal-case tracking-normal text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2 disabled:opacity-50"
         >
           {upload.isPending ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
           Upload
@@ -59,7 +59,7 @@ export function AttachmentList({ issueId }: { issueId: string }) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex w-full cursor-pointer items-center justify-center rounded-lg border border-dashed border-loom-border py-4 text-[12px] text-loom-dim-2 transition-colors hover:border-loom-border-strong hover:text-loom-dim"
+          className="flex w-full cursor-pointer items-center justify-center rounded-lg border border-dashed border-devdeck-border py-4 text-[12px] text-devdeck-dim-2 transition-colors hover:border-devdeck-border-strong hover:text-devdeck-dim"
         >
           No attachments yet — click to upload
         </button>
@@ -81,30 +81,30 @@ function AttachmentCard({
   const isImage = attachment.mimeType.startsWith('image/')
 
   return (
-    <div className="group relative flex w-36 flex-none flex-col overflow-hidden rounded-lg border border-loom-border bg-loom-card transition-colors hover:border-loom-border-strong">
+    <div className="group relative flex w-36 flex-none flex-col overflow-hidden rounded-lg border border-devdeck-border bg-devdeck-card transition-colors hover:border-devdeck-border-strong">
       <a href={url} target="_blank" rel="noreferrer" className="block">
         {isImage ? (
-          <div className="aspect-square w-full overflow-hidden bg-loom-surface-2">
+          <div className="aspect-square w-full overflow-hidden bg-devdeck-surface-2">
             <img src={url} alt={attachment.filename} className="h-full w-full object-cover" loading="lazy" />
           </div>
         ) : (
-          <div className="flex aspect-square w-full items-center justify-center bg-loom-surface-2">
-            <FileText size={22} className="text-loom-dim" />
+          <div className="flex aspect-square w-full items-center justify-center bg-devdeck-surface-2">
+            <FileText size={22} className="text-devdeck-dim" />
           </div>
         )}
       </a>
       <div className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5">
-        <span className="truncate text-[11.5px] text-loom-fg-2" title={attachment.filename}>
+        <span className="truncate text-[11.5px] text-devdeck-fg-2" title={attachment.filename}>
           {attachment.filename}
         </span>
-        <span className="text-[10.5px] text-loom-dim">{fmtBytes(attachment.size)}</span>
+        <span className="text-[10.5px] text-devdeck-dim">{fmtBytes(attachment.size)}</span>
       </div>
       <button
         type="button"
         onClick={onDelete}
         disabled={deleting}
         aria-label={`Delete ${attachment.filename}`}
-        className="absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-loom-red-tint-strong hover:text-loom-red-soft focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
+        className="absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-devdeck-red-tint-strong hover:text-devdeck-red-soft focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
       >
         {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
       </button>

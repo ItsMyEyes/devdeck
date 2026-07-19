@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"loom/backend/internal/domain"
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/port"
 )
 
 // ProjectService wraps project operations with business logic.

@@ -7,18 +7,18 @@ import { Dialog, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { useCreateFsFolder, useFsList, useMachines } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function FolderBrowser() {
   const [creating, setCreating] = useState(false)
   const [folderName, setFolderName] = useState('')
   const [createError, setCreateError] = useState('')
-  const browse = useLoomStore((s) => s.browse)
-  const closeBrowse = useLoomStore((s) => s.closeBrowse)
-  const enterFolder = useLoomStore((s) => s.enterFolder)
-  const browseUp = useLoomStore((s) => s.browseUp)
-  const browseTo = useLoomStore((s) => s.browseTo)
-  const useFolder = useLoomStore((s) => s.useFolder)
+  const browse = useDevDeckStore((s) => s.browse)
+  const closeBrowse = useDevDeckStore((s) => s.closeBrowse)
+  const enterFolder = useDevDeckStore((s) => s.enterFolder)
+  const browseUp = useDevDeckStore((s) => s.browseUp)
+  const browseTo = useDevDeckStore((s) => s.browseTo)
+  const useFolder = useDevDeckStore((s) => s.useFolder)
 
   const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
   const machines = useMachines().data
@@ -69,7 +69,7 @@ export function FolderBrowser() {
   function renderContent() {
     if (!machine) {
       return (
-        <div className="flex h-[120px] items-center justify-center font-mono text-xs text-loom-dim-2">
+        <div className="flex h-[120px] items-center justify-center font-mono text-xs text-devdeck-dim-2">
           select a machine first
         </div>
       )
@@ -87,7 +87,7 @@ export function FolderBrowser() {
       const msg = error instanceof ApiError ? error.message : 'Failed to read directory'
       return (
         <div className="flex h-[120px] flex-col items-center justify-center gap-3 px-4">
-          <span className="text-center font-mono text-xs text-loom-dim-2">{msg}</span>
+          <span className="text-center font-mono text-xs text-devdeck-dim-2">{msg}</span>
           <Button variant="secondary" size="sm" onClick={() => refetch()}>
             Retry
           </Button>
@@ -101,9 +101,9 @@ export function FolderBrowser() {
           <button
             onClick={browseUp}
             type="button"
-            className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left font-mono text-[12.5px] text-loom-muted hover:bg-loom-hover-wash"
+            className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left font-mono text-[12.5px] text-devdeck-muted hover:bg-devdeck-hover-wash"
           >
-            <CornerLeftUp size={14} className="w-4 text-loom-dim" />
+            <CornerLeftUp size={14} className="w-4 text-devdeck-dim" />
             ..
           </button>
         )}
@@ -112,20 +112,20 @@ export function FolderBrowser() {
             key={f.name}
             onClick={() => enterFolder(f.name)}
             type="button"
-            className="flex h-[38px] w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left hover:bg-loom-hover-wash"
+            className="flex h-[38px] w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left hover:bg-devdeck-hover-wash"
           >
             <Folder size={15} className="w-4 text-[#e0b454]" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-loom-fg-2">{f.name}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-devdeck-fg-2">{f.name}</span>
             {f.git && (
-              <span className="rounded-[5px] border border-[#244029] bg-[#16221a] px-1.5 py-0.5 font-mono text-[9.5px] text-loom-green-soft">
+              <span className="rounded-[5px] border border-[#244029] bg-[#16221a] px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-green-soft">
                 git
               </span>
             )}
-            <ChevronRight size={13} className="text-loom-dim-3" />
+            <ChevronRight size={13} className="text-devdeck-dim-3" />
           </button>
         ))}
         {folders.length === 0 && (
-          <div className="flex h-[120px] items-center justify-center font-mono text-xs text-loom-dim-2">empty folder</div>
+          <div className="flex h-[120px] items-center justify-center font-mono text-xs text-devdeck-dim-2">empty folder</div>
         )}
       </>
     )
@@ -140,9 +140,9 @@ export function FolderBrowser() {
       className="flex h-[min(540px,86vh)] flex-col overflow-hidden !p-0"
     >
       {/* header */}
-      <div className="flex-none border-b border-loom-border px-[18px] pb-3 pt-[17px]">
+      <div className="flex-none border-b border-devdeck-border px-[18px] pb-3 pt-[17px]">
         <div className="mb-3 flex items-center gap-2.5">
-          <FolderTree size={16} className="text-loom-muted" />
+          <FolderTree size={16} className="text-devdeck-muted" />
           <DialogTitle className="text-[14.5px]">{title}</DialogTitle>
           <div className="flex-1" />
           {!creating && (
@@ -160,11 +160,11 @@ export function FolderBrowser() {
                 <button
                   onClick={() => browseTo(i)}
                   type="button"
-                  className={cn('cursor-pointer px-0.5 hover:text-loom-accent-soft', last ? 'text-loom-fg-2' : 'text-loom-muted-2')}
+                  className={cn('cursor-pointer px-0.5 hover:text-devdeck-accent-soft', last ? 'text-devdeck-fg-2' : 'text-devdeck-muted-2')}
                 >
                   {name}
                 </button>
-                {!last && <span className="text-loom-dim-3">/</span>}
+                {!last && <span className="text-devdeck-dim-3">/</span>}
               </span>
             )
           })}
@@ -197,7 +197,7 @@ export function FolderBrowser() {
                 <X size={13} />
               </Button>
             </div>
-            {createError && <div className="mt-1.5 font-mono text-[10.5px] text-loom-red-soft">{createError}</div>}
+            {createError && <div className="mt-1.5 font-mono text-[10.5px] text-devdeck-red-soft">{createError}</div>}
           </div>
         )}
       </div>
@@ -208,10 +208,10 @@ export function FolderBrowser() {
       </div>
 
       {/* footer */}
-      <div className="flex flex-none items-center gap-3 border-t border-loom-border bg-loom-surface px-[18px] py-3">
-        <div className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-loom-muted">
+      <div className="flex flex-none items-center gap-3 border-t border-devdeck-border bg-devdeck-surface px-[18px] py-3">
+        <div className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-muted">
           {pathLabel}
-          {currentGit && <span className="text-loom-green-soft"> · git repo</span>}
+          {currentGit && <span className="text-devdeck-green-soft"> · git repo</span>}
         </div>
         <Button variant="secondary" onClick={close}>
           Cancel

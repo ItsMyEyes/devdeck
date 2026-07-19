@@ -24,7 +24,7 @@ export function Tooltip({
         <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 70 }}>
           <BaseTooltip.Popup
             className={cn(
-              'max-w-[220px] rounded-md border border-loom-border-menu bg-loom-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-loom-fg-2',
+              'max-w-[220px] rounded-md border border-devdeck-border-menu bg-devdeck-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-devdeck-fg-2',
               'shadow-[0_12px_30px_rgba(0,0,0,0.5)] transition-all duration-150',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -45,7 +45,7 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
       <BaseTooltip.Trigger
         delay={150}
         render={<button type="button" aria-label="More info" />}
-        className={cn('inline-flex cursor-help text-loom-dim hover:text-loom-accent-soft', className)}
+        className={cn('inline-flex cursor-help text-devdeck-dim hover:text-devdeck-accent-soft', className)}
       >
         <Info size={12} />
       </BaseTooltip.Trigger>
@@ -53,7 +53,7 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
         <BaseTooltip.Positioner side="top" sideOffset={6} style={{ zIndex: 70 }}>
           <BaseTooltip.Popup
             className={cn(
-              'max-w-[220px] rounded-md border border-loom-border-menu bg-loom-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-loom-fg-2',
+              'max-w-[220px] rounded-md border border-devdeck-border-menu bg-devdeck-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-devdeck-fg-2',
               'shadow-[0_12px_30px_rgba(0,0,0,0.5)] transition-all duration-150',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',

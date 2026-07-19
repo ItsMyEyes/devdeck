@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"loom/backend/internal/domain"
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/port"
 )
 
 // WorktreeService wraps worktree operations with business logic.

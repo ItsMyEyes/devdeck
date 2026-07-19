@@ -4,15 +4,15 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCreateWorkspace } from '@/features/data/queries'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function NewWorkspaceDialog() {
   const navigate = useNavigate()
-  const nw = useLoomStore((s) => s.newWorkspace)
-  const setNewWorkspace = useLoomStore((s) => s.setNewWorkspace)
-  const closeNewWorkspace = useLoomStore((s) => s.closeNewWorkspace)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const showToast = useLoomStore((s) => s.showToast)
+  const nw = useDevDeckStore((s) => s.newWorkspace)
+  const setNewWorkspace = useDevDeckStore((s) => s.setNewWorkspace)
+  const closeNewWorkspace = useDevDeckStore((s) => s.closeNewWorkspace)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const createWorkspace = useCreateWorkspace()
 
   function submit() {
@@ -33,7 +33,7 @@ export function NewWorkspaceDialog() {
   return (
     <Dialog open={nw.open} onOpenChange={(o) => !o && closeNewWorkspace()} width={420}>
       <div className="mb-1 flex items-center gap-2.5">
-        <span className="h-[18px] w-[18px] rounded-md" style={{ background: 'var(--loom-accent-gradient)' }} />
+        <span className="h-[18px] w-[18px] rounded-md" style={{ background: 'var(--devdeck-accent-gradient)' }} />
         <DialogTitle>New workspace</DialogTitle>
       </div>
       <DialogDescription className="mb-[18px]">group related projects together</DialogDescription>

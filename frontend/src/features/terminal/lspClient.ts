@@ -58,7 +58,7 @@ interface RpcMessage {
   params?: unknown
   result?: unknown
   error?: { code?: number; message?: string }
-  loomLsp?: {
+  devdeckLsp?: {
     type: 'ready' | 'error'
     message?: string
     language?: string
@@ -351,7 +351,7 @@ export class LspClient {
     this.rootUri = rootUri.replace(/\/+$/, '')
     const result = (await this.requestNow('initialize', {
       processId: null,
-      clientInfo: { name: 'loom', version: '0.1.0' },
+      clientInfo: { name: 'devdeck', version: '0.1.0' },
       rootUri: this.rootUri,
       workspaceFolders: [{ uri: this.rootUri, name: 'worktree' }],
       capabilities: {
@@ -413,15 +413,15 @@ export class LspClient {
       return
     }
 
-    if (message.loomLsp) {
-      if (message.loomLsp.type === 'error') {
+    if (message.devdeckLsp) {
+      if (message.devdeckLsp.type === 'error') {
         this.rejectReady(
-          new Error(message.loomLsp.message ?? 'Language server unavailable'),
+          new Error(message.devdeckLsp.message ?? 'Language server unavailable'),
         )
         return
       }
-      if (message.loomLsp.type === 'ready' && message.loomLsp.rootUri) {
-        void this.initialize(message.loomLsp.rootUri).catch((error: unknown) => {
+      if (message.devdeckLsp.type === 'ready' && message.devdeckLsp.rootUri) {
+        void this.initialize(message.devdeckLsp.rootUri).catch((error: unknown) => {
           this.rejectReady(toError(error))
         })
       }

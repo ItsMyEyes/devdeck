@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 const userColumns = `id, email, password_hash, totp_secret_enc, totp_enabled, backup_code_hashes,

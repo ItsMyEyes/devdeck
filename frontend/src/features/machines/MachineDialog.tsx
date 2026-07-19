@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { parseConnectionString } from '@/features/machines/connectionString'
 import { useCreateMachine, useTailscaleStatus, useUpdateMachine } from '@/features/data/queries'
 import type { TailscaleHubStatus } from '@/lib/api'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 /** 32 random bytes as 64 lowercase hex chars — mirrors the desktop sidecar's generate_key(). */
 function generateRuntimeKey(): string {
@@ -18,7 +18,7 @@ function generateRuntimeKey(): string {
 
 function runtimeCommand(key: string, hubUrl: string, name: string): string {
   return [
-    `./loom.exe --role runtime --key ${key} --addr 0.0.0.0:9199 --db runtime.db --open=false \\`,
+    `./devdeck.exe --role runtime --key ${key} --addr 0.0.0.0:9199 --db runtime.db --open=false \\`,
     `  --hub-url ${hubUrl} --hub-key <your-hub-key> --public-url http://<hostname>:9199 --name ${name.trim() || '<name>'}`,
   ].join('\n')
 }
@@ -33,7 +33,7 @@ function tailscaleGuidance(reason: TailscaleHubStatus['reason']): {
     case 'not_installed':
       return {
         title: "Tailscale isn't installed on this machine",
-        body: 'Remote runtimes reach this hub over your tailnet. Install Tailscale here, then restart Loom.',
+        body: 'Remote runtimes reach this hub over your tailnet. Install Tailscale here, then restart DevDeck.',
         copyLabel: 'Copy Tailscale download link',
         copyValue: 'https://tailscale.com/download',
       }
@@ -45,17 +45,17 @@ function tailscaleGuidance(reason: TailscaleHubStatus['reason']): {
     case 'serve_disabled':
     default:
       return {
-        title: 'Restart Loom to expose this hub',
-        body: 'Tailscale looks ready, but this hub was started before it was set up. Restart Loom to pick it up.',
+        title: 'Restart DevDeck to expose this hub',
+        body: 'Tailscale looks ready, but this hub was started before it was set up. Restart DevDeck to pick it up.',
       }
   }
 }
 
 export function MachineDialog() {
-  const dialog = useLoomStore((s) => s.machineDialog)
-  const setDialog = useLoomStore((s) => s.setMachineDialog)
-  const close = useLoomStore((s) => s.closeMachineDialog)
-  const showToast = useLoomStore((s) => s.showToast)
+  const dialog = useDevDeckStore((s) => s.machineDialog)
+  const setDialog = useDevDeckStore((s) => s.setMachineDialog)
+  const close = useDevDeckStore((s) => s.closeMachineDialog)
+  const showToast = useDevDeckStore((s) => s.showToast)
   const updateMachine = useUpdateMachine()
   const createMachine = useCreateMachine()
 
@@ -134,7 +134,7 @@ export function MachineDialog() {
           <button
             type="button"
             onClick={() => setPasteMode((m) => !m)}
-            className="cursor-pointer font-mono text-[11px] text-loom-muted-2 underline decoration-dotted hover:text-loom-accent-soft"
+            className="cursor-pointer font-mono text-[11px] text-devdeck-muted-2 underline decoration-dotted hover:text-devdeck-accent-soft"
           >
             {pasteMode ? 'Use the self-register command instead' : 'Have a connection string instead?'}
           </button>
@@ -174,7 +174,7 @@ export function MachineDialog() {
       ) : pasteMode ? (
         <>
           <Label>Connection string</Label>
-          <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
+          <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
             Paste the line from the runtime's <code>copy-this.md</code> (format: name|url|key).
           </p>
           <Input
@@ -184,7 +184,7 @@ export function MachineDialog() {
             placeholder="builder|https://builder.tail-x.ts.net|a1b2c3..."
             className="mb-1 font-mono"
           />
-          <p className={`mb-5 font-mono text-[10.5px] ${pasteInvalid ? 'text-loom-red-soft' : 'text-loom-dim-2'}`}>
+          <p className={`mb-5 font-mono text-[10.5px] ${pasteInvalid ? 'text-devdeck-red-soft' : 'text-devdeck-dim-2'}`}>
             {pasteInvalid
               ? 'Expected exactly 3 fields separated by "|": name, an https:// URL, and a key.'
               : parsedPaste
@@ -204,37 +204,37 @@ export function MachineDialog() {
           />
 
           {tailscaleNotReady ? (
-            <div className="mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-3">
-              <p className="mb-1 font-mono text-[11px] text-loom-fg">{tailscaleNotReady.title}</p>
-              <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">{tailscaleNotReady.body}</p>
+            <div className="mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3">
+              <p className="mb-1 font-mono text-[11px] text-devdeck-fg">{tailscaleNotReady.title}</p>
+              <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">{tailscaleNotReady.body}</p>
               {tailscaleNotReady.copyValue ? (
                 <button
                   type="button"
                   onClick={() => copyTailscaleLink(tailscaleNotReady.copyValue!)}
-                  className="cursor-pointer font-mono text-[10.5px] text-loom-accent-soft underline decoration-dotted"
+                  className="cursor-pointer font-mono text-[10.5px] text-devdeck-accent-soft underline decoration-dotted"
                 >
                   {tailscaleNotReady.copyLabel}
                 </button>
               ) : null}
             </div>
           ) : isLoopbackHub && tailscaleStatus.isLoading ? (
-            <p className="mb-5 font-mono text-[10.5px] text-loom-dim-2">Checking Tailscale…</p>
+            <p className="mb-5 font-mono text-[10.5px] text-devdeck-dim-2">Checking Tailscale…</p>
           ) : (
             <>
               <Label>Runtime command</Label>
-              <p className="mb-2 font-mono text-[10.5px] text-loom-dim-2">
+              <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
                 Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
                 this hub on startup.
               </p>
-              <div className="relative mb-5 rounded-lg border border-loom-border-card bg-loom-terminal p-2.5 pr-9">
-                <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-loom-fg">
+              <div className="relative mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 pr-9">
+                <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-devdeck-fg">
                   {runtimeCommand(runtimeKey, resolvedHubUrl ?? window.location.origin, dialog.name)}
                 </pre>
                 <button
                   type="button"
                   onClick={copyCommand}
                   aria-label="Copy command"
-                  className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-loom-muted-2 hover:text-loom-accent-soft"
+                  className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
                 >
                   <Copy size={12} />
                 </button>

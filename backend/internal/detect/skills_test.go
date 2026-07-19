@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/port"
 )
 
 func TestReadInstallAndRemoveSkills(t *testing.T) {
@@ -64,7 +64,7 @@ description: |
 	if err := RemoveSkill("claude", "claude-only"); err != nil {
 		t.Fatalf("RemoveSkill directory: %v", err)
 	}
-	matches, err := filepath.Glob(filepath.Join(home, ".loom", "trash", "skills", "claude", "claude-only-*"))
+	matches, err := filepath.Glob(filepath.Join(home, ".devdeck", "trash", "skills", "claude", "claude-only-*"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("trash matches = %v, err=%v", matches, err)
 	}

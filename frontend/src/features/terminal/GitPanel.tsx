@@ -46,13 +46,13 @@ type DiffTarget =
   | null
 
 const STATUS_COLOR: Record<string, string> = {
-  M: 'text-loom-yellow',
-  A: 'text-loom-green',
-  '?': 'text-loom-green',
-  D: 'text-loom-red',
-  R: 'text-loom-purple',
-  C: 'text-loom-purple',
-  U: 'text-loom-red',
+  M: 'text-devdeck-yellow',
+  A: 'text-devdeck-green',
+  '?': 'text-devdeck-green',
+  D: 'text-devdeck-red',
+  R: 'text-devdeck-purple',
+  C: 'text-devdeck-purple',
+  U: 'text-devdeck-red',
 }
 
 function errMessage(error: unknown) {
@@ -131,14 +131,14 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
 
   return (
     <div className="flex min-h-0 flex-1 max-md:flex-col md:flex-row">
-      <div className="flex min-h-0 flex-none flex-col border-loom-border max-md:max-h-[45%] max-md:border-b md:w-[300px] md:border-r">
-        <div className="flex h-9 flex-none items-center gap-2 border-b border-loom-border px-3">
-          <GitBranch size={13} className="flex-none text-loom-accent" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-loom-fg" title={status.data?.branch}>
+      <div className="flex min-h-0 flex-none flex-col border-devdeck-border max-md:max-h-[45%] max-md:border-b md:w-[300px] md:border-r">
+        <div className="flex h-9 flex-none items-center gap-2 border-b border-devdeck-border px-3">
+          <GitBranch size={13} className="flex-none text-devdeck-accent" />
+          <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg" title={status.data?.branch}>
             {status.data?.branch ?? '…'}
           </span>
           {status.data && (status.data.ahead > 0 || status.data.behind > 0) ? (
-            <span className="flex flex-none items-center gap-1 font-mono text-[10px] text-loom-muted">
+            <span className="flex flex-none items-center gap-1 font-mono text-[10px] text-devdeck-muted">
               {status.data.ahead > 0 && (
                 <span className="flex items-center gap-px">
                   {status.data.ahead}
@@ -158,16 +158,16 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
             onClick={() => status.refetch()}
             disabled={status.isFetching}
             title="Refresh status"
-            className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg disabled:cursor-wait"
+            className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-wait"
           >
             <RefreshCw size={12} className={cn(status.isFetching && 'animate-spin')} />
           </button>
         </div>
 
-        <div className="flex flex-none items-center gap-1.5 border-b border-loom-border p-2">
+        <div className="flex flex-none items-center gap-1.5 border-b border-devdeck-border p-2">
           <SegButton active={view === 'changes'} onClick={() => setView('changes')}>
             Changes
-            {files.length > 0 && <span className="font-mono text-[9.5px] text-loom-dim">{files.length}</span>}
+            {files.length > 0 && <span className="font-mono text-[9.5px] text-devdeck-dim">{files.length}</span>}
           </SegButton>
           <SegButton active={view === 'history'} onClick={() => setView('history')}>
             <History size={11} />
@@ -186,7 +186,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
 
         {view === 'changes' ? (
           <>
-            <div className="flex flex-none flex-col gap-1.5 border-b border-loom-border p-2">
+            <div className="flex flex-none flex-col gap-1.5 border-b border-devdeck-border p-2">
               <textarea
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
@@ -198,13 +198,13 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                 }}
                 placeholder={`Message (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+'}Enter to commit)`}
                 rows={2}
-                className="w-full resize-none rounded-md border border-loom-border-strong bg-loom-surface-2 px-2 py-1.5 font-mono text-[11.5px] text-loom-fg placeholder:text-loom-dim focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="w-full resize-none rounded-md border border-devdeck-border-strong bg-devdeck-surface-2 px-2 py-1.5 font-mono text-[11.5px] text-devdeck-fg placeholder:text-devdeck-dim focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               />
               <button
                 type="button"
                 onClick={doCommit}
                 disabled={busy || !message.trim() || stagedFiles.length === 0}
-                className="flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-loom-accent text-[11.5px] font-semibold text-loom-accent-ink hover:bg-loom-accent-hover disabled:cursor-default disabled:opacity-40"
+                className="flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-devdeck-accent text-[11.5px] font-semibold text-devdeck-accent-ink hover:bg-devdeck-accent-hover disabled:cursor-default disabled:opacity-40"
               >
                 {commit.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                 Commit
@@ -218,11 +218,11 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                   <DataLoading compact />
                 </div>
               ) : status.error ? (
-                <div className="px-3 py-4 text-center font-mono text-[10.5px] text-loom-red-soft">
+                <div className="px-3 py-4 text-center font-mono text-[10.5px] text-devdeck-red-soft">
                   {errMessage(status.error)}
                 </div>
               ) : files.length === 0 ? (
-                <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-loom-dim">
+                <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-devdeck-dim">
                   No changes
                 </div>
               ) : (
@@ -261,11 +261,11 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                 <DataLoading compact />
               </div>
             ) : log.error ? (
-              <div className="px-3 py-4 text-center font-mono text-[10.5px] text-loom-red-soft">
+              <div className="px-3 py-4 text-center font-mono text-[10.5px] text-devdeck-red-soft">
                 {errMessage(log.error)}
               </div>
             ) : (log.data ?? []).length === 0 ? (
-              <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-loom-dim">
+              <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-devdeck-dim">
                 No commits yet
               </div>
             ) : (
@@ -282,24 +282,24 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
         )}
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-loom-terminal">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal">
         {target === null ? (
-          <div className="flex flex-1 items-center justify-center px-6 text-center font-mono text-[11px] text-loom-dim">
+          <div className="flex flex-1 items-center justify-center px-6 text-center font-mono text-[11px] text-devdeck-dim">
             {view === 'history' ? 'Select a commit to view its diff' : 'Select a file to view its diff'}
           </div>
         ) : (
           <>
-            <div className="flex h-8 flex-none items-center gap-2 border-b border-loom-border bg-loom-surface-2 px-3">
+            <div className="flex h-8 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface-2 px-3">
               {'commit' in target ? (
-                <GitCommitHorizontal size={12} className="flex-none text-loom-accent" />
+                <GitCommitHorizontal size={12} className="flex-none text-devdeck-accent" />
               ) : (
                 <MaterialFileIcon name={basename(target.path)} size={14} />
               )}
-              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-loom-fg-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-fg-2">
                 {'commit' in target ? target.commit.slice(0, 10) : target.path}
               </span>
               {'commit' in target ? null : (
-                <span className="flex-none font-mono text-[9.5px] text-loom-dim max-md:hidden">
+                <span className="flex-none font-mono text-[9.5px] text-devdeck-dim max-md:hidden">
                   {target.staged ? 'staged · index vs HEAD' : 'unstaged · worktree'}
                 </span>
               )}
@@ -310,7 +310,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                   title="Side-by-side diff"
                   className={cn(
                     'flex h-5 w-5 cursor-pointer items-center justify-center rounded',
-                    diffMode === 'split' ? 'bg-loom-accent/15 text-loom-accent-soft' : 'text-loom-dim hover:text-loom-fg',
+                    diffMode === 'split' ? 'bg-devdeck-accent/15 text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
                   )}
                 >
                   <Columns2 size={12} />
@@ -321,7 +321,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                   title="Unified diff"
                   className={cn(
                     'flex h-5 w-5 cursor-pointer items-center justify-center rounded',
-                    diffMode === 'unified' ? 'bg-loom-accent/15 text-loom-accent-soft' : 'text-loom-dim hover:text-loom-fg',
+                    diffMode === 'unified' ? 'bg-devdeck-accent/15 text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
                   )}
                 >
                   <Rows3 size={12} />
@@ -334,7 +334,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                   <DataLoading compact />
                 </div>
               ) : diff.error ? (
-                <div className="px-4 py-4 font-mono text-[10.5px] text-loom-red-soft">{errMessage(diff.error)}</div>
+                <div className="px-4 py-4 font-mono text-[10.5px] text-devdeck-red-soft">{errMessage(diff.error)}</div>
               ) : (
                 <DiffView
                   text={diff.data?.diff ?? ''}
@@ -357,7 +357,7 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
       onClick={onClick}
       className={cn(
         'flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors',
-        active ? 'bg-loom-accent/10 text-loom-fg' : 'text-loom-muted hover:bg-loom-hover-wash hover:text-loom-fg',
+        active ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
       )}
     >
       {children}
@@ -382,7 +382,7 @@ function ActionButton({
       onClick={onClick}
       disabled={pending}
       title={title}
-      className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-loom-border-strong px-2 text-[11px] text-loom-fg-2 hover:bg-loom-hover-wash disabled:cursor-wait disabled:opacity-50"
+      className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-devdeck-border-strong px-2 text-[11px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash disabled:cursor-wait disabled:opacity-50"
     >
       {pending ? <Loader2 size={11} className="animate-spin" /> : children}
     </button>
@@ -420,8 +420,8 @@ function FileSection({
   return (
     <div>
       <div className="flex h-7 items-center gap-2 px-3 pt-1">
-        <span className="font-mono text-[9.5px] tracking-[0.14em] text-loom-dim">{label}</span>
-        <span className="font-mono text-[9.5px] text-loom-dim-2">{files.length}</span>
+        <span className="font-mono text-[9.5px] tracking-[0.14em] text-devdeck-dim">{label}</span>
+        <span className="font-mono text-[9.5px] text-devdeck-dim-2">{files.length}</span>
         <span className="flex-1" />
         {onDiscard && (
           <button
@@ -429,7 +429,7 @@ function FileSection({
             onClick={() => onDiscard(allPaths)}
             disabled={disabled}
             title="Discard all changes"
-            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-red-tint-hover hover:text-loom-red-soft disabled:cursor-wait"
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft disabled:cursor-wait"
           >
             <Undo2 size={11} />
           </button>
@@ -439,7 +439,7 @@ function FileSection({
           onClick={() => onAction(allPaths)}
           disabled={disabled}
           title={`${actionTitle} all`}
-          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg disabled:cursor-wait"
+          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-wait"
         >
           {actionIcon}
         </button>
@@ -452,7 +452,7 @@ function FileSection({
             key={file.path}
             className={cn(
               'group flex h-[27px] items-center pr-1.5',
-              selected ? 'bg-loom-accent/10' : 'hover:bg-loom-hover-wash',
+              selected ? 'bg-devdeck-accent/10' : 'hover:bg-devdeck-hover-wash',
             )}
           >
             <button
@@ -462,9 +462,9 @@ function FileSection({
               className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 pl-3 text-left"
             >
               <MaterialFileIcon name={basename(file.path)} size={14} />
-              <span className="truncate font-mono text-[11px] text-loom-fg-2">{basename(file.path)}</span>
+              <span className="truncate font-mono text-[11px] text-devdeck-fg-2">{basename(file.path)}</span>
               {dirname(file.path) && (
-                <span className="min-w-0 truncate font-mono text-[9.5px] text-loom-dim-2">{dirname(file.path)}</span>
+                <span className="min-w-0 truncate font-mono text-[9.5px] text-devdeck-dim-2">{dirname(file.path)}</span>
               )}
             </button>
             {onDiscard && (
@@ -473,7 +473,7 @@ function FileSection({
                 onClick={() => onDiscard([file.path])}
                 disabled={disabled}
                 title={`Discard changes to ${basename(file.path)}`}
-                className="mr-0.5 flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-loom-dim opacity-0 hover:bg-loom-red-tint-hover hover:text-loom-red-soft group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+                className="mr-0.5 flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
               >
                 <Undo2 size={11} />
               </button>
@@ -483,11 +483,11 @@ function FileSection({
               onClick={() => onAction([file.path])}
               disabled={disabled}
               title={`${actionTitle} ${basename(file.path)}`}
-              className="mr-0.5 flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-loom-dim opacity-0 hover:bg-loom-hover-wash hover:text-loom-fg group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+              className="mr-0.5 flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
             >
               {actionIcon}
             </button>
-            <span className={cn('w-4 flex-none text-center font-mono text-[10.5px] font-semibold', STATUS_COLOR[letter] ?? 'text-loom-muted')}>
+            <span className={cn('w-4 flex-none text-center font-mono text-[10.5px] font-semibold', STATUS_COLOR[letter] ?? 'text-devdeck-muted')}>
               {letter === '?' ? 'U' : letter}
             </span>
           </div>
@@ -508,18 +508,18 @@ function CommitRow({ commit, selected, onSelect }: { commit: GitCommit; selected
       onClick={onSelect}
       className={cn(
         'flex w-full cursor-pointer flex-col gap-0.5 px-3 py-1.5 text-left',
-        selected ? 'bg-loom-accent/10' : 'hover:bg-loom-hover-wash',
+        selected ? 'bg-devdeck-accent/10' : 'hover:bg-devdeck-hover-wash',
       )}
     >
       <span className="flex items-center gap-1.5">
-        <span className="truncate text-[11.5px] text-loom-fg-2">{commit.subject}</span>
+        <span className="truncate text-[11.5px] text-devdeck-fg-2">{commit.subject}</span>
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 font-mono text-[9.5px] text-loom-dim">
-        <span className="text-loom-accent-soft">{commit.short}</span>
+      <span className="flex min-w-0 items-center gap-1.5 font-mono text-[9.5px] text-devdeck-dim">
+        <span className="text-devdeck-accent-soft">{commit.short}</span>
         <span className="truncate">{commit.author}</span>
         <span className="flex-none">{when}</span>
         {commit.refs.length > 0 && (
-          <span className="truncate text-loom-purple">{commit.refs.join(' ')}</span>
+          <span className="truncate text-devdeck-purple">{commit.refs.join(' ')}</span>
         )}
       </span>
     </button>

@@ -7,7 +7,7 @@ import { useMachineHealth, useMachines, useSettings } from '@/features/data/quer
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Project, Worktree } from '@/store/types'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { WorktreeCard } from './WorktreeCard'
 
 interface WorkspaceHostsViewProps {
@@ -27,8 +27,8 @@ const GROUP_COLORS = ['#ff6978', '#4aa8ff', '#a578ff', '#5ed69a', '#f5c451', '#c
 export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: WorkspaceHostsViewProps) {
   const navigate = useNavigate()
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
-  const openSpawn = useLoomStore((s) => s.openSpawn)
-  const openNewProject = useLoomStore((s) => s.openNewProject)
+  const openSpawn = useDevDeckStore((s) => s.openSpawn)
+  const openNewProject = useDevDeckStore((s) => s.openNewProject)
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'cards' | 'list'>('cards')
 
@@ -59,16 +59,16 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <section className="flex-none border-b border-loom-border bg-loom-bg px-3 py-3 sm:px-4">
+      <section className="flex-none border-b border-devdeck-border bg-devdeck-bg px-3 py-3 sm:px-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-[15px] font-semibold text-loom-fg-2">Agents</h1>
-              <span className="rounded-full bg-loom-surface-2 px-2 py-0.5 font-mono text-[10px] text-loom-muted-2">
+              <h1 className="text-[15px] font-semibold text-devdeck-fg-2">Agents</h1>
+              <span className="rounded-full bg-devdeck-surface-2 px-2 py-0.5 font-mono text-[10px] text-devdeck-muted-2">
                 {allWorktrees.length}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-loom-dim">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-devdeck-dim">
               <span>{activeCount} active</span>
               <span aria-hidden="true">·</span>
               <span>{branchCount} worktrees</span>
@@ -85,19 +85,19 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
             <div className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
-              <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-loom-dim" />
+              <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-devdeck-dim" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Filter agents, branches, tasks…"
-                className="h-9 w-full rounded-[10px] border border-loom-border-card bg-loom-surface px-8 text-[12px] text-loom-fg placeholder:text-loom-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="h-9 w-full rounded-[10px] border border-devdeck-border-card bg-devdeck-surface px-8 text-[12px] text-devdeck-fg placeholder:text-devdeck-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               />
               {query ? (
                 <button
                   type="button"
                   aria-label="Clear agent search"
                   onClick={() => setQuery('')}
-                  className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-loom-dim hover:bg-loom-hover-wash hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   <X size={12} />
                 </button>
@@ -105,7 +105,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="grid h-9 grid-cols-2 rounded-[10px] border border-loom-border-card bg-loom-surface p-1" role="group" aria-label="Agent layout">
+              <div className="grid h-9 grid-cols-2 rounded-[10px] border border-devdeck-border-card bg-devdeck-surface p-1" role="group" aria-label="Agent layout">
                 <ViewButton label="Show card view" active={view === 'cards'} onClick={() => setView('cards')}>
                   <Grid2X2 size={14} />
                 </ViewButton>
@@ -118,7 +118,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
                 type="button"
                 disabled={!hasProjects}
                 onClick={() => openSpawn(spawnProjectId, 'root', defaultModel)}
-                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] bg-loom-surface-2 px-3 text-[12px] font-semibold text-loom-muted transition-colors hover:bg-loom-popover hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45"
+                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] bg-devdeck-surface-2 px-3 text-[12px] font-semibold text-devdeck-muted transition-colors hover:bg-devdeck-popover hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <House size={13} />
                 <span className="hidden sm:inline">Root</span>
@@ -127,7 +127,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
                 type="button"
                 disabled={!hasProjects}
                 onClick={() => openSpawn(spawnProjectId, 'branch', defaultModel)}
-                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-loom-border-accent bg-loom-accent-tint px-3 text-[12px] font-semibold text-loom-accent-soft transition-colors hover:bg-loom-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45"
+                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-devdeck-border-accent bg-devdeck-accent-tint px-3 text-[12px] font-semibold text-devdeck-accent-soft transition-colors hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <GitBranch size={13} />
                 New agent
@@ -137,7 +137,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
                 onClick={() => navigate({ to: '/w/$wsId/management', params: { wsId } })}
                 aria-label="Agent management"
                 title="Agent management"
-                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-[10px] bg-loom-surface-2 text-loom-muted transition-colors hover:bg-loom-popover hover:text-loom-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-[10px] bg-devdeck-surface-2 text-devdeck-muted transition-colors hover:bg-devdeck-popover hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Settings2 size={14} />
               </button>
@@ -190,9 +190,9 @@ function ProjectHostSection({
   view: 'cards' | 'list'
   defaultModel: string
 }) {
-  const openEdit = useLoomStore((s) => s.openEdit)
-  const askDelete = useLoomStore((s) => s.askDelete)
-  const openSpawn = useLoomStore((s) => s.openSpawn)
+  const openEdit = useDevDeckStore((s) => s.openEdit)
+  const askDelete = useDevDeckStore((s) => s.askDelete)
+  const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const { project, worktrees, color } = group
   const machine = useMachines().data?.find((m) => m.id === project.machineId)
   const health = useMachineHealth(machine?.id)
@@ -207,18 +207,18 @@ function ProjectHostSection({
     <section className="min-w-0">
       <div className="mb-3 flex items-center gap-3">
         <span className="h-[11px] w-[11px] flex-none rounded-[2px] border" style={{ borderColor: color, background: `${color}18` }} />
-        <h2 className="truncate text-[18px] font-semibold leading-none text-loom-fg-2">{project.name}</h2>
-        <span className="rounded-full bg-loom-surface-2 px-2 py-0.5 font-mono text-[10px] text-loom-dim">
+        <h2 className="truncate text-[18px] font-semibold leading-none text-devdeck-fg-2">{project.name}</h2>
+        <span className="rounded-full bg-devdeck-surface-2 px-2 py-0.5 font-mono text-[10px] text-devdeck-dim">
           {project.worktrees.length}
         </span>
-        <span aria-hidden="true" className="font-mono text-[11px] text-loom-dim/50">/</span>
-        <span className="truncate font-mono text-[11px] text-loom-dim">{project.path}</span>
-        <span aria-hidden="true" className="font-mono text-[11px] text-loom-dim/50">~</span>
+        <span aria-hidden="true" className="font-mono text-[11px] text-devdeck-dim/50">/</span>
+        <span className="truncate font-mono text-[11px] text-devdeck-dim">{project.path}</span>
+        <span aria-hidden="true" className="font-mono text-[11px] text-devdeck-dim/50">~</span>
         {machine ? (
           <span
             className={cn(
               'flex flex-none items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px]',
-              unreachable ? 'bg-loom-red-tint text-loom-red-soft' : 'bg-loom-surface-2 text-loom-dim',
+              unreachable ? 'bg-devdeck-red-tint text-devdeck-red-soft' : 'bg-devdeck-surface-2 text-devdeck-dim',
             )}
           >
             {unreachable ? <StatusDot color="#f87171" size={6} /> : <Server size={10} />}
@@ -226,17 +226,17 @@ function ProjectHostSection({
             {unreachable ? ' · offline' : ''}
           </span>
         ) : (
-          <span className="flex flex-none items-center gap-1 rounded-full bg-loom-red-tint px-2 py-0.5 font-mono text-[10px] text-loom-red-soft">
+          <span className="flex flex-none items-center gap-1 rounded-full bg-devdeck-red-tint px-2 py-0.5 font-mono text-[10px] text-devdeck-red-soft">
             <StatusDot color="#f87171" size={6} />
             no machine
           </span>
         )}
-        <div className="h-px min-w-6 flex-1 bg-loom-border" />
+        <div className="h-px min-w-6 flex-1 bg-devdeck-border" />
         <button
           type="button"
           aria-label={`Edit ${project.name}`}
           onClick={() => openEdit('project', project.id, { a: project.name, b: project.path })}
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-hover-wash hover:text-loom-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <Settings2 size={13} />
         </button>
@@ -244,7 +244,7 @@ function ProjectHostSection({
           type="button"
           aria-label={`Delete ${project.name}`}
           onClick={() => askDelete('project', project.id, project.name)}
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-loom-dim hover:bg-loom-red-tint hover:text-loom-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <Trash2 size={13} />
         </button>
@@ -259,8 +259,8 @@ function ProjectHostSection({
             className={cn(
               'flex min-h-[104px] w-full flex-col items-center justify-center gap-2 rounded-[13px] border border-dashed font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               unreachable
-                ? 'cursor-not-allowed border-loom-border-menu bg-loom-card/15 text-loom-dim/50'
-                : 'cursor-pointer border-loom-border-menu bg-loom-card/35 text-loom-dim hover:border-loom-border-accent hover:bg-loom-card/60 hover:text-loom-muted',
+                ? 'cursor-not-allowed border-devdeck-border-menu bg-devdeck-card/15 text-devdeck-dim/50'
+                : 'cursor-pointer border-devdeck-border-menu bg-devdeck-card/35 text-devdeck-dim hover:border-devdeck-border-accent hover:bg-devdeck-card/60 hover:text-devdeck-muted',
             )}
           >
             <Plus size={22} strokeWidth={1.5} />
@@ -303,7 +303,7 @@ function ViewButton({
       onClick={onClick}
       className={cn(
         'flex h-7 w-8 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-        active ? 'bg-loom-accent-tint text-loom-accent-soft' : 'text-loom-dim hover:text-loom-fg',
+        active ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
       )}
     >
       {children}
@@ -323,13 +323,13 @@ function EmptyHostsState({
   onAction: () => void
 }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[13px] border border-dashed border-loom-border-menu bg-loom-card/35 px-4 text-center">
-      <div className="text-[13px] font-semibold text-loom-fg-2">{title}</div>
-      <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-loom-muted">{hint}</div>
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[13px] border border-dashed border-devdeck-border-menu bg-devdeck-card/35 px-4 text-center">
+      <div className="text-[13px] font-semibold text-devdeck-fg-2">{title}</div>
+      <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-devdeck-muted">{hint}</div>
       <button
         type="button"
         onClick={onAction}
-        className="mt-4 cursor-pointer rounded-md border border-loom-border-accent bg-loom-accent-tint px-3 py-1.5 text-[12px] font-semibold text-loom-accent-soft hover:bg-loom-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="mt-4 cursor-pointer rounded-md border border-devdeck-border-accent bg-devdeck-accent-tint px-3 py-1.5 text-[12px] font-semibold text-devdeck-accent-soft hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         {actionLabel}
       </button>

@@ -8,7 +8,7 @@ pub const READY_TIMEOUT_SECS: u64 = 15;
 /// Truncate sidecar.log at startup once it exceeds 5 MB (spec: no rotation in v1).
 pub const LOG_TRUNCATE_BYTES: u64 = 5 * 1024 * 1024;
 
-const LISTEN_MARKER: &str = "loom listening on http://127.0.0.1:";
+const LISTEN_MARKER: &str = "devdeck listening on http://127.0.0.1:";
 const RUNTIME_KEY_FILE: &str = "runtime-key";
 
 /// Per-launch hub key: 32 random bytes as 64 lowercase hex chars.
@@ -18,7 +18,7 @@ pub fn generate_key() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// loom-server args for desktop-sidecar mode. `--addr 127.0.0.1:0` makes the
+/// devdeck-server args for desktop-sidecar mode. `--addr 127.0.0.1:0` makes the
 /// OS pick the port; parse_listen_port recovers it from the startup log line
 /// (the contract is marked with a NOTE next to the log.Printf in
 /// backend/cmd/server/main.go). `enable_tailscale_serve` is true only when a
@@ -30,7 +30,7 @@ pub fn sidecar_args(data_dir: &Path, key: &str, enable_tailscale_serve: bool) ->
         "--role".into(), "hub".into(),
         "--addr".into(), "127.0.0.1:0".into(),
         "--key".into(), key.into(),
-        "--db".into(), data_dir.join("loom.db").to_string_lossy().into_owned(),
+        "--db".into(), data_dir.join("devdeck.db").to_string_lossy().into_owned(),
         "--env".into(), data_dir.join(".env").to_string_lossy().into_owned(),
         "--open=false".into(),
         "--2fa=false".into(),
@@ -59,7 +59,7 @@ pub fn persisted_runtime_key(data_dir: &Path) -> std::io::Result<String> {
     Ok(key)
 }
 
-/// loom-server args for the desktop's background remote-mode runtime: binds
+/// devdeck-server args for the desktop's background remote-mode runtime: binds
 /// an ephemeral loopback port fronted on the tailnet by
 /// `--enable-tailscale-serve`, and self-registers with the operator-supplied
 /// hub using the persisted runtime key.
@@ -75,7 +75,7 @@ pub fn runtime_args(
         "--role".into(), "runtime".into(),
         "--addr".into(), "127.0.0.1:0".into(),
         "--key".into(), key.into(),
-        "--db".into(), data_dir.join("loom-runtime.db").to_string_lossy().into_owned(),
+        "--db".into(), data_dir.join("devdeck-runtime.db").to_string_lossy().into_owned(),
         "--env".into(), data_dir.join(".env").to_string_lossy().into_owned(),
         "--hub-url".into(), hub_url.into(),
         "--hub-key".into(), hub_key.into(),
@@ -85,7 +85,7 @@ pub fn runtime_args(
     ]
 }
 
-/// Extracts the bound port from the server's "loom listening on" line.
+/// Extracts the bound port from the server's "devdeck listening on" line.
 pub fn parse_listen_port(line: &str) -> Option<u16> {
     let idx = line.find(LISTEN_MARKER)?;
     let digits: String = line[idx + LISTEN_MARKER.len()..]
@@ -131,10 +131,10 @@ mod tests {
 
     #[test]
     fn parses_port_from_listen_line() {
-        let line = "2026/07/13 10:00:00 loom listening on http://127.0.0.1:52341 (db: /x/loom.db)";
+        let line = "2026/07/13 10:00:00 devdeck listening on http://127.0.0.1:52341 (db: /x/devdeck.db)";
         assert_eq!(parse_listen_port(line), Some(52341));
         assert_eq!(parse_listen_port("unrelated log noise"), None);
-        assert_eq!(parse_listen_port("loom listening on http://127.0.0.1: (db)"), None);
+        assert_eq!(parse_listen_port("devdeck listening on http://127.0.0.1: (db)"), None);
     }
 
     #[test]
@@ -147,7 +147,7 @@ mod tests {
         assert!(joined.contains("--open=false"));
         assert!(joined.contains("--2fa=false"));
         assert!(joined.contains("--secure-cookies=false"));
-        assert!(joined.contains("loom.db"));
+        assert!(joined.contains("devdeck.db"));
         assert!(!joined.contains("--enable-tailscale-serve"));
     }
 
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn log_open_truncates_oversized_file() {
-        let dir = std::env::temp_dir().join(format!("loom-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devdeck-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sidecar.log");
         std::fs::write(&path, vec![b'x'; (LOG_TRUNCATE_BYTES + 1) as usize]).unwrap();
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn persisted_runtime_key_is_stable_across_calls() {
-        let dir = std::env::temp_dir().join(format!("loom-test-runtime-key-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devdeck-test-runtime-key-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let first = persisted_runtime_key(&dir).unwrap();
         let second = persisted_runtime_key(&dir).unwrap();
@@ -198,12 +198,12 @@ mod tests {
         assert!(joined.contains("--public-url https://me.ts.net"));
         assert!(joined.contains("--name my-mac"));
         assert!(joined.contains("--enable-tailscale-serve"));
-        assert!(joined.contains("loom-runtime.db"));
+        assert!(joined.contains("devdeck-runtime.db"));
     }
 
     #[test]
     fn runtime_log_truncates_oversized_file() {
-        let dir = std::env::temp_dir().join(format!("loom-test-runtime-log-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("devdeck-test-runtime-log-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("runtime-sidecar.log");
         std::fs::write(&path, vec![b'x'; (LOG_TRUNCATE_BYTES + 1) as usize]).unwrap();

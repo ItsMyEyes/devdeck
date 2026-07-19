@@ -1,4 +1,4 @@
-module loom/backend
+module devdeck/backend
 
 go 1.25.0
 

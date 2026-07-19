@@ -1,8 +1,8 @@
 package store
 
 import (
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 func scanMachine(sc scanner) (domain.Machine, error) {

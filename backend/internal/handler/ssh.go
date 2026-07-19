@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 // SSHHandler handles the hub's saved-SSH-connection registry. Secrets ride

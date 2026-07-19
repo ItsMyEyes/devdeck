@@ -18,17 +18,17 @@ import {
   useWorkspaces,
 } from '@/features/data/queries'
 import { useScope } from '@/features/useScope'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 
 export function SpawnDialog() {
   const navigate = useNavigate()
   const { wsId } = useScope()
-  const spawn = useLoomStore((s) => s.spawn)
-  const setSpawn = useLoomStore((s) => s.setSpawn)
-  const closeSpawn = useLoomStore((s) => s.closeSpawn)
-  const setSidebarOpen = useLoomStore((s) => s.setSidebarOpen)
-  const openWorktreeTab = useLoomStore((s) => s.openWorktreeTab)
+  const spawn = useDevDeckStore((s) => s.spawn)
+  const setSpawn = useDevDeckStore((s) => s.setSpawn)
+  const closeSpawn = useDevDeckStore((s) => s.closeSpawn)
+  const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
+  const openWorktreeTab = useDevDeckStore((s) => s.openWorktreeTab)
   const isTauri = useIsTauri()
   const workspaces = useWorkspaces().data ?? []
   const machinesQuery = useMachines()
@@ -139,7 +139,7 @@ export function SpawnDialog() {
   return (
     <Dialog open={spawn.open} onOpenChange={(open) => !open && closeSpawn()} width={480}>
       <div className="mb-1 flex items-center gap-2.5">
-        {branchMode ? <GitBranch size={14} className="text-loom-accent" /> : <House size={14} className="text-loom-purple" />}
+        {branchMode ? <GitBranch size={14} className="text-devdeck-accent" /> : <House size={14} className="text-devdeck-purple" />}
         <DialogTitle>{branchMode ? 'New worktree' : 'Root terminal'}</DialogTitle>
       </div>
       <DialogDescription className="mb-4">
@@ -159,22 +159,22 @@ export function SpawnDialog() {
               aria-label="Project"
             />
           ) : (
-            <p className="mt-1 font-mono text-[11px] text-loom-dim">No projects in this workspace.</p>
+            <p className="mt-1 font-mono text-[11px] text-devdeck-dim">No projects in this workspace.</p>
           )}
           {project && !machine ? (
-            <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">Select a project with an assigned machine.</p>
+            <p className="mt-1.5 font-mono text-[11px] text-devdeck-red-soft">Select a project with an assigned machine.</p>
           ) : project && machine && !machineOnline ? (
-            <p className="mt-1.5 font-mono text-[11px] text-loom-red-soft">"{machine.name}" is offline — can't connect.</p>
+            <p className="mt-1.5 font-mono text-[11px] text-devdeck-red-soft">"{machine.name}" is offline — can't connect.</p>
           ) : null}
         </div>
       ) : project && !machine ? (
-        <p className="mb-4 font-mono text-[11px] text-loom-red-soft">This project has no available machine.</p>
+        <p className="mb-4 font-mono text-[11px] text-devdeck-red-soft">This project has no available machine.</p>
       ) : project && machine && !machineOnline ? (
-        <p className="mb-4 font-mono text-[11px] text-loom-red-soft">"{machine.name}" is offline — can't connect.</p>
+        <p className="mb-4 font-mono text-[11px] text-devdeck-red-soft">"{machine.name}" is offline — can't connect.</p>
       ) : null}
 
       {/* mode tabs */}
-      <div className="mb-4 flex gap-1.5 rounded-lg border border-loom-border-strong bg-loom-bg p-1">
+      <div className="mb-4 flex gap-1.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-1">
         <ModeTab active={branchMode} onClick={() => setSpawn({ mode: 'branch' })}>
           <GitBranch size={13} />
           New branch
@@ -250,7 +250,7 @@ function ModeTab({ active, onClick, children }: { active: boolean; onClick: () =
       onClick={onClick}
       className={cn(
         'flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-[12px] font-medium transition-colors',
-        active ? 'bg-primary text-primary-foreground' : 'bg-transparent text-loom-muted hover:text-loom-fg',
+        active ? 'bg-primary text-primary-foreground' : 'bg-transparent text-devdeck-muted hover:text-devdeck-fg',
       )}
     >
       {children}

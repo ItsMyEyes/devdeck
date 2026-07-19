@@ -37,20 +37,20 @@ export function IssueColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        'flex w-72 flex-none flex-col rounded-[14px] border border-loom-border-card bg-loom-bg/40 p-2',
-        isOver && 'border-loom-border-accent',
+        'flex w-72 flex-none flex-col rounded-[14px] border border-devdeck-border-card bg-devdeck-bg/40 p-2',
+        isOver && 'border-devdeck-border-accent',
       )}
     >
       <div className="flex items-center gap-2 px-1.5 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: cfg.color }} />
-        <span className="font-mono text-[11.5px] font-semibold text-loom-fg-2">{cfg.label}</span>
-        <span className="font-mono text-[11px] text-loom-dim">{issues.length}</span>
+        <span className="font-mono text-[11.5px] font-semibold text-devdeck-fg-2">{cfg.label}</span>
+        <span className="font-mono text-[11px] text-devdeck-dim">{issues.length}</span>
         <div className="min-w-2 flex-1" />
         <button
           type="button"
           onClick={() => setAdding(true)}
           aria-label="Add issue"
-          className="cursor-pointer rounded-md p-1 text-loom-muted-2 hover:text-loom-fg-2"
+          className="cursor-pointer rounded-md p-1 text-devdeck-muted-2 hover:text-devdeck-fg-2"
         >
           <Plus size={14} />
         </button>
@@ -81,7 +81,7 @@ export function IssueColumn({
             <IssueCard key={issue.id} issue={issue} wsId={wsId} projectId={projectId} />
           ))}
           {issues.length === 0 && !adding ? (
-            <div className="py-6 text-center font-mono text-[11px] text-loom-dim">no issues</div>
+            <div className="py-6 text-center font-mono text-[11px] text-devdeck-dim">no issues</div>
           ) : null}
         </div>
       </SortableContext>

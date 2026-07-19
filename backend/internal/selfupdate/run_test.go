@@ -31,7 +31,7 @@ func (f *fakeClient) DownloadAsset(ctx context.Context, asset Asset) ([]byte, er
 func seedExecFile(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "loom-api")
+	path := filepath.Join(dir, "devdeck-api")
 	if err := os.WriteFile(path, []byte("old-contents"), 0o755); err != nil {
 		t.Fatalf("seed exec file: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRun_DevBuildErrors(t *testing.T) {
 func TestRun_NoMatchingAsset(t *testing.T) {
 	execPath := seedExecFile(t)
 	client := &fakeClient{
-		release: &Release{TagName: "v9.9.9", Assets: []Asset{{Name: "loom-someother-arch", ID: 1}}},
+		release: &Release{TagName: "v9.9.9", Assets: []Asset{{Name: "devdeck-someother-arch", ID: 1}}},
 	}
 
 	if err := Run(context.Background(), client, Options{CurrentVersion: "v1.0.0", ExecPath: execPath}); err == nil {

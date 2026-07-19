@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"loom/backend/internal/detect"
-	gitpkg "loom/backend/internal/git"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/detect"
+	gitpkg "devdeck/backend/internal/git"
+	"devdeck/backend/internal/port"
 
 	"nhooyr.io/websocket"
 )
@@ -243,7 +243,7 @@ func bannerText(session, shell string, isPTY bool) string {
 	if isPTY {
 		mode = fmt.Sprintf("live PTY · %s", shell)
 	}
-	return fmt.Sprintf("%sloom terminal · session %s · %s%s\r\n\r\n",
+	return fmt.Sprintf("%sdevdeck terminal · session %s · %s%s\r\n\r\n",
 		ansi.Dim, session, mode, ansi.Reset)
 }
 

@@ -14,7 +14,7 @@ import {
   useUpdateSSHConnection,
   useWorkspaces,
 } from '@/features/data/queries'
-import { findProject, findWs, projectOfWorktree, useLoomStore, wsOfProject } from '@/store/useLoomStore'
+import { findProject, findWs, projectOfWorktree, useDevDeckStore, wsOfProject } from '@/store/useDevDeckStore'
 
 function titleFor(kind: string) {
   return kind === 'ssh-group' ? 'group' : kind
@@ -24,25 +24,25 @@ function bodyFor(kind: string, name: string, groupHostCount: number) {
   if (kind === 'worktree')
     return `This removes the worktree, kills its terminal session and deletes the local working copy for branch "${name}". The branch itself is kept.`
   if (kind === 'workspace')
-    return `This removes workspace "${name}" and every project inside it from loom. Your files on disk are not touched.`
+    return `This removes workspace "${name}" and every project inside it from devdeck. Your files on disk are not touched.`
   if (kind === 'machine')
     return `This removes machine "${name}" from the registry. Projects still pointing at it will show as unreachable until reassigned.`
   if (kind === 'ssh')
     return `This removes SSH connection "${name}" and its stored credentials. The remote host itself is not touched.`
   if (kind === 'ssh-group')
     return `This removes group "${name}" — ${groupHostCount} host${groupHostCount === 1 ? '' : 's'} move back to Ungrouped. The hosts themselves and their credentials are not touched.`
-  return `This removes project "${name}" and all of its worktrees from loom. Your files on disk are not touched.`
+  return `This removes project "${name}" and all of its worktrees from devdeck. Your files on disk are not touched.`
 }
 
 export function ConfirmDeleteDialog() {
   const navigate = useNavigate()
   const { wsId, projectId, wtId } = useScope()
-  const confirm = useLoomStore((s) => s.confirmDelete)
-  const cancelConfirm = useLoomStore((s) => s.cancelConfirm)
-  const showToast = useLoomStore((s) => s.showToast)
-  const removeWorktreeLayout = useLoomStore((s) => s.removeWorktreeLayout)
-  const closeWorktreeTab = useLoomStore((s) => s.closeWorktreeTab)
-  const selectAgentsTab = useLoomStore((s) => s.selectAgentsTab)
+  const confirm = useDevDeckStore((s) => s.confirmDelete)
+  const cancelConfirm = useDevDeckStore((s) => s.cancelConfirm)
+  const showToast = useDevDeckStore((s) => s.showToast)
+  const removeWorktreeLayout = useDevDeckStore((s) => s.removeWorktreeLayout)
+  const closeWorktreeTab = useDevDeckStore((s) => s.closeWorktreeTab)
+  const selectAgentsTab = useDevDeckStore((s) => s.selectAgentsTab)
   const workspaces = useWorkspaces().data ?? []
   const machines = useMachines().data
   const deleteWorktree = useDeleteWorktree()
@@ -149,12 +149,12 @@ export function ConfirmDeleteDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && cancelConfirm()} width={400} z={70} className="border-loom-red-tint">
+    <Dialog open={open} onOpenChange={(o) => !o && cancelConfirm()} width={400} z={70} className="border-devdeck-red-tint">
       <div className="mb-2.5 flex items-center gap-2.5">
-        <TriangleAlert size={15} className="text-loom-red-soft" />
+        <TriangleAlert size={15} className="text-devdeck-red-soft" />
         <DialogTitle>Delete {confirm ? titleFor(confirm.kind) : ''}</DialogTitle>
       </div>
-      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-loom-muted">
+      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
         {confirm ? bodyFor(confirm.kind, confirm.name, groupAffectedConnections.length) : ''}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">

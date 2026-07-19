@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"loom/backend/internal/terminal"
+	"devdeck/backend/internal/terminal"
 )
 
 // TerminalHandler handles terminal-session lifecycle endpoints outside the

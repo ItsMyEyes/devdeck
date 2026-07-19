@@ -33,7 +33,7 @@ func openBrowserSoon(url string) {
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		if err := openBrowser(url); err != nil {
-			fmt.Printf("open Loom UI at %s (%v)\n", url, err)
+			fmt.Printf("open DevDeck UI at %s (%v)\n", url, err)
 		}
 	}()
 }

@@ -198,12 +198,12 @@ export function MarkdownEditor({
             setEditing(true)
           }
         }}
-        className="-mx-1.5 cursor-text rounded-md px-1.5 py-1 transition-colors hover:bg-loom-hover-wash/40"
+        className="-mx-1.5 cursor-text rounded-md px-1.5 py-1 transition-colors hover:bg-devdeck-hover-wash/40"
       >
         {value.trim() ? (
           <MarkdownPreview source={value} />
         ) : (
-          <span className="text-[13px] text-loom-dim-2">{placeholder ?? 'Add a description…'}</span>
+          <span className="text-[13px] text-devdeck-dim-2">{placeholder ?? 'Add a description…'}</span>
         )}
       </div>
     )
@@ -212,14 +212,14 @@ export function MarkdownEditor({
   return (
     <div className="relative -mx-1.5 flex flex-wrap items-start gap-3 rounded-md px-1.5">
       <div className="flex min-w-[240px] flex-1 basis-[320px] flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg border border-loom-border-strong bg-loom-popover/60 p-0.5">
+        <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg border border-devdeck-border-strong bg-devdeck-popover/60 p-0.5">
           {TOOLBAR_ACTIONS.map((action) => (
             <Tooltip key={action.id} label={action.label}>
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyToolbarAction(action.apply)}
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2"
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
               >
                 <action.icon size={13} />
               </button>
@@ -227,14 +227,14 @@ export function MarkdownEditor({
           ))}
           {issueId ? (
             <>
-              <span className="mx-0.5 h-4 w-px bg-loom-border-strong" />
+              <span className="mx-0.5 h-4 w-px bg-devdeck-border-strong" />
               <Tooltip label="Attach file">
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => fileInputRef.current?.click()}
                   disabled={upload.isPending}
-                  className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-loom-dim transition-colors hover:bg-loom-hover-wash hover:text-loom-fg-2 disabled:opacity-50"
+                  className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2 disabled:opacity-50"
                 >
                   {upload.isPending ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
                 </button>
@@ -265,23 +265,23 @@ export function MarkdownEditor({
           placeholder={placeholder}
           rows={1}
           className={cn(
-            'w-full resize-none overflow-hidden rounded-md border-none bg-transparent px-0 py-0 text-[13px] leading-relaxed text-loom-fg-2',
-            'font-sans placeholder:text-loom-dim-2 focus-visible:outline-none',
-            isDragOver && 'outline-2 outline-dashed outline-loom-border-accent outline-offset-4',
+            'w-full resize-none overflow-hidden rounded-md border-none bg-transparent px-0 py-0 text-[13px] leading-relaxed text-devdeck-fg-2',
+            'font-sans placeholder:text-devdeck-dim-2 focus-visible:outline-none',
+            isDragOver && 'outline-2 outline-dashed outline-devdeck-border-accent outline-offset-4',
           )}
         />
       </div>
 
       <div className="flex min-w-[240px] flex-1 basis-[320px] flex-col gap-1.5">
-        <span className="text-[10.5px] font-medium uppercase tracking-wide text-loom-dim">Preview</span>
-        <div className="rounded-md border border-loom-border-card bg-loom-bg px-3 py-2.5">
+        <span className="text-[10.5px] font-medium uppercase tracking-wide text-devdeck-dim">Preview</span>
+        <div className="rounded-md border border-devdeck-border-card bg-devdeck-bg px-3 py-2.5">
           <MarkdownPreview source={value} />
         </div>
       </div>
 
       {slashMenu && filteredCommands.length > 0 ? (
         <div
-          className="absolute z-[70] flex w-56 flex-col gap-0.5 rounded-[11px] border border-loom-border-menu bg-loom-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
+          className="absolute z-[70] flex w-56 flex-col gap-0.5 rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
           style={{ top: slashMenu.top, left: slashMenu.left }}
         >
           {filteredCommands.map((cmd, i) => (
@@ -292,13 +292,13 @@ export function MarkdownEditor({
               onClick={() => selectSlashCommand(cmd)}
               className={cn(
                 'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-                i === slashMenu.highlighted ? 'bg-white/[0.05] text-loom-fg' : 'text-loom-fg-2 hover:bg-white/[0.05]',
+                i === slashMenu.highlighted ? 'bg-white/[0.05] text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-white/[0.05]',
               )}
             >
-              <cmd.icon size={14} className="flex-none text-loom-dim" />
+              <cmd.icon size={14} className="flex-none text-devdeck-dim" />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-[12.5px]">{cmd.label}</span>
-                <span className="truncate text-[10.5px] text-loom-dim">{cmd.hint}</span>
+                <span className="truncate text-[10.5px] text-devdeck-dim">{cmd.hint}</span>
               </span>
             </button>
           ))}

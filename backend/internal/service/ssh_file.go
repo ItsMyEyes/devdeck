@@ -15,7 +15,7 @@ import (
 
 	"github.com/pkg/sftp"
 
-	"loom/backend/internal/sshmgr"
+	"devdeck/backend/internal/sshmgr"
 )
 
 // sshSearchBudget bounds how long Search walks the remote tree before
@@ -50,7 +50,7 @@ type SSHFileContent struct {
 // there is no symlink-escape hardening here: unlike a worktree checkout
 // (where escaping the root is a real security boundary), the remote sshd
 // already governs what this user's session can reach, so there is nothing
-// extra for Loom to enforce.
+// extra for DevDeck to enforce.
 type SSHFileService struct {
 	pool *sshmgr.FilePool
 }

@@ -1,4 +1,4 @@
-// mcp-server exposes Loom's issue tracker to coding agents over the Model
+// mcp-server exposes DevDeck's issue tracker to coding agents over the Model
 // Context Protocol (stdio transport). It opens the same SQLite database as
 // the main backend (WAL mode supports the two processes sharing the file)
 // and goes through the same port.Store used by the HTTP handlers — no
@@ -19,12 +19,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 func main() {
-	dbPath := flag.String("db", envOr("LOOM_DB", defaultDBPath()), "sqlite database path (same file the Loom backend uses)")
+	dbPath := flag.String("db", envOr("DEVDECK_DB", defaultDBPath()), "sqlite database path (same file the DevDeck backend uses)")
 	flag.Parse()
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
@@ -45,7 +45,7 @@ func main() {
 }
 
 func newIssueMCPServer(st *store.Store) *server.MCPServer {
-	s := server.NewMCPServer("loom-issues", "1.0.0")
+	s := server.NewMCPServer("devdeck-issues", "1.0.0")
 	h := &issueTools{st: st}
 
 	s.AddTool(mcp.NewTool("list_projects",
@@ -286,9 +286,9 @@ func mimeFromExt(path string) string {
 func defaultDBPath() string {
 	executable, err := os.Executable()
 	if err != nil {
-		return filepath.Join("data", "loom.db")
+		return filepath.Join("data", "devdeck.db")
 	}
-	return filepath.Join(filepath.Dir(executable), "data", "loom.db")
+	return filepath.Join(filepath.Dir(executable), "data", "devdeck.db")
 }
 
 func envOr(key, fallback string) string {

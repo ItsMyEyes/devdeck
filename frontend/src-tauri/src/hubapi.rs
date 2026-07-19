@@ -51,7 +51,7 @@ pub async fn wait_healthy(port: u16, timeout: Duration) -> Result<(), String> {
             Ok(res) if res.status().is_success() => return Ok(()),
             _ if Instant::now() >= deadline => {
                 return Err(format!(
-                    "loom-server did not become healthy within {}s",
+                    "devdeck-server did not become healthy within {}s",
                     timeout.as_secs()
                 ))
             }

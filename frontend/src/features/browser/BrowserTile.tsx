@@ -14,7 +14,7 @@ import {
 import type { BrowserTileBookmark } from '@/lib/browserTileBookmarks'
 import { startProxy } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import {
   closeBrowserTile as closeNativeBrowserTile,
   hideBrowserTile,
@@ -55,14 +55,14 @@ function titleFor(url: string): string {
 }
 
 export function BrowserTile({ tabId }: BrowserTileProps) {
-  const tile = useLoomStore((s) => s.browserTiles[tabId])
-  const ensureBrowserTile = useLoomStore((s) => s.ensureBrowserTile)
-  const setBrowserDocState = useLoomStore((s) => s.setBrowserDocState)
-  const addBrowserDoc = useLoomStore((s) => s.addBrowserDoc)
-  const closeBrowserDoc = useLoomStore((s) => s.closeBrowserDoc)
-  const selectBrowserDoc = useLoomStore((s) => s.selectBrowserDoc)
-  const setBrowserTileFullscreen = useLoomStore((s) => s.setBrowserTileFullscreen)
-  const nativeOverlayBlockers = useLoomStore((s) => s.nativeOverlayBlockers)
+  const tile = useDevDeckStore((s) => s.browserTiles[tabId])
+  const ensureBrowserTile = useDevDeckStore((s) => s.ensureBrowserTile)
+  const setBrowserDocState = useDevDeckStore((s) => s.setBrowserDocState)
+  const addBrowserDoc = useDevDeckStore((s) => s.addBrowserDoc)
+  const closeBrowserDoc = useDevDeckStore((s) => s.closeBrowserDoc)
+  const selectBrowserDoc = useDevDeckStore((s) => s.selectBrowserDoc)
+  const setBrowserTileFullscreen = useDevDeckStore((s) => s.setBrowserTileFullscreen)
+  const nativeOverlayBlockers = useDevDeckStore((s) => s.nativeOverlayBlockers)
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
   const [draft, setDraft] = useState('')
@@ -269,9 +269,9 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const canGoForward = doc.historyIndex < doc.history.length - 1
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-loom-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-bg">
       {tile.fullscreen && (
-        <div className="flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-loom-border bg-loom-surface px-2">
+        <div className="flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-devdeck-border bg-devdeck-surface px-2">
           {tile.docs.map((d) => (
             <button
               key={d.id}
@@ -279,7 +279,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
               onClick={() => selectBrowserDoc(tabId, d.id)}
               className={cn(
                 'group flex h-6 max-w-[160px] flex-none items-center gap-1.5 rounded-md px-2 font-mono text-[11px]',
-                d.id === tile.activeDocId ? 'bg-loom-elevated text-loom-fg' : 'text-loom-muted hover:bg-loom-hover-wash',
+                d.id === tile.activeDocId ? 'bg-devdeck-elevated text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
               )}
             >
               <Globe size={11} />
@@ -300,15 +300,15 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
             type="button"
             onClick={() => addBrowserDoc(tabId)}
             aria-label="New tab"
-            className="ml-1 flex h-6 w-6 flex-none items-center justify-center rounded-md text-loom-dim hover:bg-loom-hover-wash"
+            className="ml-1 flex h-6 w-6 flex-none items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-hover-wash"
           >
             <Plus size={12} />
           </button>
         </div>
       )}
 
-      <div className="flex min-w-0 flex-none items-center gap-1.5 overflow-x-auto border-b border-loom-border bg-loom-bg px-2 py-1.5">
-        <Globe size={13} className="flex-none text-loom-dim" />
+      <div className="flex min-w-0 flex-none items-center gap-1.5 overflow-x-auto border-b border-devdeck-border bg-devdeck-bg px-2 py-1.5">
+        <Globe size={13} className="flex-none text-devdeck-dim" />
         <Button size="icon-sm" variant="secondary" onClick={() => void goHistory(-1)} disabled={!canGoBack} aria-label="Back">
           <ArrowLeft size={12} />
         </Button>
@@ -358,20 +358,20 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-4 overflow-auto p-6">
             {bookmarkGroups.length === 0 ? (
-              <div className="mt-16 text-[12px] text-loom-muted">No bookmarks yet — enter a URL above to start browsing.</div>
+              <div className="mt-16 text-[12px] text-devdeck-muted">No bookmarks yet — enter a URL above to start browsing.</div>
             ) : (
               bookmarkGroups.map(([group, items]) => (
                 <div key={group} className="w-full max-w-[520px]">
-                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-loom-dim">{group}</div>
+                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</div>
                   <div className="grid grid-cols-2 gap-2">
                     {items.map((bookmark) => (
                       <button
                         key={bookmark.id}
                         type="button"
                         onClick={() => void navigate(bookmark.url)}
-                        className="flex items-center justify-between rounded-lg border border-loom-border-card bg-loom-surface-2 px-3 py-2.5 text-left hover:border-loom-border-accent"
+                        className="flex items-center justify-between rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 px-3 py-2.5 text-left hover:border-devdeck-border-accent"
                       >
-                        <span className="truncate text-[12px] text-loom-fg-2">{bookmark.title}</span>
+                        <span className="truncate text-[12px] text-devdeck-fg-2">{bookmark.title}</span>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -379,7 +379,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
                             setBookmarks((current) => removeBrowserTileBookmark(current, bookmark.id))
                           }}
                           aria-label={`Remove ${bookmark.title}`}
-                          className="text-loom-muted-2 hover:text-loom-red-soft"
+                          className="text-devdeck-muted-2 hover:text-devdeck-red-soft"
                         >
                           <X size={12} />
                         </button>

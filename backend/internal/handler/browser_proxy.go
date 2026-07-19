@@ -15,7 +15,7 @@ import (
 	"time"
 
 	xhtml "golang.org/x/net/html"
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 const (
@@ -32,7 +32,7 @@ var (
 )
 
 // BrowserProxyHandler fetches web pages from the server's network and serves
-// them back through Loom. The frontend renders this endpoint inside a sandboxed
+// them back through DevDeck. The frontend renders this endpoint inside a sandboxed
 // iframe, so untrusted pages do not run in the same origin as the app UI.
 type BrowserProxyHandler struct {
 	client *http.Client
@@ -72,7 +72,7 @@ func (h *BrowserProxyHandler) GetSession(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
-// Proxy relays a single HTTP(S) request through the Loom server. GET/HEAD cover
+// Proxy relays a single HTTP(S) request through the DevDeck server. GET/HEAD cover
 // normal page/resource loads, and POST supports basic form submissions.
 func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodPost {
@@ -318,7 +318,7 @@ func writeBrowserStatus(w http.ResponseWriter, upstreamStatus int) {
 	if upstreamStatus >= http.StatusBadRequest {
 		// JSONErrorMiddleware rewrites >=400 /api responses into JSON envelopes.
 		// Keep upstream error pages renderable inside the browser iframe.
-		w.Header().Set("X-Loom-Browser-Upstream-Status", strconv.Itoa(upstreamStatus))
+		w.Header().Set("X-DevDeck-Browser-Upstream-Status", strconv.Itoa(upstreamStatus))
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -343,7 +343,7 @@ func writeBrowserResponseHeaders(dst, src http.Header, contentType string, conte
 		dst.Del("Content-Length")
 	}
 	dst.Set("Referrer-Policy", browserProxyReferrer)
-	dst.Set("X-Loom-Browser-URL", finalURL)
+	dst.Set("X-DevDeck-Browser-URL", finalURL)
 	dst.Set("X-Robots-Tag", "noindex")
 	dst.Set("Access-Control-Allow-Origin", "*")
 	if document {
@@ -380,17 +380,17 @@ func writeBrowserResourceMismatch(w http.ResponseWriter, resp *http.Response, ta
 	switch resourceKind {
 	case "script":
 		contentType = "application/javascript; charset=utf-8"
-		body = "console.error(" + strconv.Quote("Loom browser proxy: upstream returned HTML for script "+target.String()+". The site may be serving a login/challenge page or a missing asset fallback.") + ");\n"
+		body = "console.error(" + strconv.Quote("DevDeck browser proxy: upstream returned HTML for script "+target.String()+". The site may be serving a login/challenge page or a missing asset fallback.") + ");\n"
 	case "style":
 		contentType = "text/css; charset=utf-8"
-		body = "/* Loom browser proxy: upstream returned HTML for stylesheet " + strings.ReplaceAll(target.String(), "*/", "* /") + ". */\n"
+		body = "/* DevDeck browser proxy: upstream returned HTML for stylesheet " + strings.ReplaceAll(target.String(), "*/", "* /") + ". */\n"
 	default:
 		return false
 	}
 
 	out := []byte(body)
 	writeBrowserResponseHeaders(w.Header(), resp.Header, contentType, len(out), false, finalURL)
-	w.Header().Set("X-Loom-Browser-Content-Mismatch", resourceKind+"-was-html")
+	w.Header().Set("X-DevDeck-Browser-Content-Mismatch", resourceKind+"-was-html")
 	writeBrowserStatus(w, resp.StatusCode)
 	if method != http.MethodHead {
 		_, _ = w.Write(out)
@@ -618,7 +618,7 @@ func browserNavigationScript(base *url.URL, proxyToken string) string {
   const proxyToken = ` + strconv.Quote(proxyToken) + `;
   const notify = (url) => {
     try {
-      window.parent.postMessage({ type: "loom-browser:navigate", url }, "*");
+      window.parent.postMessage({ type: "devdeck-browser:navigate", url }, "*");
     } catch {}
   };
   const targetURL = (raw) => {

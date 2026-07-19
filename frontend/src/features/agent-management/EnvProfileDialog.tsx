@@ -233,7 +233,7 @@ export function EnvProfileDialog({
     >
       {/* ── header ── */}
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-loom-border-accent bg-loom-accent-tint text-loom-accent-soft">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft">
           <KeyRound size={18} />
         </div>
         <div>
@@ -256,7 +256,7 @@ export function EnvProfileDialog({
         {/* name + base URL */}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-1.5">
-            <span className="text-[11.5px] font-medium text-loom-muted">Name</span>
+            <span className="text-[11.5px] font-medium text-devdeck-muted">Name</span>
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -266,7 +266,7 @@ export function EnvProfileDialog({
             />
           </label>
           <label className="grid gap-1.5">
-            <span className="text-[11.5px] font-medium text-loom-muted">Base URL</span>
+            <span className="text-[11.5px] font-medium text-devdeck-muted">Base URL</span>
             <Input
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
@@ -280,7 +280,7 @@ export function EnvProfileDialog({
 
         {/* auth token */}
         <label className="grid gap-1.5">
-          <span className="text-[11.5px] font-medium text-loom-muted">
+          <span className="text-[11.5px] font-medium text-devdeck-muted">
             {isCodex ? 'API key' : 'Auth token'}
           </span>
           <Input
@@ -298,7 +298,7 @@ export function EnvProfileDialog({
             spellCheck={false}
             className="h-9 text-[12.5px] font-mono"
           />
-          <span className="font-mono text-[9.5px] text-loom-dim">
+          <span className="font-mono text-[9.5px] text-devdeck-dim">
             {isEdit
               ? 'Leave blank to keep the stored value unchanged.'
               : 'Required to create a profile.'}
@@ -307,13 +307,13 @@ export function EnvProfileDialog({
 
         {/* ── Codex-specific provider fields ── */}
         {isCodex ? (
-          <fieldset className="rounded-xl border border-loom-border-card bg-loom-surface-2 p-4">
-            <legend className="mb-3 text-[11.5px] font-medium text-loom-muted-2">
+          <fieldset className="rounded-xl border border-devdeck-border-card bg-devdeck-surface-2 p-4">
+            <legend className="mb-3 text-[11.5px] font-medium text-devdeck-muted-2">
               Provider config
             </legend>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Provider name
                 </span>
                 <Input
@@ -325,20 +325,20 @@ export function EnvProfileDialog({
                 />
               </label>
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Wire API
                 </span>
                 <select
                   value={codexWireAPI}
                   onChange={(e) => setCodexWireAPI(e.target.value)}
-                  className="h-8 rounded-lg border border-loom-border-card bg-loom-bg px-2 text-[11px] font-mono text-loom-fg focus:outline-none focus:ring-2 focus:ring-ring/50"
+                  className="h-8 rounded-lg border border-devdeck-border-card bg-devdeck-bg px-2 text-[11px] font-mono text-devdeck-fg focus:outline-none focus:ring-2 focus:ring-ring/50"
                 >
                   <option value="chat">chat</option>
                   <option value="responses">responses</option>
                 </select>
               </label>
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Env key
                 </span>
                 <Input
@@ -351,7 +351,7 @@ export function EnvProfileDialog({
                 />
               </label>
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Model
                 </span>
                 <Input
@@ -366,7 +366,7 @@ export function EnvProfileDialog({
                 />
               </label>
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Context window
                 </span>
                 <Input
@@ -379,7 +379,7 @@ export function EnvProfileDialog({
                 />
               </label>
               <label className="grid gap-1.5">
-                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                   Max output tokens
                 </span>
                 <Input
@@ -396,14 +396,14 @@ export function EnvProfileDialog({
         ) : (
           <>
             {/* ── model slots + fetch (Claude) ── */}
-            <fieldset className="rounded-xl border border-loom-border-card bg-loom-surface-2 p-4">
+            <fieldset className="rounded-xl border border-devdeck-border-card bg-devdeck-surface-2 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <legend className="text-[11.5px] font-medium text-loom-muted-2">Model slots</legend>
+                <legend className="text-[11.5px] font-medium text-devdeck-muted-2">Model slots</legend>
                 <button
                   type="button"
                   onClick={() => void runFetchModels()}
                   disabled={fetchModels.isPending}
-                  className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-loom-border-card bg-loom-bg px-2.5 font-mono text-[10px] text-loom-muted-2 transition-colors hover:border-loom-border-strong hover:text-loom-fg disabled:opacity-55"
+                  className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-devdeck-border-card bg-devdeck-bg px-2.5 font-mono text-[10px] text-devdeck-muted-2 transition-colors hover:border-devdeck-border-strong hover:text-devdeck-fg disabled:opacity-55"
                 >
                   <RefreshCw size={11} className={cn(fetchModels.isPending && 'animate-spin')} />
                   Fetch models
@@ -417,7 +417,7 @@ export function EnvProfileDialog({
               <div className="grid gap-3 sm:grid-cols-3">
                 {CLAUDE_SLOTS.map((slot) => (
                   <label key={slot.slot} className="grid gap-1">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-loom-dim">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-devdeck-dim">
                       {slot.label}
                     </span>
                     <Input
@@ -435,7 +435,7 @@ export function EnvProfileDialog({
                 ))}
               </div>
               {fetched.length > 0 ? (
-                <p className="mt-2 text-[9.5px] text-loom-dim">
+                <p className="mt-2 text-[9.5px] text-devdeck-dim">
                   {fetched.length} model{fetched.length === 1 ? '' : 's'} available — pick from the list or
                   type your own.
                 </p>
@@ -443,16 +443,16 @@ export function EnvProfileDialog({
             </fieldset>
 
             {/* ── default env keys (Claude only) ── */}
-            <div className="rounded-xl border border-loom-border-card px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-loom-muted-2">
-                <LockKeyhole size={12} className="text-loom-dim" />
+            <div className="rounded-xl border border-devdeck-border-card px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-devdeck-muted-2">
+                <LockKeyhole size={12} className="text-devdeck-dim" />
                 Default keys (always written, non-deletable)
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {DEFAULT_ENV_KEYS.map((key) => (
                   <span
                     key={key}
-                    className="rounded-md border border-loom-border-card bg-loom-surface-2 px-1.5 py-1 font-mono text-[9px] leading-none text-loom-muted-2"
+                    className="rounded-md border border-devdeck-border-card bg-devdeck-surface-2 px-1.5 py-1 font-mono text-[9px] leading-none text-devdeck-muted-2"
                   >
                     {key}
                   </span>
@@ -464,10 +464,10 @@ export function EnvProfileDialog({
 
         {/* ── custom env keys ── */}
         <fieldset>
-          <legend className="mb-2.5 text-[11.5px] font-medium text-loom-muted">Custom env keys</legend>
+          <legend className="mb-2.5 text-[11.5px] font-medium text-devdeck-muted">Custom env keys</legend>
           <div className="grid gap-2">
             {rows.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-loom-border px-3 py-3 text-center text-[11px] text-loom-dim">
+              <div className="rounded-lg border border-dashed border-devdeck-border px-3 py-3 text-center text-[11px] text-devdeck-dim">
                 No custom keys yet.
               </div>
             ) : (
@@ -496,7 +496,7 @@ export function EnvProfileDialog({
                     type="button"
                     aria-label="Remove key"
                     onClick={() => removeRow(index)}
-                    className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-loom-dim transition-colors hover:bg-loom-red-tint-hover hover:text-loom-red-soft"
+                    className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-devdeck-dim transition-colors hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -507,7 +507,7 @@ export function EnvProfileDialog({
           <button
             type="button"
             onClick={addRow}
-            className="mt-2.5 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-loom-border-card bg-loom-surface-2 px-2.5 text-[11px] text-loom-muted transition-colors hover:border-loom-border-strong hover:text-loom-fg"
+            className="mt-2.5 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 px-2.5 text-[11px] text-devdeck-muted transition-colors hover:border-devdeck-border-strong hover:text-devdeck-fg"
           >
             <Plus size={12} />
             Add key
@@ -518,7 +518,7 @@ export function EnvProfileDialog({
         {error ? (
           <div
             role="alert"
-            className="rounded-lg border border-loom-red-tint bg-loom-red-tint-hover px-3 py-2 text-[11px] text-loom-red-soft"
+            className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint-hover px-3 py-2 text-[11px] text-devdeck-red-soft"
           >
             {error}
           </div>

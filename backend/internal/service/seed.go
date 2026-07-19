@@ -1,8 +1,8 @@
 package service
 
 import (
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 // SeedService wraps seed operations.

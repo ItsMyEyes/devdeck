@@ -1,0 +1,7 @@
+{
+  "identifier": "dev.kiyora.devdeck.devfull",
+  "build": {
+    "beforeDevCommand": null,
+    "devUrl": null
+  }
+}

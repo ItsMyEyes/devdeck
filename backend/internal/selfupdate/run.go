@@ -33,7 +33,7 @@ type Options struct {
 
 // Run checks the latest GitHub release against opts.CurrentVersion and, if
 // newer, downloads and installs it in place of opts.ExecPath. It never
-// restarts the process — the caller exits and the operator restarts Loom.
+// restarts the process — the caller exits and the operator restarts DevDeck.
 func Run(ctx context.Context, client releaseFetcher, opts Options) error {
 	release, err := client.LatestRelease(ctx)
 	if err != nil {
@@ -64,6 +64,6 @@ func Run(ctx context.Context, client releaseFetcher, opts Options) error {
 		return fmt.Errorf("install update: %w", err)
 	}
 
-	log.Printf("updated to %s — restart loom to use it", release.TagName)
+	log.Printf("updated to %s — restart devdeck to use it", release.TagName)
 	return nil
 }

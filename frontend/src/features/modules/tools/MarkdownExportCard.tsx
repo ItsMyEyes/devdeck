@@ -42,18 +42,18 @@ export function MarkdownExportCard() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-loom-border-card bg-loom-card">
-      <div className="flex items-center justify-between gap-3 border-b border-loom-border-card px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+      <div className="flex items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
-          <div className="text-[12.5px] font-medium text-loom-fg">Markdown → Document</div>
-          <div className="mt-0.5 text-[11px] text-loom-muted">
+          <div className="text-[12.5px] font-medium text-devdeck-fg">Markdown → Document</div>
+          <div className="mt-0.5 text-[11px] text-devdeck-muted">
             Renders mermaid diagrams to images, then exports via pandoc.
           </div>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 p-3.5">
-        <div className="min-h-[220px] flex-1 overflow-auto rounded-md border border-loom-border-card px-3 py-2">
+        <div className="min-h-[220px] flex-1 overflow-auto rounded-md border border-devdeck-border-card px-3 py-2">
           <MarkdownEditor
             value={markdown}
             onChange={setMarkdown}

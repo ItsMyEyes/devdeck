@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"strings"
 
-	"loom/backend/internal/service"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/store"
 )
 
 // writeJSON encodes v as JSON and writes it with the given status.

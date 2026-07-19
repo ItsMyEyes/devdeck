@@ -227,14 +227,14 @@ func OnlyFrom(allowed, trustedProxies []*net.IPNet, ipHeader string) func(http.H
 	}
 }
 
-// accessDeniedHTML is a self-contained page matching the Loom dark theme,
+// accessDeniedHTML is a self-contained page matching the DevDeck dark theme,
 // served when a blocked browser requests any non-API path.
 const accessDeniedHTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Access denied — Loom</title>
+<title>Access denied — DevDeck</title>
 <style>
   :root {
     --bg: #0c0d10; --elevated: #1a1d23; --border: #1d2027;
@@ -265,7 +265,7 @@ const accessDeniedHTML = `<!doctype html>
   <div class="card">
     <div class="badge">&#9888;</div>
     <h1>Access denied</h1>
-    <p>This Loom instance only accepts connections from approved IP addresses. Your address is not on the allowlist.</p>
+    <p>This DevDeck instance only accepts connections from approved IP addresses. Your address is not on the allowlist.</p>
     <p style="margin-top:8px">If you believe this is a mistake, contact the operator of this instance.</p>
     <div class="code">HTTP 403 &middot; IP RESTRICTED</div>
   </div>

@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 const dialTimeout = 10 * time.Second

@@ -11,7 +11,7 @@ export function ModeTabs<T extends string>({
   options: { value: T; label: string }[]
 }) {
   return (
-    <div className="flex flex-none items-center gap-0.5 rounded-md border border-loom-border-menu p-0.5">
+    <div className="flex flex-none items-center gap-0.5 rounded-md border border-devdeck-border-menu p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -19,7 +19,7 @@ export function ModeTabs<T extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             'cursor-pointer rounded px-2.5 py-1 font-mono text-[11px] transition-colors',
-            value === o.value ? 'bg-loom-accent/10 text-loom-fg' : 'text-loom-muted hover:text-loom-fg',
+            value === o.value ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg',
           )}
         >
           {o.label}

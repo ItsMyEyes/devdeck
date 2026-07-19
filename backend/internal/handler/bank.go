@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"loom/backend/internal/port"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 // BankHandler handles bank-preset CRUD endpoints.

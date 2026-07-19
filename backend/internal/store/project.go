@@ -1,7 +1,7 @@
 package store
 
 import (
-	"loom/backend/internal/domain"
+	"devdeck/backend/internal/domain"
 )
 
 // ── Child queries ──────────────────────────────────────────────────────────

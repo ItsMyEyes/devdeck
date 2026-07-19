@@ -26,7 +26,7 @@ const explicitHistoryKeymap = Prec.highest(
   ]),
 )
 
-const loomEditorTheme = EditorView.theme(
+const devdeckEditorTheme = EditorView.theme(
   {
     '&': {
       height: '100%',
@@ -154,7 +154,7 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
   const extensions = useMemo(() => {
     const base = [
       oneDark,
-      loomEditorTheme,
+      devdeckEditorTheme,
       explicitHistoryKeymap,
       lintGutter(),
     ]
@@ -176,17 +176,17 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
   return (
     <div className="flex flex-none flex-col md:min-h-0 md:flex-1">
       {/* toolbar */}
-      <div className="flex flex-none items-center justify-between border-b border-loom-border px-4 py-2.5">
+      <div className="flex flex-none items-center justify-between border-b border-devdeck-border px-4 py-2.5">
         <div className="flex items-center gap-2.5">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-loom-dim">
+          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-devdeck-dim">
             ~/.{agentId}/{isCodex ? 'config.toml' : 'settings.json'}
           </span>
           <span
             className={cn(
               'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[9px]',
               save.isPending || query.isFetching
-                ? 'bg-loom-yellow-tint text-loom-yellow-tint-text'
-                : 'bg-loom-green-tint text-loom-green-soft',
+                ? 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text'
+                : 'bg-devdeck-green-tint text-devdeck-green-soft',
             )}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -206,11 +206,11 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
           </div>
         ) : query.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-            <p className="text-[12px] text-loom-red-soft">Could not load settings file</p>
+            <p className="text-[12px] text-devdeck-red-soft">Could not load settings file</p>
             <button
               type="button"
               onClick={() => query.refetch()}
-              className="cursor-pointer text-[11px] text-loom-accent-soft hover:underline"
+              className="cursor-pointer text-[11px] text-devdeck-accent-soft hover:underline"
             >
               Retry
             </button>

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"loom/backend/internal/service"
+	"devdeck/backend/internal/service"
 )
 
 // WorktreeGitHandler exposes source-control operations scoped to one worktree.

@@ -9,7 +9,7 @@ const LOADING_ANIMATION_SRC = 'https://lottie.host/606f05b0-b006-4006-a256-de83e
  *  it fills whatever height the caller's own wrapper already provides. */
 export function DataLoading({ label, compact }: { label?: string; compact?: boolean }) {
   const content = (
-    <div className={cn('flex flex-col items-center justify-center gap-1.5 font-mono text-loom-dim', compact ? 'text-[11px]' : 'gap-3 text-[13px]')}>
+    <div className={cn('flex flex-col items-center justify-center gap-1.5 font-mono text-devdeck-dim', compact ? 'text-[11px]' : 'gap-3 text-[13px]')}>
       <DotLottieReact
         src={LOADING_ANIMATION_SRC}
         loop

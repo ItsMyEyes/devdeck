@@ -3,9 +3,9 @@ package registry
 import (
 	"log"
 
-	"loom/backend/internal/detect"
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/detect"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 // LocalRegistry wraps an inner AgentRegistry and enriches it with data from

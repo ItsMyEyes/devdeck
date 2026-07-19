@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"loom/backend/internal/domain"
-	"loom/backend/internal/port"
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 // ── Child queries ──────────────────────────────────────────────────────────

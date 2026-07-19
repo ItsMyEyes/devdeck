@@ -1,6 +1,6 @@
 import { useLocation, useParams } from '@tanstack/react-router'
 import { findTileLeaf } from '@/features/tabs/tileTree'
-import { useLoomStore } from '@/store/useLoomStore'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { ModuleView } from '@/store/types'
 
 export interface Scope {
@@ -23,7 +23,7 @@ export function useScope(): Scope {
   // tabs anywhere else without hiding the tiling canvas behind the SSH
   // connections page) — the focused tile tab's kind is the only way to
   // tell them apart, so it breaks the tie below.
-  const focusedTabKind = useLoomStore((s) => {
+  const focusedTabKind = useDevDeckStore((s) => {
     const layout = params.wsId ? s.workspaceTileLayouts[params.wsId] : undefined
     if (!layout) return undefined
     const leaf = findTileLeaf(layout.root, layout.focusedLeafId)

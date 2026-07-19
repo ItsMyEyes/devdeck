@@ -5,7 +5,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { useMemo } from 'react'
 import {
   explicitHistoryKeymap,
-  loomCodeTheme,
+  devdeckCodeTheme,
   syntaxDiagnostics,
   useFileLanguage,
 } from './CodeFileEditor'
@@ -53,7 +53,7 @@ export function PlainCodeEditor({
       }}
       extensions={[
         oneDark,
-        loomCodeTheme,
+        devdeckCodeTheme,
         explicitHistoryKeymap,
         completionExtension,
         syntaxDiagnostics,

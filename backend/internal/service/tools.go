@@ -48,7 +48,7 @@ type ToolsService struct {
 // file once, so the server binary stays self-contained (mirrors the webui
 // package embedding the built frontend).
 func NewToolsService(cfg ToolsConfig) (*ToolsService, error) {
-	dir, err := os.MkdirTemp("", "loom-tools-")
+	dir, err := os.MkdirTemp("", "devdeck-tools-")
 	if err != nil {
 		return nil, fmt.Errorf("create tools temp dir: %w", err)
 	}
@@ -83,7 +83,7 @@ func (s *ToolsService) ToMarkdown(ctx context.Context, filename string, data []b
 		return "", err
 	}
 
-	dir, err := os.MkdirTemp("", "loom-markitdown-*")
+	dir, err := os.MkdirTemp("", "devdeck-markitdown-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
@@ -129,7 +129,7 @@ func (s *ToolsService) MarkdownToDocument(ctx context.Context, markdown, format 
 		return nil, err
 	}
 
-	dir, err := os.MkdirTemp("", "loom-export-*")
+	dir, err := os.MkdirTemp("", "devdeck-export-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}

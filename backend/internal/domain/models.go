@@ -207,7 +207,7 @@ type Machine struct {
 }
 
 // SSHConnection is a saved connection to an arbitrary external SSH host —
-// a separate concept from Machine (an already-running Loom runtime trusted
+// a separate concept from Machine (an already-running DevDeck runtime trusted
 // via a shared key). Mirrors the frontend SSHConnection type. Credentials
 // live in SSHSecret rows, never on this struct.
 type SSHConnection struct {

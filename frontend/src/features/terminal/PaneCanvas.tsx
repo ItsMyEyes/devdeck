@@ -200,7 +200,7 @@ function SplitPaneView({ node, ctx }: { node: SplitPane; ctx: PaneRenderContext 
               role="separator"
               aria-orientation={isRow ? 'vertical' : 'horizontal'}
               className={cn(
-                'flex-none touch-none bg-loom-border transition-colors hover:bg-loom-accent active:bg-loom-accent',
+                'flex-none touch-none bg-devdeck-border transition-colors hover:bg-devdeck-accent active:bg-devdeck-accent',
                 isRow ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
               )}
               onPointerDown={(event) => {
@@ -290,7 +290,7 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
         ))}
         {hoverZone ? (
           <div
-            className="pointer-events-none absolute z-10 border-2 border-loom-accent bg-loom-accent/15"
+            className="pointer-events-none absolute z-10 border-2 border-devdeck-accent bg-devdeck-accent/15"
             style={zoneStyle(hoverZone)}
           />
         ) : null}
@@ -401,7 +401,7 @@ export function PaneCanvas({
       </div>
       <DragOverlay>
         {dragContent ? (
-          <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-loom-border bg-loom-terminal px-3 font-mono text-[11px] text-loom-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
+          <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-devdeck-border bg-devdeck-terminal px-3 font-mono text-[11px] text-devdeck-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
             {tabIcon?.(dragContent)}
             <span className="truncate">{dragContent.label}</span>
           </div>

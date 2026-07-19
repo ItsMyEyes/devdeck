@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"loom/backend/internal/machineclient"
-	"loom/backend/internal/store"
+	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/store"
 )
 
 type MachineHealthCache struct {

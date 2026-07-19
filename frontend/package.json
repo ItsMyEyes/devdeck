@@ -1,20 +1,21 @@
 {
-  "name": "loom",
+  "name": "devdeck",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "loom — one operator, many companies. Multi-project dashboard for coding agents (git worktrees + terminals).",
+  "description": "devdeck — one operator, many companies. Multi-project dashboard for coding agents (git worktrees + terminals).",
   "scripts": {
-    "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${LOOM_API_PORT:-8989} && vite --host 0.0.0.0\" \"npm run dev:api\"",
+    "dev": "concurrently -k -n web,api -c blue,green \"wait-on tcp:${DEVDECK_API_PORT:-8989} && vite --host 0.0.0.0\" \"npm run dev:api\"",
     "dev:web": "vite",
-    "dev:api": "cd ../backend && go run ./cmd/server --db loom.db --open=false --2fa=false --env .env --secure-cookies=false",
+    "dev:api": "cd ../backend && go run ./cmd/server --db devdeck.db --open=false --2fa=false --env .env --secure-cookies=false",
     "build": "vite build",
     "build:api": "cd .. && make build-api",
     "preview": "vite preview",
     "pretypecheck": "vite build --outDir node_modules/.routegen --emptyOutDir --logLevel warn",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "cd .. && make sidecar-host && cd frontend && LOOM_ROLE=${LOOM_ROLE:-both} LOOM_KEY=${LOOM_KEY:-dev-hub-key} tauri dev",
+    "tauri:dev": "cd .. && make sidecar-host && cd frontend && tauri dev",
+    "tauri:dev-full": "cd .. && make sidecar-host && cd frontend && DEVDECK_TAURI_DEV_FULL=1 tauri dev --config src-tauri/tauri.dev-full.conf.json --no-dev-server",
     "tauri:build": "tauri build"
   },
   "dependencies": {
