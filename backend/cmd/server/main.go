@@ -18,6 +18,10 @@ import (
 	"time"
 
 	"devdeck/backend/internal/config"
+	"devdeck/backend/internal/dbdriver"
+	"devdeck/backend/internal/dbdriver/mysqldrv"
+	"devdeck/backend/internal/dbdriver/pgdrv"
+	"devdeck/backend/internal/dbdriver/sqlitedrv"
 	"devdeck/backend/internal/handler"
 	"devdeck/backend/internal/lsp"
 	"devdeck/backend/internal/machineclient"
@@ -249,6 +253,16 @@ func main() {
 	dbSecrets := service.NewDBSecretService(st, authKey)
 	dbH := handler.NewDBHandler(st, dbSecrets)
 
+	// Drivers are registered here rather than from an init(), so the set of
+	// enabled engines is explicit and the registry is populated before
+	// GET /api/db/engines can be served from it.
+	dbdriver.Register("sqlite", sqlitedrv.New())
+	dbdriver.Register("postgres", pgdrv.New())
+	dbdriver.Register("mysql", mysqldrv.New())
+
+	dbExecSvc := service.NewDBExecService(st, dbSecrets)
+	dbExecH := handler.NewDBExecHandler(dbExecSvc)
+
 	termSrv := terminal.NewServer(st)
 	termH := handler.NewTerminalHandler()
 	lspSrv := lsp.NewServer(st)
@@ -454,7 +468,6 @@ func main() {
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)
 
 		// Database connection registry — hub-scoped like the SSH registry.
-		// Execution endpoints arrive in phase 2; this phase is registry only.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
 		mux.HandleFunc("POST /api/db/connections", dbH.PostConnection)
 		mux.HandleFunc("PATCH /api/db/connections/{id}", dbH.PatchConnection)
@@ -465,7 +478,28 @@ func main() {
 		mux.HandleFunc("POST /api/db/connections/{id}/queries", dbH.PostSavedQuery)
 		mux.HandleFunc("PATCH /api/db/queries/{qid}", dbH.PatchSavedQuery)
 		mux.HandleFunc("DELETE /api/db/queries/{qid}", dbH.DeleteSavedQuery)
+
+		// Read path. Each of these executes on the hub, or forwards the
+		// connection's descriptor to its executor runtime, transparently.
+		mux.HandleFunc("GET /api/db/engines", dbExecH.GetEngines)
+		mux.HandleFunc("POST /api/db/connections/{id}/test", dbExecH.PostTest)
+		mux.HandleFunc("POST /api/db/connections/{id}/tree", dbExecH.PostTree)
+		mux.HandleFunc("POST /api/db/connections/{id}/columns", dbExecH.PostColumns)
+		mux.HandleFunc("POST /api/db/connections/{id}/stats", dbExecH.PostStats)
+		mux.HandleFunc("POST /api/db/connections/{id}/count", dbExecH.PostCount)
+		mux.HandleFunc("POST /api/db/connections/{id}/rows", dbExecH.PostRows)
+		mux.HandleFunc("POST /api/db/connections/{id}/lob", dbExecH.PostLOB)
+		mux.HandleFunc("POST /api/db/connections/{id}/query", dbExecH.PostQuery)
 	}
+
+	// Runtime execution endpoints. These accept a descriptor carrying
+	// decrypted credentials, so they must never be reachable unauthenticated:
+	// on --role runtime the key-auth middleware covers every path but
+	// /api/health, and on a hub they sit behind the session cookie or hub key
+	// like every other route here.
+	mux.HandleFunc("POST /api/db/introspect", dbExecH.RuntimeIntrospect)
+	mux.HandleFunc("POST /api/db/exec", dbExecH.RuntimeExec)
+	mux.HandleFunc("POST /api/db/close", dbExecH.RuntimeClose)
 
 	mux.HandleFunc("POST /api/tools/markitdown", toolsH.PostMarkitdown)
 	mux.HandleFunc("POST /api/tools/markdown-export", toolsH.PostMarkdownExport)

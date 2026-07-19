@@ -33,7 +33,9 @@ func newDBTestServer(t *testing.T) *dbTestServer {
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	h := NewDBHandler(st, service.NewDBSecretService(st, make([]byte, 32)))
+	secrets := service.NewDBSecretService(st, make([]byte, 32))
+	h := NewDBHandler(st, secrets)
+	execH := NewDBExecHandler(service.NewDBExecService(st, secrets))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/db/connections", h.GetConnections)
@@ -45,6 +47,17 @@ func newDBTestServer(t *testing.T) *dbTestServer {
 	mux.HandleFunc("POST /api/db/connections/{id}/queries", h.PostSavedQuery)
 	mux.HandleFunc("PATCH /api/db/queries/{qid}", h.PatchSavedQuery)
 	mux.HandleFunc("DELETE /api/db/queries/{qid}", h.DeleteSavedQuery)
+
+	// Phase 2 read/execution routes, same shapes as main.go's hub block.
+	mux.HandleFunc("GET /api/db/engines", execH.GetEngines)
+	mux.HandleFunc("POST /api/db/connections/{id}/test", execH.PostTest)
+	mux.HandleFunc("POST /api/db/connections/{id}/tree", execH.PostTree)
+	mux.HandleFunc("POST /api/db/connections/{id}/columns", execH.PostColumns)
+	mux.HandleFunc("POST /api/db/connections/{id}/stats", execH.PostStats)
+	mux.HandleFunc("POST /api/db/connections/{id}/count", execH.PostCount)
+	mux.HandleFunc("POST /api/db/connections/{id}/rows", execH.PostRows)
+	mux.HandleFunc("POST /api/db/connections/{id}/lob", execH.PostLOB)
+	mux.HandleFunc("POST /api/db/connections/{id}/query", execH.PostQuery)
 
 	return &dbTestServer{st: st, h: h, mux: mux}
 }
