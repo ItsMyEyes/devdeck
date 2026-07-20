@@ -48,6 +48,7 @@ import {
   fetchDBDDLPreview,
   fetchDBEngines,
   fetchDBIndexes,
+  fetchDBQuery,
   fetchDBRows,
   fetchDBSavedQueries,
   fetchDBShowCreate,
@@ -438,6 +439,12 @@ export function useDBRows(connectionId: string, req: DBRowsRequest, enabled = tr
     queryFn: () => fetchDBRows(connectionId, req),
     enabled: enabled && Boolean(connectionId) && Boolean(req.object.name),
     placeholderData: (prev) => prev, // keep the old page's rows visible while the next page loads
+  })
+}
+
+export function useRunDBQuery() {
+  return useMutation({
+    mutationFn: ({ connectionId, sql }: { connectionId: string; sql: string }) => fetchDBQuery(connectionId, sql),
   })
 }
 

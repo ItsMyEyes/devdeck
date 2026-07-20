@@ -902,6 +902,10 @@ export function fetchDBRows(connectionId: string, req: DBRowsRequest): Promise<D
   return request<DBResultSet>('POST', `/db/connections/${connectionId}/rows`, req)
 }
 
+export function fetchDBQuery(connectionId: string, sql: string): Promise<DBResultSet> {
+  return request<DBResultSet>('POST', `/db/connections/${connectionId}/query`, { sql, args: [] })
+}
+
 // ---- DB rows (write path) ----
 
 export interface DBRowEdit {

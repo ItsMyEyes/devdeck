@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Database as DatabaseIcon, Pencil, Plus, RefreshCw, Table2 } from 'lucide-react'
+import { Database as DatabaseIcon, Pencil, Plus, RefreshCw, SquareTerminal, Table2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DataLoading } from '@/features/screens/DataLoading'
@@ -10,6 +10,7 @@ import { DBConnectionDialog } from './DBConnectionDialog'
 import { DBDDLView } from './DBDDLView'
 import { emptyDBTabState } from './dbTabs'
 import { DBObjectTree } from './DBObjectTree'
+import { DBSqlEditor } from './DBSqlEditor'
 import { DBTabBar } from './DBTabBar'
 import { DBTableDesigner } from './DBTableDesigner'
 import { DBTableGrid } from './DBTableGrid'
@@ -124,6 +125,15 @@ export function DatabaseModule() {
                 >
                   <Table2 size={13} />
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => openDBTab(activeConnection.id, { kind: 'query', savedQueryId: null, label: 'New query' })}
+                  aria-label="New SQL query"
+                  title="New SQL query"
+                >
+                  <SquareTerminal size={13} />
+                </Button>
               </div>
               {engines?.[activeConnection.engine] ? (
                 <DBObjectTree
@@ -152,7 +162,7 @@ export function DatabaseModule() {
                     onApplied={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">SQL editor — added in Task 10.</div>
+                  <DBSqlEditor connectionId={activeConnection.id} />
                 )}
               </div>
             </div>
