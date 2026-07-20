@@ -12,6 +12,7 @@ import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Project, Worktree } from '@/store/types'
 import { NeverSyncedNotice } from './NeverSyncedNotice'
+import { ProjectSyncBadge } from './ProjectSyncBadge'
 
 const GROUP_COLORS = ['#ff6978', '#4aa8ff', '#a578ff', '#5ed69a', '#f5c451', '#c7a3ff']
 
@@ -188,6 +189,7 @@ function ProjectRow({
           >
             <Folder size={17} strokeWidth={2.1} className="flex-none" style={{ color }} />
             <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{project.name}</span>
+            <ProjectSyncBadge project={project} />
             {unreachable ? (
               <StatusDot color="#f87171" size={7} />
             ) : (
