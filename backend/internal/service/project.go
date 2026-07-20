@@ -16,12 +16,21 @@ import (
 
 // ProjectService wraps project operations with business logic.
 type ProjectService struct {
-	store port.Store
+	store   port.Store
+	runtime bool
 }
 
-// NewProjectService creates a project service.
+// NewProjectService creates a project service for the hub role.
 func NewProjectService(s port.Store) *ProjectService {
 	return &ProjectService{store: s}
+}
+
+// NewProjectServiceForRuntime creates a project service for the runtime
+// role. Projects it creates are marked origin="local" until the sync loop
+// replays them to the hub (see service.RunSyncLoop) — this is the only
+// difference from the hub role's behavior.
+func NewProjectServiceForRuntime(s port.Store) *ProjectService {
+	return &ProjectService{store: s, runtime: true}
 }
 
 // Create creates a project under a workspace.
@@ -37,7 +46,17 @@ func (svc *ProjectService) Create(wsID, name, path, repo, machineID string) (dom
 	if path == "" {
 		path = "~/dev/" + name
 	}
-	return svc.store.CreateProject(wsID, name, path, repo, machineID)
+	p, err := svc.store.CreateProject(wsID, name, path, repo, machineID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if svc.runtime {
+		if err := svc.store.MarkProjectLocal(p.ID); err != nil {
+			return domain.Project{}, err
+		}
+		p.Origin = "local"
+	}
+	return p, nil
 }
 
 // Clone clones a git repository into path, then creates a project for the
@@ -92,7 +111,17 @@ func (svc *ProjectService) Clone(wsID, name, path, repo, machineID string) (doma
 			}
 			return domain.Project{}, fmt.Errorf("%s: %w", err.Error(), ErrValidation)
 		}
-		return svc.store.CreateProject(wsID, name, path, repo, machineID)
+		p, err := svc.store.CreateProject(wsID, name, path, repo, machineID)
+		if err != nil {
+			return domain.Project{}, err
+		}
+		if svc.runtime {
+			if err := svc.store.MarkProjectLocal(p.ID); err != nil {
+				return domain.Project{}, err
+			}
+			p.Origin = "local"
+		}
+		return p, nil
 	}
 
 	resolved := gitpkg.ExpandHome(path)
@@ -124,6 +153,12 @@ func (svc *ProjectService) Clone(wsID, name, path, repo, machineID string) (doma
 	if err != nil {
 		_ = os.RemoveAll(resolved)
 		return domain.Project{}, err
+	}
+	if svc.runtime {
+		if err := svc.store.MarkProjectLocal(project.ID); err != nil {
+			return domain.Project{}, err
+		}
+		project.Origin = "local"
 	}
 	return project, nil
 }

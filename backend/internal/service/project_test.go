@@ -267,3 +267,31 @@ func TestProjectCloneWithMachineIDConflictReturnsErrConflict(t *testing.T) {
 		t.Errorf("err = %v, must not also wrap ErrValidation", err)
 	}
 }
+
+func TestRuntimeProjectServiceMarksCreatedProjectsLocal(t *testing.T) {
+	st := store.NewTestStore(t)
+	ws, _ := st.CreateWorkspace("clients")
+
+	svc := NewProjectServiceForRuntime(st)
+	p, err := svc.Create(ws.ID, "api", "/srv/api", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Origin != "local" {
+		t.Errorf("Origin after runtime-mode Create = %q, want local", p.Origin)
+	}
+}
+
+func TestHubProjectServiceLeavesCreatedProjectsAsHub(t *testing.T) {
+	st := store.NewTestStore(t)
+	ws, _ := st.CreateWorkspace("clients")
+
+	svc := NewProjectService(st)
+	p, err := svc.Create(ws.ID, "api", "/srv/api", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Origin != "hub" {
+		t.Errorf("Origin after hub-mode Create = %q, want hub (unchanged control)", p.Origin)
+	}
+}
