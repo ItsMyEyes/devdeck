@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
 import type { WorktreeLayout } from '@/features/terminal/paneTree'
+import { closeTab, emptyDBTabState, openTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
 import {
   closeTileTab,
   createBrowserTab,
@@ -340,6 +341,12 @@ interface DevDeckState {
   dbActiveGroup: string
   setDBActiveGroup: (group: string) => void
 
+  // db tabs (per-connection open-object tabs)
+  dbTabs: Record<string, DBTabState>
+  openDBTab: (connectionId: string, content: DBTabDraft) => void
+  closeDBTab: (connectionId: string, tabId: string) => void
+  setDBActiveTab: (connectionId: string, tabId: string) => void
+
   // ssh group rename (delete reuses askDelete/confirmDelete with kind 'ssh-group')
   renameSSHGroup: RenameSSHGroupState
   openRenameSSHGroup: (group: string) => void
@@ -437,6 +444,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         clientKey: '',
       },
       dbActiveGroup: ALL_SSH_GROUPS, // reuse the existing "all groups" sentinel; see SSHConnectionsModule's identical usage
+      dbTabs: {},
       renameSSHGroup: { open: false, oldName: '', value: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
@@ -751,6 +759,13 @@ export const useDevDeckStore = create<DevDeckState>()(
       closeDBDialog: () => set((s) => void (s.dbDialog.open = false)),
       setDBDialog: (patch) => set((s) => void Object.assign(s.dbDialog, patch)),
       setDBActiveGroup: (group) => set((s) => void (s.dbActiveGroup = group)),
+
+      openDBTab: (connectionId, content) =>
+        set((s) => void (s.dbTabs[connectionId] = openTab(s.dbTabs[connectionId] ?? emptyDBTabState(), content))),
+      closeDBTab: (connectionId, id) =>
+        set((s) => void (s.dbTabs[connectionId] = closeTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
+      setDBActiveTab: (connectionId, id) =>
+        set((s) => void (s.dbTabs[connectionId] = setActiveTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
 
       openRenameSSHGroup: (group) =>
         set((s) => void (s.renameSSHGroup = { open: true, oldName: group, value: group })),
