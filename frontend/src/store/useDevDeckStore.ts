@@ -17,6 +17,8 @@ import {
 } from '@/features/tabs/tileTree'
 import type { WorkspaceTileLayout } from '@/features/tabs/tileTree'
 import type {
+  DBConnection,
+  DBEngine,
   Priority,
   Project,
   SSHConnection,
@@ -106,6 +108,26 @@ interface SSHDialogState {
   /** Flow step 3 (alternative to direct): another saved connection id this
    *  one bastions through. '' means connect directly. */
   jumpConnectionId: string
+}
+interface DBDialogState {
+  open: boolean
+  editingId: string | null
+  name: string
+  group: string
+  engine: DBEngine
+  host: string
+  /** Kept as the text field's raw string; parsed + validated on submit. */
+  port: string
+  username: string
+  database: string
+  sslMode: string
+  isProduction: boolean
+  executorMachineId: string
+  tunnelConnectionId: string
+  password: string
+  caCert: string
+  clientCert: string
+  clientKey: string
 }
 interface RenameSSHGroupState {
   open: boolean
@@ -309,6 +331,15 @@ interface DevDeckState {
   closeSSHDialog: () => void
   setSSHDialog: (patch: Partial<SSHDialogState>) => void
 
+  // db connection dialog
+  dbDialog: DBDialogState
+  openAddDBConnection: () => void
+  openEditDBConnection: (conn: DBConnection) => void
+  closeDBDialog: () => void
+  setDBDialog: (patch: Partial<DBDialogState>) => void
+  dbActiveGroup: string
+  setDBActiveGroup: (group: string) => void
+
   // ssh group rename (delete reuses askDelete/confirmDelete with kind 'ssh-group')
   renameSSHGroup: RenameSSHGroupState
   openRenameSSHGroup: (group: string) => void
@@ -386,6 +417,26 @@ export const useDevDeckStore = create<DevDeckState>()(
         executorMachineId: '',
         jumpConnectionId: '',
       },
+      dbDialog: {
+        open: false,
+        editingId: null,
+        name: '',
+        group: '',
+        engine: 'postgres',
+        host: '',
+        port: '5432',
+        username: '',
+        database: '',
+        sslMode: 'verify-full',
+        isProduction: false,
+        executorMachineId: '',
+        tunnelConnectionId: '',
+        password: '',
+        caCert: '',
+        clientCert: '',
+        clientKey: '',
+      },
+      dbActiveGroup: ALL_SSH_GROUPS, // reuse the existing "all groups" sentinel; see SSHConnectionsModule's identical usage
       renameSSHGroup: { open: false, oldName: '', value: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
@@ -650,6 +701,56 @@ export const useDevDeckStore = create<DevDeckState>()(
         ),
       closeSSHDialog: () => set((s) => void (s.sshDialog.open = false)),
       setSSHDialog: (patch) => set((s) => void Object.assign(s.sshDialog, patch)),
+
+      openAddDBConnection: () =>
+        set(
+          (s) =>
+            void (s.dbDialog = {
+              open: true,
+              editingId: null,
+              name: '',
+              group: '',
+              engine: 'postgres',
+              host: '',
+              port: '5432',
+              username: '',
+              database: '',
+              sslMode: 'verify-full',
+              isProduction: false,
+              executorMachineId: '',
+              tunnelConnectionId: '',
+              password: '',
+              caCert: '',
+              clientCert: '',
+              clientKey: '',
+            }),
+        ),
+      openEditDBConnection: (conn) =>
+        set(
+          (s) =>
+            void (s.dbDialog = {
+              open: true,
+              editingId: conn.id,
+              name: conn.name,
+              group: conn.group,
+              engine: conn.engine,
+              host: conn.host,
+              port: String(conn.port || (conn.engine === 'mysql' ? 3306 : 5432)),
+              username: conn.username,
+              database: conn.database,
+              sslMode: conn.sslMode,
+              isProduction: conn.isProduction,
+              executorMachineId: conn.executorMachineId ?? '',
+              tunnelConnectionId: conn.tunnelConnectionId ?? '',
+              password: '',
+              caCert: '',
+              clientCert: '',
+              clientKey: '',
+            }),
+        ),
+      closeDBDialog: () => set((s) => void (s.dbDialog.open = false)),
+      setDBDialog: (patch) => set((s) => void Object.assign(s.dbDialog, patch)),
+      setDBActiveGroup: (group) => set((s) => void (s.dbActiveGroup = group)),
 
       openRenameSSHGroup: (group) =>
         set((s) => void (s.renameSSHGroup = { open: true, oldName: group, value: group })),
