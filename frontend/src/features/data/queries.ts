@@ -11,6 +11,8 @@ import {
   createBank,
   createCompany,
   createComment,
+  createDBConnection,
+  createDBSavedQuery,
   createInvoice,
   createIssue,
   createNews,
@@ -24,6 +26,8 @@ import {
   deleteBank,
   deleteComment,
   deleteCompany,
+  deleteDBConnection,
+  deleteDBSavedQuery,
   deleteInvoice,
   deleteIssue,
   deleteMachine,
@@ -37,6 +41,9 @@ import {
   fetchBanks,
   fetchComments,
   fetchCompanies,
+  fetchDBConnections,
+  fetchDBEngines,
+  fetchDBSavedQueries,
   fetchIssueEvents,
   fetchMachineHealth,
   fetchMachines,
@@ -47,10 +54,14 @@ import {
   fetchWorkspaces,
   markAllNewsRead,
   seed,
+  setDBSecret,
+  testDBConnection,
   uploadAttachment,
   updateBank,
   updateComment,
   updateCompany,
+  updateDBConnection,
+  updateDBSavedQuery,
   updateInvoice,
   updateIssue,
   updateMachine,
@@ -67,6 +78,7 @@ import type {
   CreateBankBody,
   CreateCommentBody,
   CreateCompanyBody,
+  CreateDBConnectionBody,
   CreateInvoiceBody,
   CreateIssueBody,
   CreateMachineBody,
@@ -81,6 +93,7 @@ import type {
   UpdateBankBody,
   UpdateCommentBody,
   UpdateCompanyBody,
+  UpdateDBConnectionBody,
   UpdateInvoiceBody,
   UpdateIssueBody,
   UpdateMachineBody,
@@ -290,6 +303,84 @@ export function useAcceptSSHHostKey() {
   return useMutation({
     mutationFn: (id: string) => acceptSSHHostKey(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
+  })
+}
+
+// ---- DB connections ----
+
+export function useDBConnections() {
+  return useQuery({ queryKey: qk.dbConnections, queryFn: fetchDBConnections, staleTime: 10_000 })
+}
+
+export function useCreateDBConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateDBConnectionBody) => createDBConnection(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.dbConnections }),
+  })
+}
+
+export function useUpdateDBConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateDBConnectionBody }) => updateDBConnection(id, patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.dbConnections }),
+  })
+}
+
+export function useDeleteDBConnection() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteDBConnection(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.dbConnections }),
+  })
+}
+
+export function useSetDBSecret() {
+  return useMutation({
+    mutationFn: ({ id, kind, value }: { id: string; kind: string; value: string }) => setDBSecret(id, kind, value),
+  })
+}
+
+export function useTestDBConnection() {
+  return useMutation({ mutationFn: (id: string) => testDBConnection(id) })
+}
+
+export function useDBEngines() {
+  return useQuery({ queryKey: qk.dbEngines, queryFn: fetchDBEngines, staleTime: Infinity })
+}
+
+export function useDBSavedQueries(connectionId: string) {
+  return useQuery({
+    queryKey: qk.dbSavedQueries(connectionId),
+    queryFn: () => fetchDBSavedQueries(connectionId),
+    enabled: Boolean(connectionId),
+  })
+}
+
+export function useCreateDBSavedQuery() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ connectionId, name, sql }: { connectionId: string; name: string; sql: string }) =>
+      createDBSavedQuery(connectionId, name, sql),
+    onSuccess: (_data, vars) => queryClient.invalidateQueries({ queryKey: qk.dbSavedQueries(vars.connectionId) }),
+  })
+}
+
+export function useUpdateDBSavedQuery() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; connectionId: string; patch: { name?: string; sql?: string } }) =>
+      updateDBSavedQuery(id, patch),
+    onSuccess: (_data, vars) => queryClient.invalidateQueries({ queryKey: qk.dbSavedQueries(vars.connectionId) }),
+  })
+}
+
+export function useDeleteDBSavedQuery() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: string; connectionId: string }) => deleteDBSavedQuery(id),
+    onSuccess: (_data, vars) => queryClient.invalidateQueries({ queryKey: qk.dbSavedQueries(vars.connectionId) }),
   })
 }
 

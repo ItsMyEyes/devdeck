@@ -5,6 +5,9 @@ import type {
   Attachment,
   Bank,
   Company,
+  DBConnection,
+  DBEngine,
+  DBSavedQuery,
   Invoice,
   InvoiceItem,
   InvoiceStatus,
@@ -713,4 +716,89 @@ export function deleteSSHConnection(id: string): Promise<void> {
  *  connect re-pins whatever key the host presents. */
 export function acceptSSHHostKey(id: string): Promise<void> {
   return request<void>('POST', `/ssh/connections/${id}/accept-hostkey`)
+}
+
+// ---- DB connections (hub registry; secrets are write-only) ----
+
+export interface DBCaps {
+  schemas: boolean
+  matViews: boolean
+  functions: boolean
+  multiDatabase: boolean
+  rowIdentifier: string
+  sizeStats: boolean
+  quoteChar: string
+}
+
+export interface CreateDBConnectionBody {
+  name: string
+  group?: string
+  engine: DBEngine
+  host?: string
+  port?: number
+  username?: string
+  database?: string
+  sslMode?: string
+  executorMachineId?: string | null
+  tunnelConnectionId?: string | null
+  isProduction?: boolean
+  password?: string
+  caCert?: string
+  clientCert?: string
+  clientKey?: string
+}
+
+export type UpdateDBConnectionBody = Partial<CreateDBConnectionBody>
+
+export interface DBTestResult {
+  ok: boolean
+  reason?: string
+}
+
+export function fetchDBConnections(): Promise<DBConnection[]> {
+  return request<DBConnection[]>('GET', '/db/connections')
+}
+
+export function createDBConnection(body: CreateDBConnectionBody): Promise<DBConnection> {
+  return request<DBConnection>('POST', '/db/connections', body)
+}
+
+export function updateDBConnection(id: string, patch: UpdateDBConnectionBody): Promise<DBConnection> {
+  return request<DBConnection>('PATCH', `/db/connections/${id}`, patch)
+}
+
+export function deleteDBConnection(id: string): Promise<void> {
+  return request<void>('DELETE', `/db/connections/${id}`)
+}
+
+/** kind is one of "password" | "ca_cert" | "client_cert" | "client_key"; an
+ *  empty value clears the stored credential rather than storing an empty one. */
+export function setDBSecret(id: string, kind: string, value: string): Promise<void> {
+  return request<void>('POST', `/db/connections/${id}/secret`, { kind, value })
+}
+
+/** Always resolves — a connection that cannot be reached is data
+ *  ({ok:false, reason}), not a thrown ApiError. */
+export function testDBConnection(id: string): Promise<DBTestResult> {
+  return request<DBTestResult>('POST', `/db/connections/${id}/test`)
+}
+
+export function fetchDBEngines(): Promise<Record<DBEngine, DBCaps>> {
+  return request<Record<DBEngine, DBCaps>>('GET', '/db/engines')
+}
+
+export function fetchDBSavedQueries(connectionId: string): Promise<DBSavedQuery[]> {
+  return request<DBSavedQuery[]>('GET', `/db/connections/${connectionId}/queries`)
+}
+
+export function createDBSavedQuery(connectionId: string, name: string, sql: string): Promise<DBSavedQuery> {
+  return request<DBSavedQuery>('POST', `/db/connections/${connectionId}/queries`, { name, sql })
+}
+
+export function updateDBSavedQuery(id: string, patch: { name?: string; sql?: string }): Promise<DBSavedQuery> {
+  return request<DBSavedQuery>('PATCH', `/db/queries/${id}`, patch)
+}
+
+export function deleteDBSavedQuery(id: string): Promise<void> {
+  return request<void>('DELETE', `/db/queries/${id}`)
 }
