@@ -3,10 +3,11 @@ import { useNavigate } from '@tanstack/react-router'
 import { Check, ChevronDown, Plus, Settings2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
-import { useWorkspaces } from '@/features/data/queries'
+import { useWhoami, useWorkspaces } from '@/features/data/queries'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
 import type { Workspace } from '@/store/types'
+import { NeverSyncedNotice } from './NeverSyncedNotice'
 
 interface WorkspaceSwitcherProps {
   /** Compact trigger for the sidebar rail. Still opens the workspace menu. */
@@ -138,7 +139,15 @@ function WorkspaceMenu({
   onSwitch: (id: string) => void
   onEdit: (workspace: Workspace) => void
 }) {
+  const whoami = useWhoami().data
+  // Same lookalike-empty-state guard as ProjectTree: a runtime that has
+  // never pulled a catalog must not look identical to a genuinely empty one.
+  const neverSynced = whoami?.role === 'runtime' && whoami.lastSyncedAt === null
+
   if (workspaces.length === 0) {
+    if (neverSynced) {
+      return <NeverSyncedNotice lastSyncedAt={null} />
+    }
     return <div className="px-2 py-5 text-center text-[12px] text-devdeck-dim">No workspaces yet</div>
   }
 

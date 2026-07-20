@@ -6,11 +6,12 @@ import { worktreeLabel } from '@/lib/worktreeLabel'
 import { StatusDot } from '@/components/ui/status-dot'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useScope } from '@/features/useScope'
-import { useMachineHealth, useMachines, useUpdateProject, useWorkspace } from '@/features/data/queries'
+import { useMachineHealth, useMachines, useUpdateProject, useWhoami, useWorkspace } from '@/features/data/queries'
 import { WorktreeGlyph } from '@/features/agents/WorktreeGlyph'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Project, Worktree } from '@/store/types'
+import { NeverSyncedNotice } from './NeverSyncedNotice'
 
 const GROUP_COLORS = ['#ff6978', '#4aa8ff', '#a578ff', '#5ed69a', '#f5c451', '#c7a3ff']
 
@@ -25,6 +26,11 @@ export function ProjectTree() {
   const askDelete = useDevDeckStore((s) => s.askDelete)
   const openWorktreeTab = useDevDeckStore((s) => s.openWorktreeTab)
   const selectAgentsTab = useDevDeckStore((s) => s.selectAgentsTab)
+  const whoami = useWhoami().data
+  // A runtime that has never pulled a catalog (wrong --hub-key, hub
+  // unreachable since boot) has an empty replica indistinguishable from a
+  // genuinely empty account unless we check lastSyncedAt explicitly.
+  const neverSynced = whoami?.role === 'runtime' && whoami.lastSyncedAt === null
   const projects = ws?.projects ?? []
   const totalHosts = projects.reduce((total, project) => total + project.worktrees.length, 0)
   const allSelected = view === 'agents' && !projectId
@@ -100,16 +106,20 @@ export function ProjectTree() {
         </div>
 
         {projects.length === 0 ? (
-          <div className="px-3 py-8 text-center">
-            <div className="font-mono text-[11.5px] text-devdeck-dim">no groups yet</div>
-            <button
-              type="button"
-              onClick={openNewProject}
-              className="mt-3 h-8 cursor-pointer rounded-md border border-devdeck-border-menu bg-devdeck-elevated px-3 text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            >
-              + Add project
-            </button>
-          </div>
+          neverSynced ? (
+            <NeverSyncedNotice lastSyncedAt={null} />
+          ) : (
+            <div className="px-3 py-8 text-center">
+              <div className="font-mono text-[11.5px] text-devdeck-dim">no groups yet</div>
+              <button
+                type="button"
+                onClick={openNewProject}
+                className="mt-3 h-8 cursor-pointer rounded-md border border-devdeck-border-menu bg-devdeck-elevated px-3 text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                + Add project
+              </button>
+            </div>
+          )
         ) : null}
       </div>
     </div>
