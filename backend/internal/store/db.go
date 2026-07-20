@@ -27,7 +27,13 @@ CREATE TABLE IF NOT EXISTS projects (
   -- from one created locally while the hub was unreachable ('local'). Only
   -- meaningful on a runtime; the hub itself never reads it. See
   -- docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md.
-  origin       TEXT NOT NULL DEFAULT 'hub'
+  origin       TEXT NOT NULL DEFAULT 'hub',
+  -- sync_error is set when this runtime's most recent replay attempt for a
+  -- local project failed permanently (its workspace no longer exists on the
+  -- hub) — as opposed to merely not-yet-attempted or a transient network
+  -- failure, neither of which touch this column. Cleared on a successful
+  -- replay. Only meaningful alongside origin='local'.
+  sync_error   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
 
@@ -332,6 +338,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateProjectSyncError(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -435,6 +445,18 @@ func migrateSSHConnectionColumns(db *sql.DB) error {
 // unreachable and must survive snapshot overwrites until it is replayed.
 func migrateProjectOrigin(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN origin TEXT NOT NULL DEFAULT 'hub'"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateProjectSyncError adds the sync_error column to pre-existing
+// databases. Errors from a column that's already present are expected and
+// ignored.
+func migrateProjectSyncError(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE projects ADD COLUMN sync_error TEXT"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}

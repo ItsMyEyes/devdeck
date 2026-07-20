@@ -63,6 +63,10 @@ export interface Project {
   workspaceId: string
   worktrees: Worktree[]
   issues: Issue[]
+  /** "hub" (synced) or "local" (created on this runtime, not yet replayed). Only meaningful on a runtime. */
+  origin: string
+  /** Set when this runtime's last replay attempt failed permanently (e.g. its workspace no longer exists on the hub). */
+  syncError?: string
 }
 
 /** A file uploaded from an issue's description editor. Fetch its bytes via

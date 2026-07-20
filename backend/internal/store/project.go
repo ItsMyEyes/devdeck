@@ -1,13 +1,15 @@
 package store
 
 import (
+	"database/sql"
+
 	"devdeck/backend/internal/domain"
 )
 
 // ── Child queries ──────────────────────────────────────────────────────────
 
 func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
-	rows, err := s.db.Query(`SELECT id, name, repo, path, expanded, machine_id FROM projects WHERE workspace_id = ? ORDER BY rowid ASC`, wsID)
+	rows, err := s.db.Query(`SELECT id, name, repo, path, expanded, machine_id, origin, sync_error FROM projects WHERE workspace_id = ? ORDER BY rowid ASC`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -15,8 +17,13 @@ func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
 	out := []domain.Project{}
 	for rows.Next() {
 		var p domain.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID); err != nil {
+		var syncError sql.NullString
+		if err := rows.Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID, &p.Origin, &syncError); err != nil {
 			return nil, err
+		}
+		if syncError.Valid {
+			v := syncError.String
+			p.SyncError = &v
 		}
 		out = append(out, p)
 	}
@@ -40,10 +47,15 @@ func (s *Store) projectsOf(wsID string) ([]domain.Project, error) {
 
 func (s *Store) ProjectByID(id string) (domain.Project, error) {
 	var p domain.Project
-	err := s.db.QueryRow(`SELECT id, name, repo, path, expanded, machine_id FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID)
+	var syncError sql.NullString
+	err := s.db.QueryRow(`SELECT id, name, repo, path, expanded, machine_id, origin, sync_error FROM projects WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &p.Repo, &p.Path, &p.Expanded, &p.MachineID, &p.Origin, &syncError)
 	if err != nil {
 		return domain.Project{}, mapNotFound(err)
+	}
+	if syncError.Valid {
+		v := syncError.String
+		p.SyncError = &v
 	}
 	if p.Worktrees, err = s.worktreesOf(id); err != nil {
 		return p, err

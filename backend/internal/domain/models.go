@@ -47,6 +47,16 @@ type Project struct {
 	WorkspaceID string     `json:"workspaceId"`
 	Worktrees   []Worktree `json:"worktrees"`
 	Issues      []Issue    `json:"issues"`
+	// Origin distinguishes a runtime-replica row synced from the hub ("hub")
+	// from one created locally while the hub was unreachable ("local").
+	// Only meaningful on a runtime; the hub's own projects are always "hub"
+	// and never read this field.
+	Origin string `json:"origin"`
+	// SyncError is set when this runtime's most recent replay attempt for a
+	// origin="local" project failed permanently (its workspace no longer
+	// exists on the hub). Nil means either already synced, or not yet
+	// attempted, or the last attempt failed only transiently.
+	SyncError *string `json:"syncError,omitempty"`
 }
 
 // Issue mirrors the frontend Issue type.
