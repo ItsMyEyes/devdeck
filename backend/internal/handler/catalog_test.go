@@ -99,6 +99,55 @@ func TestPostProjectReplayScopesToPresentedMachineAndTranslates409(t *testing.T)
 	}
 }
 
+// TestRuntimeCatalogRoutesSurviveTheOuterHubMiddleware reproduces the exact
+// composition main.go uses on the hub — RequireAuth wraps the ENTIRE mux,
+// including the nested RequireMachineKey-guarded catalog routes
+// (main.go:462-463) — rather than testing RequireMachineKey in isolation
+// like the tests above. That isolation is exactly what let a real bug slip
+// through once already: /api/runtime/catalog needed an explicit entry in
+// RequireAuth's publicPaths allowlist (see the comment there) or the outer
+// hub auth rejects a runtime's machine-key request before RequireMachineKey
+// ever runs. /api/runtime/projects hit the identical bug when it was added
+// later and the allowlist entry was missed — caught only by manual
+// end-to-end verification with real hub+runtime processes, not by any unit
+// test, because every existing test here bypassed RequireAuth entirely.
+func TestRuntimeCatalogRoutesSurviveTheOuterHubMiddleware(t *testing.T) {
+	st := newCatalogTestStore(t)
+	catalogSvc := service.NewCatalogService(st)
+	h := NewCatalogHandler(st, catalogSvc)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runtime/catalog", h.GetCatalog)
+	mux.HandleFunc("POST /api/runtime/projects", h.PostProject)
+
+	// Mirrors main.go exactly: RequireMachineKey wraps only these two
+	// routes, then RequireAuth wraps everything (here, just this mux).
+	// svc is nil because a request presenting a valid machine key is
+	// resolved by RequireAuth's publicPaths check before it would ever
+	// touch svc — passing nil, rather than a fully constructed
+	// AuthService, keeps this test focused on routing/middleware
+	// composition instead of auth-service plumbing.
+	inner := RequireMachineKey(st)(mux)
+	root := RequireAuth(nil, "hubkey")(inner)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/runtime/catalog", nil)
+	getReq.Header.Set("Authorization", "Bearer key-a")
+	getRec := httptest.NewRecorder()
+	root.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Errorf("GET /api/runtime/catalog through the full hub middleware stack = %d, want 200", getRec.Code)
+	}
+
+	ws, _ := st.CreateWorkspace("clients-2")
+	body := `{"id":"p-full-stack","workspaceId":"` + ws.ID + `","name":"api","path":"/srv/api"}`
+	postReq := httptest.NewRequest(http.MethodPost, "/api/runtime/projects", strings.NewReader(body))
+	postReq.Header.Set("Authorization", "Bearer key-a")
+	postRec := httptest.NewRecorder()
+	root.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Errorf("POST /api/runtime/projects through the full hub middleware stack = %d, body = %s, want 200", postRec.Code, postRec.Body.String())
+	}
+}
+
 func newCatalogTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	st := store.NewTestStore(t) // see step 3 note

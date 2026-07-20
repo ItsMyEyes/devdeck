@@ -99,12 +99,14 @@ func RequireAuth(svc *service.AuthService, hubKey string) func(http.Handler) htt
 		"/api/auth/totp/verify-setup": true,
 		"/api/auth/totp/verify":       true,
 		browserProxyPath:              true,
-		// /api/runtime/catalog authenticates a *machine* by its own key
-		// (RequireMachineKey, machinekey.go), not this hub's session cookie
-		// or hub key — a runtime never has either. It must pass through here
-		// unauthenticated so RequireMachineKey, which wraps only this one
-		// route in main.go, gets the chance to reject or accept it itself.
-		"/api/runtime/catalog": true,
+		// /api/runtime/catalog and /api/runtime/projects both authenticate a
+		// *machine* by its own key (RequireMachineKey, machinekey.go), not
+		// this hub's session cookie or hub key — a runtime never has either.
+		// They must pass through here unauthenticated so RequireMachineKey,
+		// which wraps only these two routes in main.go, gets the chance to
+		// reject or accept them itself.
+		"/api/runtime/catalog":  true,
+		"/api/runtime/projects": true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
