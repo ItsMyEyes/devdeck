@@ -87,6 +87,36 @@ func TestValidateExecutorURLRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestValidateDBHostRejectsLinkLocalIPv4(t *testing.T) {
+	// 169.254.169.254 is the cloud metadata endpoint on AWS, GCP, and Azure
+	// alike — the exact address the design's residual-risks section names.
+	if err := ValidateDBHost("169.254.169.254"); err == nil {
+		t.Fatal("link-local IPv4 host accepted, want rejection")
+	}
+}
+
+func TestValidateDBHostRejectsLinkLocalIPv6(t *testing.T) {
+	if err := ValidateDBHost("fe80::1"); err == nil {
+		t.Fatal("link-local IPv6 host accepted, want rejection")
+	}
+}
+
+func TestValidateDBHostAcceptsOrdinaryHosts(t *testing.T) {
+	for _, host := range []string{"10.0.0.5", "db.internal.example.com", "127.0.0.1", ""} {
+		if err := ValidateDBHost(host); err != nil {
+			t.Errorf("host %q rejected: %v", host, err)
+		}
+	}
+}
+
+func TestValidateDBHostAcceptsUnresolvableHostname(t *testing.T) {
+	// A hostname the hub cannot resolve yet is not link-local by definition;
+	// connecting will simply fail later with its own, clearer error.
+	if err := ValidateDBHost("this-host-does-not-exist.invalid"); err != nil {
+		t.Errorf("unresolvable hostname rejected: %v", err)
+	}
+}
+
 func TestValidateEngine(t *testing.T) {
 	for _, e := range ValidEngines {
 		if err := ValidateEngine(e); err != nil {

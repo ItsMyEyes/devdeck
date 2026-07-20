@@ -104,6 +104,44 @@ func ValidateExecutorURL(rawURL string) error {
 	return fmt.Errorf("executor machine %q uses plain http outside the tailnet; database credentials would cross the network unencrypted — use https or a tailnet address", rawURL)
 }
 
+// ValidateDBHost rejects a database host that resolves to a link-local
+// address — 169.254.0.0/16 (IPv4) and fe80::/10 (IPv6) — which is where
+// every major cloud's instance-metadata service listens: 169.254.169.254 on
+// AWS/GCP/Azure, 100.100.100.100 on Alibaba (that one is inside Tailscale's
+// own CGNAT range and is not blocked here — see the design doc's
+// residual-risks note).
+//
+// Unlike ValidateExecutorURL, this does not require TLS or reject public
+// hosts outright: pointing a DB client at an arbitrary host:port is the
+// entire feature. Only the specific metadata-endpoint shape is blocked, and
+// only at connection-save time — this is a footgun guard against a
+// deliberate metadata-endpoint host, not a defense against a hostile actor
+// racing DNS after validation, matching the design's "IsProduction is not a
+// security boundary" framing: the operator holds full credentials either way.
+func ValidateDBHost(host string) error {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return nil // sqlite, or "host required" is validated elsewhere
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return checkLinkLocal(host, []net.IP{ip})
+	}
+	ips, err := net.LookupIP(h)
+	if err != nil {
+		return nil
+	}
+	return checkLinkLocal(host, ips)
+}
+
+func checkLinkLocal(host string, ips []net.IP) error {
+	for _, ip := range ips {
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("host %q resolves to a link-local address, which is blocked to prevent reaching a cloud metadata endpoint (e.g. 169.254.169.254)", host)
+		}
+	}
+	return nil
+}
+
 // tailscaleCGNAT is the 100.64.0.0/10 carrier-grade NAT range Tailscale
 // assigns to tailnet nodes.
 var tailscaleCGNAT = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}

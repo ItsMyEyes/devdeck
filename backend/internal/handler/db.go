@@ -117,6 +117,10 @@ func (h *DBHandler) PostConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := service.ValidateDBHost(str(body.Host)); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	executorMachineID := nilIfEmpty(body.ExecutorMachineID)
 	if executorMachineID != nil {
 		if err := h.validateDBExecutor(*executorMachineID); err != nil {
@@ -184,6 +188,10 @@ func (h *DBHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 	if body.SSLMode != nil {
 		sslMode = *body.SSLMode
 	}
+	host := existing.Host
+	if body.Host != nil {
+		host = *body.Host
+	}
 	isProduction := existing.IsProduction
 	if body.IsProduction != nil {
 		isProduction = *body.IsProduction
@@ -202,6 +210,10 @@ func (h *DBHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := service.ValidateSSLMode(engine, sslMode, isProduction); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := service.ValidateDBHost(host); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

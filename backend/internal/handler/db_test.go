@@ -133,6 +133,16 @@ func TestPostConnectionRejectsProductionWithUnverifiedTLS(t *testing.T) {
 	}
 }
 
+func TestPostConnectionRejectsLinkLocalHost(t *testing.T) {
+	srv := newDBTestServer(t)
+	body := `{"name":"c","engine":"postgres","host":"169.254.169.254","port":5432,
+	          "username":"u","database":"d","sslMode":"verify-full"}`
+	res := srv.post(t, "/api/db/connections", body)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", res.Code, res.Body.String())
+	}
+}
+
 func TestPostConnectionRejectsUnsupportedEngine(t *testing.T) {
 	srv := newDBTestServer(t)
 	res := srv.post(t, "/api/db/connections", `{"name":"r","engine":"redis","host":"h","port":6379}`)
