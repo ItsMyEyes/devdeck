@@ -865,3 +865,39 @@ export function fetchDBIndexes(connectionId: string, object: DBObjectRef): Promi
 export function fetchDBStats(connectionId: string, object: DBObjectRef): Promise<DBTableStats> {
   return request<DBTableStats>('POST', `/db/connections/${connectionId}/stats`, { object })
 }
+
+// ---- DB rows (read path) ----
+
+export interface DBFilter {
+  column: string
+  op: string // eq ne lt gt le ge between in isnull isnotnull like ilike
+  values: unknown[]
+}
+
+export interface DBSortKey {
+  column: string
+  desc: boolean
+}
+
+export interface DBRowsRequest {
+  object: DBObjectRef
+  filters: DBFilter[]
+  sort: DBSortKey[]
+  cursor: unknown[] | null
+  offset: number
+  limit: number
+  globalSearch: string
+}
+
+export interface DBResultSet {
+  columns: DBColumnMeta[]
+  rows: unknown[][]
+  truncated: boolean
+  nextCursor: unknown[] | null
+  usedOffsetPaging: boolean
+  elapsedMs: number
+}
+
+export function fetchDBRows(connectionId: string, req: DBRowsRequest): Promise<DBResultSet> {
+  return request<DBResultSet>('POST', `/db/connections/${connectionId}/rows`, req)
+}

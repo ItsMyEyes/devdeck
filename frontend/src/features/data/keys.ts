@@ -1,6 +1,6 @@
 // React-query cache keys for domain data.
 
-import type { DBObjectRef, DBTreePath } from '@/lib/api'
+import type { DBObjectRef, DBRowsRequest, DBTreePath } from '@/lib/api'
 
 export const qk = {
   workspaces: ['workspaces'] as const,
@@ -55,4 +55,5 @@ export const qk = {
   dbColumns: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'columns', object] as const,
   dbIndexes: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'indexes', object] as const,
   dbStats: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'stats', object] as const,
+  dbRows: (connectionId: string, req: DBRowsRequest) => ['db', connectionId, 'rows', req] as const,
 }

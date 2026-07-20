@@ -45,6 +45,7 @@ import {
   fetchDBConnections,
   fetchDBEngines,
   fetchDBIndexes,
+  fetchDBRows,
   fetchDBSavedQueries,
   fetchDBStats,
   fetchDBTree,
@@ -93,6 +94,7 @@ import type {
   CreateTodoBody,
   CreateWorkspaceBody,
   DBObjectRef,
+  DBRowsRequest,
   DBTreePath,
   MachineHealth,
   SettingsPatch,
@@ -421,6 +423,15 @@ export function useDBStats(connectionId: string, object: DBObjectRef, enabled = 
     queryKey: qk.dbStats(connectionId, object),
     queryFn: () => fetchDBStats(connectionId, object),
     enabled: enabled && Boolean(connectionId) && Boolean(object.name),
+  })
+}
+
+export function useDBRows(connectionId: string, req: DBRowsRequest, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbRows(connectionId, req),
+    queryFn: () => fetchDBRows(connectionId, req),
+    enabled: enabled && Boolean(connectionId) && Boolean(req.object.name),
+    placeholderData: (prev) => prev, // keep the old page's rows visible while the next page loads
   })
 }
 

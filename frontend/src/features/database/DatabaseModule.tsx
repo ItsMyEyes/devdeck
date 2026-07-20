@@ -6,8 +6,10 @@ import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBConnections, useDBEngines } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
 import { DBConnectionDialog } from './DBConnectionDialog'
+import { emptyDBTabState } from './dbTabs'
 import { DBObjectTree } from './DBObjectTree'
 import { DBTabBar } from './DBTabBar'
+import { DBTableGrid } from './DBTableGrid'
 import type { DBConnection } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
@@ -77,6 +79,12 @@ export function DatabaseModule() {
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
   const activeConnection = connections?.find((c) => c.id === activeConnectionId) ?? null
   const { data: engines } = useDBEngines()
+  // Selector reads conditionally, but the hook call itself is unconditional —
+  // calling useDevDeckStore(...) only when activeConnection is truthy would
+  // change the number of hooks called between renders of this same
+  // component instance (activeConnection toggles within one mount).
+  const activeTabState = useDevDeckStore((s) => (activeConnection ? s.dbTabs[activeConnection.id] : undefined)) ?? emptyDBTabState()
+  const activeTab = activeTabState.tabs.find((t) => t.id === activeTabState.activeTabId) ?? null
 
   const groups = useMemo(() => {
     if (!connections) return []
@@ -117,9 +125,16 @@ export function DatabaseModule() {
             </div>
             <div className="flex min-h-0 flex-1 flex-col">
               <DBTabBar connectionId={activeConnection.id} isProduction={activeConnection.isProduction} />
-              <div className="min-h-0 flex-1 overflow-auto p-4 text-[12px] text-devdeck-dim">
-                {/* Task 7 replaces this placeholder with <DBTableGrid> for the active tab. */}
-                Select a table from the tree to browse it.
+              <div className="min-h-0 flex-1 overflow-auto">
+                {!activeTab ? (
+                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">Select a table from the tree to browse it.</div>
+                ) : activeTab.kind === 'table' ? (
+                  <DBTableGrid connectionId={activeConnection.id} object={activeTab.object} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">
+                    {activeTab.kind === 'ddl' ? 'DDL view — added in Task 9.' : 'SQL editor — added in Task 10.'}
+                  </div>
+                )}
               </div>
             </div>
           </div>
