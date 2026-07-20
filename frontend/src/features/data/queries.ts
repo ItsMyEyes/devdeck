@@ -158,9 +158,14 @@ export function useWorkspaces() {
   return useQuery({ queryKey: qk.workspaces, queryFn: fetchWorkspaces })
 }
 
-/** Reports this process's role (hub vs. runtime); never goes stale on its own. */
+/** Reports this process's role (hub vs. runtime) and, for runtimes, catalog
+ * sync freshness. role/machineName are fixed for a process's lifetime, but
+ * lastSyncedAt changes roughly every 30s as the runtime's sync loop ticks —
+ * so unlike a typical identity query this can't cache forever, or a runtime
+ * that syncs successfully after the initial page load keeps showing "never
+ * synced" until a hard reload. */
 export function useWhoami() {
-  return useQuery({ queryKey: qk.whoami, queryFn: fetchWhoami, staleTime: Infinity, retry: false })
+  return useQuery({ queryKey: qk.whoami, queryFn: fetchWhoami, refetchInterval: 30_000, retry: false })
 }
 
 /** Convenience hook: the single workspace matching wsId, via a select on useWorkspaces. */

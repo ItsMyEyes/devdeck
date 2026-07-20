@@ -1,8 +1,9 @@
 import { Navigate, createFileRoute, redirect } from '@tanstack/react-router'
 import { fetchSettings, fetchWorkspaces } from '@/lib/api'
 import { qk } from '@/features/data/keys'
-import { useSettings, useWorkspaces } from '@/features/data/queries'
+import { useSettings, useWhoami, useWorkspaces } from '@/features/data/queries'
 import { OnboardingScreen } from '@/features/screens/OnboardingScreen'
+import { NeverSyncedScreen } from '@/features/screens/NeverSyncedScreen'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 
@@ -29,6 +30,7 @@ export const Route = createFileRoute('/')({
 function IndexRoute() {
   const workspaces = useWorkspaces()
   const settings = useSettings()
+  const whoami = useWhoami()
 
   if (workspaces.isPending) {
     return (
@@ -52,6 +54,15 @@ function IndexRoute() {
   if (list.length > 0) {
     const active = list.find((w) => w.id === settings.data?.activeWorkspaceId)
     return <Navigate to="/w/$wsId" params={{ wsId: active?.id ?? list[0].id }} />
+  }
+  // A runtime's workspaces table is only ever populated by a catalog
+  // snapshot (workspace create/rename/delete is hub-only), so on a runtime
+  // zero workspaces and a null lastSyncedAt mean the same thing: it has
+  // never synced. That state must not look like a fresh install — the most
+  // common misconfiguration (a wrong --hub-key/--hub-url) would otherwise be
+  // indistinguishable from "nothing to do here yet".
+  if (whoami.data?.role === 'runtime' && whoami.data.lastSyncedAt === null) {
+    return <NeverSyncedScreen machineName={whoami.data.machineName} />
   }
   return <OnboardingScreen />
 }
