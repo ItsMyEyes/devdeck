@@ -157,6 +157,40 @@ func TestPostCommitReturnsConflictOnRowsAffectedMismatch(t *testing.T) {
 	}
 }
 
+func TestPostDDLApplyCreatesATable(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/ddl/apply", strings.NewReader(`{
+		"plan": {
+			"object": {"name": "widgets", "kind": "table"},
+			"kind": "create",
+			"columns": [{"name": "id", "dataType": "INTEGER", "isPrimaryKey": true}]
+		}
+	}`))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	srv.dbExecH.PostDDLApply(rec, req)
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 200 or 201: %s", rec.Code, rec.Body.String())
+	}
+
+	colReq := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/columns",
+		strings.NewReader(`{"object":{"name":"widgets","kind":"table"}}`))
+	colReq.SetPathValue("id", id)
+	colRec := httptest.NewRecorder()
+	srv.dbExecH.PostColumns(colRec, colReq)
+	if colRec.Code != http.StatusOK {
+		t.Fatalf("columns status = %d: %s", colRec.Code, colRec.Body.String())
+	}
+	var cols []port.ColumnMeta
+	if err := json.Unmarshal(colRec.Body.Bytes(), &cols); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cols) != 1 || cols[0].Name != "id" {
+		t.Fatalf("cols = %+v, want the new widgets table's id column", cols)
+	}
+}
+
 func TestDescriptorNeverAppearsInErrorResponses(t *testing.T) {
 	// A driver error must not leak the DSN or password into the client.
 	srv := newDBTestServer(t)

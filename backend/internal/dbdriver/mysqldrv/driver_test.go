@@ -422,3 +422,49 @@ func TestCommitEditsUpdatesThroughAllColumnsIdentity(t *testing.T) {
 		t.Fatalf("res = %+v, want one statement affecting 1 row", res)
 	}
 }
+
+func TestApplyCreatesAndDropsATable(t *testing.T) {
+	raw := os.Getenv("DEVDECK_TEST_MYSQL_DSN")
+	if strings.TrimSpace(raw) == "" {
+		t.Skip("set DEVDECK_TEST_MYSQL_DSN to run MySQL integration tests")
+	}
+	cfg, err := mysql.ParseDSN(raw)
+	if err != nil {
+		t.Fatalf("parse DEVDECK_TEST_MYSQL_DSN: %v", err)
+	}
+	host, port_ := splitHostPort(t, cfg.Addr)
+
+	ctx := context.Background()
+	c, err := New().Open(ctx, port.DSNDescriptor{
+		Engine: "mysql", Host: host, Port: port_,
+		Username: cfg.User, Password: cfg.Passwd, Database: cfg.DBName,
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer c.Close()
+	conn := c.(*conn)
+
+	if _, err := conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_ddl_test", nil); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_ddl_test", nil)
+
+	_, err = conn.Apply(ctx, port.TablePlan{
+		Object: port.ObjectRef{Name: "phase3_ddl_test"}, Kind: "create",
+		Columns: []port.ColumnPlan{{Name: "id", DataType: "INT", IsPrimaryKey: true}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cols, err := conn.Columns(ctx, port.ObjectRef{Name: "phase3_ddl_test"})
+	if err != nil || len(cols) != 1 {
+		t.Fatalf("cols = %v, err = %v", cols, err)
+	}
+	if _, err := conn.Apply(ctx, port.TablePlan{Object: port.ObjectRef{Name: "phase3_ddl_test"}, Kind: "drop"}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if cols, _ := conn.Columns(ctx, port.ObjectRef{Name: "phase3_ddl_test"}); len(cols) != 0 {
+		t.Fatalf("table still has columns after drop: %v", cols)
+	}
+}

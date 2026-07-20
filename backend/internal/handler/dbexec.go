@@ -46,16 +46,17 @@ type runtimeDBRequest struct {
 	Descriptor port.DSNDescriptor `json:"descriptor"`
 	// Op selects the operation; the set each endpoint accepts is listed on
 	// RuntimeIntrospect and RuntimeExec.
-	Op       string           `json:"op"`
-	Tree     port.TreePath    `json:"tree"`
-	Object   port.ObjectRef   `json:"object"`
-	Filters  []port.Filter    `json:"filters"`
-	Rows     port.RowsRequest `json:"rows"`
-	Column   string           `json:"column"`
-	Identity []port.Filter    `json:"identity"`
-	SQL      string           `json:"sql"`
-	Args     []any            `json:"args"`
-	Edits    []port.RowEdit   `json:"edits"`
+	Op        string           `json:"op"`
+	Tree      port.TreePath    `json:"tree"`
+	Object    port.ObjectRef   `json:"object"`
+	Filters   []port.Filter    `json:"filters"`
+	Rows      port.RowsRequest `json:"rows"`
+	Column    string           `json:"column"`
+	Identity  []port.Filter    `json:"identity"`
+	SQL       string           `json:"sql"`
+	Args      []any            `json:"args"`
+	Edits     []port.RowEdit   `json:"edits"`
+	TablePlan port.TablePlan   `json:"tablePlan"`
 }
 
 // countResponse, lobResponse, and testResponse keep the hub-local and
@@ -310,13 +311,13 @@ func (h *DBExecHandler) dispatch(
 // This route accepts decrypted credentials in its body, so it must only ever
 // be registered behind key auth (see main.go).
 func (h *DBExecHandler) RuntimeIntrospect(w http.ResponseWriter, r *http.Request) {
-	h.runtimeRun(w, r, map[string]bool{"tree": true, "columns": true, "stats": true, "indexes": true})
+	h.runtimeRun(w, r, map[string]bool{"tree": true, "columns": true, "stats": true, "indexes": true, "ddlPreview": true})
 }
 
 // RuntimeExec answers data operations for a forwarded descriptor.
 // Ops: rows, query, count, lob, test.
 func (h *DBExecHandler) RuntimeExec(w http.ResponseWriter, r *http.Request) {
-	h.runtimeRun(w, r, map[string]bool{"rows": true, "query": true, "count": true, "lob": true, "test": true, "commit": true})
+	h.runtimeRun(w, r, map[string]bool{"rows": true, "query": true, "count": true, "lob": true, "test": true, "commit": true, "ddlApply": true})
 }
 
 // RuntimeClose releases a runtime-held connection for a descriptor.
@@ -398,6 +399,19 @@ func runOp(ctx context.Context, conn port.DBConn, req runtimeDBRequest) (any, er
 			return nil, errors.New("this engine does not support row writes")
 		}
 		return rw.CommitEdits(ctx, req.Edits)
+	case "ddlPreview":
+		dw, ok := conn.(port.DDLWriter)
+		if !ok {
+			return nil, errors.New("this engine does not support DDL")
+		}
+		stmts, err := dw.Plan(ctx, req.TablePlan)
+		return ddlPreviewResponse{Statements: stmts}, err
+	case "ddlApply":
+		dw, ok := conn.(port.DDLWriter)
+		if !ok {
+			return nil, errors.New("this engine does not support DDL")
+		}
+		return dw.Apply(ctx, req.TablePlan)
 	case "test":
 		if _, err := conn.Query(ctx, livenessQuery, nil); err != nil {
 			return testResponse{OK: false, Reason: mapDriverErr("connect", err, req.Descriptor)}, nil

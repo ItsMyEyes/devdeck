@@ -274,6 +274,40 @@ func TestCommitEditsUpdatesThroughCtidIdentity(t *testing.T) {
 	}
 }
 
+func TestApplyCreatesAndDropsATable(t *testing.T) {
+	d := descriptorFromEnv(t)
+	ctx := context.Background()
+	c, err := New().Open(ctx, d)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer c.Close()
+	conn := c.(*conn)
+
+	if _, err := conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_ddl_test", nil); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_ddl_test", nil)
+
+	_, err = conn.Apply(ctx, port.TablePlan{
+		Object: port.ObjectRef{Name: "phase3_ddl_test"}, Kind: "create",
+		Columns: []port.ColumnPlan{{Name: "id", DataType: "INTEGER", IsPrimaryKey: true}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cols, err := conn.Columns(ctx, port.ObjectRef{Name: "phase3_ddl_test"})
+	if err != nil || len(cols) != 1 {
+		t.Fatalf("cols = %v, err = %v", cols, err)
+	}
+	if _, err := conn.Apply(ctx, port.TablePlan{Object: port.ObjectRef{Name: "phase3_ddl_test"}, Kind: "drop"}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if cols, _ := conn.Columns(ctx, port.ObjectRef{Name: "phase3_ddl_test"}); len(cols) != 0 {
+		t.Fatalf("table still has columns after drop: %v", cols)
+	}
+}
+
 func TestOpenAttemptsTunnelDialWhenConfigured(t *testing.T) {
 	// No live bastion is reachable in this test, so Open must fail at the
 	// tunnel dial stage — proving the descriptor's tunnel was wired in and

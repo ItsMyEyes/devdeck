@@ -819,6 +819,26 @@ func (c *conn) CommitEdits(ctx context.Context, edits []port.RowEdit) (port.Comm
 
 var _ port.RowWriter = (*conn)(nil)
 
+func (c *conn) Plan(ctx context.Context, p port.TablePlan) ([]string, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+	return dbquery.BuildTablePlan(ctx, c, p, caps)
+}
+
+func (c *conn) Apply(ctx context.Context, p port.TablePlan) (port.CommitResult, error) {
+	stmts, err := c.Plan(ctx, p)
+	if err != nil {
+		return port.CommitResult{}, err
+	}
+	txStmts := make([]port.Statement, len(stmts))
+	for i, s := range stmts {
+		txStmts[i] = port.Statement{SQL: s}
+	}
+	return dbdriver.ExecTxOnDB(ctx, c.db, txStmts)
+}
+
+var _ port.DDLWriter = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()

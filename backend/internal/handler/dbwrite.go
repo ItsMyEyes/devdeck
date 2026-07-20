@@ -56,3 +56,49 @@ func (h *DBExecHandler) PostCommit(w http.ResponseWriter, r *http.Request) {
 			return rw.CommitEdits(ctx, body.Edits)
 		})
 }
+
+type ddlPreviewResponse struct {
+	Statements []string `json:"statements"`
+}
+
+// PostDDLPreview renders the exact statements a TablePlan implies without
+// executing them — the "preview before apply" step the design calls for.
+func (h *DBExecHandler) PostDDLPreview(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Plan port.TablePlan `json:"plan"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	var out ddlPreviewResponse
+	h.dispatch(w, r, runtimeIntrospectPath, runtimeDBRequest{Op: "ddlPreview", TablePlan: body.Plan}, &out,
+		func(ctx context.Context, c port.DBConn) (any, error) {
+			dw, ok := c.(port.DDLWriter)
+			if !ok {
+				return nil, errors.New("this engine does not support DDL")
+			}
+			stmts, err := dw.Plan(ctx, body.Plan)
+			return ddlPreviewResponse{Statements: stmts}, err
+		})
+}
+
+// PostDDLApply executes a TablePlan's statements inside one transaction.
+func (h *DBExecHandler) PostDDLApply(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Plan port.TablePlan `json:"plan"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	var out port.CommitResult
+	h.dispatch(w, r, runtimeExecPath, runtimeDBRequest{Op: "ddlApply", TablePlan: body.Plan}, &out,
+		func(ctx context.Context, c port.DBConn) (any, error) {
+			dw, ok := c.(port.DDLWriter)
+			if !ok {
+				return nil, errors.New("this engine does not support DDL")
+			}
+			return dw.Apply(ctx, body.Plan)
+		})
+}

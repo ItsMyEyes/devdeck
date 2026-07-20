@@ -282,3 +282,25 @@ func TestCommitEditsUpdatesThroughPrimaryKeyIdentity(t *testing.T) {
 		t.Fatalf("commit did not apply: name=%q err=%v", name, err)
 	}
 }
+
+func TestApplyCreatesAndDropsATable(t *testing.T) {
+	ctx := context.Background()
+	conn := openTestConn(t) // from Task 4's helper
+	_, err := conn.Apply(ctx, port.TablePlan{
+		Object: port.ObjectRef{Name: "widgets"}, Kind: "create",
+		Columns: []port.ColumnPlan{{Name: "id", DataType: "INTEGER", IsPrimaryKey: true}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cols, err := conn.Columns(ctx, port.ObjectRef{Name: "widgets"})
+	if err != nil || len(cols) != 1 {
+		t.Fatalf("cols = %v, err = %v", cols, err)
+	}
+	if _, err := conn.Apply(ctx, port.TablePlan{Object: port.ObjectRef{Name: "widgets"}, Kind: "drop"}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if cols, _ := conn.Columns(ctx, port.ObjectRef{Name: "widgets"}); len(cols) != 0 {
+		t.Fatalf("table still has columns after drop: %v", cols)
+	}
+}
