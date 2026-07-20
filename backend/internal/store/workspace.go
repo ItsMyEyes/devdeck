@@ -8,6 +8,30 @@ import (
 
 // ── Workspaces (full nested tree) ──────────────────────────────────────────
 
+// WorkspaceShells returns workspaces with only id and name populated — no
+// projects, news, todos, invoices, or recurring templates. Use this wherever
+// a caller only needs the grouping (e.g. CatalogForMachine, which ships its
+// result to a runtime machine): Workspaces() eagerly loads every business-data
+// field, and nil-ing them out after the fact is a trap — a new field added to
+// domain.Workspace later would leak into that response by default, silently.
+func (s *Store) WorkspaceShells() ([]domain.Workspace, error) {
+	rows, err := s.db.Query(`SELECT id, name FROM workspaces ORDER BY rowid ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []domain.Workspace{}
+	for rows.Next() {
+		var w domain.Workspace
+		if err := rows.Scan(&w.ID, &w.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // Workspaces returns the full nested workspace tree, ordered by creation ASC.
 func (s *Store) Workspaces() ([]domain.Workspace, error) {
 	rows, err := s.db.Query(`SELECT id, name FROM workspaces ORDER BY rowid ASC`)

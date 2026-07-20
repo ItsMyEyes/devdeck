@@ -41,6 +41,49 @@ func TestApplyCatalogSnapshotPreservesLocalProjectsAndWorktrees(t *testing.T) {
 	}
 }
 
+func TestCatalogForMachineNeverLeaksBusinessData(t *testing.T) {
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace("clients")
+	otherMachineProj, _ := s.CreateProject(ws.ID, "not-mine", "/srv/other", "", "m-other")
+	mineProj, _ := s.CreateProject(ws.ID, "mine", "/srv/mine", "", "m-1")
+	if _, err := s.CreateNews(ws.ID, "manual", "Q3 renewal at risk", "", "2026-07-01", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTodo(ws.ID, "chase invoice #114", "high"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateInvoice(ws.ID, "INV-1", "Acme Co", "1 Main St", nil, "2026-08-01", "2026-07-01", "draft", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRecurringTemplate(ws.ID, "Acme Co", "1 Main St", nil, "", "", "", 1, 30, "2026-07-01"); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := s.CatalogForMachine("m-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Workspaces) != 1 {
+		t.Fatalf("workspaces = %+v, want exactly one", snap.Workspaces)
+	}
+	w := snap.Workspaces[0]
+	if len(w.News) != 0 || len(w.Todos) != 0 || len(w.Invoices) != 0 || len(w.RecurringTemplates) != 0 {
+		t.Fatalf("workspace shell leaked business data: news=%d todos=%d invoices=%d recurring=%d",
+			len(w.News), len(w.Todos), len(w.Invoices), len(w.RecurringTemplates))
+	}
+	if len(w.Projects) != 0 {
+		t.Errorf("workspace shell carries nested projects = %+v, want none (projects ship flattened in snap.Projects)", w.Projects)
+	}
+	if len(snap.Projects) != 1 || snap.Projects[0].ID != mineProj.ID {
+		t.Fatalf("snap.Projects = %+v, want only %s", snap.Projects, mineProj.ID)
+	}
+	for _, p := range snap.Projects {
+		if p.ID == otherMachineProj.ID {
+			t.Errorf("another machine's project (%s) leaked into this machine's catalog", otherMachineProj.ID)
+		}
+	}
+}
+
 func TestApplyCatalogSnapshotRollsBackOnFailure(t *testing.T) {
 	s := newTestStore(t)
 	ws, _ := s.CreateWorkspace("clients")

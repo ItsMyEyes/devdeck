@@ -55,16 +55,15 @@ func (s *Store) SSHConnectionsByExecutor(machineID string) ([]domain.SSHConnecti
 }
 
 // CatalogForMachine assembles one machine's slice of the catalog. Workspaces
-// are returned without their nested project trees: the Projects list is the
-// authoritative, machine-scoped set, and leaving both populated would ship
-// other machines' projects inside the workspace tree.
+// come from WorkspaceShells, not Workspaces: a runtime is execution-scoped
+// and must never receive another field's worth of the operator's business
+// data (news, todos, invoices, recurring templates) just for asking for its
+// own project list. The Projects list is the authoritative, machine-scoped
+// set, shipped flattened alongside the shells rather than nested inside them.
 func (s *Store) CatalogForMachine(machineID string) (domain.CatalogSnapshot, error) {
-	workspaces, err := s.Workspaces()
+	workspaces, err := s.WorkspaceShells()
 	if err != nil {
 		return domain.CatalogSnapshot{}, err
-	}
-	for i := range workspaces {
-		workspaces[i].Projects = nil
 	}
 	projects, err := s.ProjectsByMachine(machineID)
 	if err != nil {
