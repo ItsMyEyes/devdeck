@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useCommitDBEdits, useDBConnections } from '@/features/data/queries'
 import { ApiError } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function DBCommitDialog() {
@@ -49,13 +50,20 @@ export function DBCommitDialog() {
       <div className="mb-4 max-h-[280px] overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
         {dialog.edits.map((edit, i) => (
           <div key={i} className="mb-2 border-b border-devdeck-border-menu/50 pb-2 font-mono text-[11px] text-devdeck-fg-2 last:mb-0 last:border-0 last:pb-0">
-            <div className="text-devdeck-dim">
+            <div className={cn('text-devdeck-dim', edit.kind === 'delete' && 'text-devdeck-red-soft')}>
               {edit.kind.toUpperCase()} {edit.object.name}
             </div>
             {edit.newValues
               ? Object.entries(edit.newValues).map(([col, val]) => (
                   <div key={col}>
                     {col}: <span className="text-devdeck-yellow-tint-text">{String(val)}</span>
+                  </div>
+                ))
+              : null}
+            {edit.kind === 'delete' && edit.oldValues
+              ? Object.entries(edit.oldValues).map(([col, val]) => (
+                  <div key={col}>
+                    {col}: <span className="text-devdeck-red-soft">{val === null ? 'null' : String(val)}</span>
                   </div>
                 ))
               : null}

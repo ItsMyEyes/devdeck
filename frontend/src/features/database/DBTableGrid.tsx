@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Plus, Trash2, Undo2, X } from 'lucide-react'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBColumns, useDBRows } from '@/features/data/queries'
 import type { DBFilter, DBObjectRef, DBRowEdit, DBSortKey } from '@/lib/api'
@@ -10,6 +11,15 @@ import { DBTableInfo } from './DBTableInfo'
 
 const ROW_HEIGHT = 30
 const PAGE_LIMIT = 200
+const IDENTITY_COL_WIDTH = 28
+
+interface PendingInsert {
+  id: string
+  /** Only columns the operator actually typed into are present — an omitted
+   *  column lets the database apply its own default rather than the frontend
+   *  fabricating an empty-string value for it. */
+  values: Record<string, string>
+}
 
 export function DBTableGrid({ connectionId, object }: { connectionId: string; object: DBObjectRef }) {
   const { data: columns, isLoading: columnsLoading, error: columnsError } = useDBColumns(connectionId, object)
@@ -21,6 +31,16 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
   const openCommitDialog = useDevDeckStore((s) => s.openCommitDialog)
 
   const [pendingEdits, setPendingEdits] = useState<Map<string, unknown>>(new Map())
+  const [pendingDeletes, setPendingDeletes] = useState<Set<number>>(new Set())
+  const [pendingInserts, setPendingInserts] = useState<PendingInsert[]>([])
+
+  // Switching tables (or re-fetching after a schema change) invalidates every
+  // row index and synthetic id the pending state above refers to.
+  useEffect(() => {
+    setPendingEdits(new Map())
+    setPendingDeletes(new Set())
+    setPendingInserts([])
+  }, [connectionId, object.database, object.schema, object.name])
 
   function cellKey(rowIndex: number, column: string) {
     return `${rowIndex}:${column}`
@@ -34,23 +54,82 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
     })
   }
 
+  function toggleDelete(rowIndex: number) {
+    setPendingDeletes((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowIndex)) next.delete(rowIndex)
+      else next.add(rowIndex)
+      return next
+    })
+  }
+
+  function addPendingRow() {
+    setPendingInserts((prev) => [...prev, { id: `new-${Date.now()}-${prev.length}`, values: {} }])
+  }
+
+  function removePendingInsert(id: string) {
+    setPendingInserts((prev) => prev.filter((r) => r.id !== id))
+  }
+
+  function setPendingInsertValue(id: string, column: string, value: string) {
+    setPendingInserts((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r
+        const values = { ...r.values }
+        if (value === '') delete values[column]
+        else values[column] = value
+        return { ...r, values }
+      }),
+    )
+  }
+
+  function discardAllPending() {
+    setPendingEdits(new Map())
+    setPendingDeletes(new Set())
+    setPendingInserts([])
+  }
+
   function buildRowEdits(): DBRowEdit[] {
     if (!page) return []
+    const edits: DBRowEdit[] = []
+
     const byRow = new Map<number, Record<string, unknown>>()
     for (const [key, value] of pendingEdits) {
       const [rowIndexStr, column] = key.split(':')
       const rowIndex = Number(rowIndexStr)
+      // A row marked for deletion ignores any cell edits made before the
+      // delete was toggled — deleting wins, there is nothing left to update.
+      if (pendingDeletes.has(rowIndex)) continue
       if (!byRow.has(rowIndex)) byRow.set(rowIndex, {})
       byRow.get(rowIndex)![column] = value
     }
-    const edits: DBRowEdit[] = []
     for (const [rowIndex, newValues] of byRow) {
       const oldValues: Record<string, unknown> = {}
       page.columns.forEach((col, i) => { oldValues[col.name] = page.rows[rowIndex][i] })
       edits.push({ object, kind: 'update', oldValues, newValues })
     }
+
+    for (const rowIndex of pendingDeletes) {
+      const oldValues: Record<string, unknown> = {}
+      page.columns.forEach((col, i) => { oldValues[col.name] = page.rows[rowIndex][i] })
+      edits.push({ object, kind: 'delete', oldValues })
+    }
+
+    for (const insert of pendingInserts) {
+      if (Object.keys(insert.values).length === 0) continue // untouched blank row — nothing to insert
+      edits.push({ object, kind: 'insert', newValues: insert.values })
+    }
+
     return edits
   }
+
+  const updatedRowCount = new Set(
+    Array.from(pendingEdits.keys())
+      .map((k) => Number(k.split(':')[0]))
+      .filter((rowIndex) => !pendingDeletes.has(rowIndex)),
+  ).size
+  const filledInsertCount = pendingInserts.filter((r) => Object.keys(r.values).length > 0).length
+  const pendingCount = updatedRowCount + pendingDeletes.size + filledInsertCount
 
   const { data: page, isLoading: rowsLoading, error: rowsError } = useDBRows(connectionId, {
     object,
@@ -97,6 +176,8 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
     return <div className="p-4 text-[12px] text-devdeck-red-soft">{columnsError instanceof Error ? columnsError.message : 'Failed to load columns'}</div>
   }
 
+  const showGrid = Boolean(page) && (page!.rows.length > 0 || pendingInserts.length > 0)
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <DBFilterBar
@@ -107,8 +188,12 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
         onGlobalSearchChange={(v) => { setGlobalSearch(v); resetPaging() }}
       />
       <div className="flex flex-none items-center justify-between border-b border-devdeck-border-menu px-3 py-1.5">
-        <DBTableInfo connectionId={connectionId} object={object} />
-        <div className="flex items-center gap-2 font-mono text-[11px] text-devdeck-dim">
+        <DBTableInfo connectionId={connectionId} object={object} filters={filters} />
+        <div className="flex items-center gap-3 font-mono text-[11px] text-devdeck-dim">
+          <button type="button" onClick={addPendingRow} className="flex items-center gap-1 hover:text-devdeck-fg">
+            <Plus size={11} />
+            Add row
+          </button>
           {page?.usedOffsetPaging ? <span className="text-devdeck-yellow-tint-text">offset paging — no usable row identity</span> : null}
           {page?.truncated ? <span>showing first {page.rows.length} rows</span> : null}
           <button type="button" onClick={prevPage} disabled={pageIndex === 0} className="disabled:opacity-30">
@@ -120,16 +205,16 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
         </div>
       </div>
 
-      {pendingEdits.size > 0 ? (
+      {pendingCount > 0 ? (
         <div className="flex flex-none items-center justify-between border-b border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-3 py-1.5">
-          <span className="font-mono text-[11px] text-devdeck-yellow-tint-text">{pendingEdits.size} pending change{pendingEdits.size === 1 ? '' : 's'}</span>
+          <span className="font-mono text-[11px] text-devdeck-yellow-tint-text">{pendingCount} pending change{pendingCount === 1 ? '' : 's'}</span>
           <div className="flex gap-2">
-            <button type="button" onClick={() => setPendingEdits(new Map())} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
+            <button type="button" onClick={discardAllPending} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
               Discard
             </button>
             <button
               type="button"
-              onClick={() => openCommitDialog(connectionId, buildRowEdits(), () => setPendingEdits(new Map()))}
+              onClick={() => openCommitDialog(connectionId, buildRowEdits(), discardAllPending)}
               className="text-[11px] font-medium text-devdeck-accent-soft hover:text-devdeck-accent"
             >
               Review &amp; commit
@@ -142,11 +227,12 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
         <div className="p-4 text-[12px] text-devdeck-red-soft">{rowsError instanceof Error ? rowsError.message : 'Failed to load rows'}</div>
       ) : rowsLoading && !page ? (
         <DataLoading compact label="loading rows…" />
-      ) : page && page.rows.length === 0 ? (
+      ) : !showGrid ? (
         <div className="flex flex-1 items-center justify-center text-[12px] text-devdeck-dim">No rows match the current filters.</div>
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
           <div className="sticky top-0 z-10 flex border-b border-devdeck-border-menu bg-devdeck-surface-2">
+            <div style={{ width: IDENTITY_COL_WIDTH }} className="flex-none border-r border-devdeck-border-menu" />
             {columns.map((col) => {
               const sortEntry = sort.find((s) => s.column === col.name)
               return (
@@ -166,12 +252,27 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
           <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const row = page!.rows[virtualRow.index]
+              const isDeleted = pendingDeletes.has(virtualRow.index)
               return (
                 <div
                   key={virtualRow.key}
                   style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
-                  className={cn('flex border-b border-devdeck-border-menu/50', virtualRow.index % 2 === 1 && 'bg-white/[0.015]')}
+                  className={cn(
+                    'flex border-b border-devdeck-border-menu/50',
+                    virtualRow.index % 2 === 1 && 'bg-white/[0.015]',
+                    isDeleted && 'bg-devdeck-red-tint/40',
+                  )}
                 >
+                  <button
+                    type="button"
+                    onClick={() => toggleDelete(virtualRow.index)}
+                    style={{ width: IDENTITY_COL_WIDTH }}
+                    className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-dim hover:text-devdeck-red-soft"
+                    aria-label={isDeleted ? 'Restore row' : 'Delete row'}
+                    title={isDeleted ? 'Restore row' : 'Delete row'}
+                  >
+                    {isDeleted ? <Undo2 size={11} /> : <Trash2 size={11} />}
+                  </button>
                   {columns.map((col, colIndex) => {
                     const key = cellKey(virtualRow.index, col.name)
                     const isPending = pendingEdits.has(key)
@@ -184,11 +285,13 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
                       <input
                         key={col.name}
                         defaultValue={display === null ? '' : String(display)}
+                        disabled={isDeleted}
                         onBlur={(e) => { if (e.target.value !== String(display ?? '')) setPendingValue(virtualRow.index, col.name, e.target.value) }}
                         style={{ minWidth: 140 }}
                         className={cn(
-                          'flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none focus:bg-devdeck-accent-tint/30',
-                          isPending && 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text',
+                          'flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none focus:bg-devdeck-accent-tint/30 disabled:cursor-not-allowed',
+                          isPending && !isDeleted && 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text',
+                          isDeleted && 'text-devdeck-dim line-through',
                         )}
                       />
                     )
@@ -197,6 +300,32 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
               )
             })}
           </div>
+
+          {pendingInserts.map((insert) => (
+            <div key={insert.id} className="flex border-b border-devdeck-border-menu/50 bg-devdeck-accent-tint/10">
+              <button
+                type="button"
+                onClick={() => removePendingInsert(insert.id)}
+                style={{ width: IDENTITY_COL_WIDTH }}
+                className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-dim hover:text-devdeck-red-soft"
+                aria-label="Remove new row"
+                title="Remove new row"
+              >
+                <X size={11} />
+              </button>
+              {columns.map((col) => (
+                <input
+                  key={col.name}
+                  defaultValue={insert.values[col.name] ?? ''}
+                  disabled={col.isLob}
+                  onChange={(e) => setPendingInsertValue(insert.id, col.name, e.target.value)}
+                  placeholder={col.isLob ? '(not settable here)' : col.name}
+                  style={{ minWidth: 140 }}
+                  className="flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-accent-soft outline-none placeholder:text-devdeck-dim-2 focus:bg-devdeck-accent-tint/30 disabled:cursor-not-allowed"
+                />
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </div>

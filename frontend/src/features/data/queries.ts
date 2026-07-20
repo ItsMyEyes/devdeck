@@ -45,6 +45,7 @@ import {
   fetchCompanies,
   fetchDBColumns,
   fetchDBConnections,
+  fetchDBCount,
   fetchDBDDLPreview,
   fetchDBEngines,
   fetchDBIndexes,
@@ -98,6 +99,7 @@ import type {
   CreateSSHConnectionBody,
   CreateTodoBody,
   CreateWorkspaceBody,
+  DBFilter,
   DBObjectRef,
   DBRowEdit,
   DBRowsRequest,
@@ -445,6 +447,13 @@ export function useDBRows(connectionId: string, req: DBRowsRequest, enabled = tr
 export function useRunDBQuery() {
   return useMutation({
     mutationFn: ({ connectionId, sql }: { connectionId: string; sql: string }) => fetchDBQuery(connectionId, sql),
+  })
+}
+
+export function useCountDBRows() {
+  return useMutation({
+    mutationFn: ({ connectionId, object, filters }: { connectionId: string; object: DBObjectRef; filters: DBFilter[] }) =>
+      fetchDBCount(connectionId, object, filters),
   })
 }
 

@@ -902,6 +902,13 @@ export function fetchDBRows(connectionId: string, req: DBRowsRequest): Promise<D
   return request<DBResultSet>('POST', `/db/connections/${connectionId}/rows`, req)
 }
 
+/** Exact COUNT(*) — an explicit user action only, never fetched on the read
+ *  path (the estimate in DBTableStats covers that). Respects the same
+ *  filters as the current grid view. */
+export function fetchDBCount(connectionId: string, object: DBObjectRef, filters: DBFilter[]): Promise<{ count: number }> {
+  return request<{ count: number }>('POST', `/db/connections/${connectionId}/count`, { object, filters })
+}
+
 export function fetchDBQuery(connectionId: string, sql: string): Promise<DBResultSet> {
   return request<DBResultSet>('POST', `/db/connections/${connectionId}/query`, { sql, args: [] })
 }
