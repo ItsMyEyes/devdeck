@@ -3,6 +3,7 @@ import type { DBObjectRef } from '@/lib/api'
 export type DBTabContent =
   | { id: string; kind: 'table'; object: DBObjectRef }
   | { id: string; kind: 'ddl'; object: DBObjectRef }
+  | { id: string; kind: 'designer'; object: DBObjectRef | null }
   | { id: string; kind: 'query'; savedQueryId: string | null; label: string }
 
 /** Plain `Omit<T, K>` does not distribute over a discriminated union — since
@@ -32,6 +33,7 @@ function objectKey(object: DBObjectRef) {
 export function tabId(content: DBTabDraft): string {
   if (content.kind === 'table') return `table:${objectKey(content.object)}`
   if (content.kind === 'ddl') return `ddl:${objectKey(content.object)}`
+  if (content.kind === 'designer') return content.object ? `designer:${objectKey(content.object)}` : 'designer:new'
   return `query:${content.savedQueryId ?? 'draft'}`
 }
 

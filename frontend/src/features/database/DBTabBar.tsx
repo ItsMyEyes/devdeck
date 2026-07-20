@@ -14,7 +14,16 @@ export function DBTabBar({ connectionId, isProduction }: { connectionId: string;
     <div className="flex flex-none items-center gap-1 overflow-x-auto border-b border-devdeck-border-menu bg-devdeck-surface-2 px-2">
       {state.tabs.map((tab) => {
         const active = tab.id === state.activeTabId
-        const label = tab.kind === 'query' ? tab.label : tab.kind === 'ddl' ? `${tab.object.name} · DDL` : tab.object.name
+        const label =
+          tab.kind === 'query'
+            ? tab.label
+            : tab.kind === 'ddl'
+              ? `${tab.object.name} · DDL`
+              : tab.kind === 'designer'
+                ? tab.object
+                  ? `${tab.object.name} · Alter`
+                  : 'New table'
+                : tab.object.name
         return (
           <div
             key={tab.id}

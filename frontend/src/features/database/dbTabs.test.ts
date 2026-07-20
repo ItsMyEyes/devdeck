@@ -66,6 +66,15 @@ check('closing a non-active tab leaves the active tab untouched', () => {
   assertEqual(s.activeTabId, tabId({ kind: 'table', object: OBJ }), 'unchanged')
 })
 
+check('designer tabs for "new table" and an existing table are distinct, and dedupe within themselves', () => {
+  let s = openTab(emptyDBTabState(), { kind: 'designer', object: null })
+  s = openTab(s, { kind: 'designer', object: null })
+  assertEqual(s.tabs.length, 1, 'opening "new table" designer twice still yields one tab')
+  s = openTab(s, { kind: 'designer', object: OBJ })
+  assertEqual(s.tabs.length, 2, 'a designer tab for an existing table is distinct from "new table"')
+  assertEqual(tabId({ kind: 'designer', object: null }), 'designer:new', 'stable id for the create-new case')
+})
+
 check('setActiveTab is a no-op for an id that is not open', () => {
   const s = openTab(emptyDBTabState(), { kind: 'table', object: OBJ })
   const s2 = setActiveTab(s, 'not-a-real-id')

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Database as DatabaseIcon, Pencil, Plus, RefreshCw } from 'lucide-react'
+import { Database as DatabaseIcon, Pencil, Plus, RefreshCw, Table2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DataLoading } from '@/features/screens/DataLoading'
@@ -7,9 +7,11 @@ import { useDBConnections, useDBEngines } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
 import { DBCommitDialog } from './DBCommitDialog'
 import { DBConnectionDialog } from './DBConnectionDialog'
+import { DBDDLView } from './DBDDLView'
 import { emptyDBTabState } from './dbTabs'
 import { DBObjectTree } from './DBObjectTree'
 import { DBTabBar } from './DBTabBar'
+import { DBTableDesigner } from './DBTableDesigner'
 import { DBTableGrid } from './DBTableGrid'
 import type { DBConnection } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
@@ -113,12 +115,22 @@ export function DatabaseModule() {
                 <button type="button" onClick={() => setActiveConnectionId(null)} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
                   ← Connections
                 </button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => openDBTab(activeConnection.id, { kind: 'designer', object: null })}
+                  aria-label="New table"
+                  title="New table"
+                >
+                  <Table2 size={13} />
+                </Button>
               </div>
               {engines?.[activeConnection.engine] ? (
                 <DBObjectTree
                   connectionId={activeConnection.id}
                   caps={engines[activeConnection.engine]}
                   onOpenTable={(object) => openDBTab(activeConnection.id, { kind: 'table', object })}
+                  onOpenDDL={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
                 />
               ) : (
                 <DataLoading compact label="loading capabilities…" />
@@ -131,10 +143,16 @@ export function DatabaseModule() {
                   <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">Select a table from the tree to browse it.</div>
                 ) : activeTab.kind === 'table' ? (
                   <DBTableGrid connectionId={activeConnection.id} object={activeTab.object} />
+                ) : activeTab.kind === 'ddl' ? (
+                  <DBDDLView connectionId={activeConnection.id} object={activeTab.object} />
+                ) : activeTab.kind === 'designer' ? (
+                  <DBTableDesigner
+                    connectionId={activeConnection.id}
+                    object={activeTab.object}
+                    onApplied={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
+                  />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">
-                    {activeTab.kind === 'ddl' ? 'DDL view — added in Task 9.' : 'SQL editor — added in Task 10.'}
-                  </div>
+                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">SQL editor — added in Task 10.</div>
                 )}
               </div>
             </div>

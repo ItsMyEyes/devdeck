@@ -56,4 +56,5 @@ export const qk = {
   dbIndexes: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'indexes', object] as const,
   dbStats: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'stats', object] as const,
   dbRows: (connectionId: string, req: DBRowsRequest) => ['db', connectionId, 'rows', req] as const,
+  dbShowCreate: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'showCreate', object] as const,
 }

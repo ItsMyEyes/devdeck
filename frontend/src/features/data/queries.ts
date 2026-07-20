@@ -6,6 +6,7 @@ import { useMemo } from 'react'
 import type { Machine, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
+  applyDBDDL,
   clearDoneTodos,
   cloneProject,
   commitDBEdits,
@@ -44,10 +45,12 @@ import {
   fetchCompanies,
   fetchDBColumns,
   fetchDBConnections,
+  fetchDBDDLPreview,
   fetchDBEngines,
   fetchDBIndexes,
   fetchDBRows,
   fetchDBSavedQueries,
+  fetchDBShowCreate,
   fetchDBStats,
   fetchDBTree,
   fetchIssueEvents,
@@ -97,6 +100,7 @@ import type {
   DBObjectRef,
   DBRowEdit,
   DBRowsRequest,
+  DBTablePlan,
   DBTreePath,
   MachineHealth,
   SettingsPatch,
@@ -445,6 +449,34 @@ export function useCommitDBEdits() {
     mutationFn: ({ connectionId, edits }: { connectionId: string; edits: DBRowEdit[] }) => commitDBEdits(connectionId, edits),
     onSuccess: (_data, vars) =>
       queryClient.invalidateQueries({ queryKey: ['db', vars.connectionId, 'rows'], exact: false }),
+  })
+}
+
+// ---- DB DDL ----
+
+export function useDBDDLPreview() {
+  return useMutation({
+    mutationFn: ({ connectionId, plan }: { connectionId: string; plan: DBTablePlan }) => fetchDBDDLPreview(connectionId, plan),
+  })
+}
+
+export function useApplyDBDDL() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ connectionId, plan }: { connectionId: string; plan: DBTablePlan }) => applyDBDDL(connectionId, plan),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: qk.dbTree(vars.connectionId, { database: vars.plan.object.database, schema: vars.plan.object.schema, kind: 'tables' }) })
+      queryClient.invalidateQueries({ queryKey: qk.dbColumns(vars.connectionId, vars.plan.object) })
+      queryClient.invalidateQueries({ queryKey: qk.dbIndexes(vars.connectionId, vars.plan.object) })
+    },
+  })
+}
+
+export function useDBShowCreate(connectionId: string, object: DBObjectRef, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbShowCreate(connectionId, object),
+    queryFn: () => fetchDBShowCreate(connectionId, object),
+    enabled: enabled && Boolean(connectionId) && Boolean(object.name),
   })
 }
 

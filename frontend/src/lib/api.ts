@@ -925,3 +925,38 @@ export interface DBCommitResult {
 export function commitDBEdits(connectionId: string, edits: DBRowEdit[]): Promise<DBCommitResult> {
   return request<DBCommitResult>('POST', `/db/connections/${connectionId}/commit`, { edits })
 }
+
+// ---- DB DDL (table/index create/alter, generated DDL) ----
+
+export interface DBColumnPlan {
+  name: string
+  dataType: string
+  nullable: boolean
+  default: string | null
+  isPrimaryKey: boolean
+}
+
+export interface DBIndexPlan {
+  name: string
+  columns: string[]
+  unique: boolean
+}
+
+export interface DBTablePlan {
+  object: DBObjectRef
+  kind: 'create' | 'alter' | 'drop'
+  columns?: DBColumnPlan[]
+  indexes?: DBIndexPlan[]
+}
+
+export function fetchDBDDLPreview(connectionId: string, plan: DBTablePlan): Promise<{ statements: string[] }> {
+  return request<{ statements: string[] }>('POST', `/db/connections/${connectionId}/ddl/preview`, { plan })
+}
+
+export function applyDBDDL(connectionId: string, plan: DBTablePlan): Promise<DBCommitResult> {
+  return request<DBCommitResult>('POST', `/db/connections/${connectionId}/ddl/apply`, { plan })
+}
+
+export function fetchDBShowCreate(connectionId: string, object: DBObjectRef): Promise<{ ddl: string }> {
+  return request<{ ddl: string }>('POST', `/db/connections/${connectionId}/show-create`, { object })
+}
