@@ -168,8 +168,20 @@ func (svc *ProjectService) Update(id string, name, path, repo, machineID *string
 	return svc.store.UpdateProject(id, name, path, repo, machineID, expanded)
 }
 
-// Delete deletes a project and its worktrees.
+// Delete deletes a project and its worktrees. On a runtime, only a project
+// that has never reached the hub (origin="local") may be deleted this way —
+// removing something that never synced is purely local; once origin="hub",
+// deletion must go through the hub instead.
 func (svc *ProjectService) Delete(id string) error {
+	if svc.runtime {
+		p, err := svc.store.ProjectByID(id)
+		if err != nil {
+			return err
+		}
+		if p.Origin != "local" {
+			return fmt.Errorf("cannot delete a hub-synced project from a runtime: %w", ErrForbidden)
+		}
+	}
 	return svc.store.DeleteProject(id)
 }
 

@@ -235,6 +235,16 @@ func TestRequireAuthAcceptsBearerHubKey(t *testing.T) {
 	}
 }
 
+func TestHandleStoreErrMapsErrForbiddenTo403(t *testing.T) {
+	rec := httptest.NewRecorder()
+	if !handleStoreErr(rec, fmt.Errorf("cannot delete a hub-synced project from a runtime: %w", service.ErrForbidden)) {
+		t.Fatal("handleStoreErr returned false for a non-nil error")
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
 func TestRequireAuthEmptyHubKeyNeverMatchesBearer(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

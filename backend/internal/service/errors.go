@@ -20,3 +20,9 @@ var ErrUnauthorized = errors.New("unauthorized")
 // login attempts. Wrap it with fmt.Errorf("...: %w", ErrLocked) —
 // handleStoreErr maps it to HTTP 423.
 var ErrLocked = errors.New("locked")
+
+// ErrForbidden indicates the request is well-formed and the credential is
+// valid, but this specific action isn't allowed given the resource's current
+// state (e.g. deleting a hub-synced project from a runtime). Wrap it with
+// fmt.Errorf("...: %w", ErrForbidden) — handleStoreErr maps it to HTTP 403.
+var ErrForbidden = errors.New("forbidden")

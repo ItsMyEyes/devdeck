@@ -295,3 +295,46 @@ func TestHubProjectServiceLeavesCreatedProjectsAsHub(t *testing.T) {
 		t.Errorf("Origin after hub-mode Create = %q, want hub (unchanged control)", p.Origin)
 	}
 }
+
+func TestRuntimeProjectServiceRefusesToDeleteASyncedProject(t *testing.T) {
+	st := store.NewTestStore(t)
+	ws, _ := st.CreateWorkspace("clients")
+	synced, _ := st.CreateProject(ws.ID, "synced", "/srv/synced", "", "") // origin defaults to "hub"
+
+	svc := NewProjectServiceForRuntime(st)
+	err := svc.Delete(synced.ID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("Delete(synced project) error = %v, want ErrForbidden", err)
+	}
+	if _, err := st.ProjectByID(synced.ID); err != nil {
+		t.Errorf("synced project was deleted despite the rejection: %v", err)
+	}
+}
+
+func TestRuntimeProjectServiceDeletesALocalProject(t *testing.T) {
+	st := store.NewTestStore(t)
+	ws, _ := st.CreateWorkspace("clients")
+	local, _ := st.CreateProject(ws.ID, "local", "/srv/local", "", "")
+	if err := st.MarkProjectLocal(local.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewProjectServiceForRuntime(st)
+	if err := svc.Delete(local.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ProjectByID(local.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("local project still exists after Delete: err=%v", err)
+	}
+}
+
+func TestHubProjectServiceDeletesAnyProject(t *testing.T) {
+	st := store.NewTestStore(t)
+	ws, _ := st.CreateWorkspace("clients")
+	p, _ := st.CreateProject(ws.ID, "api", "/srv/api", "", "")
+
+	svc := NewProjectService(st)
+	if err := svc.Delete(p.ID); err != nil {
+		t.Fatalf("hub-mode Delete of a hub-origin project failed: %v (control — must be unchanged)", err)
+	}
+}

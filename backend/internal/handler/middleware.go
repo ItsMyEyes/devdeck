@@ -53,6 +53,10 @@ func handleStoreErr(w http.ResponseWriter, err error) bool {
 		writeErr(w, http.StatusLocked, err.Error())
 		return true
 	}
+	if errors.Is(err, service.ErrForbidden) {
+		writeErr(w, http.StatusForbidden, err.Error())
+		return true
+	}
 	writeErr(w, http.StatusInternalServerError, err.Error())
 	return true
 }
