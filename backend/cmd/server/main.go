@@ -499,6 +499,11 @@ func main() {
 		mux.HandleFunc("POST /api/db/connections/{id}/rows", dbExecH.PostRows)
 		mux.HandleFunc("POST /api/db/connections/{id}/lob", dbExecH.PostLOB)
 		mux.HandleFunc("POST /api/db/connections/{id}/query", dbExecH.PostQuery)
+		mux.HandleFunc("POST /api/db/connections/{id}/indexes", dbExecH.PostIndexes)
+		mux.HandleFunc("POST /api/db/connections/{id}/commit", dbExecH.PostCommit)
+		mux.HandleFunc("POST /api/db/connections/{id}/ddl/preview", dbExecH.PostDDLPreview)
+		mux.HandleFunc("POST /api/db/connections/{id}/ddl/apply", dbExecH.PostDDLApply)
+		mux.HandleFunc("POST /api/db/connections/{id}/show-create", dbExecH.PostShowCreate)
 	}
 
 	// Runtime execution endpoints. These accept a descriptor carrying

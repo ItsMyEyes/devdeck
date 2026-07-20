@@ -213,6 +213,45 @@ func TestPostShowCreateReturnsDDL(t *testing.T) {
 	}
 }
 
+// TestCommitRequestAndResponseAreAudited confirms the design spec's claim
+// that the commit path needs no new audit plumbing — handler/audit.go's
+// existing AccessLog middleware already captures a commit's request body
+// (the edited value) and response body (rowsAffected) verbatim, the same way
+// it captures every other /api request.
+func TestCommitRequestAndResponseAreAudited(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t)
+
+	// Wrap PostCommit the same way main.go wraps the whole mux, so the audit
+	// middleware sees the real request/response bodies.
+	mw := AccessLog(nil, "")(http.HandlerFunc(srv.dbExecH.PostCommit))
+
+	out := captureLog(func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/commit", strings.NewReader(`{
+			"edits": [{"object":{"name":"assets","kind":"table"},"kind":"update",
+				"oldValues":{"id":1,"name":"alpha"},"newValues":{"name":"renamed"}}]
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", id)
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, req)
+	})
+
+	if !strings.Contains(out, "renamed") {
+		t.Fatalf("commit's new value did not reach the audit log: %s", out)
+	}
+	if !strings.Contains(out, "rowsAffected") {
+		t.Fatalf("commit's rowsAffected did not reach the audit log: %s", out)
+	}
+	// Note (per plan Task 11 Step 4): redactJSON matches any JSON key
+	// containing "password|secret|token|otp|code" and redacts its value
+	// regardless of table/column semantics. A table with a column literally
+	// named "password" or "code" would have that edited value redacted from
+	// this same audit log. That is audit.go's existing, deliberate
+	// "over-matching is the safe direction" behavior — not something this
+	// plan changes. The assets/renamed fixture above doesn't trigger it.
+}
+
 func TestDescriptorNeverAppearsInErrorResponses(t *testing.T) {
 	// A driver error must not leak the DSN or password into the client.
 	srv := newDBTestServer(t)
