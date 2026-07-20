@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -40,6 +41,8 @@ func RunSyncLoop(ctx context.Context, st port.Store, cfg SyncConfig, every time.
 }
 
 func syncOnce(ctx context.Context, st port.Store, cfg SyncConfig) {
+	pushLocalProjects(ctx, st, cfg)
+
 	snap, err := machineclient.FetchCatalog(ctx, cfg.HubURL, cfg.MachineKey)
 	if err != nil {
 		log.Printf("catalog sync: fetch: %v", err)
@@ -51,4 +54,37 @@ func syncOnce(ctx context.Context, st port.Store, cfg SyncConfig) {
 	}
 	log.Printf("catalog sync: %d workspace(s), %d project(s), %d ssh connection(s)",
 		len(snap.Workspaces), len(snap.Projects), len(snap.SSHConnections))
+}
+
+// pushLocalProjects replays every project created while the hub was
+// unreachable. Runs before the pull below: a project accepted here should
+// come back as a hub row in the SAME cycle's snapshot, never appearing
+// twice. A push failure is logged and left for the next tick — it never
+// blocks the pull, since a stale replica is still better than none.
+func pushLocalProjects(ctx context.Context, st port.Store, cfg SyncConfig) {
+	local, err := st.LocalProjects()
+	if err != nil {
+		log.Printf("catalog sync: list local projects: %v", err)
+		return
+	}
+	for _, p := range local {
+		_, err := machineclient.ReplayProject(ctx, cfg.HubURL, cfg.MachineKey, p)
+		switch {
+		case err == nil:
+			// Flip to origin=hub NOW, before the pull below applies a
+			// snapshot containing this same project id — ApplyCatalogSnapshot
+			// only deletes origin='hub' rows before reinserting, so a row
+			// still marked 'local' at that point would collide with the
+			// snapshot's copy on its own primary key.
+			if err := st.MarkProjectSynced(p.ID); err != nil {
+				log.Printf("catalog sync: mark %s synced: %v", p.ID, err)
+			}
+		case errors.Is(err, machineclient.ErrWorkspaceGone):
+			if err := st.SetProjectSyncError(p.ID, "this project's workspace no longer exists on the hub"); err != nil {
+				log.Printf("catalog sync: record sync error for %s: %v", p.ID, err)
+			}
+		default:
+			log.Printf("catalog sync: replay %s: %v", p.ID, err)
+		}
+	}
 }
