@@ -20,6 +20,17 @@ import (
 // runtime is about to answer.
 const dbRequestTimeout = 45 * time.Second
 
+// RemoteError carries a runtime's response status alongside its message, so a
+// caller can classify the failure — a 409 conflict from a rows-affected
+// mismatch is not the same thing as a 500 the runtime itself failed with —
+// rather than treating every non-2xx reply as an opaque server error.
+type RemoteError struct {
+	Status  int
+	Message string
+}
+
+func (e *RemoteError) Error() string { return e.Message }
+
 // RunDBRequest posts a database operation to a runtime machine and decodes the
 // reply into out.
 //
@@ -59,10 +70,13 @@ func RunDBRequest(ctx context.Context, m domain.Machine, path string, body any, 
 			Error string `json:"error"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&envelope)
-		if envelope.Error == "" {
-			return fmt.Errorf("machine %s returned status %d", m.ID, resp.StatusCode)
+		msg := envelope.Error
+		if msg == "" {
+			msg = fmt.Sprintf("machine %s returned status %d", m.ID, resp.StatusCode)
+		} else {
+			msg = fmt.Sprintf("machine %s: %s", m.ID, msg)
 		}
-		return fmt.Errorf("machine %s: %s", m.ID, envelope.Error)
+		return &RemoteError{Status: resp.StatusCode, Message: msg}
 	}
 	if out == nil {
 		return nil

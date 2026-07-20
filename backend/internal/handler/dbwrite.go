@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"devdeck/backend/internal/port"
@@ -25,4 +26,33 @@ func (h *DBExecHandler) PostIndexes(w http.ResponseWriter, r *http.Request) {
 	out := []port.IndexMeta{}
 	h.dispatch(w, r, runtimeIntrospectPath, runtimeDBRequest{Op: "indexes", Object: body.Object}, &out,
 		func(ctx context.Context, c port.DBConn) (any, error) { return c.Indexes(ctx, body.Object) })
+}
+
+// PostCommit applies a batch of pending grid edits as one transaction. Each
+// edit's row identity is resolved fresh against the object's live schema —
+// never trusted from the request — inside RowWriter.CommitEdits; a
+// rows-affected mismatch rolls back the whole batch and this returns 409 via
+// dispatch's statusForDBErr, so the client can re-read the row and retry
+// rather than silently doing nothing or corrupting an unrelated row.
+func (h *DBExecHandler) PostCommit(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Edits []port.RowEdit `json:"edits"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if len(body.Edits) == 0 {
+		writeErr(w, http.StatusBadRequest, "edits is required")
+		return
+	}
+	var out port.CommitResult
+	h.dispatch(w, r, runtimeExecPath, runtimeDBRequest{Op: "commit", Edits: body.Edits}, &out,
+		func(ctx context.Context, c port.DBConn) (any, error) {
+			rw, ok := c.(port.RowWriter)
+			if !ok {
+				return nil, errors.New("this engine does not support row writes")
+			}
+			return rw.CommitEdits(ctx, body.Edits)
+		})
 }

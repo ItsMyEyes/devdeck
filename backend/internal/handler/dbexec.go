@@ -55,6 +55,7 @@ type runtimeDBRequest struct {
 	Identity []port.Filter    `json:"identity"`
 	SQL      string           `json:"sql"`
 	Args     []any            `json:"args"`
+	Edits    []port.RowEdit   `json:"edits"`
 }
 
 // countResponse, lobResponse, and testResponse keep the hub-local and
@@ -279,7 +280,7 @@ func (h *DBExecHandler) dispatch(
 	if remote {
 		req.Descriptor = d
 		if err := machineclient.RunDBRequest(ctx, machine, runtimePath, req, out); err != nil {
-			writeErr(w, http.StatusInternalServerError, mapDriverErr(req.Op, err, d))
+			writeErr(w, statusForDBErr(err), mapDriverErr(req.Op, err, d))
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -295,7 +296,7 @@ func (h *DBExecHandler) dispatch(
 
 	res, err := local(ctx, conn)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, mapDriverErr(req.Op, err, d))
+		writeErr(w, statusForDBErr(err), mapDriverErr(req.Op, err, d))
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -315,7 +316,7 @@ func (h *DBExecHandler) RuntimeIntrospect(w http.ResponseWriter, r *http.Request
 // RuntimeExec answers data operations for a forwarded descriptor.
 // Ops: rows, query, count, lob, test.
 func (h *DBExecHandler) RuntimeExec(w http.ResponseWriter, r *http.Request) {
-	h.runtimeRun(w, r, map[string]bool{"rows": true, "query": true, "count": true, "lob": true, "test": true})
+	h.runtimeRun(w, r, map[string]bool{"rows": true, "query": true, "count": true, "lob": true, "test": true, "commit": true})
 }
 
 // RuntimeClose releases a runtime-held connection for a descriptor.
@@ -363,7 +364,7 @@ func (h *DBExecHandler) runtimeRun(w http.ResponseWriter, r *http.Request, allow
 
 	res, err := runOp(ctx, conn, req)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, mapDriverErr(req.Op, err, req.Descriptor))
+		writeErr(w, statusForDBErr(err), mapDriverErr(req.Op, err, req.Descriptor))
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -391,6 +392,12 @@ func runOp(ctx context.Context, conn port.DBConn, req runtimeDBRequest) (any, er
 	case "lob":
 		v, err := conn.LOBValue(ctx, req.Object, req.Column, req.Identity)
 		return lobResponse{Value: v}, err
+	case "commit":
+		rw, ok := conn.(port.RowWriter)
+		if !ok {
+			return nil, errors.New("this engine does not support row writes")
+		}
+		return rw.CommitEdits(ctx, req.Edits)
 	case "test":
 		if _, err := conn.Query(ctx, livenessQuery, nil); err != nil {
 			return testResponse{OK: false, Reason: mapDriverErr("connect", err, req.Descriptor)}, nil
@@ -402,6 +409,24 @@ func runOp(ctx context.Context, conn port.DBConn, req runtimeDBRequest) (any, er
 }
 
 // --- error mapping ----------------------------------------------------------
+
+// statusForDBErr classifies a driver/commit error into its HTTP status.
+// Every op defaults to 500; a rows-affected mismatch is a conflict (409) the
+// client can retry after re-reading the row, not a server fault.
+// errors.As also unwraps a forwarded runtime's *machineclient.RemoteError, so
+// a remote commit's conflict is classified identically to a local one — this
+// is the mechanism that survives the hub→runtime JSON hop, where a plain
+// Go error's type would not.
+func statusForDBErr(err error) int {
+	if errors.Is(err, port.ErrRowsAffectedMismatch) {
+		return http.StatusConflict
+	}
+	var remoteErr *machineclient.RemoteError
+	if errors.As(err, &remoteErr) && remoteErr.Status == http.StatusConflict {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
 
 // mapDriverErr turns a driver failure into a message that is safe to hand a
 // client, and records it server-side.

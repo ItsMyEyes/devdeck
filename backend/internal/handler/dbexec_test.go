@@ -112,6 +112,51 @@ func TestPostIndexesReturnsIndexMetadata(t *testing.T) {
 	}
 }
 
+func TestPostCommitAppliesAnUpdate(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t) // "assets" table, seeded with id/name rows per Phase 2's fixture
+	req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/commit", strings.NewReader(`{
+		"edits": [{
+			"object": {"name": "assets", "kind": "table"},
+			"kind": "update",
+			"oldValues": {"id": 1, "name": "alpha"},
+			"newValues": {"name": "renamed"}
+		}]
+	}`))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	srv.dbExecH.PostCommit(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out port.CommitResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Results) != 1 || out.Results[0].RowsAffected != 1 {
+		t.Fatalf("out = %+v, want one statement affecting 1 row", out)
+	}
+}
+
+func TestPostCommitReturnsConflictOnRowsAffectedMismatch(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/commit", strings.NewReader(`{
+		"edits": [{
+			"object": {"name": "assets", "kind": "table"},
+			"kind": "update",
+			"oldValues": {"id": 999, "name": "does-not-exist"},
+			"newValues": {"name": "renamed"}
+		}]
+	}`))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	srv.dbExecH.PostCommit(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDescriptorNeverAppearsInErrorResponses(t *testing.T) {
 	// A driver error must not leak the DSN or password into the client.
 	srv := newDBTestServer(t)
