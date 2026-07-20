@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -119,5 +120,56 @@ func TestLastSyncedAtIsNilBeforeFirstSync(t *testing.T) {
 	}
 	if at != nil {
 		t.Errorf("LastSyncedAt = %v, want nil", at)
+	}
+}
+
+func TestReplayLocalProjectPreservesIDAndForcesMachineID(t *testing.T) {
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace("clients")
+
+	p, err := s.ReplayLocalProject("p-fixed-id-123", ws.ID, "api", "/srv/api", "", "m-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ID != "p-fixed-id-123" {
+		t.Errorf("ID = %q, want the exact ID the caller supplied (worktrees on the runtime already point at it)", p.ID)
+	}
+	if p.MachineID != "m-a" {
+		t.Errorf("MachineID = %q, want m-a", p.MachineID)
+	}
+	if p.Origin != "hub" {
+		t.Errorf("Origin = %q, want hub — a replayed project is now the hub's canonical row", p.Origin)
+	}
+}
+
+func TestReplayLocalProjectIsIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace("clients")
+
+	if _, err := s.ReplayLocalProject("p-retry-1", ws.ID, "api", "/srv/api", "", "m-a"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a retried push after the first response was lost in transit.
+	p, err := s.ReplayLocalProject("p-retry-1", ws.ID, "api", "/srv/api", "", "m-a")
+	if err != nil {
+		t.Fatalf("retrying the same replay failed: %v, want a clean idempotent no-op", err)
+	}
+	if p.ID != "p-retry-1" {
+		t.Errorf("ID after retry = %q, want p-retry-1", p.ID)
+	}
+
+	all, err := s.ProjectsByMachine("m-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("ProjectsByMachine(m-a) = %+v, want exactly one row (retry must not duplicate)", all)
+	}
+}
+
+func TestReplayLocalProjectRejectsAMissingWorkspace(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.ReplayLocalProject("p-orphan", "ws-does-not-exist", "api", "/srv/api", "", "m-a"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound (the service layer translates this into a 409)", err)
 	}
 }

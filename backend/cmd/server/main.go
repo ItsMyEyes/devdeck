@@ -454,10 +454,13 @@ func main() {
 		// its own key (never the hub key). The nested mux is deliberate:
 		// RequireMachineKey must wrap only this route, not the whole hub —
 		// every other hub route authenticates by session cookie or hub key.
-		catalogH := handler.NewCatalogHandler(st)
+		catalogSvc := service.NewCatalogService(st)
+		catalogH := handler.NewCatalogHandler(st, catalogSvc)
 		catalogMux := http.NewServeMux()
 		catalogMux.HandleFunc("GET /api/runtime/catalog", catalogH.GetCatalog)
+		catalogMux.HandleFunc("POST /api/runtime/projects", catalogH.PostProject)
 		mux.Handle("GET /api/runtime/catalog", handler.RequireMachineKey(st)(catalogMux))
+		mux.Handle("POST /api/runtime/projects", handler.RequireMachineKey(st)(catalogMux))
 
 		// SSH connection registry — hub-scoped like the machine registry.
 		mux.HandleFunc("GET /api/ssh/connections", sshH.GetConnections)

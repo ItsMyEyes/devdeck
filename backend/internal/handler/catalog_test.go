@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/service"
 	"devdeck/backend/internal/store"
 )
 
@@ -42,9 +44,59 @@ func TestCatalogIsScopedToThePresentedMachineKey(t *testing.T) {
 
 func catalogRouter(st *store.Store) http.Handler {
 	mux := http.NewServeMux()
-	h := NewCatalogHandler(st)
+	h := NewCatalogHandler(st, service.NewCatalogService(st))
 	mux.HandleFunc("GET /api/runtime/catalog", h.GetCatalog)
 	return RequireMachineKey(st)(mux)
+}
+
+func TestPostProjectReplayScopesToPresentedMachineAndTranslates409(t *testing.T) {
+	st := newCatalogTestStore(t)
+	ws, _ := st.CreateWorkspace("orphanable")
+
+	catalogSvc := service.NewCatalogService(st)
+	h := NewCatalogHandler(st, catalogSvc)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/runtime/projects", h.PostProject)
+	router := RequireMachineKey(st)(mux)
+
+	body := `{"id":"p-offline-1","workspaceId":"` + ws.ID + `","name":"api","path":"/srv/api"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/projects", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer key-a")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var got domain.Project
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "p-offline-1" {
+		t.Errorf("ID = %q, want p-offline-1 (preserved)", got.ID)
+	}
+	// Machine IDs are random hex (idGen), not the literal key label, so look
+	// up the machine "key-a" actually resolves to rather than assuming a
+	// literal value.
+	wantMachine, err := st.MachineByKey("key-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MachineID != wantMachine.ID {
+		t.Errorf("MachineID = %q, want %q (forced from the presented key, not from the body)", got.MachineID, wantMachine.ID)
+	}
+
+	// Replaying against a workspace that doesn't exist must come back 409,
+	// not the store's raw 404 — the spec calls this out explicitly so a
+	// runtime can tell "retry later" apart from "gone forever".
+	badBody := `{"id":"p-orphan","workspaceId":"ws-does-not-exist","name":"x","path":"/srv/x"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/runtime/projects", strings.NewReader(badBody))
+	req2.Header.Set("Authorization", "Bearer key-a")
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec2.Code)
+	}
 }
 
 func newCatalogTestStore(t *testing.T) *store.Store {

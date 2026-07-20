@@ -157,6 +157,40 @@ func (s *Store) ApplyCatalogSnapshot(snap domain.CatalogSnapshot, syncedAt time.
 	return tx.Commit()
 }
 
+// ReplayLocalProject inserts a project a runtime created while the hub was
+// unreachable. Two things are non-negotiable:
+//
+//   - The ID is preserved exactly as the caller supplied it, never reissued:
+//     the runtime's own worktrees already point at it.
+//   - machineID always comes from the authenticated caller (RequireMachineKey
+//     in the handler layer), never from request content — mirrors
+//     CatalogForMachine's "structurally cannot express another machine"
+//     guarantee from Phase 2.
+//
+// Retrying the same id is a safe no-op, not a duplicate-row error: a runtime
+// whose first response was lost in transit will retry on the next sync tick,
+// and the hub may already have accepted it.
+func (s *Store) ReplayLocalProject(id, wsID, name, path, repo, machineID string) (domain.Project, error) {
+	ok, err := s.workspaceExists(wsID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if !ok {
+		return domain.Project{}, ErrNotFound
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO projects (id, workspace_id, name, repo, path, expanded, machine_id, origin)
+		VALUES (?, ?, ?, ?, ?, 1, ?, 'hub')
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name, path = excluded.path, repo = excluded.repo
+		WHERE machine_id = excluded.machine_id
+	`, id, wsID, name, repo, path, machineID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	return s.ProjectByID(id)
+}
+
 // LastSyncedAt reports when a snapshot last applied cleanly. A nil result
 // means never — which the UI must render distinctly from "no projects",
 // since a wrong hub key otherwise looks exactly like an empty account.
