@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Cable, LayoutGrid, Receipt, Server, Wrench, type LucideIcon } from 'lucide-react'
+import { Cable, Database, LayoutGrid, Receipt, Server, Wrench, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useScope } from '@/features/useScope'
@@ -7,7 +7,7 @@ import { useWorkspace } from '@/features/data/queries'
 import type { ModuleView } from '@/store/types'
 
 interface RailDef {
-  key: Extract<ModuleView, 'agents' | 'ssh' | 'tools' | 'invoices' | 'machines'>
+  key: Extract<ModuleView, 'agents' | 'ssh' | 'database' | 'tools' | 'invoices' | 'machines'>
   label: string
   Icon: LucideIcon
   badge?: number
@@ -28,6 +28,7 @@ export function SidebarNav({ compact: _compact }: SidebarNavProps = {}) {
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, badge: runningHosts },
     { key: 'machines', label: 'Runtimes', Icon: Server },
     { key: 'ssh', label: 'SSH', Icon: Cable },
+    { key: 'database', label: 'Database', Icon: Database },
     { key: 'tools', label: 'Tools', Icon: Wrench },
     { key: 'invoices', label: 'Invoices', Icon: Receipt, badge: openInvoices },
   ]

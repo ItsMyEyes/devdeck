@@ -38,6 +38,7 @@ export function useScope(): Scope {
   else if (pathname.includes('/tools')) view = 'tools'
   else if (pathname.includes('/machines')) view = 'machines'
   else if (pathname.includes('/ssh')) view = 'ssh'
+  else if (pathname.includes('/database')) view = 'database'
   else if (focusedTabKind === 'ssh-shell') view = 'ssh'
   return { wsId: params.wsId, projectId: params.projectId, wtId: params.wtId, view }
 }
