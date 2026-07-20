@@ -665,6 +665,59 @@ func (c *conn) Apply(ctx context.Context, p port.TablePlan) (port.CommitResult, 
 
 var _ port.DDLWriter = (*conn)(nil)
 
+// ShowCreate has no native equivalent in PostgreSQL. For a table it
+// reconstructs a CREATE TABLE from introspected columns and indexes via
+// dbquery.CompileTablePlan — the same compiler Task 9's Plan/Apply use — so
+// this is not a byte-perfect pg_dump: check constraints, foreign keys, and
+// comments are not carried by ColumnMeta/IndexMeta and do not appear. Views
+// and materialized views use the server's own pg_get_viewdef instead, which
+// is exact.
+func (c *conn) ShowCreate(ctx context.Context, obj port.ObjectRef) (string, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+
+	target, err := dbquery.QuoteObject(qualified(obj), caps)
+	if err != nil {
+		return "", err
+	}
+	if obj.Kind == "view" || obj.Kind == "matview" {
+		var def string
+		if err := c.db.QueryRowContext(ctx, "SELECT pg_get_viewdef($1::regclass, true)", target).Scan(&def); err != nil {
+			return "", err
+		}
+		kw := "VIEW"
+		if obj.Kind == "matview" {
+			kw = "MATERIALIZED VIEW"
+		}
+		return "CREATE " + kw + " " + target + " AS\n" + def, nil
+	}
+
+	cols, _, err := c.columnInfo(ctx, qualified(obj))
+	if err != nil {
+		return "", err
+	}
+	if len(cols) == 0 {
+		return "", fmt.Errorf("postgres: no such relation %q", obj.Name)
+	}
+	idxs, err := c.Indexes(ctx, obj)
+	if err != nil {
+		return "", err
+	}
+	plan := port.TablePlan{
+		Object:  qualified(obj),
+		Kind:    "create",
+		Columns: dbquery.ColumnPlansFromMeta(cols),
+		Indexes: dbquery.IndexPlansFromMeta(idxs),
+	}
+	stmts, err := dbquery.CompileTablePlan(plan, nil, nil, caps)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(stmts, ";\n") + ";", nil
+}
+
+var _ port.DDLReader = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()

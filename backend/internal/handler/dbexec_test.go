@@ -191,6 +191,28 @@ func TestPostDDLApplyCreatesATable(t *testing.T) {
 	}
 }
 
+func TestPostShowCreateReturnsDDL(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/show-create",
+		strings.NewReader(`{"object":{"name":"assets","kind":"table"}}`))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	srv.dbExecH.PostShowCreate(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		DDL string `json:"ddl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(out.DDL, "CREATE TABLE") {
+		t.Fatalf("ddl = %q, want it to contain CREATE TABLE", out.DDL)
+	}
+}
+
 func TestDescriptorNeverAppearsInErrorResponses(t *testing.T) {
 	// A driver error must not leak the DSN or password into the client.
 	srv := newDBTestServer(t)

@@ -330,3 +330,28 @@ func TestOpenAttemptsTunnelDialWhenConfigured(t *testing.T) {
 		t.Fatal("tunnel was rejected outright rather than attempted")
 	}
 }
+
+func TestShowCreateReconstructsColumnsAndPrimaryKey(t *testing.T) {
+	d := descriptorFromEnv(t)
+	ctx := context.Background()
+	c, err := New().Open(ctx, d)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer c.Close()
+	conn := c.(*conn)
+
+	conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_showcreate_test", nil)
+	if _, err := conn.Exec(ctx, "CREATE TABLE phase3_showcreate_test (id integer PRIMARY KEY, name text)", nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE phase3_showcreate_test", nil)
+
+	ddl, err := conn.ShowCreate(ctx, port.ObjectRef{Name: "phase3_showcreate_test", Kind: "table"})
+	if err != nil {
+		t.Fatalf("ShowCreate: %v", err)
+	}
+	if !strings.Contains(ddl, "CREATE TABLE") || !strings.Contains(ddl, "PRIMARY KEY") {
+		t.Fatalf("ddl = %q", ddl)
+	}
+}

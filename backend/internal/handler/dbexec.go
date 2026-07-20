@@ -311,7 +311,9 @@ func (h *DBExecHandler) dispatch(
 // This route accepts decrypted credentials in its body, so it must only ever
 // be registered behind key auth (see main.go).
 func (h *DBExecHandler) RuntimeIntrospect(w http.ResponseWriter, r *http.Request) {
-	h.runtimeRun(w, r, map[string]bool{"tree": true, "columns": true, "stats": true, "indexes": true, "ddlPreview": true})
+	h.runtimeRun(w, r, map[string]bool{
+		"tree": true, "columns": true, "stats": true, "indexes": true, "ddlPreview": true, "showCreate": true,
+	})
 }
 
 // RuntimeExec answers data operations for a forwarded descriptor.
@@ -383,6 +385,13 @@ func runOp(ctx context.Context, conn port.DBConn, req runtimeDBRequest) (any, er
 		return conn.Stats(ctx, req.Object)
 	case "indexes":
 		return conn.Indexes(ctx, req.Object)
+	case "showCreate":
+		dr, ok := conn.(port.DDLReader)
+		if !ok {
+			return nil, errors.New("this engine does not support DDL introspection")
+		}
+		ddl, err := dr.ShowCreate(ctx, req.Object)
+		return showCreateResponse{DDL: ddl}, err
 	case "rows":
 		return conn.Rows(ctx, req.Rows)
 	case "query":

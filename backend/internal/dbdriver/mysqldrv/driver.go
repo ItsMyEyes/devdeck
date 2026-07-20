@@ -839,6 +839,32 @@ func (c *conn) Apply(ctx context.Context, p port.TablePlan) (port.CommitResult, 
 
 var _ port.DDLWriter = (*conn)(nil)
 
+// ShowCreate uses MySQL's native SHOW CREATE, which answers tables and views
+// with a different column shape each.
+func (c *conn) ShowCreate(ctx context.Context, obj port.ObjectRef) (string, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+	target, err := c.qualify(obj)
+	if err != nil {
+		return "", err
+	}
+	if obj.Kind == "view" {
+		var name, ddl, clientCS, collation string
+		if err := c.db.QueryRowContext(ctx, "SHOW CREATE VIEW "+target).
+			Scan(&name, &ddl, &clientCS, &collation); err != nil {
+			return "", err
+		}
+		return ddl, nil
+	}
+	var name, ddl string
+	if err := c.db.QueryRowContext(ctx, "SHOW CREATE TABLE "+target).Scan(&name, &ddl); err != nil {
+		return "", err
+	}
+	return ddl, nil
+}
+
+var _ port.DDLReader = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()

@@ -636,6 +636,26 @@ func (c *conn) Apply(ctx context.Context, p port.TablePlan) (port.CommitResult, 
 
 var _ port.DDLWriter = (*conn)(nil)
 
+// ShowCreate returns SQLite's own stored DDL text verbatim — sqlite_master
+// records exactly what CREATE TABLE/VIEW statement produced each object, so
+// there is nothing to reconstruct.
+func (c *conn) ShowCreate(ctx context.Context, obj port.ObjectRef) (string, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+	var ddl sql.NullString
+	err := c.db.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = ?`, obj.Name).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !ddl.Valid) {
+		return "", fmt.Errorf("sqlite: no such table or view %q", obj.Name)
+	}
+	if err != nil {
+		return "", err
+	}
+	return ddl.String, nil
+}
+
+var _ port.DDLReader = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()

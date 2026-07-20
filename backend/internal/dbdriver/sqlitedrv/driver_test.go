@@ -2,6 +2,7 @@ package sqlitedrv
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"devdeck/backend/internal/port"
@@ -302,5 +303,27 @@ func TestApplyCreatesAndDropsATable(t *testing.T) {
 	}
 	if cols, _ := conn.Columns(ctx, port.ObjectRef{Name: "widgets"}); len(cols) != 0 {
 		t.Fatalf("table still has columns after drop: %v", cols)
+	}
+}
+
+func TestShowCreateReturnsTheStoredDDLVerbatim(t *testing.T) {
+	ctx := context.Background()
+	conn := openTestConn(t)
+	if _, err := conn.Exec(ctx, "CREATE TABLE widgets (id INTEGER PRIMARY KEY)", nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	ddl, err := conn.ShowCreate(ctx, port.ObjectRef{Name: "widgets", Kind: "table"})
+	if err != nil {
+		t.Fatalf("ShowCreate: %v", err)
+	}
+	if !strings.Contains(ddl, "CREATE TABLE") || !strings.Contains(ddl, "widgets") {
+		t.Fatalf("ddl = %q", ddl)
+	}
+}
+
+func TestShowCreateRejectsUnknownObject(t *testing.T) {
+	conn := openTestConn(t)
+	if _, err := conn.ShowCreate(context.Background(), port.ObjectRef{Name: "does_not_exist", Kind: "table"}); err == nil {
+		t.Fatal("unknown table accepted, want rejection")
 	}
 }

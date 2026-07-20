@@ -102,3 +102,30 @@ func (h *DBExecHandler) PostDDLApply(w http.ResponseWriter, r *http.Request) {
 			return dw.Apply(ctx, body.Plan)
 		})
 }
+
+type showCreateResponse struct {
+	DDL string `json:"ddl"`
+}
+
+// PostShowCreate renders an object's CREATE statement — a read-only-tab
+// convenience in Navicat-style tools, and the "generated DDL" tab the design
+// calls for.
+func (h *DBExecHandler) PostShowCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Object port.ObjectRef `json:"object"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	var out showCreateResponse
+	h.dispatch(w, r, runtimeIntrospectPath, runtimeDBRequest{Op: "showCreate", Object: body.Object}, &out,
+		func(ctx context.Context, c port.DBConn) (any, error) {
+			dr, ok := c.(port.DDLReader)
+			if !ok {
+				return nil, errors.New("this engine does not support DDL introspection")
+			}
+			ddl, err := dr.ShowCreate(ctx, body.Object)
+			return showCreateResponse{DDL: ddl}, err
+		})
+}

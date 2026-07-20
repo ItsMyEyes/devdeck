@@ -468,3 +468,15 @@ func TestApplyCreatesAndDropsATable(t *testing.T) {
 		t.Fatalf("table still has columns after drop: %v", cols)
 	}
 }
+
+func TestShowCreateReturnsNativeDDL(t *testing.T) {
+	c, _, table := openTestDB(t)
+	conn := c.(*conn)
+	ddl, err := conn.ShowCreate(context.Background(), port.ObjectRef{Name: table, Kind: "table"})
+	if err != nil {
+		t.Fatalf("ShowCreate: %v", err)
+	}
+	if !strings.Contains(ddl, "CREATE TABLE") {
+		t.Fatalf("ddl = %q, want it to contain CREATE TABLE", ddl)
+	}
+}
