@@ -173,3 +173,48 @@ func TestReplayLocalProjectRejectsAMissingWorkspace(t *testing.T) {
 		t.Errorf("error = %v, want ErrNotFound (the service layer translates this into a 409)", err)
 	}
 }
+
+func TestApplyCatalogSnapshotIsIdempotentForAJustReplayedProject(t *testing.T) {
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace("clients")
+	p, _ := s.CreateProject(ws.ID, "api", "/srv/api", "", "m-1")
+	if err := s.MarkProjectLocal(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a successful replay: the push step flips origin back to hub
+	// immediately, before the pull below applies a snapshot containing the
+	// SAME project id (because the hub now legitimately has it too).
+	if err := s.MarkProjectSynced(p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := domain.CatalogSnapshot{
+		Workspaces: []domain.Workspace{{ID: ws.ID, Name: "clients"}},
+		Projects:   []domain.Project{{ID: p.ID, WorkspaceID: ws.ID, Name: "api", Path: "/srv/api", MachineID: "m-1"}},
+	}
+	if err := s.ApplyCatalogSnapshot(snap, time.Unix(1_700_000_100, 0)); err != nil {
+		t.Fatalf("ApplyCatalogSnapshot failed on a project id that already existed pre-flip: %v", err)
+	}
+
+	got, err := s.ProjectByID(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Origin != "hub" {
+		t.Errorf("Origin = %q, want hub", got.Origin)
+	}
+}
+
+func TestApplyCatalogSnapshotAppliedTwiceInARowIsIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	snap := domain.CatalogSnapshot{
+		Workspaces: []domain.Workspace{{ID: "ws-1", Name: "clients"}},
+		Projects:   []domain.Project{{ID: "p-1", WorkspaceID: "ws-1", Name: "api", Path: "/srv/api", MachineID: "m-1"}},
+	}
+	if err := s.ApplyCatalogSnapshot(snap, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyCatalogSnapshot(snap, time.Unix(1_700_000_030, 0)); err != nil {
+		t.Fatalf("applying the identical snapshot a second time failed: %v, want a clean no-op", err)
+	}
+}

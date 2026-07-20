@@ -131,9 +131,22 @@ func (s *Store) ApplyCatalogSnapshot(snap domain.CatalogSnapshot, syncedAt time.
 		}
 	}
 	for _, p := range snap.Projects {
+		// ON CONFLICT is defense in depth: a project just replayed to the hub
+		// (Task 7's push step flips it to origin='hub' before this pull runs
+		// in the same cycle) can still collide here if that flip's write
+		// hasn't landed for any reason — a plain INSERT would then hit the
+		// PRIMARY KEY constraint and roll back the whole snapshot. This is
+		// deliberately unconditional (no WHERE clause on the conflict, unlike
+		// ReplayLocalProject): a snapshot is always self-consistent data the
+		// hub itself already vouches for, so there's no "wrong machine" case
+		// to guard against here — just make repeated application safe.
 		if _, err := tx.Exec(
 			`INSERT INTO projects (id, workspace_id, name, repo, path, expanded, machine_id, origin)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 'hub')`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'hub')
+			 ON CONFLICT(id) DO UPDATE SET
+			   workspace_id = excluded.workspace_id, name = excluded.name, repo = excluded.repo,
+			   path = excluded.path, expanded = excluded.expanded, machine_id = excluded.machine_id,
+			   origin = 'hub', sync_error = NULL`,
 			p.ID, p.WorkspaceID, p.Name, p.Repo, p.Path, boolInt(p.Expanded), p.MachineID); err != nil {
 			return err
 		}
