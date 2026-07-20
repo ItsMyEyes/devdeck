@@ -226,7 +226,11 @@ func main() {
 	gitSvc := service.NewWorktreeGitService(st)
 
 	healthH := handler.NewHealthHandler()
-	whoamiH := handler.NewWhoamiHandler(*role, *machineName)
+	var whoamiStore port.Store
+	if isRuntime {
+		whoamiStore = st
+	}
+	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore)
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)

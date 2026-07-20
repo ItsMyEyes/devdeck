@@ -348,4 +348,6 @@ export interface Whoami {
   status: string
   role: 'hub' | 'runtime'
   machineName: string
+  /** RFC3339 timestamp of the last clean catalog snapshot, or null if never. */
+  lastSyncedAt: string | null
 }
