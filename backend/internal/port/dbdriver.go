@@ -1,6 +1,9 @@
 package port
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // DBCaps describes what an engine can do. It is served to the frontend so the
 // UI renders tree nodes and toolbar actions from capabilities rather than
@@ -216,4 +219,142 @@ type QueryRunner interface {
 
 type StatsReader interface {
 	Stats(ctx context.Context, obj ObjectRef) (TableStats, error)
+}
+
+// --- row-identity ladder (Phase 3) ------------------------------------------
+
+// RowIdentityLevel names which rung of the row-identity ladder a table uses
+// for writes. Descend only when the level above is unavailable — a stronger
+// identity always wins when one exists. String-typed so it travels usefully
+// in JSON if a future "why is this table read-only" endpoint surfaces it.
+type RowIdentityLevel string
+
+const (
+	IdentityNone        RowIdentityLevel = "none" // no level applies; table is read-only
+	IdentityPrimaryKey  RowIdentityLevel = "primary_key"
+	IdentityUniqueIndex RowIdentityLevel = "unique_index"
+	IdentityRowPointer  RowIdentityLevel = "row_pointer" // ctid / rowid
+	IdentityAllColumns  RowIdentityLevel = "all_columns"
+)
+
+// RowIdentityPlan is the resolved write-identity strategy for one table,
+// computed fresh from its live columns and indexes on every commit — never
+// trusted from the client, the same discipline CompileFilters already applies
+// to column names.
+type RowIdentityPlan struct {
+	Level RowIdentityLevel `json:"level"`
+	// KeyColumns are the columns compared in the identity predicate: the PK or
+	// unique-index columns at levels 1–2, every column at level 3 (ctid/rowid
+	// alone is not stable — see RowPointerColumn), and every comparable column
+	// at level 4.
+	KeyColumns []string `json:"keyColumns,omitempty"`
+	// RowPointerColumn is the engine's physical row-address column name
+	// ("ctid"/"rowid"), set only at IdentityRowPointer.
+	RowPointerColumn string `json:"rowPointerColumn,omitempty"`
+	ReadOnly         bool   `json:"readOnly"`
+	Reason           string `json:"reason,omitempty"`
+}
+
+// RowEdit is one pending grid edit, expressed so the server can rebuild the
+// identity predicate without trusting the client's view of the schema.
+type RowEdit struct {
+	Object ObjectRef `json:"object"`
+	Kind   string    `json:"kind"` // "insert" | "update" | "delete"
+	// OldValues carries every loaded column's value at read time, keyed by
+	// column name. Required for "update"/"delete" — it is what proves row
+	// identity at IdentityRowPointer and IdentityAllColumns. Ignored for
+	// "insert".
+	OldValues map[string]any `json:"oldValues,omitempty"`
+	// NewValues carries changed columns only for "update", or every column for
+	// "insert". Ignored for "delete".
+	NewValues map[string]any `json:"newValues,omitempty"`
+	// RowPointer is the ctid/rowid value captured at read time. Required only
+	// when the resolved identity level is IdentityRowPointer; ignored
+	// otherwise, since ctid is not itself stable and only narrows the scan —
+	// the old-value comparison is what actually proves identity.
+	RowPointer any `json:"rowPointer,omitempty"`
+}
+
+// Statement is one SQL statement queued inside a transactional commit.
+type Statement struct {
+	SQL  string
+	Args []any
+	// ExpectRowsAffected, when non-nil, makes the executing transaction roll
+	// back and return ErrRowsAffectedMismatch if the statement's actual
+	// rows-affected count does not equal this value. Set for update/delete
+	// (always 1: the identity predicate is built to match exactly one row);
+	// left nil for insert and for DDL, neither of which has a meaningful
+	// expectation.
+	ExpectRowsAffected *int64
+}
+
+// CommitResult is the outcome of a transactional multi-statement commit.
+type CommitResult struct {
+	Results   []ExecResult `json:"results"`
+	ElapsedMS int64        `json:"elapsedMs"`
+}
+
+// ErrRowsAffectedMismatch means a Statement's ExpectRowsAffected did not
+// match reality — another session changed or removed the row between when
+// the grid loaded it and when this commit ran. It is a stale-read conflict,
+// not a driver fault: callers map it to HTTP 409, not 500.
+var ErrRowsAffectedMismatch = errors.New("rows affected did not match expected count")
+
+// RowWriter is implemented by drivers that support editable-grid writes.
+// Deliberately not part of DBConn: a future engine can implement Introspector
+// alone and simply not satisfy this interface, exactly as the package doc for
+// DBCaps already describes for Redis/Mongo.
+type RowWriter interface {
+	// CommitEdits resolves each edit's row-identity strategy against its
+	// object's live schema, compiles it to a statement, and executes the
+	// whole batch inside one transaction.
+	CommitEdits(ctx context.Context, edits []RowEdit) (CommitResult, error)
+}
+
+// --- DDL (Phase 3) -----------------------------------------------------------
+
+// ColumnPlan describes one column's desired shape in a TablePlan.
+type ColumnPlan struct {
+	Name         string  `json:"name"`
+	DataType     string  `json:"dataType"`
+	Nullable     bool    `json:"nullable"`
+	Default      *string `json:"default"`
+	IsPrimaryKey bool    `json:"isPrimaryKey"`
+}
+
+// IndexPlan describes one index's desired shape in a TablePlan.
+type IndexPlan struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+	Unique  bool     `json:"unique"`
+}
+
+// TablePlan describes a table structure change. Columns/Indexes are the FULL
+// desired end state for "create" and "alter" — for "alter", drivers diff
+// against the object's introspected current state to produce ALTER
+// statements; a column present in both current and desired is left
+// untouched, since the ALTER syntax for changing a column's type diverges
+// sharply across engines (and SQLite has none at all short of a table
+// rebuild). Ignored for "drop".
+type TablePlan struct {
+	Object  ObjectRef    `json:"object"`
+	Kind    string       `json:"kind"` // "create" | "alter" | "drop"
+	Columns []ColumnPlan `json:"columns,omitempty"`
+	Indexes []IndexPlan  `json:"indexes,omitempty"`
+}
+
+// DDLReader is implemented by drivers that can render an object's CREATE
+// statement. Not part of DBConn, for the same reason as RowWriter.
+type DDLReader interface {
+	ShowCreate(ctx context.Context, obj ObjectRef) (string, error)
+}
+
+// DDLWriter is implemented by drivers that support table/index DDL. Not part
+// of DBConn, for the same reason as RowWriter.
+type DDLWriter interface {
+	// Plan renders the exact statements p implies without executing them, for
+	// a "preview before apply" step.
+	Plan(ctx context.Context, p TablePlan) ([]string, error)
+	// Apply executes p's statements inside one transaction.
+	Apply(ctx context.Context, p TablePlan) (CommitResult, error)
 }
