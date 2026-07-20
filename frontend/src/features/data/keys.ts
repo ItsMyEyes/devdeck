@@ -1,5 +1,7 @@
 // React-query cache keys for domain data.
 
+import type { DBObjectRef, DBTreePath } from '@/lib/api'
+
 export const qk = {
   workspaces: ['workspaces'] as const,
   settings: ['settings'] as const,
@@ -49,4 +51,8 @@ export const qk = {
   dbConnections: ['dbConnections'] as const,
   dbEngines: ['dbEngines'] as const,
   dbSavedQueries: (connectionId: string) => ['db', connectionId, 'queries'] as const,
+  dbTree: (connectionId: string, path: DBTreePath) => ['db', connectionId, 'tree', path] as const,
+  dbColumns: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'columns', object] as const,
+  dbIndexes: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'indexes', object] as const,
+  dbStats: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'stats', object] as const,
 }

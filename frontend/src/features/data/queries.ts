@@ -41,9 +41,13 @@ import {
   fetchBanks,
   fetchComments,
   fetchCompanies,
+  fetchDBColumns,
   fetchDBConnections,
   fetchDBEngines,
+  fetchDBIndexes,
   fetchDBSavedQueries,
+  fetchDBStats,
+  fetchDBTree,
   fetchIssueEvents,
   fetchMachineHealth,
   fetchMachines,
@@ -88,6 +92,8 @@ import type {
   CreateSSHConnectionBody,
   CreateTodoBody,
   CreateWorkspaceBody,
+  DBObjectRef,
+  DBTreePath,
   MachineHealth,
   SettingsPatch,
   UpdateBankBody,
@@ -381,6 +387,40 @@ export function useDeleteDBSavedQuery() {
   return useMutation({
     mutationFn: ({ id }: { id: string; connectionId: string }) => deleteDBSavedQuery(id),
     onSuccess: (_data, vars) => queryClient.invalidateQueries({ queryKey: qk.dbSavedQueries(vars.connectionId) }),
+  })
+}
+
+// ---- DB tree / metadata (read path) ----
+
+export function useDBTree(connectionId: string, path: DBTreePath, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbTree(connectionId, path),
+    queryFn: () => fetchDBTree(connectionId, path),
+    enabled: enabled && Boolean(connectionId),
+  })
+}
+
+export function useDBColumns(connectionId: string, object: DBObjectRef, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbColumns(connectionId, object),
+    queryFn: () => fetchDBColumns(connectionId, object),
+    enabled: enabled && Boolean(connectionId) && Boolean(object.name),
+  })
+}
+
+export function useDBIndexes(connectionId: string, object: DBObjectRef, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbIndexes(connectionId, object),
+    queryFn: () => fetchDBIndexes(connectionId, object),
+    enabled: enabled && Boolean(connectionId) && Boolean(object.name),
+  })
+}
+
+export function useDBStats(connectionId: string, object: DBObjectRef, enabled = true) {
+  return useQuery({
+    queryKey: qk.dbStats(connectionId, object),
+    queryFn: () => fetchDBStats(connectionId, object),
+    enabled: enabled && Boolean(connectionId) && Boolean(object.name),
   })
 }
 

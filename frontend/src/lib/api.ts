@@ -802,3 +802,66 @@ export function updateDBSavedQuery(id: string, patch: { name?: string; sql?: str
 export function deleteDBSavedQuery(id: string): Promise<void> {
   return request<void>('DELETE', `/db/queries/${id}`)
 }
+
+// ---- DB tree / metadata (read path) ----
+
+export interface DBObjectRef {
+  database: string
+  schema: string
+  name: string
+  kind: string // "table" | "view" | "matview" | "function"
+}
+
+export interface DBTreePath {
+  database: string
+  schema: string
+  kind: string // "" | "databases" | "schemas" | "tables" | "views" | "matviews" | "functions"
+}
+
+export interface DBTreeNode {
+  name: string
+  kind: string
+  hasChildren: boolean
+}
+
+export interface DBColumnMeta {
+  name: string
+  dataType: string
+  nullable: boolean
+  default: string | null
+  isPrimaryKey: boolean
+  ordinalPosition: number
+  isLob: boolean
+  comparable: boolean
+}
+
+export interface DBIndexMeta {
+  name: string
+  columns: string[]
+  unique: boolean
+  primary: boolean
+  nullable: boolean
+}
+
+export interface DBTableStats {
+  estRows: number | null
+  totalBytes: number | null
+  indexBytes: number | null
+  analyzed: boolean
+}
+
+export function fetchDBTree(connectionId: string, path: DBTreePath): Promise<DBTreeNode[]> {
+  return request<DBTreeNode[]>('POST', `/db/connections/${connectionId}/tree`, path)
+}
+
+export function fetchDBColumns(connectionId: string, object: DBObjectRef): Promise<DBColumnMeta[]> {
+  return request<DBColumnMeta[]>('POST', `/db/connections/${connectionId}/columns`, { object })
+}
+
+export function fetchDBIndexes(connectionId: string, object: DBObjectRef): Promise<DBIndexMeta[]> {
+  return request<DBIndexMeta[]>('POST', `/db/connections/${connectionId}/indexes`, { object })
+}
+
+export function fetchDBStats(connectionId: string, object: DBObjectRef): Promise<DBTableStats> {
+  return request<DBTableStats>('POST', `/db/connections/${connectionId}/stats`, { object })
+}
