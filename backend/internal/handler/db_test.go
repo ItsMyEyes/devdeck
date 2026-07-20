@@ -20,9 +20,10 @@ import (
 // inline mux per test, but the request bodies this task's tests need make a
 // small shared wrapper worth it.
 type dbTestServer struct {
-	st  *store.Store
-	h   *DBHandler
-	mux *http.ServeMux
+	st      *store.Store
+	h       *DBHandler
+	dbExecH *DBExecHandler
+	mux     *http.ServeMux
 }
 
 func newDBTestServer(t *testing.T) *dbTestServer {
@@ -59,7 +60,7 @@ func newDBTestServer(t *testing.T) *dbTestServer {
 	mux.HandleFunc("POST /api/db/connections/{id}/lob", execH.PostLOB)
 	mux.HandleFunc("POST /api/db/connections/{id}/query", execH.PostQuery)
 
-	return &dbTestServer{st: st, h: h, mux: mux}
+	return &dbTestServer{st: st, h: h, dbExecH: execH, mux: mux}
 }
 
 func (s *dbTestServer) do(t *testing.T, method, path, body string) *httptest.ResponseRecorder {

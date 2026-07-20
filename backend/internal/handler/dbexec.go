@@ -309,7 +309,7 @@ func (h *DBExecHandler) dispatch(
 // This route accepts decrypted credentials in its body, so it must only ever
 // be registered behind key auth (see main.go).
 func (h *DBExecHandler) RuntimeIntrospect(w http.ResponseWriter, r *http.Request) {
-	h.runtimeRun(w, r, map[string]bool{"tree": true, "columns": true, "stats": true})
+	h.runtimeRun(w, r, map[string]bool{"tree": true, "columns": true, "stats": true, "indexes": true})
 }
 
 // RuntimeExec answers data operations for a forwarded descriptor.
@@ -379,6 +379,8 @@ func runOp(ctx context.Context, conn port.DBConn, req runtimeDBRequest) (any, er
 		return conn.Columns(ctx, req.Object)
 	case "stats":
 		return conn.Stats(ctx, req.Object)
+	case "indexes":
+		return conn.Indexes(ctx, req.Object)
 	case "rows":
 		return conn.Rows(ctx, req.Rows)
 	case "query":

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +92,23 @@ func TestRowsClampsLimitToHardMaximum(t *testing.T) {
 	_ = json.Unmarshal(res.Body.Bytes(), &out)
 	if len(out.Rows) > 5000 {
 		t.Fatalf("returned %d rows, hard cap is 5000", len(out.Rows))
+	}
+}
+
+func TestPostIndexesReturnsIndexMetadata(t *testing.T) {
+	srv := newDBTestServer(t)
+	id := srv.createSQLiteConnection(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/db/connections/"+id+"/indexes",
+		strings.NewReader(`{"object":{"name":"assets","kind":"table"}}`))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+	srv.dbExecH.PostIndexes(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out []port.IndexMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
 }
 
