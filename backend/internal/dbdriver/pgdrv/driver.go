@@ -58,12 +58,6 @@ func (pgDriver) Capabilities() port.DBCaps { return caps }
 
 // Open dials the server described by d.
 func (pgDriver) Open(ctx context.Context, d port.DSNDescriptor) (port.DBConn, error) {
-	if d.Tunnel != nil {
-		// Tunnelled dialling lands with dbdriver.OpenTunnel. Until it exists,
-		// refuse rather than connect directly: an operator who configured a
-		// bastion must not silently get a direct connection to the database.
-		return nil, errors.New("postgres: SSH tunnelled connections are not supported yet")
-	}
 	host := strings.TrimSpace(d.Host)
 	if host == "" {
 		return nil, errors.New("postgres: no host configured")
@@ -101,7 +95,26 @@ func (pgDriver) Open(ctx context.Context, d port.DSNDescriptor) (port.DBConn, er
 	cfg.RuntimeParams["statement_timeout"] = strconv.FormatInt(
 		int64(dbdriver.DefaultStatementTimeout/time.Millisecond), 10)
 
+	if d.Tunnel != nil {
+		target := net.JoinHostPort(host, strconv.Itoa(prt))
+		cfg.DialFunc = func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+			nc, closeExtra, err := dbdriver.OpenTunnel(dialCtx, *d.Tunnel, target)
+			if err != nil {
+				return nil, err
+			}
+			return &tunnelConn{Conn: nc, closeExtra: closeExtra}, nil
+		}
+	}
+
 	db := stdlib.OpenDB(*cfg)
+	if d.Tunnel != nil {
+		// Each dial opens its own SSH channel over a fresh client. Capping
+		// the pool at one connection bounds how many concurrent channels a
+		// single DevDeck connection opens to the bastion, matching the
+		// sqlite driver's own single-connection pool for an analogous
+		// serialization reason.
+		db.SetMaxOpenConns(1)
+	}
 
 	pingCtx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()
@@ -800,4 +813,21 @@ func scanRow(rows *sql.Rows, n int) ([]any, error) {
 		return nil, err
 	}
 	return vals, nil
+}
+
+// tunnelConn wraps the net.Conn OpenTunnel returns so closing it also tears
+// down the SSH client and channel beneath it. Closing just the embedded
+// net.Conn would close the channel but leak the *ssh.Client's TCP socket to
+// the bastion.
+type tunnelConn struct {
+	net.Conn
+	closeExtra func() error
+}
+
+func (c *tunnelConn) Close() error {
+	err := c.Conn.Close()
+	if extraErr := c.closeExtra(); extraErr != nil && err == nil {
+		err = extraErr
+	}
+	return err
 }

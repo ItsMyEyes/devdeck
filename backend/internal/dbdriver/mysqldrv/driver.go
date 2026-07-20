@@ -75,12 +75,6 @@ func (mysqlDriver) Capabilities() port.DBCaps { return caps }
 
 // Open dials the server described by d.
 func (mysqlDriver) Open(ctx context.Context, d port.DSNDescriptor) (port.DBConn, error) {
-	// Tunnel dialing is a separate unit (dbdriver.OpenTunnel). Until it is wired
-	// in here, accepting a tunnel descriptor would open a *direct* connection
-	// while the operator believes traffic is going through their bastion.
-	if d.Tunnel != nil {
-		return nil, errors.New("mysql: SSH tunneled connections are not supported by this driver yet")
-	}
 	host := strings.TrimSpace(d.Host)
 	if host == "" {
 		return nil, errors.New("mysql: no host configured")
@@ -106,6 +100,16 @@ func (mysqlDriver) Open(ctx context.Context, d port.DSNDescriptor) (port.DBConn,
 		// "preferred" is the only mode that may silently continue without TLS;
 		// every other mode requires the handshake to succeed.
 		cfg.AllowFallbackToPlaintext = d.SSLMode == "preferred"
+		if d.Tunnel != nil {
+			target := cfg.Addr
+			cfg.DialFunc = func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+				nc, closeExtra, err := dbdriver.OpenTunnel(dialCtx, *d.Tunnel, target)
+				if err != nil {
+					return nil, err
+				}
+				return &tunnelConn{Conn: nc, closeExtra: closeExtra}, nil
+			}
+		}
 		if withTimeout {
 			// Engine-side enforcement of the statement timeout. Params are
 			// applied as `SET <name> = <value>` on every new pooled connection,
@@ -126,6 +130,9 @@ func (mysqlDriver) Open(ctx context.Context, d port.DSNDescriptor) (port.DBConn,
 	}
 	if err != nil {
 		return nil, err
+	}
+	if d.Tunnel != nil {
+		db.SetMaxOpenConns(1)
 	}
 
 	c := &conn{db: db, defaultDB: d.Database}
@@ -985,4 +992,19 @@ func scanRow(rows *sql.Rows, n int) ([]any, error) {
 		return nil, err
 	}
 	return vals, nil
+}
+
+// tunnelConn wraps the net.Conn OpenTunnel returns so closing it also tears
+// down the SSH client and channel beneath it.
+type tunnelConn struct {
+	net.Conn
+	closeExtra func() error
+}
+
+func (c *tunnelConn) Close() error {
+	err := c.Conn.Close()
+	if extraErr := c.closeExtra(); extraErr != nil && err == nil {
+		err = extraErr
+	}
+	return err
 }

@@ -273,3 +273,26 @@ func TestCommitEditsUpdatesThroughCtidIdentity(t *testing.T) {
 		t.Fatalf("res = %+v, want one statement affecting 1 row", res)
 	}
 }
+
+func TestOpenAttemptsTunnelDialWhenConfigured(t *testing.T) {
+	// No live bastion is reachable in this test, so Open must fail at the
+	// tunnel dial stage — proving the descriptor's tunnel was wired in and
+	// attempted, rather than silently ignored or rejected outright.
+	_, err := New().Open(context.Background(), port.DSNDescriptor{
+		Host: "127.0.0.1", Port: 5432, Database: "postgres",
+		Tunnel: &port.TunnelDescriptor{
+			Host: "127.0.0.1", Port: 1, // nothing listens here
+			Username: "u", AuthType: "password", Password: "p",
+			HostKeyFingerprint: "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected a dial failure")
+	}
+	if !strings.Contains(err.Error(), "tunnel") {
+		t.Fatalf("error = %q, want it to mention the tunnel dial attempt", err.Error())
+	}
+	if strings.Contains(err.Error(), "not supported") {
+		t.Fatal("tunnel was rejected outright rather than attempted")
+	}
+}

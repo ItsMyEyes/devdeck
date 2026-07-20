@@ -42,15 +42,20 @@ func TestCapabilitiesUsesBacktickQuoting(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsTunnelWithoutSupport(t *testing.T) {
-	// A tunnel descriptor that is silently ignored would hide a
-	// misconfiguration the operator believes is protecting them.
+func TestOpenAttemptsTunnelDialWhenConfigured(t *testing.T) {
 	_, err := New().Open(context.Background(), port.DSNDescriptor{
-		Engine: "mysql", Host: "db.example.com", Port: 3306,
-		Tunnel: &port.TunnelDescriptor{Host: "bastion", Port: 22},
+		Engine: "mysql", Host: "127.0.0.1", Port: 3306,
+		Tunnel: &port.TunnelDescriptor{
+			Host: "127.0.0.1", Port: 1, // nothing listens here
+			Username: "u", AuthType: "password", Password: "p",
+			HostKeyFingerprint: "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		},
 	})
 	if err == nil {
-		t.Fatal("tunneled descriptor accepted, want rejection until tunnel dialing lands")
+		t.Fatal("expected a dial failure")
+	}
+	if strings.Contains(err.Error(), "not supported") {
+		t.Fatal("tunnel was rejected outright rather than attempted")
 	}
 }
 
