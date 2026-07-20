@@ -620,6 +620,18 @@ func (c *conn) Exec(ctx context.Context, sqlText string, args []any) (port.ExecR
 	return port.ExecResult{RowsAffected: n, ElapsedMS: time.Since(start).Milliseconds()}, nil
 }
 
+func (c *conn) CommitEdits(ctx context.Context, edits []port.RowEdit) (port.CommitResult, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+	stmts, err := dbquery.BuildCommitStatements(ctx, c, edits, caps, dbquery.DollarPlaceholder)
+	if err != nil {
+		return port.CommitResult{}, err
+	}
+	return dbdriver.ExecTxOnDB(ctx, c.db, stmts)
+}
+
+var _ port.RowWriter = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()

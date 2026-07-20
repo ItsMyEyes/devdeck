@@ -233,3 +233,43 @@ func TestStatsReportsUnknownRowsForNeverAnalyzedTable(t *testing.T) {
 		t.Fatal("PostgreSQL always knows the on-disk size")
 	}
 }
+
+func TestCommitEditsUpdatesThroughCtidIdentity(t *testing.T) {
+	d := descriptorFromEnv(t)
+	ctx := context.Background()
+	c, err := New().Open(ctx, d)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer c.Close()
+	conn := c.(*conn)
+
+	if _, err := conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_commit_test", nil); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	// No primary key on purpose: exercises the ctid rung of the ladder.
+	if _, err := conn.Exec(ctx, "CREATE TABLE phase3_commit_test (name text)", nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE phase3_commit_test", nil)
+	if _, err := conn.Exec(ctx, "INSERT INTO phase3_commit_test (name) VALUES ('alpha')", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var ctid string
+	if err := conn.db.QueryRowContext(ctx, "SELECT ctid::text FROM phase3_commit_test WHERE name = 'alpha'").Scan(&ctid); err != nil {
+		t.Fatalf("read ctid: %v", err)
+	}
+
+	res, err := conn.CommitEdits(ctx, []port.RowEdit{
+		{Object: port.ObjectRef{Name: "phase3_commit_test"}, Kind: "update",
+			OldValues: map[string]any{"name": "alpha"}, NewValues: map[string]any{"name": "beta"},
+			RowPointer: ctid},
+	})
+	if err != nil {
+		t.Fatalf("CommitEdits: %v", err)
+	}
+	if len(res.Results) != 1 || res.Results[0].RowsAffected != 1 {
+		t.Fatalf("res = %+v, want one statement affecting 1 row", res)
+	}
+}

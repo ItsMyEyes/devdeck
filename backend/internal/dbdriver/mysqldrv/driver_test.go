@@ -372,3 +372,48 @@ func TestStatsReportsSizeWithoutFabricatingRowCounts(t *testing.T) {
 		t.Fatal("Analyzed must be false when the engine reports no row estimate")
 	}
 }
+
+func TestCommitEditsUpdatesThroughAllColumnsIdentity(t *testing.T) {
+	raw := os.Getenv("DEVDECK_TEST_MYSQL_DSN")
+	if strings.TrimSpace(raw) == "" {
+		t.Skip("set DEVDECK_TEST_MYSQL_DSN to run MySQL integration tests")
+	}
+	cfg, err := mysql.ParseDSN(raw)
+	if err != nil {
+		t.Fatalf("parse DEVDECK_TEST_MYSQL_DSN: %v", err)
+	}
+	host, port_ := splitHostPort(t, cfg.Addr)
+
+	ctx := context.Background()
+	c, err := New().Open(ctx, port.DSNDescriptor{
+		Engine: "mysql", Host: host, Port: port_,
+		Username: cfg.User, Password: cfg.Passwd, Database: cfg.DBName,
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer c.Close()
+	conn := c.(*conn)
+
+	if _, err := conn.Exec(ctx, "DROP TABLE IF EXISTS phase3_commit_test", nil); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE TABLE phase3_commit_test (name VARCHAR(64))", nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE phase3_commit_test", nil)
+	if _, err := conn.Exec(ctx, "INSERT INTO phase3_commit_test (name) VALUES ('alpha')", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	res, err := conn.CommitEdits(ctx, []port.RowEdit{
+		{Object: port.ObjectRef{Name: "phase3_commit_test"}, Kind: "update",
+			OldValues: map[string]any{"name": "alpha"}, NewValues: map[string]any{"name": "beta"}},
+	})
+	if err != nil {
+		t.Fatalf("CommitEdits: %v", err)
+	}
+	if len(res.Results) != 1 || res.Results[0].RowsAffected != 1 {
+		t.Fatalf("res = %+v, want one statement affecting 1 row", res)
+	}
+}

@@ -246,3 +246,39 @@ func TestStatsDegradesWithoutDbstat(t *testing.T) {
 		t.Fatalf("negative size reported: %d", *st.TotalBytes)
 	}
 }
+
+func openTestConn(t *testing.T) *conn {
+	t.Helper()
+	c, err := New().Open(context.Background(), port.DSNDescriptor{Engine: "sqlite", Database: ":memory:"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c.(*conn)
+}
+
+func TestCommitEditsUpdatesThroughPrimaryKeyIdentity(t *testing.T) {
+	ctx := context.Background()
+	conn := openTestConn(t) // reuse whatever in-memory-DB test helper this file already establishes
+	if _, err := conn.Exec(ctx, "CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)", nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO assets (id, name) VALUES (1, 'alpha')", nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	res, err := conn.CommitEdits(ctx, []port.RowEdit{
+		{Object: port.ObjectRef{Name: "assets"}, Kind: "update",
+			OldValues: map[string]any{"id": int64(1), "name": "alpha"},
+			NewValues: map[string]any{"name": "beta"}},
+	})
+	if err != nil {
+		t.Fatalf("CommitEdits: %v", err)
+	}
+	if len(res.Results) != 1 || res.Results[0].RowsAffected != 1 {
+		t.Fatalf("res = %+v, want one statement affecting 1 row", res)
+	}
+	var name string
+	if err := conn.db.QueryRowContext(ctx, "SELECT name FROM assets WHERE id = 1").Scan(&name); err != nil || name != "beta" {
+		t.Fatalf("commit did not apply: name=%q err=%v", name, err)
+	}
+}

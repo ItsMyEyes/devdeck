@@ -599,6 +599,23 @@ func (c *conn) Exec(ctx context.Context, sqlText string, args []any) (port.ExecR
 	return port.ExecResult{RowsAffected: n, ElapsedMS: time.Since(start).Milliseconds()}, nil
 }
 
+// CommitEdits resolves each edit's row-identity strategy against its live
+// schema and executes the whole batch inside one transaction. All of the
+// engine-agnostic work — identity resolution, SQL compilation — lives in
+// dbquery.BuildCommitStatements; this method is the thin per-engine wrapper
+// dbdriver.ExecTxOnDB expects.
+func (c *conn) CommitEdits(ctx context.Context, edits []port.RowEdit) (port.CommitResult, error) {
+	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
+	defer cancel()
+	stmts, err := dbquery.BuildCommitStatements(ctx, c, edits, caps, dbquery.QuestionPlaceholder)
+	if err != nil {
+		return port.CommitResult{}, err
+	}
+	return dbdriver.ExecTxOnDB(ctx, c.db, stmts)
+}
+
+var _ port.RowWriter = (*conn)(nil)
+
 func (c *conn) CountExact(ctx context.Context, obj port.ObjectRef, filters []port.Filter) (int64, error) {
 	ctx, cancel := dbdriver.WithStatementTimeout(ctx, 0)
 	defer cancel()
