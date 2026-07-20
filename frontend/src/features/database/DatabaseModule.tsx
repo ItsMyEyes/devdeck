@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBConnections } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
+import { DBConnectionDialog } from './DBConnectionDialog'
 import type { DBConnection } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
@@ -76,86 +77,89 @@ export function DatabaseModule() {
   }, [connections, activeGroup, query])
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-none items-center gap-2.5 border-b border-devdeck-border-menu px-4 py-3">
-        <DatabaseIcon size={16} className="text-devdeck-muted" />
-        <h1 className="text-[15px] font-semibold text-devdeck-fg">Database</h1>
-        <span className="rounded-full bg-devdeck-popover px-2 py-0.5 font-mono text-[11px] text-devdeck-dim">
-          {connections?.length ?? 0}
-        </span>
-        <div className="flex-1" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search connections…"
-          className="w-56 font-mono"
-        />
-        <Button variant="ghost" size="icon" onClick={() => refetch()} aria-label="Refresh">
-          <RefreshCw size={14} />
-        </Button>
-        <Button onClick={openAdd}>
-          <Plus size={14} />
-          New connection
-        </Button>
-      </div>
+    <>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex flex-none items-center gap-2.5 border-b border-devdeck-border-menu px-4 py-3">
+          <DatabaseIcon size={16} className="text-devdeck-muted" />
+          <h1 className="text-[15px] font-semibold text-devdeck-fg">Database</h1>
+          <span className="rounded-full bg-devdeck-popover px-2 py-0.5 font-mono text-[11px] text-devdeck-dim">
+            {connections?.length ?? 0}
+          </span>
+          <div className="flex-1" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search connections…"
+            className="w-56 font-mono"
+          />
+          <Button variant="ghost" size="icon" onClick={() => refetch()} aria-label="Refresh">
+            <RefreshCw size={14} />
+          </Button>
+          <Button onClick={openAdd}>
+            <Plus size={14} />
+            New connection
+          </Button>
+        </div>
 
-      {groups.length > 0 ? (
-        <div className="flex flex-none items-center gap-1.5 overflow-x-auto border-b border-devdeck-border-menu px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setActiveGroup(ALL_GROUPS)}
-            className={cn(
-              'h-7 flex-none rounded-full px-3 font-mono text-[11px] transition-colors',
-              activeGroup === ALL_GROUPS ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
-            )}
-          >
-            All
-          </button>
-          {groups.map((g) => (
+        {groups.length > 0 ? (
+          <div className="flex flex-none items-center gap-1.5 overflow-x-auto border-b border-devdeck-border-menu px-4 py-2">
             <button
-              key={g}
               type="button"
-              onClick={() => setActiveGroup(g)}
+              onClick={() => setActiveGroup(ALL_GROUPS)}
               className={cn(
                 'h-7 flex-none rounded-full px-3 font-mono text-[11px] transition-colors',
-                activeGroup === g ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
+                activeGroup === ALL_GROUPS ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
               )}
             >
-              {g}
+              All
             </button>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <DataLoading compact label="loading connections…" />
-        ) : error ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
-            <p>{error instanceof Error ? error.message : 'Failed to load connections'}</p>
-            <Button variant="secondary" size="sm" onClick={() => refetch()}>
-              Retry
-            </Button>
-          </div>
-        ) : visible.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
-            <DatabaseIcon size={28} className="text-devdeck-dim-2" />
-            <p>{connections?.length ? 'No connections match your search.' : 'No database connections yet.'}</p>
-            {!connections?.length ? (
-              <Button size="sm" onClick={openAdd}>
-                <Plus size={13} />
-                Add your first connection
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {visible.map((c) => (
-              <ConnectionCard key={c.id} conn={c} onEdit={() => openEdit(c)} />
+            {groups.map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setActiveGroup(g)}
+                className={cn(
+                  'h-7 flex-none rounded-full px-3 font-mono text-[11px] transition-colors',
+                  activeGroup === g ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
+                )}
+              >
+                {g}
+              </button>
             ))}
           </div>
-        )}
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <DataLoading compact label="loading connections…" />
+          ) : error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
+              <p>{error instanceof Error ? error.message : 'Failed to load connections'}</p>
+              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                Retry
+              </Button>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
+              <DatabaseIcon size={28} className="text-devdeck-dim-2" />
+              <p>{connections?.length ? 'No connections match your search.' : 'No database connections yet.'}</p>
+              {!connections?.length ? (
+                <Button size="sm" onClick={openAdd}>
+                  <Plus size={13} />
+                  Add your first connection
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {visible.map((c) => (
+                <ConnectionCard key={c.id} conn={c} onEdit={() => openEdit(c)} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      <DBConnectionDialog />
+    </>
   )
 }
