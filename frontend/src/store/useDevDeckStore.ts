@@ -17,6 +17,7 @@ import {
   pruneTileTabs,
 } from '@/features/tabs/tileTree'
 import type { WorkspaceTileLayout } from '@/features/tabs/tileTree'
+import type { DBRowEdit } from '@/lib/api'
 import type {
   DBConnection,
   DBEngine,
@@ -347,6 +348,11 @@ interface DevDeckState {
   closeDBTab: (connectionId: string, tabId: string) => void
   setDBActiveTab: (connectionId: string, tabId: string) => void
 
+  // db commit-preview dialog (pending row edits from DBTableGrid)
+  commitDialog: { open: boolean; connectionId: string; edits: DBRowEdit[]; onCommitted: (() => void) | null }
+  openCommitDialog: (connectionId: string, edits: DBRowEdit[], onCommitted: () => void) => void
+  closeCommitDialog: () => void
+
   // ssh group rename (delete reuses askDelete/confirmDelete with kind 'ssh-group')
   renameSSHGroup: RenameSSHGroupState
   openRenameSSHGroup: (group: string) => void
@@ -445,6 +451,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       },
       dbActiveGroup: ALL_SSH_GROUPS, // reuse the existing "all groups" sentinel; see SSHConnectionsModule's identical usage
       dbTabs: {},
+      commitDialog: { open: false, connectionId: '', edits: [], onCommitted: null },
       renameSSHGroup: { open: false, oldName: '', value: '' },
       dirtyFileCount: 0,
       worktreeLayouts: {},
@@ -766,6 +773,10 @@ export const useDevDeckStore = create<DevDeckState>()(
         set((s) => void (s.dbTabs[connectionId] = closeTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
       setDBActiveTab: (connectionId, id) =>
         set((s) => void (s.dbTabs[connectionId] = setActiveTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
+
+      openCommitDialog: (connectionId, edits, onCommitted) =>
+        set((s) => void (s.commitDialog = { open: true, connectionId, edits, onCommitted })),
+      closeCommitDialog: () => set((s) => void (s.commitDialog.open = false)),
 
       openRenameSSHGroup: (group) =>
         set((s) => void (s.renameSSHGroup = { open: true, oldName: group, value: group })),

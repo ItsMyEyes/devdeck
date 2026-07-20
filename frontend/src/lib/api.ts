@@ -901,3 +901,27 @@ export interface DBResultSet {
 export function fetchDBRows(connectionId: string, req: DBRowsRequest): Promise<DBResultSet> {
   return request<DBResultSet>('POST', `/db/connections/${connectionId}/rows`, req)
 }
+
+// ---- DB rows (write path) ----
+
+export interface DBRowEdit {
+  object: DBObjectRef
+  kind: 'insert' | 'update' | 'delete'
+  oldValues?: Record<string, unknown>
+  newValues?: Record<string, unknown>
+  rowPointer?: unknown
+}
+
+export interface DBExecResult {
+  rowsAffected: number
+  elapsedMs: number
+}
+
+export interface DBCommitResult {
+  results: DBExecResult[]
+  elapsedMs: number
+}
+
+export function commitDBEdits(connectionId: string, edits: DBRowEdit[]): Promise<DBCommitResult> {
+  return request<DBCommitResult>('POST', `/db/connections/${connectionId}/commit`, { edits })
+}

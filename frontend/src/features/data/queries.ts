@@ -8,6 +8,7 @@ import {
   acceptSSHHostKey,
   clearDoneTodos,
   cloneProject,
+  commitDBEdits,
   createBank,
   createCompany,
   createComment,
@@ -94,6 +95,7 @@ import type {
   CreateTodoBody,
   CreateWorkspaceBody,
   DBObjectRef,
+  DBRowEdit,
   DBRowsRequest,
   DBTreePath,
   MachineHealth,
@@ -432,6 +434,17 @@ export function useDBRows(connectionId: string, req: DBRowsRequest, enabled = tr
     queryFn: () => fetchDBRows(connectionId, req),
     enabled: enabled && Boolean(connectionId) && Boolean(req.object.name),
     placeholderData: (prev) => prev, // keep the old page's rows visible while the next page loads
+  })
+}
+
+// ---- DB rows (write path) ----
+
+export function useCommitDBEdits() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ connectionId, edits }: { connectionId: string; edits: DBRowEdit[] }) => commitDBEdits(connectionId, edits),
+    onSuccess: (_data, vars) =>
+      queryClient.invalidateQueries({ queryKey: ['db', vars.connectionId, 'rows'], exact: false }),
   })
 }
 

@@ -2,8 +2,9 @@ import { useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBColumns, useDBRows } from '@/features/data/queries'
-import type { DBFilter, DBObjectRef, DBSortKey } from '@/lib/api'
+import type { DBFilter, DBObjectRef, DBRowEdit, DBSortKey } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { DBFilterBar } from './DBFilterBar'
 import { DBTableInfo } from './DBTableInfo'
 
@@ -17,6 +18,39 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
   const [globalSearch, setGlobalSearch] = useState('')
   const [cursorStack, setCursorStack] = useState<(unknown[] | null)[]>([null])
   const pageIndex = cursorStack.length - 1
+  const openCommitDialog = useDevDeckStore((s) => s.openCommitDialog)
+
+  const [pendingEdits, setPendingEdits] = useState<Map<string, unknown>>(new Map())
+
+  function cellKey(rowIndex: number, column: string) {
+    return `${rowIndex}:${column}`
+  }
+
+  function setPendingValue(rowIndex: number, column: string, value: string) {
+    setPendingEdits((prev) => {
+      const next = new Map(prev)
+      next.set(cellKey(rowIndex, column), value)
+      return next
+    })
+  }
+
+  function buildRowEdits(): DBRowEdit[] {
+    if (!page) return []
+    const byRow = new Map<number, Record<string, unknown>>()
+    for (const [key, value] of pendingEdits) {
+      const [rowIndexStr, column] = key.split(':')
+      const rowIndex = Number(rowIndexStr)
+      if (!byRow.has(rowIndex)) byRow.set(rowIndex, {})
+      byRow.get(rowIndex)![column] = value
+    }
+    const edits: DBRowEdit[] = []
+    for (const [rowIndex, newValues] of byRow) {
+      const oldValues: Record<string, unknown> = {}
+      page.columns.forEach((col, i) => { oldValues[col.name] = page.rows[rowIndex][i] })
+      edits.push({ object, kind: 'update', oldValues, newValues })
+    }
+    return edits
+  }
 
   const { data: page, isLoading: rowsLoading, error: rowsError } = useDBRows(connectionId, {
     object,
@@ -86,6 +120,24 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
         </div>
       </div>
 
+      {pendingEdits.size > 0 ? (
+        <div className="flex flex-none items-center justify-between border-b border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-3 py-1.5">
+          <span className="font-mono text-[11px] text-devdeck-yellow-tint-text">{pendingEdits.size} pending change{pendingEdits.size === 1 ? '' : 's'}</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPendingEdits(new Map())} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={() => openCommitDialog(connectionId, buildRowEdits(), () => setPendingEdits(new Map()))}
+              className="text-[11px] font-medium text-devdeck-accent-soft hover:text-devdeck-accent"
+            >
+              Review &amp; commit
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {rowsError ? (
         <div className="p-4 text-[12px] text-devdeck-red-soft">{rowsError instanceof Error ? rowsError.message : 'Failed to load rows'}</div>
       ) : rowsLoading && !page ? (
@@ -120,15 +172,27 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
                   style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
                   className={cn('flex border-b border-devdeck-border-menu/50', virtualRow.index % 2 === 1 && 'bg-white/[0.015]')}
                 >
-                  {columns.map((col, colIndex) => (
-                    <div
-                      key={col.name}
-                      style={{ minWidth: 140 }}
-                      className="flex flex-1 items-center truncate border-r border-devdeck-border-menu/50 px-2.5 font-mono text-[11.5px] text-devdeck-fg-2"
-                    >
-                      {col.isLob ? `⟨${String(row[colIndex])} bytes⟩` : row[colIndex] === null ? <span className="text-devdeck-dim-2 italic">null</span> : String(row[colIndex])}
-                    </div>
-                  ))}
+                  {columns.map((col, colIndex) => {
+                    const key = cellKey(virtualRow.index, col.name)
+                    const isPending = pendingEdits.has(key)
+                    const display = isPending ? String(pendingEdits.get(key)) : row[colIndex]
+                    return col.isLob ? (
+                      <div key={col.name} style={{ minWidth: 140 }} className="flex flex-1 items-center truncate border-r border-devdeck-border-menu/50 px-2.5 font-mono text-[11.5px] text-devdeck-fg-2">
+                        ⟨{String(row[colIndex])} bytes⟩
+                      </div>
+                    ) : (
+                      <input
+                        key={col.name}
+                        defaultValue={display === null ? '' : String(display)}
+                        onBlur={(e) => { if (e.target.value !== String(display ?? '')) setPendingValue(virtualRow.index, col.name, e.target.value) }}
+                        style={{ minWidth: 140 }}
+                        className={cn(
+                          'flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none focus:bg-devdeck-accent-tint/30',
+                          isPending && 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text',
+                        )}
+                      />
+                    )
+                  })}
                 </div>
               )
             })}

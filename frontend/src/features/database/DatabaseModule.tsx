@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBConnections, useDBEngines } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
+import { DBCommitDialog } from './DBCommitDialog'
 import { DBConnectionDialog } from './DBConnectionDialog'
 import { emptyDBTabState } from './dbTabs'
 import { DBObjectTree } from './DBObjectTree'
@@ -223,6 +224,7 @@ export function DatabaseModule() {
         )}
       </div>
       <DBConnectionDialog />
+      <DBCommitDialog />
     </>
   )
 }
