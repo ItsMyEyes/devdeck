@@ -240,7 +240,7 @@ func main() {
 	if isRuntime {
 		whoamiStore = st
 	}
-	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore)
+	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
@@ -606,6 +606,7 @@ func main() {
 				IsLocal:   isBoth,
 			}, 30*time.Second)
 			if registered {
+				whoamiH.SetMachineID(self.ID)
 				if pub, err := base64.StdEncoding.DecodeString(self.SigningPublicKey); err == nil && len(pub) == ed25519.PublicKeySize {
 					handler.SetRuntimeIdentity(self.ID, ed25519.PublicKey(pub))
 				} else {

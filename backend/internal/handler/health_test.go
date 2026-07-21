@@ -12,7 +12,7 @@ import (
 )
 
 func TestWhoamiReportsRoleAndKeepsStatus(t *testing.T) {
-	h := NewWhoamiHandler("runtime", "builder", nil)
+	h := NewWhoamiHandler("runtime", "builder", nil, "", "")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
 
@@ -35,7 +35,7 @@ func TestWhoamiReportsRoleAndKeepsStatus(t *testing.T) {
 
 func TestWhoamiReportsNullLastSyncedBeforeFirstSync(t *testing.T) {
 	// nil store: the hub's whoami never reports sync state at all.
-	h := NewWhoamiHandler("runtime", "builder", nil)
+	h := NewWhoamiHandler("runtime", "builder", nil, "", "")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
 
@@ -51,7 +51,7 @@ func TestWhoamiReportsNullLastSyncedBeforeFirstSync(t *testing.T) {
 func TestWhoamiReportsLastSyncedAtOnceTheReplicaHasSynced(t *testing.T) {
 	// non-nil store, but never applied a snapshot: still null.
 	st := store.NewTestStore(t)
-	h := NewWhoamiHandler("runtime", "builder", st)
+	h := NewWhoamiHandler("runtime", "builder", st, "", "")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
 
@@ -78,5 +78,36 @@ func TestWhoamiReportsLastSyncedAtOnceTheReplicaHasSynced(t *testing.T) {
 	want := syncedAt.Format(time.RFC3339)
 	if got2["lastSyncedAt"] != want {
 		t.Errorf("lastSyncedAt = %v, want %v", got2["lastSyncedAt"], want)
+	}
+}
+
+func TestWhoamiReportsHubURLAndMachineIDOnARuntime(t *testing.T) {
+	h := NewWhoamiHandler("runtime", "builder", nil, "https://hub.example.ts.net:8989", "m-abc")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["hubUrl"] != "https://hub.example.ts.net:8989" {
+		t.Errorf("hubUrl = %v, want the configured --hub-url", got["hubUrl"])
+	}
+	if got["machineId"] != "m-abc" {
+		t.Errorf("machineId = %v, want m-abc", got["machineId"])
+	}
+}
+
+func TestWhoamiOmitsHubURLAndMachineIDOnTheHub(t *testing.T) {
+	h := NewWhoamiHandler("hub", "", nil, "", "")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["hubUrl"]; ok && v != "" && v != nil {
+		t.Errorf("hubUrl = %v on the hub, want empty/absent", v)
 	}
 }

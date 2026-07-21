@@ -356,4 +356,8 @@ export interface Whoami {
   machineName: string
   /** RFC3339 timestamp of the last clean catalog snapshot, or null if never. */
   lastSyncedAt: string | null
+  /** This runtime's configured --hub-url, empty on the hub. */
+  hubUrl: string
+  /** This runtime's own hub-assigned machine id, empty until self-registration first succeeds. */
+  machineId: string
 }
