@@ -35,6 +35,10 @@ pub fn sidecar_args(data_dir: &Path, key: &str, enable_tailscale_serve: bool) ->
         "--open=false".into(),
         "--2fa=false".into(),
         "--secure-cookies=false".into(),
+        // Tells the Go process an external supervisor (this Tauri app's own
+        // respawn loop) already owns its respawn lifecycle — see
+        // docs/superpowers/specs/2026-07-21-runtime-restart-stop-design.md.
+        "--managed".into(),
     ];
     if enable_tailscale_serve {
         args.push("--enable-tailscale-serve".into());
@@ -82,6 +86,9 @@ pub fn runtime_args(
         "--public-url".into(), public_url.into(),
         "--name".into(), name.into(),
         "--enable-tailscale-serve".into(),
+        // See sidecar_args's --managed comment — same reasoning applies to
+        // this desktop's background remote-mode runtime.
+        "--managed".into(),
     ]
 }
 
@@ -148,6 +155,7 @@ mod tests {
         assert!(joined.contains("--2fa=false"));
         assert!(joined.contains("--secure-cookies=false"));
         assert!(joined.contains("devdeck.db"));
+        assert!(joined.contains("--managed"));
         assert!(!joined.contains("--enable-tailscale-serve"));
     }
 
@@ -198,6 +206,7 @@ mod tests {
         assert!(joined.contains("--public-url https://me.ts.net"));
         assert!(joined.contains("--name my-mac"));
         assert!(joined.contains("--enable-tailscale-serve"));
+        assert!(joined.contains("--managed"));
         assert!(joined.contains("devdeck-runtime.db"));
     }
 
