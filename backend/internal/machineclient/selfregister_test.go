@@ -75,7 +75,7 @@ func TestSelfRegisterCreatesWhenAbsent(t *testing.T) {
 	srv := httptest.NewServer(stub.handler())
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk",
 	})
@@ -95,7 +95,7 @@ func TestSelfRegisterPatchesWhenURLMatchesButFieldsDiffer(t *testing.T) {
 	srv := httptest.NewServer(stub.handler())
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk",
 	})
@@ -115,7 +115,7 @@ func TestSelfRegisterNoOpWhenAlreadyCorrect(t *testing.T) {
 	srv := httptest.NewServer(stub.handler())
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk",
 	})
@@ -133,7 +133,7 @@ func TestSelfRegisterReturnsErrorOnNon200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk",
 	})
@@ -151,6 +151,10 @@ func TestRunSelfRegisterLoopRetriesThenStopsOnSuccess(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(hubMachine{ID: "m-new"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode([]hubMachine{})
 	}))
 	t.Cleanup(srv.Close)
@@ -183,12 +187,13 @@ func TestSelfRegisterCreateIncludesIsLocalWhenTrue(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]hubMachine{})
 		case http.MethodPost:
 			_ = json.NewDecoder(r.Body).Decode(&captured)
-			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(hubMachine{ID: "m-new"})
 		}
 	}))
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "http://127.0.0.1:8989", Name: "desktop", Key: "k", IsLocal: true,
 	})
@@ -205,7 +210,7 @@ func TestSelfRegisterPatchesWhenOnlyIsLocalDiffers(t *testing.T) {
 	srv := httptest.NewServer(stub.handler())
 	t.Cleanup(srv.Close)
 
-	err := SelfRegister(context.Background(), SelfRegisterConfig{
+	_, err := SelfRegister(context.Background(), SelfRegisterConfig{
 		HubURL: srv.URL, HubKey: "hubk",
 		PublicURL: "https://rt-a.tail.ts.net:8989", Name: "rt-a", Key: "rtk", IsLocal: true,
 	})
@@ -214,5 +219,33 @@ func TestSelfRegisterPatchesWhenOnlyIsLocalDiffers(t *testing.T) {
 	}
 	if len(stub.requests) != 2 || stub.requests[1].method != http.MethodPatch {
 		t.Fatalf("requests = %+v, want [GET, PATCH] (isLocal alone must trigger a patch)", stub.requests)
+	}
+}
+
+func TestSelfRegisterReturnsTheHubMachineIncludingSigningKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/machines":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/machines":
+			_, _ = w.Write([]byte(`{"id":"m-new","name":"builder","url":"http://runtime","key":"rt-key","isLocal":false,"signingPublicKey":"cHVia2V5"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := SelfRegister(context.Background(), SelfRegisterConfig{
+		HubURL: srv.URL, HubKey: "hubkey", PublicURL: "http://runtime", Name: "builder", Key: "rt-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "m-new" {
+		t.Errorf("ID = %q, want m-new", got.ID)
+	}
+	if got.SigningPublicKey != "cHVia2V5" {
+		t.Errorf("SigningPublicKey = %q, want cHVia2V5", got.SigningPublicKey)
 	}
 }

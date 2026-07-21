@@ -34,22 +34,27 @@ type SelfRegisterConfig struct {
 // this package already depends on domain.Worktree/Machine for the
 // hub->runtime direction and this is the inverse, runtime->hub direction.
 type hubMachine struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Key     string `json:"key"`
-	IsLocal bool   `json:"isLocal"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	URL              string `json:"url"`
+	Key              string `json:"key"`
+	IsLocal          bool   `json:"isLocal"`
+	SigningPublicKey string `json:"signingPublicKey"`
 }
 
 // SelfRegister upserts this runtime's entry in the hub's machine registry
 // by URL: an existing entry whose url matches cfg.PublicURL is PATCHed if
 // its name/key differ (a no-op if already correct); no match creates a new
 // entry. It reuses the hub's existing GET/POST/PATCH /api/machines
-// endpoints — no hub-side change was needed for this.
-func SelfRegister(ctx context.Context, cfg SelfRegisterConfig) error {
+// endpoints — no hub-side change was needed for this. The returned
+// hubMachine carries this runtime's own hub-assigned id and the hub's
+// signing public key, both needed to verify handover tokens
+// (internal/handovertoken) — this is the only place a runtime ever learns
+// either value.
+func SelfRegister(ctx context.Context, cfg SelfRegisterConfig) (hubMachine, error) {
 	machines, err := listHubMachines(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("list hub machines: %w", err)
+		return hubMachine{}, fmt.Errorf("list hub machines: %w", err)
 	}
 
 	for _, m := range machines {
@@ -57,7 +62,7 @@ func SelfRegister(ctx context.Context, cfg SelfRegisterConfig) error {
 			continue
 		}
 		if m.Name == cfg.Name && m.Key == cfg.Key && m.IsLocal == cfg.IsLocal {
-			return nil
+			return m, nil
 		}
 		return patchHubMachine(ctx, cfg, m.ID)
 	}
@@ -65,20 +70,23 @@ func SelfRegister(ctx context.Context, cfg SelfRegisterConfig) error {
 }
 
 // RunSelfRegisterLoop retries SelfRegister on retryEvery until it succeeds
-// once, then returns. A failure is logged, never fatal — the caller (the
-// runtime's main goroutine) keeps serving regardless of registration
-// status. Returns early if ctx is cancelled.
-func RunSelfRegisterLoop(ctx context.Context, cfg SelfRegisterConfig, retryEvery time.Duration) {
+// once, then returns the registered machine (including this runtime's own
+// hub-assigned id and the hub's signing public key). A failure is logged,
+// never fatal — the caller (the runtime's main goroutine) keeps serving
+// regardless of registration status. Returns (zero value, false) early if
+// ctx is cancelled before success.
+func RunSelfRegisterLoop(ctx context.Context, cfg SelfRegisterConfig, retryEvery time.Duration) (hubMachine, bool) {
 	for {
-		if err := SelfRegister(ctx, cfg); err != nil {
+		m, err := SelfRegister(ctx, cfg)
+		if err != nil {
 			log.Printf("self-register: %v; retrying in %s", err, retryEvery)
 		} else {
 			log.Printf("self-register: registered with hub as %q (%s)", cfg.Name, cfg.PublicURL)
-			return
+			return m, true
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return hubMachine{}, false
 		case <-time.After(retryEvery):
 		}
 	}
@@ -107,7 +115,7 @@ func listHubMachines(ctx context.Context, cfg SelfRegisterConfig) ([]hubMachine,
 	return machines, nil
 }
 
-func createHubMachine(ctx context.Context, cfg SelfRegisterConfig) error {
+func createHubMachine(ctx context.Context, cfg SelfRegisterConfig) (hubMachine, error) {
 	body, err := json.Marshal(struct {
 		Name    string `json:"name"`
 		URL     string `json:"url"`
@@ -115,39 +123,43 @@ func createHubMachine(ctx context.Context, cfg SelfRegisterConfig) error {
 		IsLocal bool   `json:"isLocal,omitempty"`
 	}{Name: cfg.Name, URL: cfg.PublicURL, Key: cfg.Key, IsLocal: cfg.IsLocal})
 	if err != nil {
-		return err
+		return hubMachine{}, err
 	}
 	return doHubMachineRequest(ctx, cfg, http.MethodPost, strings.TrimRight(cfg.HubURL, "/")+"/api/machines", body)
 }
 
-func patchHubMachine(ctx context.Context, cfg SelfRegisterConfig, id string) error {
+func patchHubMachine(ctx context.Context, cfg SelfRegisterConfig, id string) (hubMachine, error) {
 	body, err := json.Marshal(struct {
 		Name    string `json:"name"`
 		Key     string `json:"key"`
 		IsLocal bool   `json:"isLocal,omitempty"`
 	}{Name: cfg.Name, Key: cfg.Key, IsLocal: cfg.IsLocal})
 	if err != nil {
-		return err
+		return hubMachine{}, err
 	}
 	return doHubMachineRequest(ctx, cfg, http.MethodPatch, strings.TrimRight(cfg.HubURL, "/")+"/api/machines/"+id, body)
 }
 
-func doHubMachineRequest(ctx context.Context, cfg SelfRegisterConfig, method, url string, body []byte) error {
+func doHubMachineRequest(ctx context.Context, cfg SelfRegisterConfig, method, url string, body []byte) (hubMachine, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return hubMachine{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.HubKey)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return hubMachine{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("hub returned status %d for %s %s", resp.StatusCode, method, url)
+		return hubMachine{}, fmt.Errorf("hub returned status %d for %s %s", resp.StatusCode, method, url)
 	}
-	return nil
+	var m hubMachine
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return hubMachine{}, fmt.Errorf("decode machine: %w", err)
+	}
+	return m, nil
 }

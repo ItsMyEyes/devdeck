@@ -597,7 +597,7 @@ func main() {
 	}
 	if (isRuntime || isBoth) && *hubURL != "" {
 		go func() {
-			machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
+			self, registered := machineclient.RunSelfRegisterLoop(context.Background(), machineclient.SelfRegisterConfig{
 				HubURL:    *hubURL,
 				HubKey:    *hubKey,
 				PublicURL: *publicURL,
@@ -605,6 +605,13 @@ func main() {
 				Key:       *apiKey,
 				IsLocal:   isBoth,
 			}, 30*time.Second)
+			if registered {
+				if pub, err := base64.StdEncoding.DecodeString(self.SigningPublicKey); err == nil && len(pub) == ed25519.PublicKeySize {
+					handler.SetRuntimeIdentity(self.ID, ed25519.PublicKey(pub))
+				} else {
+					log.Printf("self-register: hub did not return a usable signing public key; SSO handover tokens will fail verification until this runtime re-registers")
+				}
+			}
 
 			// CRITICAL: only a pure runtime syncs. A --role both process is
 			// its own hub, so `st` here IS the hub store — running the sync
