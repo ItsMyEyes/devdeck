@@ -23,6 +23,7 @@ import (
 	"devdeck/backend/internal/dbdriver/mysqldrv"
 	"devdeck/backend/internal/dbdriver/pgdrv"
 	"devdeck/backend/internal/dbdriver/sqlitedrv"
+	"devdeck/backend/internal/detect"
 	"devdeck/backend/internal/handler"
 	"devdeck/backend/internal/lsp"
 	"devdeck/backend/internal/machineclient"
@@ -58,6 +59,7 @@ func main() {
 	pandocBin := flag.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
 	mmdcBin := flag.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("DEVDECK_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
+	managed := flag.Bool("managed", envBool("DEVDECK_MANAGED", false), "mark this process as supervised by an external respawn loop (set by the Tauri desktop sidecar) — /api/self/restart won't spawn its own replacement, and /api/self/stop will refuse, since the supervisor already owns this process's respawn lifecycle")
 	role := flag.String("role", envOr("DEVDECK_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address)")
 	apiKey := flag.String("key", envOr("DEVDECK_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
 	hubURL := flag.String("hub-url", envOr("DEVDECK_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
@@ -242,6 +244,7 @@ func main() {
 	}
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
+	selfH := handler.NewSelfHandler(*managed)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
@@ -334,6 +337,8 @@ func main() {
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
 	mux.HandleFunc("GET /api/tailscale-status", tailscaleStatusH.ServeHTTP)
+	mux.HandleFunc("POST /api/self/restart", selfH.PostRestart)
+	mux.HandleFunc("POST /api/self/stop", selfH.PostStop)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
@@ -677,9 +682,9 @@ func startTailscaleServe(addr net.Addr) error {
 	if err != nil {
 		return fmt.Errorf("resolve listen port from %s: %w", addr, err)
 	}
-	bin, err := exec.LookPath("tailscale")
+	bin, err := detect.ResolveTailscale()
 	if err != nil {
-		return fmt.Errorf("tailscale CLI not found in PATH; install it or drop the flag")
+		return fmt.Errorf("tailscale CLI not found in PATH or common install locations; install it or drop the flag")
 	}
 	cmd := exec.Command(bin, "serve", port)
 	cmd.Stdout = os.Stdout
