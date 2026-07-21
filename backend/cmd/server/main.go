@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"flag"
@@ -162,6 +163,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("auth key: %v", err)
 	}
+	signingKey, err := loadOrCreateSigningKey(*dbPath)
+	if err != nil {
+		log.Fatalf("signing key: %v", err)
+	}
+	_ = signingKey // wired into handler.NewMachineHandler in Task 3
 	authSvc := service.NewAuthService(st, authKey)
 	authSvc.SetTOTPRequired(*twoFA)
 	if !*twoFA {
@@ -755,4 +761,36 @@ func loadOrCreateAuthKey(dbPath string) ([]byte, error) {
 		return nil, err
 	}
 	return key, nil
+}
+
+// loadOrCreateSigningKey returns the hub's Ed25519 keypair, used to sign
+// short-lived handover tokens (see internal/handovertoken). Persisted the
+// same way as loadOrCreateAuthKey: an env var override, then a file next to
+// the database, then generated fresh on first run. The private key format
+// (ed25519.PrivateKey) is 64 bytes and already contains the public key in
+// its second half.
+func loadOrCreateSigningKey(dbPath string) (ed25519.PrivateKey, error) {
+	if envKey := os.Getenv("DEVDECK_SIGNING_KEY"); envKey != "" {
+		key, err := base64.StdEncoding.DecodeString(envKey)
+		if err != nil || len(key) != ed25519.PrivateKeySize {
+			return nil, fmt.Errorf("DEVDECK_SIGNING_KEY must be a base64-encoded %d-byte Ed25519 private key", ed25519.PrivateKeySize)
+		}
+		return ed25519.PrivateKey(key), nil
+	}
+	keyPath := filepath.Join(filepath.Dir(dbPath), "signing.key")
+	if data, err := os.ReadFile(keyPath); err == nil {
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+		if err != nil || len(key) != ed25519.PrivateKeySize {
+			return nil, fmt.Errorf("corrupt signing key file %s", keyPath)
+		}
+		return ed25519.PrivateKey(key), nil
+	}
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(keyPath, []byte(base64.StdEncoding.EncodeToString(priv)), 0o600); err != nil {
+		return nil, err
+	}
+	return priv, nil
 }
