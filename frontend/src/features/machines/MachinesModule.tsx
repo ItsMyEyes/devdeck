@@ -1,4 +1,4 @@
-import { Monitor, Plus, Server, Settings2, Trash2 } from 'lucide-react'
+import { Monitor, Plus, Power, RotateCw, Server, Settings2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { DataLoading } from '@/features/screens/DataLoading'
@@ -35,6 +35,7 @@ function RuntimeHealth({ machineId }: { machineId: string }) {
 function MachineRow({ machine }: { machine: Machine }) {
   const openEditMachine = useDevDeckStore((s) => s.openEditMachine)
   const askDelete = useDevDeckStore((s) => s.askDelete)
+  const askMachineAction = useDevDeckStore((s) => s.askMachineAction)
   return (
     <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
       <div className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-devdeck-surface-2 text-devdeck-muted">
@@ -56,30 +57,49 @@ function MachineRow({ machine }: { machine: Machine }) {
       <div className="col-span-2 flex items-center gap-2 pl-12 lg:col-span-1 lg:pl-0">
         <RuntimeHealth machineId={machine.id} />
         <div className="min-w-2 flex-1 lg:hidden" />
-        {machine.isLocal ? (
-          <span className="ml-auto rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-dim-2 lg:ml-0">
-            managed
-          </span>
-        ) : (
-          <div className="ml-auto flex items-center gap-1 lg:ml-0">
-            <button
-              type="button"
-              aria-label={`Edit ${machine.name}`}
-              onClick={() => openEditMachine(machine.id, machine.name, machine.url, machine.key)}
-              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            >
-              <Settings2 size={13} />
-            </button>
-            <button
-              type="button"
-              aria-label={`Delete ${machine.name}`}
-              onClick={() => askDelete('machine', machine.id, machine.name)}
-              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-1 lg:ml-0">
+          {machine.isLocal ? (
+            <span className="rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-dim-2">
+              managed
+            </span>
+          ) : null}
+          <button
+            type="button"
+            aria-label={`Restart ${machine.name}`}
+            onClick={() => askMachineAction('restart', machine.id, machine.name)}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <RotateCw size={13} />
+          </button>
+          {machine.isLocal ? null : (
+            <>
+              <button
+                type="button"
+                aria-label={`Stop ${machine.name}`}
+                onClick={() => askMachineAction('stop', machine.id, machine.name)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <Power size={13} />
+              </button>
+              <button
+                type="button"
+                aria-label={`Edit ${machine.name}`}
+                onClick={() => openEditMachine(machine.id, machine.name, machine.url, machine.key)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <Settings2 size={13} />
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${machine.name}`}
+                onClick={() => askDelete('machine', machine.id, machine.name)}
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <Trash2 size={13} />
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </article>
   )
