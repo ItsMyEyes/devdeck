@@ -152,6 +152,42 @@ func (h *MachineHandler) PostToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 }
 
+// PostMachineRestart handles POST /api/machines/{id}/restart: tells the
+// target machine's own process to restart itself. Works for the local
+// machine too — its stored URL is its own http://127.0.0.1:<port>, so this
+// is a loopback call back into this exact process. See machineclient.Restart.
+func (h *MachineHandler) PostMachineRestart(w http.ResponseWriter, r *http.Request) {
+	m, err := h.st.MachineByID(r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	if err := machineclient.Restart(r.Context(), m); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
+}
+
+// PostMachineStop handles POST /api/machines/{id}/stop: tells the target
+// machine's own process to stop. Refused for the local machine — the Tauri
+// desktop's respawn loop would just relaunch it, so there is no "stopped"
+// state to reach for that row (see design doc, Decision 3).
+func (h *MachineHandler) PostMachineStop(w http.ResponseWriter, r *http.Request) {
+	m, err := h.st.MachineByID(r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	if m.IsLocal {
+		writeErr(w, http.StatusBadRequest, "the local machine can't be stopped from here")
+		return
+	}
+	if err := machineclient.Stop(r.Context(), m); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
+}
+
 func healthResponse(s machineclient.HealthStatus) map[string]any {
 	if s.Status != "online" {
 		return map[string]any{"status": "offline"}

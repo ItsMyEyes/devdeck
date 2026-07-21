@@ -459,6 +459,8 @@ func main() {
 		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
 		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
 		mux.HandleFunc("POST /api/machines/{id}/token", machineH.PostToken)
+		mux.HandleFunc("POST /api/machines/{id}/restart", machineH.PostMachineRestart)
+		mux.HandleFunc("POST /api/machines/{id}/stop", machineH.PostMachineStop)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 
 		// Catalog: a runtime pulls its own machine-scoped slice here, using

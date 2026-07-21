@@ -229,6 +229,96 @@ func TestGetMachinesIncludesTheHubSigningPublicKey(t *testing.T) {
 	}
 }
 
+func TestPostMachineRestartCallsTheMachinesSelfRestart(t *testing.T) {
+	var gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/restart", h.PostMachineRestart)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/restart", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/self/restart" {
+		t.Errorf("backend received path %q, want /api/self/restart", gotPath)
+	}
+}
+
+func TestPostMachineRestartSurfacesUnreachable(t *testing.T) {
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("dead", "http://127.0.0.1:1", "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/restart", h.PostMachineRestart)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/restart", nil))
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 for an unreachable machine", rec.Code)
+	}
+}
+
+func TestPostMachineStopCallsTheMachinesSelfStop(t *testing.T) {
+	var gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/stop", h.PostMachineStop)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/stop", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/self/stop" {
+		t.Errorf("backend received path %q, want /api/self/stop", gotPath)
+	}
+}
+
+func TestPostMachineStopRefusesForLocalMachine(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("must not call the local machine's /api/self/stop at all")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("desktop", backend.URL, "k", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/stop", h.PostMachineStop)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/stop", nil))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for stopping the local machine", rec.Code)
+	}
+}
+
 func TestPostTokenMintsAHandoverTokenForTheAuthenticatedUser(t *testing.T) {
 	st := store.NewTestStore(t)
 	m, _ := st.CreateMachine("builder", "https://a.ts.net", "key-a", false)
