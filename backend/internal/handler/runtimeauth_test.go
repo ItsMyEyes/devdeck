@@ -173,3 +173,14 @@ func TestRequireRuntimeAuthStillAcceptsBearerKeyAlongsideTokenSupport(t *testing
 		t.Errorf("bearer key rejected: code=%d hit=%v", rec.Code, hit)
 	}
 }
+
+func TestRequireRuntimeAuthAllowsWhoamiWithoutACredential(t *testing.T) {
+	var hit bool
+	mw := RequireRuntimeAuth(nil, "rt-key")
+	req := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
+	rec := httptest.NewRecorder()
+	mw(okHandler(&hit)).ServeHTTP(rec, req)
+	if !hit || rec.Code != http.StatusOK {
+		t.Errorf("unauthenticated /api/whoami: code=%d hit=%v, want 200 — the frontend must be able to learn this process's role before any credential exists", rec.Code, hit)
+	}
+}

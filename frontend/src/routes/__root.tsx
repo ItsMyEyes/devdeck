@@ -2,13 +2,15 @@ import { createRootRouteWithContext, Outlet, redirect } from '@tanstack/react-ro
 import type { QueryClient } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { meQueryOptions } from '@/features/data/authQueries'
+import { qk } from '@/features/data/keys'
+import { fetchWhoami } from '@/lib/api'
 import { useViewportHeight } from '@/features/useViewportHeight'
 
 export interface RouterContext {
   queryClient: QueryClient
 }
 
-const PUBLIC_PATHS = new Set(['/login', '/register', '/2fa-setup', '/access-denied', '/handover'])
+const PUBLIC_PATHS = new Set(['/login', '/register', '/2fa-setup', '/access-denied', '/handover', '/runtime-sign-in'])
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {
@@ -16,6 +18,12 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     try {
       await context.queryClient.ensureQueryData(meQueryOptions)
     } catch {
+      const whoami = await context.queryClient
+        .fetchQuery({ queryKey: qk.whoami, queryFn: fetchWhoami })
+        .catch(() => null)
+      if (whoami?.role === 'runtime') {
+        throw redirect({ to: '/runtime-sign-in' })
+      }
       throw redirect({ to: '/login' })
     }
   },

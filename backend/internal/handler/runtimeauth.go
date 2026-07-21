@@ -48,6 +48,13 @@ func RequireRuntimeAuth(svc *service.AuthService, key string) func(http.Handler)
 	publicPaths := map[string]bool{
 		"/api/health":           true,
 		"/api/auth/key-session": true,
+		// The frontend must be able to tell "this is a runtime" apart from
+		// "this is a hub" BEFORE any credential exists, to decide whether an
+		// unauthenticated visitor should see the runtime sign-in page or the
+		// hub's password/TOTP login — see __root.tsx's beforeLoad. Nothing in
+		// this payload (role, machineName, hubUrl, machineId, lastSyncedAt)
+		// is secret.
+		"/api/whoami": true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
