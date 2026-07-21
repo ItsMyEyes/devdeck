@@ -4,6 +4,7 @@ import { NewWorkspaceDialog } from './NewWorkspaceDialog'
 import { FolderBrowser } from './FolderBrowser'
 import { EditDrawer } from './EditDrawer'
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog'
+import { ConfirmMachineActionDialog } from './ConfirmMachineActionDialog'
 import { TransferStatusPanel } from './TransferStatusPanel'
 import { MachineDialog } from '@/features/machines/MachineDialog'
 import { SSHConnectionDialog } from '@/features/ssh/SSHConnectionDialog'
@@ -19,6 +20,7 @@ export function GlobalOverlays() {
       <FolderBrowser />
       <EditDrawer />
       <ConfirmDeleteDialog />
+      <ConfirmMachineActionDialog />
       <TransferStatusPanel />
       <MachineDialog />
       <SSHConnectionDialog />
