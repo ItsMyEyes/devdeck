@@ -148,6 +148,8 @@ export interface Machine {
   key: string
   /** True only for the Tauri desktop shell's self-registered embedded runtime. */
   isLocal: boolean
+  /** The hub's Ed25519 public key (base64) — the same value on every machine; unused by the UI, present only to mirror the backend type. */
+  signingPublicKey: string
 }
 
 /** A saved SSH connection (operator-global registry — mirrors the backend's

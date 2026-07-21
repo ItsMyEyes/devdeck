@@ -167,7 +167,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("signing key: %v", err)
 	}
-	_ = signingKey // wired into handler.NewMachineHandler in Task 3
 	authSvc := service.NewAuthService(st, authKey)
 	authSvc.SetTOTPRequired(*twoFA)
 	if !*twoFA {
@@ -261,7 +260,7 @@ func main() {
 	eventH := handler.NewEventHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
-	machineH := handler.NewMachineHandler(st, healthCache)
+	machineH := handler.NewMachineHandler(st, healthCache, authSvc, signingKey)
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
 	sshH := handler.NewSSHHandler(st, sshSecrets)
@@ -454,6 +453,7 @@ func main() {
 		mux.HandleFunc("PATCH /api/machines/{id}", machineH.PatchMachine)
 		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
 		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
+		mux.HandleFunc("POST /api/machines/{id}/token", machineH.PostToken)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 
 		// Catalog: a runtime pulls its own machine-scoped slice here, using

@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/handovertoken"
 	"devdeck/backend/internal/machineclient"
 	"devdeck/backend/internal/service"
 	"devdeck/backend/internal/store"
@@ -19,7 +25,8 @@ func newTestMachineHandler(t *testing.T) *MachineHandler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return NewMachineHandler(store.New(db), service.NewMachineHealthCache())
+	_, priv, _ := ed25519.GenerateKey(nil)
+	return NewMachineHandler(store.New(db), service.NewMachineHealthCache(), nil, priv)
 }
 
 func TestPostMachineValidatesRequiredFields(t *testing.T) {
@@ -179,7 +186,8 @@ func TestMachineHealthServesFromCacheWithoutLiveCheck(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
 	cache := service.NewMachineHealthCache()
-	h := NewMachineHandler(st, cache)
+	_, priv, _ := ed25519.GenerateKey(nil)
+	h := NewMachineHandler(st, cache, nil, priv)
 
 	// Unreachable URL: if the handler ever did a live check here, it would
 	// report offline. The cached value must win instead.
@@ -195,5 +203,82 @@ func TestMachineHealthServesFromCacheWithoutLiveCheck(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/health", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"online"`) || !strings.Contains(rec.Body.String(), `"latencyMs":42`) {
 		t.Errorf("status=%d body=%s, want cached online/42", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetMachinesIncludesTheHubSigningPublicKey(t *testing.T) {
+	st := store.NewTestStore(t)
+	st.CreateMachine("builder", "https://a.ts.net", "key-a", false)
+	_, priv, _ := ed25519.GenerateKey(nil)
+
+	h := NewMachineHandler(st, service.NewMachineHealthCache(), nil, priv)
+	req := httptest.NewRequest(http.MethodGet, "/api/machines", nil)
+	rec := httptest.NewRecorder()
+	h.GetMachines(rec, req)
+
+	var got []domain.Machine
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SigningPublicKey == "" {
+		t.Fatalf("GetMachines() = %+v, want one machine with a non-empty SigningPublicKey", got)
+	}
+	wantPub := base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))
+	if got[0].SigningPublicKey != wantPub {
+		t.Errorf("SigningPublicKey = %q, want %q (base64 of priv.Public())", got[0].SigningPublicKey, wantPub)
+	}
+}
+
+func TestPostTokenMintsAHandoverTokenForTheAuthenticatedUser(t *testing.T) {
+	st := store.NewTestStore(t)
+	m, _ := st.CreateMachine("builder", "https://a.ts.net", "key-a", false)
+	_, priv, _ := ed25519.GenerateKey(nil)
+	authKey := make([]byte, 32)
+	authSvc := service.NewAuthService(st, authKey)
+
+	// KeySession's underlying mechanism creates/reuses the single operator
+	// account and issues a real session — reused here purely to get a
+	// valid (userID, sessionToken) pair to authenticate the request with,
+	// the same way any other authenticated hub handler test would.
+	sessionToken, user, err := authSvc.KeySession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewMachineHandler(st, service.NewMachineHealthCache(), authSvc, priv)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/token", h.PostToken)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/token", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	pub := priv.Public().(ed25519.PublicKey)
+	claims, err := handovertoken.Verify(pub, body.Token, m.ID, time.Now())
+	if err != nil {
+		t.Fatalf("minted token failed to verify: %v", err)
+	}
+	if claims.Sub != user.ID {
+		t.Errorf("claims.Sub = %q, want %q", claims.Sub, user.ID)
+	}
+
+	// A request for a machine id that doesn't exist must 404, not silently
+	// mint a token for nothing.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/machines/m-does-not-exist/token", nil)
+	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("status for unknown machine = %d, want 404", rec2.Code)
 	}
 }

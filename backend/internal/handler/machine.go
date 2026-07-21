@@ -1,9 +1,14 @@
 package handler
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"net/http"
 	"net/url"
+	"time"
 
+	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/handovertoken"
 	"devdeck/backend/internal/machineclient"
 	"devdeck/backend/internal/port"
 	"devdeck/backend/internal/service"
@@ -14,10 +19,27 @@ import (
 type MachineHandler struct {
 	st          *store.Store
 	healthCache *service.MachineHealthCache
+	authSvc     *service.AuthService // nil-safe: only PostToken (Task 4) uses it
+	signingPriv ed25519.PrivateKey
 }
 
-func NewMachineHandler(st *store.Store, healthCache *service.MachineHealthCache) *MachineHandler {
-	return &MachineHandler{st: st, healthCache: healthCache}
+func NewMachineHandler(st *store.Store, healthCache *service.MachineHealthCache, authSvc *service.AuthService, signingPriv ed25519.PrivateKey) *MachineHandler {
+	return &MachineHandler{st: st, healthCache: healthCache, authSvc: authSvc, signingPriv: signingPriv}
+}
+
+// withSigningKey stamps every Machine in the slice with this hub's Ed25519
+// public key before it's serialized — see domain.Machine.SigningPublicKey.
+func (h *MachineHandler) withSigningKey(machines []domain.Machine) []domain.Machine {
+	pub := base64.StdEncoding.EncodeToString(h.signingPriv.Public().(ed25519.PublicKey))
+	for i := range machines {
+		machines[i].SigningPublicKey = pub
+	}
+	return machines
+}
+
+func (h *MachineHandler) withSigningKeyOne(m domain.Machine) domain.Machine {
+	m.SigningPublicKey = base64.StdEncoding.EncodeToString(h.signingPriv.Public().(ed25519.PublicKey))
+	return m
 }
 
 // validMachineURL accepts absolute http/https URLs.
@@ -33,7 +55,7 @@ func (h *MachineHandler) GetMachines(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, h.withSigningKey(list))
 }
 
 func (h *MachineHandler) PostMachine(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +85,7 @@ func (h *MachineHandler) PostMachine(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, h.withSigningKeyOne(m))
 }
 
 func (h *MachineHandler) PatchMachine(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +102,7 @@ func (h *MachineHandler) PatchMachine(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, h.withSigningKeyOne(m))
 }
 
 func (h *MachineHandler) DeleteMachine(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +128,28 @@ func (h *MachineHandler) GetMachineHealth(w http.ResponseWriter, r *http.Request
 		status = machineclient.CheckHealth(r.Context(), m)
 	}
 	writeJSON(w, http.StatusOK, healthResponse(status))
+}
+
+// PostToken handles POST /api/machines/{id}/token. The caller must already
+// hold a valid hub session (this route is hub-only, gated by the normal
+// RequireAuth cookie check — no new auth path here). It mints a 60-second
+// token scoped to this one machine, which the browser then uses to sign
+// into that runtime's own UI without re-entering credentials.
+func (h *MachineHandler) PostToken(w http.ResponseWriter, r *http.Request) {
+	user, err := h.authSvc.CurrentUser(cookieValue(r, sessionCookieName))
+	if handleStoreErr(w, err) {
+		return
+	}
+	m, err := h.st.MachineByID(r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	tok, err := handovertoken.Issue(h.signingPriv, user.ID, m.ID, time.Now())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 }
 
 func healthResponse(s machineclient.HealthStatus) map[string]any {

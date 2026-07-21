@@ -230,6 +230,15 @@ type Machine struct {
 	// managed automatically by the desktop app's own lifecycle, not the
 	// operator, and auto-selects it as the default machine.
 	IsLocal bool `json:"isLocal"`
+	// SigningPublicKey is the HUB's Ed25519 public key (base64), the same
+	// value on every Machine this hub ever returns — it is a property of
+	// the hub, not of any individual machine. It rides here rather than a
+	// dedicated endpoint because every registered runtime already fetches
+	// its own Machine record via the exact POST/PATCH /api/machines call it
+	// makes to self-register (see machineclient.SelfRegister), so this is
+	// "free": no new round trip, no bootstrap-ordering problem. Runtimes
+	// use it to verify hub-signed handover tokens (internal/handovertoken).
+	SigningPublicKey string `json:"signingPublicKey"`
 }
 
 // SSHConnection is a saved connection to an arbitrary external SSH host —
