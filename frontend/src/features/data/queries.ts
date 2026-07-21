@@ -65,8 +65,10 @@ import {
   fetchWorkspaces,
   markAllNewsRead,
   mintHandoverToken,
+  restartMachine,
   seed,
   setDBSecret,
+  stopMachine,
   testDBConnection,
   uploadAttachment,
   updateBank,
@@ -239,6 +241,28 @@ export function useDeleteMachine() {
   return useMutation({
     mutationFn: (id: string) => deleteMachine(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.machines }),
+  })
+}
+
+export function useRestartMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => restartMachine(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: qk.machines })
+      queryClient.invalidateQueries({ queryKey: qk.machineHealth(id) })
+    },
+  })
+}
+
+export function useStopMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => stopMachine(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: qk.machines })
+      queryClient.invalidateQueries({ queryKey: qk.machineHealth(id) })
+    },
   })
 }
 

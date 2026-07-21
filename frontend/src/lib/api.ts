@@ -661,6 +661,14 @@ export function deleteMachine(id: string): Promise<void> {
   return request<void>('DELETE', `/machines/${id}`)
 }
 
+export function restartMachine(id: string): Promise<void> {
+  return request<void>('POST', `/machines/${id}/restart`)
+}
+
+export function stopMachine(id: string): Promise<void> {
+  return request<void>('POST', `/machines/${id}/stop`)
+}
+
 export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
 }
