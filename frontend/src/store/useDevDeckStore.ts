@@ -29,6 +29,7 @@ import type {
 } from './types'
 
 export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh' | 'ssh-group'
+export type MachineAction = 'restart' | 'stop'
 
 export interface Transfer {
   id: string
@@ -197,6 +198,7 @@ interface DevDeckState {
   browse: { open: boolean; target: BrowseTarget; path: string[]; machineId: string }
   edit: EditState
   confirmDelete: { kind: EditKind; id: string; name: string } | null
+  confirmMachineAction: { action: MachineAction; id: string; name: string } | null
   todoDraft: { text: string; pri: Priority }
   todoFilter: TodoFilter
   machineDialog: MachineDialogState
@@ -307,6 +309,8 @@ interface DevDeckState {
   setEdit: (patch: Partial<Pick<EditState, 'a' | 'b' | 'model'>>) => void
   askDelete: (kind: EditKind, id: string, name: string) => void
   cancelConfirm: () => void
+  askMachineAction: (action: MachineAction, id: string, name: string) => void
+  cancelMachineAction: () => void
 
   // folder browser
   openBrowse: (target: BrowseTarget, initialPath?: string, machineId?: string) => void
@@ -410,6 +414,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       browse: { open: false, target: 'newPath', path: [], machineId: '' },
       edit: { kind: null, id: null, a: '', b: '', model: '' },
       confirmDelete: null,
+      confirmMachineAction: null,
       transfers: [],
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
@@ -636,6 +641,8 @@ export const useDevDeckStore = create<DevDeckState>()(
       setEdit: (patch) => set((s) => void Object.assign(s.edit, patch)),
       askDelete: (kind, id, name) => set((s) => void (s.confirmDelete = { kind, id, name })),
       cancelConfirm: () => set((s) => void (s.confirmDelete = null)),
+      askMachineAction: (action, id, name) => set((s) => void (s.confirmMachineAction = { action, id, name })),
+      cancelMachineAction: () => set((s) => void (s.confirmMachineAction = null)),
 
       openBrowse: (target, initialPath, machineId) =>
         set(
