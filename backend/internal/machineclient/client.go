@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -110,4 +111,56 @@ func Probe(ctx context.Context, rawURL, key string) error {
 		return fmt.Errorf("machine returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// Restart tells m's runtime process to restart itself via its own
+// /api/self/restart endpoint. The call completes as soon as the target
+// accepts the request (200) — it does not wait for the target to actually
+// come back up; callers that care about that poll CheckHealth afterward,
+// same as any other machine state change.
+func Restart(ctx context.Context, m domain.Machine) error {
+	return postSelf(ctx, m, "restart")
+}
+
+// Stop tells m's runtime process to stop. See Restart for the "call
+// completes on acceptance, not on completion" note.
+func Stop(ctx context.Context, m domain.Machine) error {
+	return postSelf(ctx, m, "stop")
+}
+
+func postSelf(ctx context.Context, m domain.Machine, action string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	url := strings.TrimRight(m.URL, "/") + "/api/self/" + action
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.Key)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("machine %s unreachable: %w", m.ID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		msg := extractErrorMessage(body, resp.StatusCode)
+		return fmt.Errorf("machine %s: %s", m.ID, msg)
+	}
+	return nil
+}
+
+// extractErrorMessage unwraps the {"error":"..."} envelope every DevDeck
+// handler uses, so callers see the target's actual reason (e.g. "supervised
+// by its desktop app...") instead of a raw status code or JSON blob.
+func extractErrorMessage(body []byte, status int) string {
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && envelope.Error != "" {
+		return envelope.Error
+	}
+	return fmt.Sprintf("returned status %d", status)
 }
