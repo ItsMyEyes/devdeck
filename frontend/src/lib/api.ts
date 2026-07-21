@@ -665,6 +665,11 @@ export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
 }
 
+/** Mints a 60-second hub-signed handover token scoped to one machine — see internal/handovertoken. */
+export function mintHandoverToken(machineId: string): Promise<{ token: string }> {
+  return request<{ token: string }>('POST', `/machines/${machineId}/token`)
+}
+
 export interface TailscaleHubStatus {
   ready: boolean
   reason?: 'not_installed' | 'not_ready' | 'serve_disabled'

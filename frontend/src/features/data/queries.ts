@@ -64,6 +64,7 @@ import {
   fetchWhoami,
   fetchWorkspaces,
   markAllNewsRead,
+  mintHandoverToken,
   seed,
   setDBSecret,
   testDBConnection,
@@ -238,6 +239,13 @@ export function useDeleteMachine() {
   return useMutation({
     mutationFn: (id: string) => deleteMachine(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.machines }),
+  })
+}
+
+/** Mints a hub-signed handover token for the /handover SSO handshake — see docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md. */
+export function useMintHandoverToken() {
+  return useMutation({
+    mutationFn: (machineId: string) => mintHandoverToken(machineId),
   })
 }
 

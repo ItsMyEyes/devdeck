@@ -8,7 +8,7 @@ export interface RouterContext {
   queryClient: QueryClient
 }
 
-const PUBLIC_PATHS = new Set(['/login', '/register', '/2fa-setup', '/access-denied'])
+const PUBLIC_PATHS = new Set(['/login', '/register', '/2fa-setup', '/access-denied', '/handover'])
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {

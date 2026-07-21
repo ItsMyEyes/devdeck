@@ -7,12 +7,20 @@ import { ApiError } from '@/lib/api'
 import { useAuthConfig, useLogin, useVerifyTotp } from '@/features/data/authQueries'
 import { TurnstileWidget } from '@/features/auth/TurnstileWidget'
 
+interface LoginSearch {
+  next?: string
+}
+
 export const Route = createFileRoute('/login')({
+  validateSearch: (search: Record<string, unknown>): LoginSearch => ({
+    next: typeof search.next === 'string' ? search.next : undefined,
+  }),
   component: LoginPage,
 })
 
 function LoginPage() {
   const navigate = useNavigate()
+  const { next } = Route.useSearch()
   const login = useLogin()
   const verifyTotp = useVerifyTotp()
   const authConfig = useAuthConfig()
@@ -27,6 +35,14 @@ function LoginPage() {
   // after a failed login consumed the token server-side.
   const [turnstileKey, setTurnstileKey] = useState(0)
 
+  function goNext() {
+    if (next) {
+      window.location.href = next // may be a different route entirely (e.g. /handover?...); a full navigation keeps this simple and correct either way
+    } else {
+      navigate({ to: '/' })
+    }
+  }
+
   function submitCredentials() {
     setError(null)
     login.mutate(
@@ -34,8 +50,7 @@ function LoginPage() {
       {
         // status 'ok' means the server runs with --2fa=false and the
         // session cookie is already set; there is no TOTP step.
-        onSuccess: (data) =>
-          data.status === 'ok' ? navigate({ to: '/' }) : setStep('totp'),
+        onSuccess: (data) => (data.status === 'ok' ? goNext() : setStep('totp')),
         onError: (err) => {
           setError(err instanceof ApiError ? err.message : 'Login failed')
           if (turnstileSiteKey) {
@@ -52,7 +67,7 @@ function LoginPage() {
     verifyTotp.mutate(
       { code },
       {
-        onSuccess: () => navigate({ to: '/' }),
+        onSuccess: () => goNext(),
         onError: (err) => setError(err instanceof ApiError ? err.message : 'Invalid code'),
       },
     )
