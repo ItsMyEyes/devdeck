@@ -73,7 +73,10 @@ export function DBTabStrip({
     reorder(connectionId, String(active.id), String(over.id))
   }
 
-  if (state.tabs.length === 0) return null
+  // Always render the strip, even with zero open tabs: the "+" popover
+  // below is the only UI entry point for "New table"/"New SQL query", so
+  // hiding this whole bar on an empty tab list (first connection open, or
+  // closing the last tab) would leave no way to open anything.
 
   return (
     <div className="flex flex-none items-stretch border-b border-devdeck-border-menu bg-devdeck-surface-2">
