@@ -6,6 +6,7 @@ import { EditDrawer } from './EditDrawer'
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog'
 import { ConfirmMachineActionDialog } from './ConfirmMachineActionDialog'
 import { TransferStatusPanel } from './TransferStatusPanel'
+import { DesktopSettingsDialog } from './DesktopSettingsDialog'
 import { MachineDialog } from '@/features/machines/MachineDialog'
 import { SSHConnectionDialog } from '@/features/ssh/SSHConnectionDialog'
 import { RenameSSHGroupDialog } from '@/features/ssh/RenameSSHGroupDialog'
@@ -22,6 +23,7 @@ export function GlobalOverlays() {
       <ConfirmDeleteDialog />
       <ConfirmMachineActionDialog />
       <TransferStatusPanel />
+      <DesktopSettingsDialog />
       <MachineDialog />
       <SSHConnectionDialog />
       <RenameSSHGroupDialog />
