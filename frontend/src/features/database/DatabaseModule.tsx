@@ -1,19 +1,22 @@
 import { useMemo, useState } from 'react'
-import { Database as DatabaseIcon, Pencil, Plus, RefreshCw, SquareTerminal, Table2 } from 'lucide-react'
+import { Database as DatabaseIcon, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { StatusDot } from '@/components/ui/status-dot'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useDBConnections, useDBEngines } from '@/features/data/queries'
 import { cn } from '@/lib/utils'
 import { DBCommitDialog } from './DBCommitDialog'
 import { DBConnectionDialog } from './DBConnectionDialog'
 import { DBDDLView } from './DBDDLView'
-import { emptyDBTabState } from './dbTabs'
+import { DBInspectorPanel } from './DBInspectorPanel'
 import { DBObjectTree } from './DBObjectTree'
 import { DBSqlEditor } from './DBSqlEditor'
-import { DBTabBar } from './DBTabBar'
+import { DBTabStrip } from './DBTabStrip'
 import { DBTableDesigner } from './DBTableDesigner'
 import { DBTableGrid } from './DBTableGrid'
+import { emptyDBTabState } from './dbTabs'
+import { EngineGlyph } from './EngineGlyph'
 import type { DBConnection } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
@@ -21,15 +24,6 @@ const ALL_GROUPS = '__all__'
 
 function groupLabel(group: string) {
   return group.trim() || 'Ungrouped'
-}
-
-function EngineGlyph({ engine }: { engine: DBConnection['engine'] }) {
-  const label = engine === 'postgres' ? 'PG' : engine === 'mysql' ? 'My' : 'lite'
-  return (
-    <span className="flex h-8 w-8 flex-none items-center justify-center rounded-[10px] border border-devdeck-border-accent bg-devdeck-accent-tint font-mono text-[10px] font-semibold text-devdeck-accent-soft">
-      {label}
-    </span>
-  )
 }
 
 function ConnectionCard({ conn, onOpen, onEdit }: { conn: DBConnection; onOpen: () => void; onEdit: () => void }) {
@@ -79,8 +73,13 @@ export function DatabaseModule() {
   const openAdd = useDevDeckStore((s) => s.openAddDBConnection)
   const openEdit = useDevDeckStore((s) => s.openEditDBConnection)
   const openDBTab = useDevDeckStore((s) => s.openDBTab)
+  const activeConnectionId = useDevDeckStore((s) => s.dbActiveConnectionId)
+  const setActiveConnectionId = useDevDeckStore((s) => s.setDBActiveConnectionId)
+  const inspectorCollapsed = useDevDeckStore((s) => s.dbInspectorCollapsed)
+  const setInspectorCollapsed = useDevDeckStore((s) => s.setDBInspectorCollapsed)
+  const testStatus = useDevDeckStore((s) => s.dbConnectionTestStatus)
   const [query, setQuery] = useState('')
-  const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
+  const [dirtyTabIds, setDirtyTabIds] = useState<ReadonlySet<string>>(new Set())
   const activeConnection = connections?.find((c) => c.id === activeConnectionId) ?? null
   const { data: engines } = useDBEngines()
   // Selector reads conditionally, but the hook call itself is unconditional —
@@ -89,6 +88,15 @@ export function DatabaseModule() {
   // component instance (activeConnection toggles within one mount).
   const activeTabState = useDevDeckStore((s) => (activeConnection ? s.dbTabs[activeConnection.id] : undefined)) ?? emptyDBTabState()
   const activeTab = activeTabState.tabs.find((t) => t.id === activeTabState.activeTabId) ?? null
+
+  function setTabDirty(tabId: string, dirty: boolean) {
+    setDirtyTabIds((prev) => {
+      const next = new Set(prev)
+      if (dirty) next.add(tabId)
+      else next.delete(tabId)
+      return next
+    })
+  }
 
   const groups = useMemo(() => {
     if (!connections) return []
@@ -111,61 +119,86 @@ export function DatabaseModule() {
       <div className="flex h-full min-h-0 flex-col">
         {activeConnection ? (
           <div className="flex min-h-0 flex-1">
-            <div className="w-64 flex-none overflow-auto border-r border-devdeck-border-menu">
-              <div className="flex h-9 items-center justify-between border-b border-devdeck-border-menu px-2.5">
-                <button type="button" onClick={() => setActiveConnectionId(null)} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
-                  ← Connections
+            <div className="flex w-64 flex-none flex-col overflow-hidden border-r border-devdeck-border-menu">
+              <div className="flex h-9 flex-none items-center border-b border-devdeck-border-menu px-2.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveConnectionId(null)}
+                  className="flex min-w-0 items-center gap-1.5 text-[11px] text-devdeck-dim hover:text-devdeck-fg"
+                >
+                  {testStatus[activeConnection.id] ? (
+                    <StatusDot color={testStatus[activeConnection.id].ok ? '#56d58a' : '#f87171'} size={6} />
+                  ) : null}
+                  <span className="truncate">← Connections</span>
                 </button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => openDBTab(activeConnection.id, { kind: 'designer', object: null })}
-                  aria-label="New table"
-                  title="New table"
-                >
-                  <Table2 size={13} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => openDBTab(activeConnection.id, { kind: 'query', savedQueryId: null, label: 'New query' })}
-                  aria-label="New SQL query"
-                  title="New SQL query"
-                >
-                  <SquareTerminal size={13} />
-                </Button>
               </div>
-              {engines?.[activeConnection.engine] ? (
-                <DBObjectTree
-                  connectionId={activeConnection.id}
-                  caps={engines[activeConnection.engine]}
-                  onOpenTable={(object) => openDBTab(activeConnection.id, { kind: 'table', object })}
-                  onOpenDDL={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
-                />
-              ) : (
-                <DataLoading compact label="loading capabilities…" />
-              )}
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col">
-              <DBTabBar connectionId={activeConnection.id} isProduction={activeConnection.isProduction} />
               <div className="min-h-0 flex-1 overflow-auto">
-                {!activeTab ? (
-                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">Select a table from the tree to browse it.</div>
-                ) : activeTab.kind === 'table' ? (
-                  <DBTableGrid connectionId={activeConnection.id} object={activeTab.object} />
-                ) : activeTab.kind === 'ddl' ? (
-                  <DBDDLView connectionId={activeConnection.id} object={activeTab.object} />
-                ) : activeTab.kind === 'designer' ? (
-                  <DBTableDesigner
+                {engines?.[activeConnection.engine] ? (
+                  <DBObjectTree
                     connectionId={activeConnection.id}
-                    object={activeTab.object}
-                    onApplied={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
+                    caps={engines[activeConnection.engine]}
+                    onOpenTable={(object) => openDBTab(activeConnection.id, { kind: 'table', object })}
+                    onOpenDDL={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
                   />
                 ) : (
-                  <DBSqlEditor connectionId={activeConnection.id} />
+                  <DataLoading compact label="loading capabilities…" />
                 )}
               </div>
             </div>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <DBTabStrip
+                connectionId={activeConnection.id}
+                isProduction={activeConnection.isProduction}
+                dirtyTabIds={dirtyTabIds}
+                onNewTable={() => openDBTab(activeConnection.id, { kind: 'designer', object: null })}
+                onNewQuery={() => openDBTab(activeConnection.id, { kind: 'query', savedQueryId: null, label: 'New query' })}
+                inspectorCollapsed={inspectorCollapsed}
+                onToggleInspector={() => setInspectorCollapsed(!inspectorCollapsed)}
+              />
+              <div className="relative min-h-0 flex-1 overflow-hidden">
+                {activeTabState.tabs.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">
+                    Select a table from the tree to browse it.
+                  </div>
+                ) : (
+                  // Every open tab stays mounted (hidden via CSS when
+                  // inactive) instead of only rendering the active one —
+                  // matching the terminal's PaneCanvas pattern. This is what
+                  // keeps a table's pending row edits alive when switching
+                  // to another tab and back, and what makes per-tab
+                  // dirty-dots reflect every tab, not just the visible one.
+                  activeTabState.tabs.map((tab) => (
+                    <div
+                      key={tab.id}
+                      className={cn('absolute inset-0 overflow-auto', tab.id === activeTabState.activeTabId ? 'block' : 'hidden')}
+                    >
+                      {tab.kind === 'table' ? (
+                        <DBTableGrid
+                          connectionId={activeConnection.id}
+                          object={tab.object}
+                          onDirtyChange={(d) => setTabDirty(tab.id, d)}
+                        />
+                      ) : tab.kind === 'ddl' ? (
+                        <DBDDLView connectionId={activeConnection.id} object={tab.object} />
+                      ) : tab.kind === 'designer' ? (
+                        <DBTableDesigner
+                          connectionId={activeConnection.id}
+                          object={tab.object}
+                          onApplied={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
+                        />
+                      ) : (
+                        <DBSqlEditor connectionId={activeConnection.id} onDirtyChange={(d) => setTabDirty(tab.id, d)} />
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            {!inspectorCollapsed ? (
+              <div className="w-72 flex-none overflow-auto border-l border-devdeck-border-menu">
+                <DBInspectorPanel connection={activeConnection} activeTab={activeTab} />
+              </div>
+            ) : null}
           </div>
         ) : (
           <>
