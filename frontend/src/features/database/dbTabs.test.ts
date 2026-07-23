@@ -6,7 +6,7 @@
  *   npx tsx src/features/database/dbTabs.test.ts
  */
 
-import { closeTab, emptyDBTabState, openTab, setActiveTab, tabId } from './dbTabs'
+import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, tabId } from './dbTabs'
 
 let passed = 0
 
@@ -78,6 +78,35 @@ check('designer tabs for "new table" and an existing table are distinct, and ded
 check('setActiveTab is a no-op for an id that is not open', () => {
   const s = openTab(emptyDBTabState(), { kind: 'table', object: OBJ })
   const s2 = setActiveTab(s, 'not-a-real-id')
+  assertEqual(s2, s, 'state unchanged')
+})
+
+check('reorderTab moves a tab before another', () => {
+  const objB = { ...OBJ, name: 'u' }
+  const objC = { ...OBJ, name: 'v' }
+  let s = openTab(emptyDBTabState(), { kind: 'table', object: OBJ })
+  s = openTab(s, { kind: 'table', object: objB })
+  s = openTab(s, { kind: 'table', object: objC })
+  const idA = tabId({ kind: 'table', object: OBJ })
+  const idB = tabId({ kind: 'table', object: objB })
+  const idC = tabId({ kind: 'table', object: objC })
+  s = reorderTab(s, idC, idA)
+  assertEqual(s.tabs.map((t) => t.id), [idC, idA, idB], 'C moved before A')
+})
+
+check('reorderTab moves to the end when the target id is not found', () => {
+  let s = openTab(emptyDBTabState(), { kind: 'table', object: OBJ })
+  const objB = { ...OBJ, name: 'u' }
+  s = openTab(s, { kind: 'table', object: objB })
+  const idA = tabId({ kind: 'table', object: OBJ })
+  s = reorderTab(s, idA, 'not-a-real-id')
+  assertEqual(s.tabs.map((t) => t.id), [tabId({ kind: 'table', object: objB }), idA], 'A moved to end')
+})
+
+check('reorderTab is a no-op when fromId equals toId', () => {
+  const s = openTab(emptyDBTabState(), { kind: 'table', object: OBJ })
+  const idA = tabId({ kind: 'table', object: OBJ })
+  const s2 = reorderTab(s, idA, idA)
   assertEqual(s2, s, 'state unchanged')
 })
 

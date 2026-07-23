@@ -53,6 +53,22 @@ export function closeTab(state: DBTabState, id: string): DBTabState {
   return { tabs, activeTabId: fallback ? fallback.id : null }
 }
 
+/** Moves the tab with id `fromId` to sit immediately before the tab with id
+ *  `toId` (or to the end, if `toId` is not found). Used by DBTabStrip's
+ *  drag-to-reorder. A no-op (returns the same state) if `fromId` is missing
+ *  or the two ids are equal. */
+export function reorderTab(state: DBTabState, fromId: string, toId: string): DBTabState {
+  if (fromId === toId) return state
+  const fromIndex = state.tabs.findIndex((t) => t.id === fromId)
+  if (fromIndex === -1) return state
+  const tabs = [...state.tabs]
+  const [moved] = tabs.splice(fromIndex, 1)
+  const toIndex = tabs.findIndex((t) => t.id === toId)
+  if (toIndex === -1) tabs.push(moved)
+  else tabs.splice(toIndex, 0, moved)
+  return { ...state, tabs }
+}
+
 export function setActiveTab(state: DBTabState, id: string): DBTabState {
   return state.tabs.some((t) => t.id === id) ? { ...state, activeTabId: id } : state
 }
