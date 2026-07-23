@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
 import type { WorktreeLayout } from '@/features/terminal/paneTree'
-import { closeTab, emptyDBTabState, openTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
+import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
 import {
   closeTileTab,
   createBrowserTab,
@@ -356,6 +356,19 @@ interface DevDeckState {
   openDBTab: (connectionId: string, content: DBTabDraft) => void
   closeDBTab: (connectionId: string, tabId: string) => void
   setDBActiveTab: (connectionId: string, tabId: string) => void
+  reorderDBTab: (connectionId: string, fromId: string, toId: string) => void
+
+  // db active connection + inspector pane (frontend-only UI state, not domain data)
+  dbActiveConnectionId: string | null
+  setDBActiveConnectionId: (id: string | null) => void
+  dbInspectorCollapsed: boolean
+  setDBInspectorCollapsed: (collapsed: boolean) => void
+
+  // db connection test status — the last explicit "Test" result per
+  // connection, not a live health check (the backend has no health-check
+  // endpoint); shown as a status dot in the object tree header.
+  dbConnectionTestStatus: Record<string, { ok: boolean; testedAt: string }>
+  setDBConnectionTestStatus: (connectionId: string, ok: boolean) => void
 
   // db commit-preview dialog (pending row edits from DBTableGrid)
   commitDialog: { open: boolean; connectionId: string; edits: DBRowEdit[]; onCommitted: (() => void) | null }
@@ -462,6 +475,9 @@ export const useDevDeckStore = create<DevDeckState>()(
       },
       dbActiveGroup: ALL_SSH_GROUPS, // reuse the existing "all groups" sentinel; see SSHConnectionsModule's identical usage
       dbTabs: {},
+      dbActiveConnectionId: null,
+      dbInspectorCollapsed: false,
+      dbConnectionTestStatus: {},
       commitDialog: { open: false, connectionId: '', edits: [], onCommitted: null },
       renameSSHGroup: { open: false, oldName: '', value: '' },
       dirtyFileCount: 0,
@@ -788,6 +804,13 @@ export const useDevDeckStore = create<DevDeckState>()(
         set((s) => void (s.dbTabs[connectionId] = closeTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
       setDBActiveTab: (connectionId, id) =>
         set((s) => void (s.dbTabs[connectionId] = setActiveTab(s.dbTabs[connectionId] ?? emptyDBTabState(), id))),
+      reorderDBTab: (connectionId, fromId, toId) =>
+        set((s) => void (s.dbTabs[connectionId] = reorderTab(s.dbTabs[connectionId] ?? emptyDBTabState(), fromId, toId))),
+
+      setDBActiveConnectionId: (id) => set((s) => void (s.dbActiveConnectionId = id)),
+      setDBInspectorCollapsed: (collapsed) => set((s) => void (s.dbInspectorCollapsed = collapsed)),
+      setDBConnectionTestStatus: (connectionId, ok) =>
+        set((s) => void (s.dbConnectionTestStatus[connectionId] = { ok, testedAt: new Date().toISOString() })),
 
       openCommitDialog: (connectionId, edits, onCommitted) =>
         set((s) => void (s.commitDialog = { open: true, connectionId, edits, onCommitted })),
@@ -809,6 +832,8 @@ export const useDevDeckStore = create<DevDeckState>()(
         sshTileLayouts: s.sshTileLayouts,
         railExpanded: s.railExpanded,
         workspaceTileLayouts: s.workspaceTileLayouts,
+        dbActiveConnectionId: s.dbActiveConnectionId,
+        dbTabs: s.dbTabs,
       }),
       // v2 -> v3 retires the flat `openTabs` shape for `workspaceTileLayouts`.
       // A bare version bump with no `migrate` discards the *entire*

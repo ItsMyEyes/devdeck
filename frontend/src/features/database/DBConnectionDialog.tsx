@@ -52,6 +52,7 @@ export function DBConnectionDialog() {
   const setDialog = useDevDeckStore((s) => s.setDBDialog)
   const close = useDevDeckStore((s) => s.closeDBDialog)
   const showToast = useDevDeckStore((s) => s.showToast)
+  const setConnectionTestStatus = useDevDeckStore((s) => s.setDBConnectionTestStatus)
   const createConnection = useCreateDBConnection()
   const updateConnection = useUpdateDBConnection()
   const deleteConnection = useDeleteDBConnection()
@@ -93,6 +94,7 @@ export function DBConnectionDialog() {
     setTestResult(null)
     const result = await testConnection.mutateAsync(dialog.editingId)
     setTestResult(result)
+    setConnectionTestStatus(dialog.editingId, result.ok)
   }
 
   function submit() {
