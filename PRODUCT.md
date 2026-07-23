@@ -31,3 +31,13 @@ Avoid SaaS gloss: no bright marketing gradients, oversized hero styling, decorat
 ## Accessibility & Inclusion
 
 Target WCAG AA contrast for text and controls. Preserve keyboard access for tab and pane workflows, visible focus states, and reduced-motion-safe transitions.
+
+## Module Exceptions
+
+The Database module (`features/database/`) is a deliberate, scoped
+exception to "accent color as state, not decoration." Dense per-kind object
+identification (table vs. view vs. function, engine identity, data type) is
+the primary usability need there, mirroring established database-client
+conventions (Navicat, DataGrip). Color there is role-based, not decorative —
+see `docs/superpowers/specs/2026-07-23-database-ui-redesign-design.md`. No
+other module gains new accent colors under this exception.
