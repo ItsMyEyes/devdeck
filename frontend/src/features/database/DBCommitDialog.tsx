@@ -50,7 +50,13 @@ export function DBCommitDialog() {
       <div className="mb-4 max-h-[280px] overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
         {dialog.edits.map((edit, i) => (
           <div key={i} className="mb-2 border-b border-devdeck-border-menu/50 pb-2 font-mono text-[11px] text-devdeck-fg-2 last:mb-0 last:border-0 last:pb-0">
-            <div className={cn('text-devdeck-dim', edit.kind === 'delete' && 'text-devdeck-red-soft')}>
+            <div
+              className={cn(
+                'text-devdeck-dim',
+                edit.kind === 'delete' && 'text-devdeck-red-soft',
+                edit.kind === 'insert' && 'text-devdeck-green-soft',
+              )}
+            >
               {edit.kind.toUpperCase()} {edit.object.name}
             </div>
             {edit.newValues

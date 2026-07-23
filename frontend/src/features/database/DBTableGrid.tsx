@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Plus, Trash2, Undo2, X } from 'lucide-react'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { Pill } from '@/components/ui/pill'
 import { useDBColumns, useDBRows } from '@/features/data/queries'
 import type { DBFilter, DBObjectRef, DBRowEdit, DBSortKey } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { classifyDataType, DB_TYPE_BADGE } from './dbColors'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { DBFilterBar } from './DBFilterBar'
 import { DBTableInfo } from './DBTableInfo'
@@ -247,14 +249,16 @@ export function DBTableGrid({
             <div style={{ width: IDENTITY_COL_WIDTH }} className="flex-none border-r border-devdeck-border-menu" />
             {columns.map((col) => {
               const sortEntry = sort.find((s) => s.column === col.name)
+              const badge = classifyDataType(col.dataType)
               return (
                 <button
                   key={col.name}
                   type="button"
                   onClick={() => toggleSort(col.name)}
                   style={{ minWidth: 140 }}
-                  className="flex h-8 flex-1 items-center gap-1 border-r border-devdeck-border-menu px-2.5 text-left font-mono text-[11px] font-medium text-devdeck-muted hover:text-devdeck-fg"
+                  className="flex h-8 flex-1 items-center gap-1.5 border-r border-devdeck-border-menu px-2.5 text-left font-mono text-[11px] font-medium text-devdeck-muted hover:text-devdeck-fg"
                 >
+                  {badge ? <Pill color={DB_TYPE_BADGE[badge].color}>{DB_TYPE_BADGE[badge].label}</Pill> : null}
                   <span className="truncate">{col.name}</span>
                   {sortEntry ? <span className="text-devdeck-accent-soft">{sortEntry.desc ? '↓' : '↑'}</span> : null}
                 </button>
