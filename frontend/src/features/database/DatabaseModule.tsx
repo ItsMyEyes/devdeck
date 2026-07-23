@@ -91,6 +91,14 @@ export function DatabaseModule() {
 
   function setTabDirty(tabId: string, dirty: boolean) {
     setDirtyTabIds((prev) => {
+      // Bail out (return the same reference) when the dirty flag hasn't
+      // actually changed. DBTableGrid/DBSqlEditor's onDirtyChange effects
+      // list the callback itself as a dependency, and the callback passed
+      // down here is a fresh arrow function on every DatabaseModule render
+      // — so without this early-out, every effect fire would produce a new
+      // Set reference, trigger a re-render, mint a new callback identity,
+      // and re-fire the effect again, forever.
+      if (prev.has(tabId) === dirty) return prev
       const next = new Set(prev)
       if (dirty) next.add(tabId)
       else next.delete(tabId)
