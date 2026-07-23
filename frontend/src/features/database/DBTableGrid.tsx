@@ -21,7 +21,15 @@ interface PendingInsert {
   values: Record<string, string>
 }
 
-export function DBTableGrid({ connectionId, object }: { connectionId: string; object: DBObjectRef }) {
+export function DBTableGrid({
+  connectionId,
+  object,
+  onDirtyChange,
+}: {
+  connectionId: string
+  object: DBObjectRef
+  onDirtyChange?: (dirty: boolean) => void
+}) {
   const { data: columns, isLoading: columnsLoading, error: columnsError } = useDBColumns(connectionId, object)
   const [filters, setFilters] = useState<DBFilter[]>([])
   const [sort, setSort] = useState<DBSortKey[]>([])
@@ -130,6 +138,10 @@ export function DBTableGrid({ connectionId, object }: { connectionId: string; ob
   ).size
   const filledInsertCount = pendingInserts.filter((r) => Object.keys(r.values).length > 0).length
   const pendingCount = updatedRowCount + pendingDeletes.size + filledInsertCount
+
+  useEffect(() => {
+    onDirtyChange?.(pendingCount > 0)
+  }, [pendingCount, onDirtyChange])
 
   const { data: page, isLoading: rowsLoading, error: rowsError } = useDBRows(connectionId, {
     object,

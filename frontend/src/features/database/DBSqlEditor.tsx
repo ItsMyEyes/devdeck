@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { sql } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -14,7 +14,13 @@ import {
 import { ApiError } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
-export function DBSqlEditor({ connectionId }: { connectionId: string }) {
+export function DBSqlEditor({
+  connectionId,
+  onDirtyChange,
+}: {
+  connectionId: string
+  onDirtyChange?: (dirty: boolean) => void
+}) {
   const { data: savedQueries } = useDBSavedQueries(connectionId)
   const createSaved = useCreateDBSavedQuery()
   const updateSaved = useUpdateDBSavedQuery()
@@ -23,8 +29,15 @@ export function DBSqlEditor({ connectionId }: { connectionId: string }) {
   const showToast = useDevDeckStore((s) => s.showToast)
 
   const [text, setText] = useState('SELECT 1;')
+  // The text at last save/load — dirty means the editor's text has diverged
+  // from it. Reset on save, on update, and when a saved query is loaded.
+  const [baseline, setBaseline] = useState('SELECT 1;')
   const [activeSavedId, setActiveSavedId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    onDirtyChange?.(text !== baseline)
+  }, [text, baseline, onDirtyChange])
 
   function run() {
     setError(null)
@@ -39,13 +52,16 @@ export function DBSqlEditor({ connectionId }: { connectionId: string }) {
     if (!name) return
     createSaved.mutate(
       { connectionId, name, sql: text },
-      { onSuccess: (q) => { setActiveSavedId(q.id); showToast(`Saved "${name}"`) } },
+      { onSuccess: (q) => { setActiveSavedId(q.id); setBaseline(text); showToast(`Saved "${name}"`) } },
     )
   }
 
   function updateActiveSaved() {
     if (!activeSavedId) return
-    updateSaved.mutate({ id: activeSavedId, connectionId, patch: { sql: text } }, { onSuccess: () => showToast('Updated saved query') })
+    updateSaved.mutate(
+      { id: activeSavedId, connectionId, patch: { sql: text } },
+      { onSuccess: () => { setBaseline(text); showToast('Updated saved query') } },
+    )
   }
 
   const result = runQuery.data
@@ -60,7 +76,7 @@ export function DBSqlEditor({ connectionId }: { connectionId: string }) {
           <div key={q.id} className="group mb-0.5 flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/[0.04]">
             <button
               type="button"
-              onClick={() => { setText(q.sql); setActiveSavedId(q.id) }}
+              onClick={() => { setText(q.sql); setActiveSavedId(q.id); setBaseline(q.sql) }}
               className="min-w-0 flex-1 truncate text-left font-mono text-[11.5px] text-devdeck-fg-2"
             >
               {q.name}
@@ -88,7 +104,7 @@ export function DBSqlEditor({ connectionId }: { connectionId: string }) {
             {activeSavedId ? 'Update' : 'Save'}
           </Button>
           {activeSavedId ? (
-            <Button variant="ghost" size="sm" onClick={() => { setActiveSavedId(null); setText('') }}>
+            <Button variant="ghost" size="sm" onClick={() => { setActiveSavedId(null); setText(''); setBaseline('') }}>
               <Plus size={12} />
               New
             </Button>
