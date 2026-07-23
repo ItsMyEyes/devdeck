@@ -1,8 +1,10 @@
-import { ChevronRight, Code2, Database as DatabaseIcon, FileCode, Table2 } from 'lucide-react'
+import { ChevronRight, Code2, Eye, FolderTree, Layers, Sigma, Table2 } from 'lucide-react'
 import { useState } from 'react'
 import { useDBTree } from '@/features/data/queries'
+import { DB_KIND_COLOR } from './dbColors'
 import type { DBCaps, DBObjectRef, DBTreePath } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { childCollections } from './dbTree'
 
 interface DBObjectTreeProps {
   connectionId: string
@@ -11,29 +13,12 @@ interface DBObjectTreeProps {
   onOpenDDL: (object: DBObjectRef) => void
 }
 
-/** childKind maps a parent node's kind to the TreePath.kind of its children,
- *  per the engine's capability flags — a schema-less engine (mysql, sqlite)
- *  skips straight from "databases"/root to "tables"/"views". */
-function childCollections(caps: DBCaps, parentKind: string): string[] {
-  if (parentKind === '') {
-    if (caps.multiDatabase) return ['databases']
-    if (caps.schemas) return ['schemas']
-    return ['tables', 'views']
-  }
-  if (parentKind === 'databases') return caps.schemas ? ['schemas'] : ['tables', 'views']
-  if (parentKind === 'schemas') {
-    const kinds = ['tables', 'views']
-    if (caps.matViews) kinds.push('matviews')
-    if (caps.functions) kinds.push('functions')
-    return kinds
-  }
-  return []
-}
-
 function nodeIcon(kind: string) {
-  if (kind === 'function') return <FileCode size={13} className="text-devdeck-dim" />
-  if (kind === 'database' || kind === 'schema') return <DatabaseIcon size={13} className="text-devdeck-dim" />
-  return <Table2 size={13} className="text-devdeck-dim" />
+  if (kind === 'function') return <Sigma size={13} color={DB_KIND_COLOR.function} />
+  if (kind === 'database' || kind === 'schema') return <FolderTree size={13} color={DB_KIND_COLOR.folder} />
+  if (kind === 'view') return <Eye size={13} color={DB_KIND_COLOR.view} />
+  if (kind === 'matview') return <Layers size={13} color={DB_KIND_COLOR.matview} />
+  return <Table2 size={13} color={DB_KIND_COLOR.table} />
 }
 
 interface TreeLevelProps {
