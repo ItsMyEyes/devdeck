@@ -114,13 +114,24 @@ calm as they are today.
 
 Three color groups, kept in different visual contexts (connection identity,
 tree/tab object kind, grid-header data type) so they never compete for the
-same pixels. Exact hex values below are starting points —
-finalized during implementation against WCAG AA contrast on
-`devdeck-bg`/`devdeck-terminal`/`devdeck-card`. The commitment that matters is
-the **role mapping**: a given kind always means the same hue, everywhere it
+same pixels. Exact hex values below are starting points — finalized during
+implementation against WCAG AA contrast. The commitment that matters is the
+**role mapping**: a given kind always means the same hue, everywhere it
 appears.
 
-**Reserved app-wide (unchanged, not reassigned by this design):**
+**Storage mechanism**: a plain constants module,
+`frontend/src/features/database/dbColors.ts`, exporting hex-string maps —
+matching this codebase's *existing* convention for per-entity colors (worktree
+status dots, workspace tile colors in `WorkspaceTileCanvas.tsx`/`WorktreeCard.tsx`,
+consumed via `components/ui/status-dot.tsx`'s and `components/ui/pill.tsx`'s
+`color: string` props, and lucide-react icons' native `color` prop) rather
+than new global CSS custom properties in `globals.css`. Simpler, no Tailwind
+`@theme` plumbing, and these colors are never needed as arbitrary Tailwind
+utility classes — every consumer already takes a raw color value.
+
+**Reserved app-wide (unchanged, not reassigned by this design — still CSS
+tokens, still consumed via `text-devdeck-*`/`bg-devdeck-*` Tailwind classes
+as today):**
 
 | Token | Meaning |
 |---|---|
@@ -129,50 +140,59 @@ appears.
 | `devdeck-red*` | destructive / error |
 | `devdeck-green*` | success |
 
-**New, DB-module-scoped — engine identity** (connection cards' `EngineGlyph`,
-tree root, tab-strip corner chip):
+**New, DB-module-scoped — engine identity** (`DB_ENGINE_COLOR` in
+`dbColors.ts`; connection cards' `EngineGlyph`, tree root, tab-strip corner
+chip):
 
-| Engine | Token | Starting hex |
+| Engine | Constant key | Starting hex |
 |---|---|---|
-| Postgres | `devdeck-db-postgres` | `#5b8def` |
-| MySQL / MariaDB | `devdeck-db-mysql` | `#e0894a` |
-| SQLite | `devdeck-db-sqlite` | `#a385e0` |
+| Postgres | `postgres` | `#5b8def` |
+| MySQL / MariaDB | `mysql` | `#e0894a` |
+| SQLite | `sqlite` | `#a385e0` |
 
-**New, DB-module-scoped — object-kind identity** (tree row icons *and* tab
-icons — same hue in both, so a tab visually matches its tree row):
+**New, DB-module-scoped — object-kind identity** (`DB_KIND_COLOR` in
+`dbColors.ts`; tree row icons *and* tab icons — same hue in both, so a tab
+visually matches its tree row):
 
-| Kind | Token | Starting hex | Icon (`lucide-react`) |
+| Kind | Constant key | Starting hex | Icon (`lucide-react`) |
 |---|---|---|---|
-| Table | `devdeck-db-table` | `#5aa9e6` | `Table2` |
-| View | `devdeck-db-view` | `#b28ce0` | `Eye` |
-| Materialized view | `devdeck-db-matview` | `#e07fb0` | `Layers` |
-| Function | `devdeck-db-function` | `#1f9d6b` | `Sigma` |
-| Schema / Database (folder) | `devdeck-db-folder` | `#c9a06a` | `FolderTree` |
-| SQL query tab | *(reuses `devdeck-accent`)* | — | `Terminal` |
-| DDL / Designer tab | *(reuses `devdeck-dim`/`devdeck-muted`)* | — | `Code2` / `Wrench` |
+| Table | `table` | `#5aa9e6` | `Table2` |
+| View | `view` | `#b28ce0` | `Eye` |
+| Materialized view | `matview` | `#e07fb0` | `Layers` |
+| Function | `function` | `#1f9d6b` | `Sigma` |
+| Schema / Database (folder) | `folder` | `#c9a06a` | `FolderTree` |
+| SQL query tab | *(reuses `devdeck-accent` CSS token)* | — | `Terminal` |
+| DDL / Designer tab | *(reuses `devdeck-dim`/`devdeck-muted` CSS tokens)* | — | `Code2` / `Wrench` |
 
-Query and DDL/Designer tabs deliberately reuse existing neutral/accent tokens
-rather than getting new hues — they're actions/utilities, not object kinds,
-so giving them a "kind color" would blur the system's meaning.
+Query and DDL/Designer tabs deliberately reuse existing neutral/accent CSS
+tokens (via Tailwind classes, unchanged) rather than getting a `dbColors.ts`
+entry — they're actions/utilities, not object kinds, so giving them a "kind
+color" would blur the system's meaning.
 
-`devdeck-db-function`'s `#1f9d6b` is a deliberately darker, more saturated
-emerald than `devdeck-green` (`#56d58a`, a light mint) — separated by
-lightness/saturation rather than hue alone, so it reads as distinct even
-placed next to a success-state green, rather than as a near-duplicate.
+`function`'s `#1f9d6b` is a deliberately darker, more saturated emerald than
+`devdeck-green` (`#56d58a`, a light mint) — separated by lightness/saturation
+rather than hue alone, so it reads as distinct even placed next to a
+success-state green, rather than as a near-duplicate.
 
-**New, DB-module-scoped — data-type badges** (tiny colored abbreviation next
-to each column name in the grid header; a separate visual context from the
-tree/tabs, so reusing some hues here is fine):
+**New, DB-module-scoped — data-type badges** (`DB_TYPE_BADGE` in
+`dbColors.ts`; tiny colored abbreviation next to each column name in the grid
+header; a separate visual context from the tree/tabs, so reusing some hues
+here is fine):
 
-| Data type | Color | Badge text |
-|---|---|---|
-| uuid | cyan | `uuid` |
-| integer / numeric | orange-red | `#` |
-| varchar / text | violet | `abc` |
-| boolean | pink | `bool` |
-| date / time / timestamp | blue | a clock/calendar glyph |
-| json / jsonb | green | `{}` |
-| bytea / blob / binary | gray (`devdeck-gray`, currently unused) | `hex` |
+| Data type | Constant key | Color | Badge text |
+|---|---|---|---|
+| uuid | `uuid` | cyan `#4fb8c9` | `uuid` |
+| integer / numeric | `number` | orange-red `#e0713f` | `#` |
+| varchar / text | `text` | violet `#b28ce0` | `abc` |
+| boolean | `boolean` | pink `#e07fb0` | `bool` |
+| date / time / timestamp | `datetime` | blue `#5b8def` | `date` |
+| json / jsonb | `json` | green `#56d58a` (reuses `devdeck-green`'s hex) | `{}` |
+| bytea / blob / binary | `binary` | gray `#6b7280` (reuses `devdeck-gray`'s hex) | `hex` |
+
+`json`/`binary` intentionally reuse the existing `devdeck-green`/`devdeck-gray`
+hex values rather than inventing new ones — grid-header badges are a distinct
+visual context from where those tokens carry success/neutral meaning, so no
+role collision, and it keeps the total palette smaller.
 
 **Accessibility guardrail**: color is never the *only* signal. Kind icons
 differ in shape as well as hue (a colorblind operator distinguishes table vs.
@@ -279,7 +299,7 @@ additions are pure UI state, not domain data.
 
 ## Accessibility
 
-Target WCAG AA text contrast for every new token against
+Target WCAG AA text contrast for every new `dbColors.ts` value against
 `devdeck-bg`/`devdeck-terminal`/`devdeck-card`, verified during
 implementation. Color is never the sole signal (see guardrail above).
 Keyboard access, visible focus states, and reduced-motion-safe transitions
@@ -305,7 +325,7 @@ verification since it isn't inherited from `PanelHeader`.
 
 ## Build order (for the implementation plan)
 
-1. New color tokens in `globals.css` + the `PRODUCT.md` amendment (verbatim
+1. New `dbColors.ts` constants module + the `PRODUCT.md` amendment (verbatim
    text above) — foundation everything else reads from.
 2. Extract `TabStripPopoverMenu` (the overflow/new-tab popover shell) out of
    `PanelHeader.tsx` into a shared component; update `PanelHeader` to call it
