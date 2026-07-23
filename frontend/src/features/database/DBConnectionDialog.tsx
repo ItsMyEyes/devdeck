@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
-import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { SideDrawer } from '@/components/ui/drawer'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
@@ -18,6 +18,7 @@ import type { CreateDBConnectionBody, UpdateDBConnectionBody } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { DBEngine } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { EngineGlyph } from './EngineGlyph'
 
 const ENGINE_OPTIONS: { value: DBEngine; label: string }[] = [
   { value: 'postgres', label: 'PostgreSQL' },
@@ -40,6 +41,13 @@ const MYSQL_SSL_OPTIONS = [
   { value: 'verify-ca', label: 'verify-ca' },
   { value: 'verify-identity', label: 'verify-identity (recommended)' },
 ]
+
+// Mirrors the backend's verifiedSSLModes (dbvalidate.go) — the modes that
+// actually authenticate the server, not just encrypt the pipe. Production
+// connections are restricted to these so the dropdown can't offer a choice
+// the server will reject on save.
+const PG_VERIFIED_MODES = new Set(['verify-ca', 'verify-full'])
+const MYSQL_VERIFIED_MODES = new Set(['true', 'verify-ca', 'verify-identity'])
 
 const NO_TUNNEL = ''
 
@@ -80,10 +88,22 @@ export function DBConnectionDialog() {
     { value: NO_TUNNEL, label: 'Direct connection' },
     ...sshConnections.map((c) => ({ value: c.id, label: c.name })),
   ]
-  const sslOptions = dialog.engine === 'mysql' ? MYSQL_SSL_OPTIONS : PG_SSL_OPTIONS
+  const verifiedModes = dialog.engine === 'mysql' ? MYSQL_VERIFIED_MODES : PG_VERIFIED_MODES
+  const sslOptions = (dialog.engine === 'mysql' ? MYSQL_SSL_OPTIONS : PG_SSL_OPTIONS).filter(
+    (o) => !dialog.isProduction || verifiedModes.has(o.value),
+  )
+  const verifiedDefault = dialog.engine === 'mysql' ? 'verify-identity' : 'verify-full'
 
   function onEngineChange(engine: DBEngine) {
     setDialog({ engine, port: defaultPort(engine), sslMode: engine === 'mysql' ? 'verify-identity' : 'verify-full' })
+  }
+
+  function onProductionChange(isProduction: boolean) {
+    if (isProduction && !verifiedModes.has(dialog.sslMode)) {
+      setDialog({ isProduction, sslMode: verifiedDefault })
+    } else {
+      setDialog({ isProduction })
+    }
   }
 
   async function runTest() {
@@ -142,90 +162,115 @@ export function DBConnectionDialog() {
   }
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={520}>
-      <DialogTitle>{isEdit ? 'Edit database connection' : 'New database connection'}</DialogTitle>
-      <DialogDescription className="mb-[18px]">
-        Credentials are encrypted at rest and never sent back to the browser.
-      </DialogDescription>
-
-      <Label>Name</Label>
-      <Input value={dialog.name} disabled={busy} onChange={(e) => setDialog({ name: e.target.value })} placeholder="prod-postgres" className="mb-3 font-mono" />
-
-      <Label>Group</Label>
-      <Combobox value={dialog.group} onChange={(group) => setDialog({ group })} options={groupOptions} disabled={busy} placeholder="Production" className="mb-3" />
-
-      <Label>Engine</Label>
-      <Select value={dialog.engine} onValueChange={(v) => onEngineChange(v as DBEngine)} options={ENGINE_OPTIONS} disabled={busy || isEdit} aria-label="Engine" className="mb-3" />
-
-      {isSqlite ? (
-        <>
-          <Label>Database file path</Label>
-          <Input value={dialog.database} disabled={busy} onChange={(e) => setDialog({ database: e.target.value })} placeholder="/path/to/app.db" className="mb-3 font-mono" />
-        </>
-      ) : (
-        <>
-          <div className="mb-3 flex gap-3">
-            <div className="min-w-0 flex-1">
-              <Label>Host</Label>
-              <Input value={dialog.host} disabled={busy} onChange={(e) => setDialog({ host: e.target.value })} placeholder="db.example.com" className="font-mono" />
-            </div>
-            <div className="w-[90px] flex-none">
-              <Label>Port</Label>
-              <Input value={dialog.port} disabled={busy} onChange={(e) => setDialog({ port: e.target.value })} className="font-mono" />
-            </div>
+    <SideDrawer open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={440} z={55}>
+      {/* header */}
+      <div className="flex flex-none items-start gap-2.5 border-b border-devdeck-border px-[18px] pb-3.5 pt-[18px]">
+        <EngineGlyph engine={dialog.engine} size={30} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-semibold text-devdeck-fg">
+            {isEdit ? 'Edit database connection' : 'New database connection'}
           </div>
-          <Label>Username</Label>
-          <Input value={dialog.username} disabled={busy} onChange={(e) => setDialog({ username: e.target.value })} className="mb-3 font-mono" />
-          <Label>Database</Label>
-          <Input value={dialog.database} disabled={busy} onChange={(e) => setDialog({ database: e.target.value })} className="mb-3 font-mono" />
-          <Label>Password</Label>
-          <Input
-            value={dialog.password}
-            disabled={busy}
-            type="password"
-            onChange={(e) => setDialog({ password: e.target.value })}
-            placeholder={isEdit ? 'unchanged' : ''}
-            className="mb-3 font-mono"
-          />
-          <Label>TLS mode</Label>
-          <Select value={dialog.sslMode} onValueChange={(v) => setDialog({ sslMode: v })} options={sslOptions} disabled={busy} aria-label="TLS mode" className="mb-3" />
-        </>
-      )}
-
-      <label className="mb-3 flex items-center gap-2 text-[12px] text-devdeck-fg">
-        <input type="checkbox" checked={dialog.isProduction} disabled={busy} onChange={(e) => setDialog({ isProduction: e.target.checked })} />
-        Production — colors this connection's tabs, forces extra confirmation on commits and DDL, and (for postgres/mysql) rejects an unverified TLS mode
-      </label>
-
-      {!isSqlite ? (
-        <div className="mb-5 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
-          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">SSH tunnel</div>
-          <Select value={dialog.tunnelConnectionId} onValueChange={(v) => setDialog({ tunnelConnectionId: v })} options={tunnelOptions} disabled={busy} aria-label="SSH tunnel" />
-          <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
-            {dialog.tunnelConnectionId ? 'The executor tunnels through this SSH connection to reach the database.' : 'The executor dials the database directly.'}
-          </p>
+          <div className="mt-1 font-mono text-[11px] text-devdeck-dim">
+            Credentials are encrypted at rest and never sent back to the browser.
+          </div>
         </div>
-      ) : null}
+        <button
+          onClick={close}
+          disabled={busy}
+          aria-label="Close"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg disabled:opacity-50"
+        >
+          <X size={14} />
+        </button>
+      </div>
 
-      {isEdit ? (
-        <div className="mb-5 flex items-center gap-2.5">
-          <Button variant="secondary" size="sm" onClick={runTest} disabled={testConnection.isPending}>
-            {testConnection.isPending && <Loader2 size={13} className="animate-spin" />}
-            Test connection
-          </Button>
-          {testResult ? (
-            <span className={cn('text-[11.5px]', testResult.ok ? 'text-devdeck-green-soft' : 'text-devdeck-red-soft')}>
-              {testResult.ok ? 'Connected' : testResult.reason}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+      {/* body */}
+      <div className="flex-1 overflow-auto p-[18px]">
+        <Label>Name</Label>
+        <Input value={dialog.name} disabled={busy} onChange={(e) => setDialog({ name: e.target.value })} placeholder="prod-postgres" className="mb-3 font-mono" />
 
-      <div className="flex items-center justify-between gap-2.5">
+        <Label>Group</Label>
+        <Combobox value={dialog.group} onChange={(group) => setDialog({ group })} options={groupOptions} disabled={busy} placeholder="Production" className="mb-3" />
+
+        <Label>Engine</Label>
+        <Select value={dialog.engine} onValueChange={(v) => onEngineChange(v as DBEngine)} options={ENGINE_OPTIONS} disabled={busy || isEdit} aria-label="Engine" className="mb-3" />
+
+        {isSqlite ? (
+          <>
+            <Label>Database file path</Label>
+            <Input value={dialog.database} disabled={busy} onChange={(e) => setDialog({ database: e.target.value })} placeholder="/path/to/app.db" className="mb-3 font-mono" />
+          </>
+        ) : (
+          <>
+            <div className="mb-3 flex gap-3">
+              <div className="min-w-0 flex-1">
+                <Label>Host</Label>
+                <Input value={dialog.host} disabled={busy} onChange={(e) => setDialog({ host: e.target.value })} placeholder="db.example.com" className="font-mono" />
+              </div>
+              <div className="w-[90px] flex-none">
+                <Label>Port</Label>
+                <Input value={dialog.port} disabled={busy} onChange={(e) => setDialog({ port: e.target.value })} className="font-mono" />
+              </div>
+            </div>
+            <Label>Username</Label>
+            <Input value={dialog.username} disabled={busy} onChange={(e) => setDialog({ username: e.target.value })} className="mb-3 font-mono" />
+            <Label>Database</Label>
+            <Input value={dialog.database} disabled={busy} onChange={(e) => setDialog({ database: e.target.value })} className="mb-3 font-mono" />
+            <Label>Password</Label>
+            <Input
+              value={dialog.password}
+              disabled={busy}
+              type="password"
+              onChange={(e) => setDialog({ password: e.target.value })}
+              placeholder={isEdit ? 'unchanged' : ''}
+              className="mb-3 font-mono"
+            />
+            <Label>TLS mode</Label>
+            <Select value={dialog.sslMode} onValueChange={(v) => setDialog({ sslMode: v })} options={sslOptions} disabled={busy} aria-label="TLS mode" className="mb-3" />
+            {dialog.isProduction ? (
+              <p className="-mt-2 mb-3 text-[11px] leading-snug text-devdeck-dim">
+                Unencrypted and unverified modes are hidden while Production is checked.
+              </p>
+            ) : null}
+          </>
+        )}
+
+        <label className="mb-3 flex items-center gap-2 text-[12px] text-devdeck-fg">
+          <input type="checkbox" checked={dialog.isProduction} disabled={busy} onChange={(e) => onProductionChange(e.target.checked)} />
+          Production — colors this connection's tabs, forces extra confirmation on commits and DDL, and (for postgres/mysql) rejects an unverified TLS mode
+        </label>
+
+        {!isSqlite ? (
+          <div className="mb-5 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">SSH tunnel</div>
+            <Select value={dialog.tunnelConnectionId} onValueChange={(v) => setDialog({ tunnelConnectionId: v })} options={tunnelOptions} disabled={busy} aria-label="SSH tunnel" />
+            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
+              {dialog.tunnelConnectionId ? 'The executor tunnels through this SSH connection to reach the database.' : 'The executor dials the database directly.'}
+            </p>
+          </div>
+        ) : null}
+
+        {isEdit ? (
+          <div className="flex items-center gap-2.5">
+            <Button variant="secondary" size="sm" onClick={runTest} disabled={testConnection.isPending}>
+              {testConnection.isPending && <Loader2 size={13} className="animate-spin" />}
+              Test connection
+            </Button>
+            {testResult ? (
+              <span className={cn('text-[11.5px]', testResult.ok ? 'text-devdeck-green-soft' : 'text-devdeck-red-soft')}>
+                {testResult.ok ? 'Connected' : testResult.reason}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {/* footer */}
+      <div className="flex flex-none items-center gap-2.5 border-t border-devdeck-border px-[18px] py-3.5">
         {isEdit ? (
           confirmingDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-[11.5px] text-devdeck-red-soft">Delete "{dialog.name}"?</span>
+              <span className="text-[11.5px] text-devdeck-red-soft">Delete?</span>
               <Button variant="destructive-solid" size="sm" onClick={confirmDelete} disabled={busy}>
                 Confirm
               </Button>
@@ -234,23 +279,20 @@ export function DBConnectionDialog() {
               </Button>
             </div>
           ) : (
-            <Button variant="destructive" size="sm" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+            <Button variant="destructive" onClick={() => setConfirmingDelete(true)} disabled={busy}>
               Delete
             </Button>
           )
-        ) : (
-          <span />
-        )}
-        <div className="flex gap-2.5">
-          <Button variant="secondary" onClick={close} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            {busy && <Loader2 size={14} className="animate-spin" />}
-            {isEdit ? 'Save' : 'Add'}
-          </Button>
-        </div>
+        ) : null}
+        <div className="flex-1" />
+        <Button variant="secondary" onClick={close} disabled={busy}>
+          Cancel
+        </Button>
+        <Button onClick={submit} disabled={!canSubmit}>
+          {busy && <Loader2 size={14} className="animate-spin" />}
+          {isEdit ? 'Save' : 'Add'}
+        </Button>
       </div>
-    </Dialog>
+    </SideDrawer>
   )
 }
