@@ -1,5 +1,6 @@
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useScope } from '@/features/useScope'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -22,9 +23,12 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
   const railExpanded = useDevDeckStore((s) => s.railExpanded)
   const toggleRailExpanded = useDevDeckStore((s) => s.toggleRailExpanded)
+  const openDesktopSettings = useDevDeckStore((s) => s.openDesktopSettings)
   const { view } = useScope()
   const canExpandPanel = view === 'agents' || view === 'ssh'
   const hasSidebarPanel = canExpandPanel && railExpanded
+  const isLoopbackHub = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  const showDesktopSettings = useIsTauri() && isLoopbackHub
 
   const railControlClass =
     'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-devdeck-muted transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
@@ -72,6 +76,19 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
           ) : null}
           <WorkspaceSwitcher compact />
           <SidebarNav compact />
+          <div className="flex-1" />
+          {showDesktopSettings ? (
+            <Tooltip label="Desktop settings" side="right">
+              <button
+                type="button"
+                onClick={openDesktopSettings}
+                aria-label="Desktop settings"
+                className={railControlClass}
+              >
+                <Settings size={16} />
+              </button>
+            </Tooltip>
+          ) : null}
         </div>
         {hasSidebarPanel ? (
           <div className="flex min-w-0 flex-1 flex-col bg-devdeck-surface">
