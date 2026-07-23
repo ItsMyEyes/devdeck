@@ -191,6 +191,9 @@ interface DevDeckState {
   // ---- transient UI ----
   sidebarOpen: boolean
   wsMenuOpen: boolean
+  /** Desktop settings dialog (Tauri + local hub only) — hub-mode switch,
+   *  Tailscale status, sidecar log access. Not persisted, same as `wsMenuOpen`. */
+  desktopSettingsOpen: boolean
   newTab: NewTabState
   spawn: SpawnState
   newProject: NewProjectState
@@ -252,6 +255,8 @@ interface DevDeckState {
   setSSHActiveGroup: (group: string) => void
   toggleWsMenu: () => void
   closeWsMenu: () => void
+  openDesktopSettings: () => void
+  closeDesktopSettings: () => void
   setDirtyFileCount: (n: number) => void
   setWorktreeLayout: (worktreeId: string, layout: WorktreeLayout) => void
   removeWorktreeLayout: (worktreeId: string) => void
@@ -407,6 +412,7 @@ export const useDevDeckStore = create<DevDeckState>()(
     immer((set) => ({
       sidebarOpen: false,
       wsMenuOpen: false,
+      desktopSettingsOpen: false,
       newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '' },
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
@@ -475,6 +481,8 @@ export const useDevDeckStore = create<DevDeckState>()(
       setSSHActiveGroup: (group) => set((s) => void (s.sshActiveGroup = group)),
       toggleWsMenu: () => set((s) => void (s.wsMenuOpen = !s.wsMenuOpen)),
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
+      openDesktopSettings: () => set((s) => void (s.desktopSettingsOpen = true)),
+      closeDesktopSettings: () => set((s) => void (s.desktopSettingsOpen = false)),
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
