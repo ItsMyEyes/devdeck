@@ -27,10 +27,21 @@ calm as they are today.
    "Approaches considered"). Requires a documented, explicit exception in
    `PRODUCT.md` — the app's general "teal is the only accent" rule is
    otherwise unchanged everywhere else.
-3. **Share the tab-strip interaction engine with the terminal feature**
-   (`PanelHeader.tsx`'s drag-reorder/overflow/dirty-dot logic), rather than
-   building a second, independent implementation. Restyled per-module, not
-   re-solved per-module.
+3. **Match the terminal tab strip's visual language and reuse its popover
+   shell, but give DB tabs their own local drag-reorder.** Investigated during
+   planning: `PanelHeader.tsx`'s drag (`useDraggable`) is entangled with
+   cross-pane split-view drop zones owned by `PaneCanvas.tsx` (a `DndContext`
+   living above `PanelHeader`, with per-pane droppable zones for dragging tabs
+   *between* split panes) — infrastructure the DB module, which has no split
+   panes, would never use. `DBTabStrip` is therefore a new, self-contained
+   component: same active/hover/close/dirty-dot visual language as
+   `PanelHeader`, its own single-list reorder via `@dnd-kit/sortable`'s
+   `SortableContext` (already a dependency, no cross-pane `DndContext`
+   needed). Only the small, genuinely-duplicated overflow/new-tab popover
+   shell (`Popover.Root`/`Trigger`/`Positioner`/`Popup` with identical
+   styling, already used twice inside `PanelHeader` itself) is extracted into
+   a shared `TabStripPopoverMenu` — real DRY win where it actually applies,
+   zero risk to the terminal's working split-drag system.
 4. **Add a persistent right-side inspector pane** (three-pane layout: tree |
    tabs+content | inspector), matching the Navicat reference images, rather
    than keeping metadata as an inline strip above the grid.
@@ -69,22 +80,35 @@ calm as they are today.
   *role-based* (Section "Color & Icon System") rather than decorative, so it
   reads as a systematic language rather than gloss.
 
-**Tab-strip implementation — two options weighed:**
+**Tab-strip implementation — three options weighed:**
 
-- *Separate DB-specific tab strip*: no shared code, avoids pulling in
-  `PanelHeader`'s split-pane concepts the DB module doesn't need. Rejected —
-  duplicates drag-reorder/overflow/dirty-dot logic that already exists and
-  works, and risks the two tab strips drifting in subtle behavior
-  (keyboard nav, middle-click-to-close) over time.
-- **Shared `TabStrip` primitive (chosen).** Extract the tab-row rendering
-  (drag via `@dnd-kit`, overflow popover, dirty-dot, per-tab icon slot) out
-  of `PanelHeader.tsx` into `frontend/src/components/TabStrip.tsx`.
-  `PanelHeader` becomes a thin wrapper adding split-right/split-down/close-pane
-  chrome around it; a new `DBTabStrip` wraps the same primitive with a "+"
-  new-tab popover and an inspector-toggle button instead, since a data grid
-  has no split-pane concept. Cost: a small refactor of working terminal code,
-  mitigated by a regression test asserting `PanelHeader`'s rendered output is
-  unchanged post-extraction.
+- *Fully separate DB-specific tab strip, no shared code at all*: avoids
+  pulling in `PanelHeader`'s concepts entirely. Rejected — the overflow/new-tab
+  popover shell is real, already-duplicated-twice boilerplate inside
+  `PanelHeader.tsx` itself; not sharing it just duplicates it a third time for
+  no benefit, since that piece has zero dependency on the cross-pane drag
+  system.
+- *Full shared `TabStrip` primitive covering drag too*: extract `PanelHeader`'s
+  `useDraggable`-based tab-button rendering into a shared primitive, and give
+  `DatabaseModule` its own `DndContext` + droppable zones to use it. Rejected
+  after investigation (see Decision 3) — `PanelHeader`'s drag is entangled
+  with `PaneCanvas.tsx`'s cross-pane split-view drop zones, which the DB
+  module (one pane, never splits) has no use for; forcing it through adds a
+  cross-pane-capable drag system for a module that will never move a tab
+  between panes, and risks regressing the terminal's working split-drag
+  feature for no payoff.
+- **Own reorder, shared popover shell (chosen).** `DBTabStrip` is a new,
+  self-contained component matching `PanelHeader`'s visual language, with its
+  own single-list drag-reorder via `@dnd-kit/sortable`'s `SortableContext`
+  (self-contained, no cross-pane concerns). The overflow-menu and new-tab
+  popover shell — identical `Popover.Root`/`Trigger`/`Positioner`/`Popup`
+  JSX already appearing twice in `PanelHeader.tsx` — is extracted into a
+  shared, purely presentational `TabStripPopoverMenu` component that both
+  `PanelHeader` and `DBTabStrip` render. Cost: `DBTabStrip`'s reorder logic
+  is not literally shared with `PanelHeader`'s, so the two could in principle
+  drift in reorder-specific behavior (e.g. keyboard nav) over time — accepted
+  because the two reorder problems (single-list vs. cross-pane) are genuinely
+  different, and forcing one shape onto both is the greater long-term cost.
 
 ## Color & Icon System
 
@@ -194,7 +218,9 @@ Three-pane workspace shell, replacing today's two-pane tree+tabs layout in
 - Collapse toggle lives in the tab strip's trailing chrome; collapsed state
   persisted in the store (`dbInspectorCollapsed: boolean`).
 
-**Tab strip** (`DBTabStrip`, built on the shared `TabStrip` primitive):
+**Tab strip** (`DBTabStrip`, self-contained with its own `@dnd-kit/sortable`
+reorder, sharing only the `TabStripPopoverMenu` shell with `PanelHeader` —
+see "Approaches considered"):
 
 - Each tab renders its kind-colored icon (Section "Color & Icon System")
   instead of today's uniform `Table2` for every tab kind.
@@ -257,18 +283,21 @@ Target WCAG AA text contrast for every new token against
 `devdeck-bg`/`devdeck-terminal`/`devdeck-card`, verified during
 implementation. Color is never the sole signal (see guardrail above).
 Keyboard access, visible focus states, and reduced-motion-safe transitions
-are inherited from the shared `TabStrip` primitive and existing `Button`/form
-components — no new interaction patterns introduced that would need separate
-a11y work.
+are inherited from `TabStripPopoverMenu` and existing `Button`/form
+components; `DBTabStrip`'s own reorder logic gets its own keyboard-nav
+verification since it isn't inherited from `PanelHeader`.
 
 ## Testing
 
-- **`TabStrip` primitive** — unit tests for reorder, overflow-popover
-  threshold, close, dirty-dot rendering, since it now serves two independent
-  consumers.
-- **Regression test**: `PanelHeader` (terminal) renders and behaves
-  identically after the extraction — no drag/overflow/close regressions in
-  the feature this design doesn't otherwise touch.
+- **`DBTabStrip`** — unit tests for reorder (via `@dnd-kit/sortable`),
+  overflow-popover threshold, close, dirty-dot rendering.
+- **`TabStripPopoverMenu`** — unit test confirming it renders identically
+  whether invoked from `PanelHeader` or `DBTabStrip` (same shared component,
+  two call sites).
+- **No `PanelHeader` regression test needed** — this design does not modify
+  `PanelHeader.tsx`'s drag/overflow/close logic, only extracts its popover
+  JSX into the shared component `PanelHeader` then calls instead of
+  inlining.
 - **Store tests**: `dbActiveConnectionId` and `dbInspectorCollapsed`
   persistence/resume behavior.
 - **`npm run typecheck`** — required before commit per `.claude/rules/frontend.md`.
@@ -278,12 +307,13 @@ a11y work.
 
 1. New color tokens in `globals.css` + the `PRODUCT.md` amendment (verbatim
    text above) — foundation everything else reads from.
-2. Extract `TabStrip` primitive out of `PanelHeader.tsx`; regression-test
-   terminal tabs are unaffected.
+2. Extract `TabStripPopoverMenu` (the overflow/new-tab popover shell) out of
+   `PanelHeader.tsx` into a shared component; update `PanelHeader` to call it
+   in place of its two inlined copies.
 3. `dbActiveConnectionId` + `dbInspectorCollapsed` in the store (convergence
    file — serialize this step).
-4. `DBTabStrip` built on `TabStrip`: kind-colored icons, dirty-dot wiring,
-   "+" popover.
+4. New `DBTabStrip` component: kind-colored icons, own `@dnd-kit/sortable`
+   reorder, dirty-dot wiring, `TabStripPopoverMenu`-based "+" popover.
 5. Three-pane shell in `DatabaseModule.tsx`: inspector pane + collapse
    toggle, wired to the active tab's object.
 6. `DBObjectTree` kind-colored icons + connection-status dot.
