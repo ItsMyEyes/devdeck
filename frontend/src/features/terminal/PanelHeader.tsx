@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useDraggable } from '@dnd-kit/core'
-import { Popover } from '@base-ui/react/popover'
 import { MoreHorizontal, PanelBottom, PanelRight, Plus, X } from 'lucide-react'
+import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { cn } from '@/lib/utils'
 
 /**
@@ -84,29 +84,14 @@ export function PanelHeader({
           />
         ))}
         {newTabActions ? (
-          <Popover.Root>
-            <Popover.Trigger
-              className={cn(iconButtonClass, 'my-1 ml-1 flex-none self-center')}
-              title="New tab (Ctrl+T)"
-              aria-label="New tab"
-            >
-              <Plus size={13} />
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Positioner side="bottom" align="start" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
-                <Popover.Popup
-                  className={cn(
-                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
-                    'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
-                    'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
-                    'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
-                  )}
-                >
-                  {newTabActions}
-                </Popover.Popup>
-              </Popover.Positioner>
-            </Popover.Portal>
-          </Popover.Root>
+          <TabStripPopoverMenu
+            trigger={<Plus size={13} />}
+            triggerClassName={cn(iconButtonClass, 'my-1 ml-1 flex-none self-center')}
+            triggerTitle="New tab (Ctrl+T)"
+            triggerAriaLabel="New tab"
+          >
+            {newTabActions}
+          </TabStripPopoverMenu>
         ) : null}
       </div>
 
@@ -133,29 +118,15 @@ export function PanelHeader({
         </button>
 
         {isFocused && overflowActions ? (
-          <Popover.Root>
-            <Popover.Trigger
-              className={iconButtonClass}
-              title="More actions"
-              aria-label="More actions"
-            >
-              <MoreHorizontal size={13} />
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Positioner side="bottom" align="end" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
-                <Popover.Popup
-                  className={cn(
-                    'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
-                    'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
-                    'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
-                    'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
-                  )}
-                >
-                  {overflowActions}
-                </Popover.Popup>
-              </Popover.Positioner>
-            </Popover.Portal>
-          </Popover.Root>
+          <TabStripPopoverMenu
+            trigger={<MoreHorizontal size={13} />}
+            triggerClassName={iconButtonClass}
+            triggerTitle="More actions"
+            triggerAriaLabel="More actions"
+            align="end"
+          >
+            {overflowActions}
+          </TabStripPopoverMenu>
         ) : null}
 
         <button
