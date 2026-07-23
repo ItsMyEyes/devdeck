@@ -1,0 +1,294 @@
+# Database Management UI/UX Redesign (Navicat-style) — Design
+
+Status: approved (brainstorming 2026-07-23)
+Scope: **Frontend only.** Full visual/interaction pass over the existing,
+already-shipped Database module (`docs/superpowers/specs/2026-07-19-database-management-design.md`).
+No backend, driver, or API changes. No new domain types.
+
+## Goal
+
+Give the Database module a Navicat-class look and feel: a colorful, systematic
+tab strip for open objects, a persistent inspector panel, and consistent
+color/icon coding for engines, object kinds, and data types — while keeping
+the rest of DevDeck's restrained, teal-only visual language untouched.
+
+Success: opening a connection feels like Navicat (colorful, information-dense,
+tabs that carry identity at a glance) without the rest of the app absorbing
+any of that decoration — Terminal, SSH, Runtimes, Explorer stay exactly as
+calm as they are today.
+
+## Decisions (from brainstorming)
+
+1. **Full DB-module pass**, not just the tab strip — tree, gallery, dialogs,
+   grid, and a new inspector pane are all in scope, so nothing added later
+   feels bolted on.
+2. **Full Navicat-style color richness, scoped to this module only.** Chosen
+   over a semantic-only palette or a per-engine-accent-bleed palette (see
+   "Approaches considered"). Requires a documented, explicit exception in
+   `PRODUCT.md` — the app's general "teal is the only accent" rule is
+   otherwise unchanged everywhere else.
+3. **Share the tab-strip interaction engine with the terminal feature**
+   (`PanelHeader.tsx`'s drag-reorder/overflow/dirty-dot logic), rather than
+   building a second, independent implementation. Restyled per-module, not
+   re-solved per-module.
+4. **Add a persistent right-side inspector pane** (three-pane layout: tree |
+   tabs+content | inspector), matching the Navicat reference images, rather
+   than keeping metadata as an inline strip above the grid.
+5. **Inspector mirrors the active tab's object** — no separate "selected but
+   not opened" tree state. One source of truth; tree clicks still open/focus
+   a tab exactly as today.
+6. **Lift `activeConnectionId` into the store** so the redesigned tab
+   experience actually persists across navigation/reload, instead of
+   resetting every time (today: local `useState` in `DatabaseModule`).
+7. **Connection-status dot reflects the last explicit "Test" result only** —
+   the backend has no live health-check endpoint (confirmed against
+   `handler/db.go` / `service/dbexec.go`), so this is not presented as
+   real-time monitoring. Labeled on hover to avoid implying a guarantee it
+   can't back up.
+
+## Approaches considered
+
+**Color richness — three options weighed:**
+
+- *Semantic color only*: color strictly encodes meaning (data-type badges,
+  object-kind icons, a small engine dot, amber-for-production), teal stays
+  the only "real" accent. Cheapest, zero `PRODUCT.md` change needed. Rejected
+  as the sole approach — too timid relative to the Navicat reference and the
+  explicit ask for "colourful."
+- *Expanded palette per engine*: each engine's color bleeds into that
+  connection's whole tab strip / sidebar entry / dialogs, not just a dot.
+  Rejected as the primary approach — coloring entire surfaces by engine
+  competes with the kind/type color coding for visual attention, and two
+  independent color axes (engine likeness vs. object kind) fighting for the
+  same saturated real estate reads as noisier, not clearer.
+- **Full Navicat-style richness (chosen).** Colorful icons across toolbar,
+  tree, tabs, and type badges — closest to the reference material, biggest
+  visual departure from the rest of DevDeck. Cost: requires a documented,
+  scoped exception in `PRODUCT.md` (not a rewrite of it) and the largest
+  design-token surface of the three options. Mitigated by keeping color
+  *role-based* (Section "Color & Icon System") rather than decorative, so it
+  reads as a systematic language rather than gloss.
+
+**Tab-strip implementation — two options weighed:**
+
+- *Separate DB-specific tab strip*: no shared code, avoids pulling in
+  `PanelHeader`'s split-pane concepts the DB module doesn't need. Rejected —
+  duplicates drag-reorder/overflow/dirty-dot logic that already exists and
+  works, and risks the two tab strips drifting in subtle behavior
+  (keyboard nav, middle-click-to-close) over time.
+- **Shared `TabStrip` primitive (chosen).** Extract the tab-row rendering
+  (drag via `@dnd-kit`, overflow popover, dirty-dot, per-tab icon slot) out
+  of `PanelHeader.tsx` into `frontend/src/components/TabStrip.tsx`.
+  `PanelHeader` becomes a thin wrapper adding split-right/split-down/close-pane
+  chrome around it; a new `DBTabStrip` wraps the same primitive with a "+"
+  new-tab popover and an inspector-toggle button instead, since a data grid
+  has no split-pane concept. Cost: a small refactor of working terminal code,
+  mitigated by a regression test asserting `PanelHeader`'s rendered output is
+  unchanged post-extraction.
+
+## Color & Icon System
+
+Three color groups, kept in different visual contexts (connection identity,
+tree/tab object kind, grid-header data type) so they never compete for the
+same pixels. Exact hex values below are starting points —
+finalized during implementation against WCAG AA contrast on
+`devdeck-bg`/`devdeck-terminal`/`devdeck-card`. The commitment that matters is
+the **role mapping**: a given kind always means the same hue, everywhere it
+appears.
+
+**Reserved app-wide (unchanged, not reassigned by this design):**
+
+| Token | Meaning |
+|---|---|
+| `devdeck-accent` (teal) | focus / selection / primary action |
+| `devdeck-yellow*` | production / pending-change / warning |
+| `devdeck-red*` | destructive / error |
+| `devdeck-green*` | success |
+
+**New, DB-module-scoped — engine identity** (connection cards' `EngineGlyph`,
+tree root, tab-strip corner chip):
+
+| Engine | Token | Starting hex |
+|---|---|---|
+| Postgres | `devdeck-db-postgres` | `#5b8def` |
+| MySQL / MariaDB | `devdeck-db-mysql` | `#e0894a` |
+| SQLite | `devdeck-db-sqlite` | `#a385e0` |
+
+**New, DB-module-scoped — object-kind identity** (tree row icons *and* tab
+icons — same hue in both, so a tab visually matches its tree row):
+
+| Kind | Token | Starting hex | Icon (`lucide-react`) |
+|---|---|---|---|
+| Table | `devdeck-db-table` | `#5aa9e6` | `Table2` |
+| View | `devdeck-db-view` | `#b28ce0` | `Eye` |
+| Materialized view | `devdeck-db-matview` | `#e07fb0` | `Layers` |
+| Function | `devdeck-db-function` | `#1f9d6b` | `Sigma` |
+| Schema / Database (folder) | `devdeck-db-folder` | `#c9a06a` | `FolderTree` |
+| SQL query tab | *(reuses `devdeck-accent`)* | — | `Terminal` |
+| DDL / Designer tab | *(reuses `devdeck-dim`/`devdeck-muted`)* | — | `Code2` / `Wrench` |
+
+Query and DDL/Designer tabs deliberately reuse existing neutral/accent tokens
+rather than getting new hues — they're actions/utilities, not object kinds,
+so giving them a "kind color" would blur the system's meaning.
+
+`devdeck-db-function`'s `#1f9d6b` is a deliberately darker, more saturated
+emerald than `devdeck-green` (`#56d58a`, a light mint) — separated by
+lightness/saturation rather than hue alone, so it reads as distinct even
+placed next to a success-state green, rather than as a near-duplicate.
+
+**New, DB-module-scoped — data-type badges** (tiny colored abbreviation next
+to each column name in the grid header; a separate visual context from the
+tree/tabs, so reusing some hues here is fine):
+
+| Data type | Color | Badge text |
+|---|---|---|
+| uuid | cyan | `uuid` |
+| integer / numeric | orange-red | `#` |
+| varchar / text | violet | `abc` |
+| boolean | pink | `bool` |
+| date / time / timestamp | blue | a clock/calendar glyph |
+| json / jsonb | green | `{}` |
+| bytea / blob / binary | gray (`devdeck-gray`, currently unused) | `hex` |
+
+**Accessibility guardrail**: color is never the *only* signal. Kind icons
+differ in shape as well as hue (a colorblind operator distinguishes table vs.
+view by icon, not color alone); the connection-status dot is paired with a
+tooltip stating what it means and when it was last checked.
+
+## PRODUCT.md amendment
+
+Add one new subsection (exact text, applied in the implementation's first
+build step):
+
+> ## Module Exceptions
+>
+> The Database module (`features/database/`) is a deliberate, scoped
+> exception to "accent color as state, not decoration." Dense per-kind object
+> identification (table vs. view vs. function, engine identity, data type) is
+> the primary usability need there, mirroring established database-client
+> conventions (Navicat, DataGrip). Color there is role-based, not decorative —
+> see `docs/superpowers/specs/2026-07-23-database-ui-redesign-design.md`. No
+> other module gains new accent colors under this exception.
+
+## Layout & Tab Strip
+
+Three-pane workspace shell, replacing today's two-pane tree+tabs layout in
+`DatabaseModule.tsx`:
+
+```
+┌─ ← Connections   [+Table] [+Query]        ─┐
+│ Tree (264px) │  Tab strip                  │ Inspector (280px,
+│  · colorful  │  ──────────────────────     │  collapsible)
+│    kind      │  [content: grid / SQL       │  · metadata for the
+│    icons     │   editor / DDL / designer]  │    ACTIVE TAB's object
+│  · status    │                             │  · extends today's
+│    dot       │                             │    DBTableInfo stats
+└──────────────┴─────────────────────────────┴──────────────────┘
+```
+
+- **Inspector content by active-tab kind**: table/view/matview → estimated
+  rows, total/index bytes, PK, column count (today's `DBTableInfo.tsx`,
+  relocated into the inspector); query → connection/database/schema context,
+  last-run duration + row count; ddl/designer → object identity + "copy DDL" /
+  "open table" quick actions.
+- Collapse toggle lives in the tab strip's trailing chrome; collapsed state
+  persisted in the store (`dbInspectorCollapsed: boolean`).
+
+**Tab strip** (`DBTabStrip`, built on the shared `TabStrip` primitive):
+
+- Each tab renders its kind-colored icon (Section "Color & Icon System")
+  instead of today's uniform `Table2` for every tab kind.
+- Active-tab indicator: production connections keep the existing amber border
+  (the one place "accent as alarm" is already sanctioned by the original
+  spec); non-production active tabs get a bottom border in the **tab's kind
+  color** instead of a generic accent line.
+- Dirty indicator (`PanelHeaderTab.dirty`, already exists as a prop) wires to
+  real state: SQL editor tabs with unsaved query text, table tabs with
+  pending inserts/edits/deletes.
+- The "+" popover (already a `TabStrip` capability via `newTabActions`)
+  replaces today's two separate header buttons ("New table" / "New SQL
+  query") with a single "+" offering both.
+- Middle-click-to-close and keyboard nav come for free from the shared
+  primitive — no re-implementation.
+
+**Connection gallery** (unopened state) — structure unchanged (search,
+group-pill filter, card grid). `EngineGlyph` gets the per-engine identity
+color as background/border instead of the current uniform accent tint, so
+Postgres/MySQL/SQLite connections are visually distinguishable in the grid.
+
+## Tree, Grid, Dialogs
+
+**`DBObjectTree.tsx`** — `nodeIcon(kind)` returns the kind-colored icon
+instead of one dim-gray icon for every kind. A connection-status dot sits
+next to the "← Connections" back button, reflecting the last `Test`
+connection result (see Decision 7) — not a live health check.
+
+**`DBTableGrid.tsx`** — column headers gain the tiny data-type badge next to
+each column name. Row-action buttons (insert/delete/commit) keep their
+*existing* green/red/teal tokens — those roles already exist app-wide, no new
+tokens needed there.
+
+**`DBConnectionDialog.tsx`** — the drawer header gains the colored
+`EngineGlyph`, matching the gallery card, so identity is visible while
+editing. Form fields stay plain — no icon-per-input decoration, which is the
+"SaaS gloss" `PRODUCT.md` already warns against.
+
+**`DBCommitDialog.tsx`** — insert rows get the green-soft treatment,
+symmetric with the existing delete-row red-soft treatment.
+
+## Store changes
+
+`useDevDeckStore.ts` (convergence file — single-agent step, see
+`ORCHESTRATION.md`):
+
+- `dbActiveConnectionId: string | null` + `setDBActiveConnectionId` — replaces
+  `DatabaseModule`'s local `useState`, so the open connection (and, via the
+  existing per-connection `dbTabs`, its open tabs) survives navigation away
+  and page reload.
+- `dbInspectorCollapsed: boolean` + `setDBInspectorCollapsed` — inspector
+  pane collapse state.
+
+No changes to `store/types.ts` or `backend/internal/domain/models.go` — both
+additions are pure UI state, not domain data.
+
+## Accessibility
+
+Target WCAG AA text contrast for every new token against
+`devdeck-bg`/`devdeck-terminal`/`devdeck-card`, verified during
+implementation. Color is never the sole signal (see guardrail above).
+Keyboard access, visible focus states, and reduced-motion-safe transitions
+are inherited from the shared `TabStrip` primitive and existing `Button`/form
+components — no new interaction patterns introduced that would need separate
+a11y work.
+
+## Testing
+
+- **`TabStrip` primitive** — unit tests for reorder, overflow-popover
+  threshold, close, dirty-dot rendering, since it now serves two independent
+  consumers.
+- **Regression test**: `PanelHeader` (terminal) renders and behaves
+  identically after the extraction — no drag/overflow/close regressions in
+  the feature this design doesn't otherwise touch.
+- **Store tests**: `dbActiveConnectionId` and `dbInspectorCollapsed`
+  persistence/resume behavior.
+- **`npm run typecheck`** — required before commit per `.claude/rules/frontend.md`.
+- No backend tests — this design makes no backend changes.
+
+## Build order (for the implementation plan)
+
+1. New color tokens in `globals.css` + the `PRODUCT.md` amendment (verbatim
+   text above) — foundation everything else reads from.
+2. Extract `TabStrip` primitive out of `PanelHeader.tsx`; regression-test
+   terminal tabs are unaffected.
+3. `dbActiveConnectionId` + `dbInspectorCollapsed` in the store (convergence
+   file — serialize this step).
+4. `DBTabStrip` built on `TabStrip`: kind-colored icons, dirty-dot wiring,
+   "+" popover.
+5. Three-pane shell in `DatabaseModule.tsx`: inspector pane + collapse
+   toggle, wired to the active tab's object.
+6. `DBObjectTree` kind-colored icons + connection-status dot.
+7. Grid column type-badges; `DBCommitDialog` insert-row coloring.
+8. Connection gallery / `DBConnectionDialog` engine-glyph coloring.
+
+Steps 1 and 3 touch convergence-adjacent files and must not be edited by
+parallel agents — serialize them or fold into a single integration step.
