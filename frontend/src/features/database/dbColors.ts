@@ -24,9 +24,13 @@ export const DB_KIND_COLOR: Record<DBKindKey, string> = {
 }
 
 /** Tiny colored abbreviation shown next to each column name in the grid
- *  header. json/binary intentionally reuse devdeck-green/devdeck-gray's hex
- *  values — a grid header badge is a different visual context from where
- *  those tokens carry success/neutral meaning elsewhere in the app. */
+ *  header. json intentionally reuses devdeck-green's hex value — a grid
+ *  header badge is a different visual context from where that token carries
+ *  success meaning elsewhere in the app. binary reuses devdeck-muted's hex
+ *  (not devdeck-gray's #6b7280, which only clears ~3.3:1 against the grid
+ *  header background — below the 4.5:1 WCAG AA text-contrast bar); the
+ *  literal hex is required here rather than `var(--devdeck-muted)` since
+ *  Pill appends alpha suffixes (`${color}18`/`${color}33`) to this value. */
 export const DB_TYPE_BADGE: Record<DBTypeBadgeKey, { color: string; label: string }> = {
   uuid: { color: '#4fb8c9', label: 'uuid' },
   number: { color: '#e0713f', label: '#' },
@@ -34,7 +38,7 @@ export const DB_TYPE_BADGE: Record<DBTypeBadgeKey, { color: string; label: strin
   boolean: { color: '#e07fb0', label: 'bool' },
   datetime: { color: '#5b8def', label: 'date' },
   json: { color: '#56d58a', label: '{}' },
-  binary: { color: '#6b7280', label: 'hex' },
+  binary: { color: '#a4a8aa', label: 'hex' },
 }
 
 /** Classifies a raw, engine-specific SQL data-type string (postgres's
