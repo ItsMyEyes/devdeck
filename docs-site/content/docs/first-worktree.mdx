@@ -1,0 +1,36 @@
+---
+title: Your first worktree
+description: Spawn an agent worktree, or a plain root-mode terminal.
+---
+
+From a project's **Worktrees** tab, click spawn to open the new-worktree
+dialog.
+
+## Branch mode
+
+The common case — a new isolated branch with an agent (or a plain shell)
+attached:
+
+- **Branch name** — a new branch to check out. DevDeck runs a real
+  `git worktree add` under `<project>/.wt/<worktree-id>`, so your main
+  checkout is never touched.
+- **Base branch** — which existing branch to branch from.
+- **Task** — a short description; if an agent is attached, this is passed to
+  it as its initial prompt.
+- **Agent / Model** — pick from whichever agent CLIs DevDeck detected on
+  your `$PATH` (see [Agent management](/docs/agent-management)). You can
+  still spawn a worktree with none installed — it just falls back to a
+  plain shell instead of launching an agent.
+
+The new worktree shows up as a live card (running / waiting / error, with
+token and diff stats once the agent starts working). Click it to open the
+full terminal view — see [Working inside a
+worktree](/docs/working-in-a-worktree).
+
+## Root mode
+
+Sometimes you just want a shell at the project root — no branch, no agent.
+The same dialog has a **root mode** tab: it gives you a plain terminal
+`cd`'d into the project's own path, shown with a house icon instead of a
+branch icon. Deleting a root-mode worktree never touches git — there's
+nothing to remove, since it's the project's own checkout.

@@ -1,4 +1,11 @@
 {
   "title": "Docs",
-  "pages": ["index", "installation", "first-account", "workspaces-and-projects"]
+  "pages": [
+    "index",
+    "installation",
+    "first-account",
+    "workspaces-and-projects",
+    "first-worktree",
+    "working-in-a-worktree"
+  ]
 }

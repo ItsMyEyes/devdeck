@@ -1,0 +1,56 @@
+---
+title: Working inside a worktree
+description: The tiling pane workspace, and everything you can put in it.
+---
+
+Opening a worktree switches the whole screen into a **tiling workspace**:
+the top header disappears, the sidebar collapses to a narrow icon rail (back
+arrow, workspace badge, nav icons — the only way back once the header's
+gone), and the rest of the viewport becomes a canvas of resizable panes.
+
+## Pane kinds
+
+Every pane can hold one of four content kinds:
+
+- **Terminal** — the real PTY the agent (or shell) is running in, backed by
+  a live WebSocket. Navigate away and back and you reattach to the *same*
+  running process — nothing restarts. A worktree always starts with one
+  Terminal pane; splitting a Terminal pane spins up a genuinely independent
+  second PTY, with its own shell/agent and no shared echo.
+- **File explorer** — a tree of the worktree's files, with quick-open search
+  (`Ctrl/Cmd-P`) and new-file/delete actions.
+- **Editor** — click any file to open it in a CodeMirror tab. Every common
+  language gets syntax highlighting; Go, TypeScript/JavaScript, Python, and
+  Rust additionally get real language-server intelligence (autocomplete,
+  inline diagnostics, go-to-definition) if `gopls` / `typescript-language-server`
+  / `pyright-langserver` / `rust-analyzer` are on your `$PATH`. `Ctrl/Cmd-S`
+  saves; `Ctrl/Cmd-W` closes the active file tab.
+- **Git panel** — status, diff, stage/unstage/discard, commit, push, pull,
+  scoped to this worktree's branch.
+
+## Splitting and arranging panes
+
+Each pane has a small header with its own tab strip (stack several tabs in
+one pane without splitting), "split right"/"split down" buttons, and — when
+the pane is focused — a "..." overflow menu. Drag a tab and drop it near a
+pane's edge to split in that direction, or onto its center to merge it in as
+another tab in that pane.
+
+Your layout (which panes, which tabs, split sizes) is remembered per
+worktree, so it reopens exactly as you left it.
+
+<Callout title="On phones">
+  Panes stack one full-bleed at a time instead of tiling side by side, and
+  drag-and-drop is disabled.
+</Callout>
+
+## The overflow menu
+
+On the focused pane, when its active tab is a Terminal, the "..." menu has:
+
+- **Approve** — only shown while the worktree is waiting on you.
+- **Open Git panel** / **Open file explorer** — add or focus that pane kind,
+  since a fresh worktree starts with only a Terminal pane.
+- **Details** — edit the worktree's branch, task, or model.
+- **Delete** — removes both the database row and the on-disk `git worktree`
+  (the agent process is stopped first).
