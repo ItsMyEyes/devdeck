@@ -1,0 +1,26 @@
+---
+title: Tools
+description: Document conversion and everyday dev utilities.
+---
+
+The **Tools** sidebar item is a workspace-agnostic utility page.
+
+## Document conversion
+
+Two tools shell out to external CLIs on the server. If the underlying binary
+isn't installed, the UI shows a clear error with the exact install command
+instead of failing silently:
+
+- **Document → Markdown** — upload a PDF/Word/PowerPoint/Excel/image/audio/
+  HTML file (25MB cap), get back editable Markdown. PDFs get layout-aware
+  extraction; if the server is configured with an LLM API key, images get
+  LLM-generated descriptions automatically.
+- **Markdown → Document** — write or paste Markdown, export to `.docx` or
+  `.pdf`. Any fenced ` ```mermaid ` code block is rendered to a PNG first
+  and inlined, so diagrams show up in the exported document.
+
+## Everyday utilities
+
+The rest of the page is dev utilities that run entirely client-side: JWT
+decode, Base64, URL encode/decode, hashing, JSON/XML/CSV formatting, UUID
+generation, and timestamp conversion.

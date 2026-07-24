@@ -6,6 +6,9 @@
     "first-account",
     "workspaces-and-projects",
     "first-worktree",
-    "working-in-a-worktree"
+    "working-in-a-worktree",
+    "issues",
+    "agent-management",
+    "tools"
   ]
 }
