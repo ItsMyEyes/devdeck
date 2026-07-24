@@ -194,6 +194,12 @@ interface DevDeckState {
   /** Desktop settings dialog (Tauri + local hub only) — hub-mode switch,
    *  Tailscale status, sidecar log access. Not persisted, same as `wsMenuOpen`. */
   desktopSettingsOpen: boolean
+  /** This session's hub API key, captured once from the desktop bootstrap's
+   *  `?key=` query param before it's scrubbed from the URL (see main.tsx's
+   *  `bootstrapDesktopSession`) — shown masked-by-default in
+   *  DesktopSettingsDialog. In-memory only, never persisted; regenerates on
+   *  every app restart since the Rust side mints a fresh key per launch. */
+  hubApiKey: string | null
   newTab: NewTabState
   spawn: SpawnState
   newProject: NewProjectState
@@ -257,6 +263,7 @@ interface DevDeckState {
   closeWsMenu: () => void
   openDesktopSettings: () => void
   closeDesktopSettings: () => void
+  setHubApiKey: (key: string | null) => void
   setDirtyFileCount: (n: number) => void
   setWorktreeLayout: (worktreeId: string, layout: WorktreeLayout) => void
   removeWorktreeLayout: (worktreeId: string) => void
@@ -426,6 +433,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       sidebarOpen: false,
       wsMenuOpen: false,
       desktopSettingsOpen: false,
+      hubApiKey: null,
       newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '' },
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
@@ -499,6 +507,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
       openDesktopSettings: () => set((s) => void (s.desktopSettingsOpen = true)),
       closeDesktopSettings: () => set((s) => void (s.desktopSettingsOpen = false)),
+      setHubApiKey: (key) => set((s) => void (s.hubApiKey = key)),
       setDirtyFileCount: (n) => set((s) => void (s.dirtyFileCount = n)),
       setWorktreeLayout: (worktreeId, layout) => set((s) => void (s.worktreeLayouts[worktreeId] = layout)),
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),

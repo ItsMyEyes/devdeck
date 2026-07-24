@@ -131,3 +131,31 @@ DesktopSettingsDialog (frontend/src/features/overlays/DesktopSettingsDialog.tsx)
   asked for; this is a small, desktop-specific panel.
 - Showing the gear icon for a remote-mode Tauri window, or in a plain
   browser tab (per Decision 1).
+
+## Hub key display (addendum)
+
+**Date:** 2026-07-24
+
+A fourth section, "Hub key," was added to `DesktopSettingsDialog.tsx`:
+this session's hub API key, masked by default with a reveal toggle and a
+copy button. The operator needs the key to self-register a new remote
+runtime machine against this hub — without it, that meant digging the key
+out of Rust source or sidecar logs. `bootstrapDesktopSession()`
+(`frontend/src/main.tsx`) already receives this exact value via the
+`?key=` query param on desktop launch to establish the session cookie; it
+previously discarded the key right after that fetch. It now also stashes
+it in the store (`hubApiKey`) before scrubbing the URL.
+
+**Security posture:** this does not increase exposure versus today. The
+frontend already holds the raw key during bootstrap; surfacing it in the
+dialog changes how long the operator can retrieve it, not who can see it.
+Masked-by-default plus an explicit reveal step is the standard treatment
+for a client-held secret, and matches DevDeck's single-operator threat
+model (`PRODUCT.md`, "Users" — one operator, not a shared or multi-tenant
+surface).
+
+**Lifecycle:** in-memory only. `hubApiKey` lives in `useDevDeckStore` but
+is deliberately excluded from `partialize`, so it is never written to
+localStorage. The Rust side mints a fresh key per launch, so the value
+regenerates every app restart; the dialog falls back to "Unavailable —
+reopen from the desktop app" if opened without a live bootstrap value.

@@ -5,6 +5,7 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import { toast } from 'sonner'
 import { routeTree } from './routeTree.gen'
 import { qk } from './features/data/keys'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import './styles/globals.css'
 
 // Every mutation surfaces its failure through sonner, and the devdeck query cache is
@@ -39,11 +40,18 @@ declare module '@tanstack/react-router' {
  * Desktop (Tauri) bootstrap: the shell launches the SPA at /?key=<hub key>.
  * Exchange it for a normal session cookie before the router's auth guard
  * runs, then scrub the key from the URL. No-op on the web (no ?key=).
+ *
+ * Also stashes the raw key in the store (in-memory only) before it's
+ * otherwise discarded — DesktopSettingsDialog shows it masked-by-default so
+ * self-registering a runtime doesn't require digging it out of Rust source
+ * or sidecar logs. Not a new exposure: the frontend already receives this
+ * exact value here today, just previously threw it away after the fetch.
  */
 async function bootstrapDesktopSession(): Promise<void> {
   const params = new URLSearchParams(window.location.search)
   const key = params.get('key')
   if (!key) return
+  useDevDeckStore.getState().setHubApiKey(key)
   params.delete('key')
   const query = params.toString()
   window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)

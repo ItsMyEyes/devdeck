@@ -1,5 +1,6 @@
-import { TriangleAlert } from 'lucide-react'
+import { Copy, Eye, EyeOff, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -7,6 +8,8 @@ import { changeHub, openLogFile } from '@/features/desktop/desktopBridge'
 import { useTailscaleStatus } from '@/features/data/queries'
 import type { TailscaleHubStatus } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+
+const MASKED_KEY = '••••••••••••••••'
 
 function tailscaleLabel(status: TailscaleHubStatus | undefined, isLoading: boolean): { color: string; text: string } {
   if (isLoading || !status) return { color: '#6b7280', text: 'checking…' }
@@ -20,13 +23,22 @@ export function DesktopSettingsDialog() {
   const open = useDevDeckStore((s) => s.desktopSettingsOpen)
   const close = useDevDeckStore((s) => s.closeDesktopSettings)
   const showToast = useDevDeckStore((s) => s.showToast)
+  const hubApiKey = useDevDeckStore((s) => s.hubApiKey)
   const tailscaleStatus = useTailscaleStatus(open)
   const [confirmingSwitch, setConfirmingSwitch] = useState(false)
   const [switching, setSwitching] = useState(false)
+  const [keyRevealed, setKeyRevealed] = useState(false)
 
   function closeDialog() {
     setConfirmingSwitch(false)
+    setKeyRevealed(false)
     close()
+  }
+
+  function copyHubKey() {
+    if (!hubApiKey) return
+    void navigator.clipboard.writeText(hubApiKey)
+    toast.success('Copied')
   }
 
   function restartToPicker() {
@@ -76,6 +88,38 @@ export function DesktopSettingsDialog() {
               Switch to a remote hub…
             </Button>
           </>
+        )}
+      </div>
+
+      <div className="mb-5">
+        <div className="mb-1.5 text-[12.5px] font-semibold text-devdeck-fg-2">Hub key</div>
+        <p className="mb-2 font-mono text-[11px] text-devdeck-dim-2">
+          Used to self-register a new runtime with this hub — regenerates every restart.
+        </p>
+        {hubApiKey ? (
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate rounded-md border border-devdeck-border-card bg-devdeck-terminal px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg">
+              {keyRevealed ? hubApiKey : MASKED_KEY}
+            </span>
+            <button
+              type="button"
+              aria-label={keyRevealed ? 'Hide hub key' : 'Show hub key'}
+              onClick={() => setKeyRevealed((r) => !r)}
+              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              {keyRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+            <button
+              type="button"
+              aria-label="Copy hub key"
+              onClick={copyHubKey}
+              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <Copy size={13} />
+            </button>
+          </div>
+        ) : (
+          <p className="font-mono text-[11px] text-devdeck-dim-2">Unavailable — reopen from the desktop app.</p>
         )}
       </div>
 
