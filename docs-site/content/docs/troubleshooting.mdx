@@ -1,0 +1,32 @@
+---
+title: Troubleshooting
+description: Common issues and fixes.
+---
+
+- **A worktree opens to a plain shell instead of an agent.** The agent CLI
+  you picked isn't on the server process's `$PATH`. Install it, or pick a
+  different agent.
+- **Tools page shows an error for a conversion.** The underlying conversion
+  CLI isn't installed on the server — the error message includes the exact
+  install command.
+- **Lost your 2FA device.** Use one of the one-time backup codes shown at
+  enrollment. If you don't have those either, there's no self-service
+  recovery — it requires direct database access to clear the account's TOTP
+  secret.
+- **A registered machine shows offline.** The hub polls that machine's
+  health endpoint with a short timeout — check the runtime process is
+  actually running and reachable at the URL you registered it with, and
+  that both machines are on the same tailnet if you're not on `127.0.0.1`.
+- **New project's machine dropdown is empty.** A brand-new hub has no
+  registered Machines yet — see [Deployment modes](/docs/deployment-modes).
+  The fastest fix is running with `--role both`, or the desktop app's "Host
+  locally" option, which registers itself automatically.
+- **Pasting a connection string fails immediately.** The hub verifies the
+  URL/key against the runtime's own API before registering it —
+  "unreachable" means the URL isn't actually reachable from the hub, and a
+  rejected key means it doesn't match that runtime's own key.
+- **Desktop app shows "⚠ Runtime not registered" instead of "Change
+  Hub…".** This device couldn't self-register as a runtime with the hub
+  you connected to — click the menu item for the reason and log path. Most
+  commonly, Tailscale isn't installed or this device isn't joined to a
+  tailnet; browsing the hub itself is unaffected either way.
