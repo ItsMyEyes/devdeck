@@ -25,10 +25,24 @@
       <button id="back-btn">Back to hub</button>
     </main>
     <script>
-      document.getElementById('back-btn').addEventListener('click', () => {
+      const invoke = window.__TAURI__.core.invoke
+      const $ = (id) => document.getElementById(id)
+
+      $('back-btn').addEventListener('click', () => {
         const url = document.body.dataset.hubUrl
         if (url) window.location.href = url
       })
+
+      invoke('get_runtime_warning')
+        .then((info) => {
+          if (!info) return
+          $('reason').textContent = info.reason
+          $('logpath').textContent = info.logPath
+          document.body.dataset.hubUrl = info.hubUrl
+        })
+        .catch(() => {
+          // Leave the static placeholder text — nothing more useful to show.
+        })
     </script>
   </body>
 </html>

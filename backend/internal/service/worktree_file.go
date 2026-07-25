@@ -2,28 +2,53 @@ package service
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
+	"devdeck/backend/internal/detect"
 	gitpkg "devdeck/backend/internal/git"
 	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/rginstall"
 	"devdeck/backend/internal/store"
 )
 
 const (
 	maxEditableFileSize  = 2 << 20
 	maxFileSearchResults = 200
+
+	// maxGrepFiles/maxGrepMatchesPerFile bound a content-search response,
+	// same spirit as maxFileSearchResults for filename search — exact
+	// numbers are an implementation detail, not a design commitment.
+	maxGrepFiles          = 200
+	maxGrepMatchesPerFile = 200
+
+	// grepTimeout bounds how long a local `rg` invocation may run before
+	// being killed, so a huge/slow tree can't hang a request.
+	grepTimeout = 20 * time.Second
+
+	// rgInstallTimeout bounds how long a ripgrep auto-install (GitHub API
+	// call + asset download + extract + write) may run before being
+	// canceled, so a slow/stalled network request can't hang a request
+	// indefinitely.
+	rgInstallTimeout = 60 * time.Second
 )
 
 var searchSkipDirs = map[string]bool{
@@ -331,6 +356,383 @@ func (svc *WorktreeFileService) Search(worktreeID, pattern string, includeDirs b
 		result = append(result, match.path)
 	}
 	return result, nil
+}
+
+// GrepOptions configures a content search's query interpretation. Shared
+// (same package) between WorktreeFileService.Grep and SSHFileService.Grep
+// so the frontend has one request/response shape regardless of which
+// search target (local worktree/Machine vs. SSH connection) it's hitting.
+type GrepOptions struct {
+	Regex          bool
+	CaseSensitive  bool
+	IncludePattern string
+}
+
+// GrepMatch is one matched line within a GrepFileMatch. Column is a 1-based
+// offset into Text where the match starts (ripgrep's --json submatch
+// "start" byte offset, +1).
+type GrepMatch struct {
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+	Text   string `json:"text"`
+}
+
+// GrepFileMatch groups every GrepMatch found in one file, path relative to
+// the search root.
+type GrepFileMatch struct {
+	Path    string      `json:"path"`
+	Matches []GrepMatch `json:"matches"`
+}
+
+// GrepResult is the shared response shape for both WorktreeFileService.Grep
+// and SSHFileService.Grep. RgAvailable is false whenever ripgrep itself
+// isn't installed on the target — reported back rather than treated as an
+// error, so the frontend can offer a one-click ripgrep install (a later
+// feature). This does not necessarily mean Files is empty: when rg is
+// missing but a `grep` fallback is found (Engine: "grep"), Files still
+// carries real results from that fallback; Files is only empty when neither
+// engine is available.
+type GrepResult struct {
+	Engine      string          `json:"engine"`
+	RgAvailable bool            `json:"rgAvailable"`
+	Truncated   bool            `json:"truncated"`
+	Files       []GrepFileMatch `json:"files"`
+}
+
+// resolveRipgrep resolves the "rg" binary via detect.ResolveBinary,
+// overridable in tests — same pattern as detect's own shellPathDirs (see its
+// doc comment: "overridable in tests via direct reassignment") — so Grep's
+// "ripgrep not installed" path can be exercised deterministically
+// regardless of whether the machine running the tests happens to have
+// ripgrep installed under one of ResolveBinary's hardcoded fallback dirs
+// (e.g. Homebrew's /opt/homebrew/bin on macOS), which plain PATH
+// manipulation in a test can't hide.
+var resolveRipgrep = func() (string, error) { return detect.ResolveBinary("rg") }
+
+// resolveGrepBinary resolves the "grep" binary via detect.ResolveBinary,
+// overridable in tests exactly like resolveRipgrep — used by
+// WorktreeFileService.Grep's fallback path when ripgrep isn't installed.
+var resolveGrepBinary = func() (string, error) { return detect.ResolveBinary("grep") }
+
+// currentGOOS reports the local OS, overridable in tests via direct
+// reassignment — same pattern as resolveRipgrep — so Grep's "no grep
+// fallback on Windows" branch (design decision 5: Windows has no reliable
+// built-in grep) can be exercised deterministically regardless of which OS
+// actually runs the test suite.
+var currentGOOS = runtime.GOOS
+
+// currentGOARCH reports the local architecture, overridable in tests
+// exactly like currentGOOS — used by InstallRipgrep to pick the right
+// ripgrep release asset without depending on which arch actually runs the
+// test suite.
+var currentGOARCH = runtime.GOARCH
+
+// installRipgrepLocal wraps rginstall.InstallLocal, overridable in tests
+// via direct reassignment — same pattern as resolveRipgrep — so
+// InstallRipgrep's tests don't require real network access.
+var installRipgrepLocal = rginstall.InstallLocal
+
+// Grep searches file contents under worktreeID's root using ripgrep, if
+// installed (detected via detect.ResolveBinary, same helper internal/lsp
+// uses for language-server binaries — handles the GUI/service process not
+// seeing the login shell's PATH). When rg isn't resolvable and the local OS
+// isn't Windows, it falls back to `grep -rn` (detected the same way); on
+// Windows there is no reliable built-in grep (design decision 5), so the
+// fallback is skipped there. If neither engine is available, this reports
+// GrepResult{RgAvailable: false} with a nil error rather than failing the
+// request.
+func (svc *WorktreeFileService) Grep(ctx context.Context, worktreeID, query string, opts GrepOptions) (GrepResult, error) {
+	if strings.TrimSpace(query) == "" {
+		return GrepResult{}, fmt.Errorf("query is required: %w", ErrValidation)
+	}
+	root, _, _, err := svc.resolve(worktreeID, "", true, false)
+	if err != nil {
+		return GrepResult{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, grepTimeout)
+	defer cancel()
+
+	if rgPath, rgErr := resolveRipgrep(); rgErr == nil {
+		cmd := exec.CommandContext(ctx, rgPath, rgGrepArgs(query, opts, root)...)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr := cmd.Run()
+		if runErr != nil && !isLocalNoMatchExit(runErr) {
+			return GrepResult{}, grepError(stderr.String(), runErr)
+		}
+		files, truncated := parseRipgrepJSON(stdout.Bytes(), root)
+		return GrepResult{Engine: "ripgrep", RgAvailable: true, Truncated: truncated, Files: files}, nil
+	}
+
+	if currentGOOS == "windows" {
+		return GrepResult{RgAvailable: false}, nil
+	}
+	grepPath, err := resolveGrepBinary()
+	if err != nil {
+		return GrepResult{RgAvailable: false}, nil
+	}
+
+	cmd := exec.CommandContext(ctx, grepPath, grepFallbackArgs(query, opts, root)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	if runErr != nil && !isLocalNoMatchExit(runErr) {
+		return GrepResult{}, grepError(stderr.String(), runErr)
+	}
+
+	files, truncated := parseGrepOutput(stdout.Bytes(), root)
+	return GrepResult{Engine: "grep", RgAvailable: false, Truncated: truncated, Files: files}, nil
+}
+
+// InstallRipgrep downloads and installs ripgrep locally (on whichever
+// process owns worktreeID — the hub for local/unassigned projects, or the
+// remote runtime process itself for Machine-assigned ones, since this
+// handler already runs on that process) via rginstall.InstallLocal, so the
+// very next Grep call picks it up. worktreeID is validated against the
+// store first (consistent 404 for an unknown id, matching every other
+// worktree-scoped route) even though the install itself is host-global and
+// doesn't otherwise depend on the worktree.
+func (svc *WorktreeFileService) InstallRipgrep(ctx context.Context, worktreeID string) (string, error) {
+	if _, err := svc.worktreeRoot(worktreeID); err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rgInstallTimeout)
+	defer cancel()
+
+	_, version, err := installRipgrepLocal(ctx, currentGOOS, currentGOARCH)
+	if err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+// rgGrepArgs builds `rg --json` argv shared by both the local (os/exec) and
+// SSH (sshmgr.RunCommand) Grep implementations: literal-vs-regex, case
+// sensitivity, an optional include glob, `--glob '!DIR'` excludes for the
+// same directories filename search already skips (searchSkipDirs), and the
+// absolute search root as rg's final positional path argument — so
+// parseRipgrepJSON can strip one common prefix regardless of which
+// implementation ran it.
+func rgGrepArgs(query string, opts GrepOptions, root string) []string {
+	args := []string{"--json", "--no-heading"}
+	if !opts.Regex {
+		args = append(args, "--fixed-strings")
+	}
+	if opts.CaseSensitive {
+		args = append(args, "--case-sensitive")
+	} else {
+		args = append(args, "--ignore-case")
+	}
+	if opts.IncludePattern != "" {
+		args = append(args, "--glob", opts.IncludePattern)
+	}
+	skipDirs := make([]string, 0, len(searchSkipDirs))
+	for dir := range searchSkipDirs {
+		skipDirs = append(skipDirs, dir)
+	}
+	sort.Strings(skipDirs)
+	for _, dir := range skipDirs {
+		args = append(args, "--glob", "!"+dir)
+	}
+	args = append(args, "--", query, root)
+	return args
+}
+
+// grepFallbackArgs builds `grep -rn` argv shared by both the local
+// (os/exec) and SSH (sshmgr.RunCommand) Grep fallback implementations,
+// invoked when ripgrep isn't installed: recursive (-r), line numbers (-n),
+// skip binary files (-I — rg does this automatically, grep needs it spelled
+// out), `--exclude-dir=DIR` for the same directories rgGrepArgs excludes via
+// --glob, case-insensitive (-i) unless opts.CaseSensitive, and literal-string
+// matching (-F) unless opts.Regex — grep's default is POSIX basic regex, not
+// literal, unlike ripgrep's default. "--" ends option parsing so a query
+// starting with "-" is never misread as a flag, and root is the final
+// positional argument, matching rgGrepArgs so parseGrepOutput can strip the
+// same absolute-root prefix regardless of which engine produced the output.
+func grepFallbackArgs(query string, opts GrepOptions, root string) []string {
+	args := []string{"-r", "-n", "-I"}
+	skipDirs := make([]string, 0, len(searchSkipDirs))
+	for dir := range searchSkipDirs {
+		skipDirs = append(skipDirs, dir)
+	}
+	sort.Strings(skipDirs)
+	for _, dir := range skipDirs {
+		args = append(args, "--exclude-dir="+dir)
+	}
+	if !opts.CaseSensitive {
+		args = append(args, "-i")
+	}
+	if !opts.Regex {
+		args = append(args, "-F")
+	}
+	args = append(args, "--", query, root)
+	return args
+}
+
+// isLocalNoMatchExit reports whether err is a local *exec.ExitError with
+// the "no matches found" exit code (1) POSIX grep and ripgrep both use for
+// success-with-zero-results — not a failure. Any other exit code (2:
+// usage/regex error, ...) is a real failure. Shared by both engines since
+// both follow the same exit-code convention.
+func isLocalNoMatchExit(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() == 1
+	}
+	return false
+}
+
+// grepError turns a failed rg invocation's stderr into an actionable
+// validation error (almost always an invalid regex, the only user-supplied
+// input rg would reject outright given a valid, existing root) — mirrors
+// the "never leak raw subprocess error detail beyond a short, safe message"
+// convention firstLine/ToolUnavailableError establish in tools.go.
+func grepError(stderr string, runErr error) error {
+	msg := firstLine(stderr)
+	if msg == "" {
+		return fmt.Errorf("search failed: %v", runErr)
+	}
+	return fmt.Errorf("search failed: %s: %w", msg, ErrValidation)
+}
+
+// rgJSONEvent is one line of ripgrep's --json output stream. Only the
+// "match" event type carries fields parseRipgrepJSON needs; begin/end/
+// summary events are ignored.
+type rgJSONEvent struct {
+	Type string `json:"type"`
+	Data struct {
+		Path struct {
+			Text string `json:"text"`
+		} `json:"path"`
+		Lines struct {
+			Text string `json:"text"`
+		} `json:"lines"`
+		LineNumber int `json:"line_number"`
+		Submatches []struct {
+			Start int `json:"start"`
+		} `json:"submatches"`
+	} `json:"data"`
+}
+
+// parseRipgrepJSON parses `rg --json` output (one JSON object per line) into
+// GrepFileMatch groups, stripping rootPrefix — the absolute search root
+// passed as rg's final positional argument by rgGrepArgs — from each
+// match's path so results come back relative, regardless of whether the
+// absolute root was a local worktree checkout or a remote SSH home
+// directory. Caps at maxGrepFiles distinct files and maxGrepMatchesPerFile
+// matches per file, reporting truncated=true if either cap was hit.
+func parseRipgrepJSON(output []byte, rootPrefix string) (files []GrepFileMatch, truncated bool) {
+	prefix := strings.TrimSuffix(rootPrefix, "/") + "/"
+	byPath := make(map[string]*GrepFileMatch)
+	order := make([]string, 0)
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var event rgJSONEvent
+		if err := json.Unmarshal(line, &event); err != nil || event.Type != "match" {
+			continue
+		}
+		relPath := strings.TrimPrefix(event.Data.Path.Text, prefix)
+		entry, ok := byPath[relPath]
+		if !ok {
+			if len(order) >= maxGrepFiles {
+				truncated = true
+				continue
+			}
+			entry = &GrepFileMatch{Path: relPath}
+			byPath[relPath] = entry
+			order = append(order, relPath)
+		}
+		if len(entry.Matches) >= maxGrepMatchesPerFile {
+			truncated = true
+			continue
+		}
+		column := 1
+		if len(event.Data.Submatches) > 0 {
+			column = event.Data.Submatches[0].Start + 1
+		}
+		entry.Matches = append(entry.Matches, GrepMatch{
+			Line:   event.Data.LineNumber,
+			Column: column,
+			Text:   strings.TrimRight(event.Data.Lines.Text, "\n"),
+		})
+	}
+
+	files = make([]GrepFileMatch, 0, len(order))
+	for _, p := range order {
+		files = append(files, *byPath[p])
+	}
+	return files, truncated
+}
+
+// parseGrepOutput parses `grep -rn` plain-text output — one "path:line:text"
+// line per match, NOT JSON like rg --json — into GrepFileMatch groups,
+// stripping rootPrefix the same way parseRipgrepJSON does. Column is always
+// 0: unlike ripgrep's --json submatch offsets, grep doesn't report a match
+// column by default, so 0 is used as an explicit "unknown" sentinel rather
+// than guessing one. Each line is split into at most 3 fields (path, line
+// number, text) via strings.SplitN, since the matched text can itself
+// legitimately contain colons (URLs, "key: value" pairs, timestamps, ...) —
+// a naive strings.Split(line, ":") would misparse those; capping at 3 fields
+// lets everything after the first two colons flow into Text untouched.
+// Malformed lines (not exactly 3 fields, or a non-numeric line number) are
+// skipped rather than failing the whole parse.
+func parseGrepOutput(output []byte, rootPrefix string) (files []GrepFileMatch, truncated bool) {
+	prefix := strings.TrimSuffix(rootPrefix, "/") + "/"
+	byPath := make(map[string]*GrepFileMatch)
+	order := make([]string, 0)
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		lineNumber, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		relPath := strings.TrimPrefix(parts[0], prefix)
+		entry, ok := byPath[relPath]
+		if !ok {
+			if len(order) >= maxGrepFiles {
+				truncated = true
+				continue
+			}
+			entry = &GrepFileMatch{Path: relPath}
+			byPath[relPath] = entry
+			order = append(order, relPath)
+		}
+		if len(entry.Matches) >= maxGrepMatchesPerFile {
+			truncated = true
+			continue
+		}
+		entry.Matches = append(entry.Matches, GrepMatch{
+			Line:   lineNumber,
+			Column: 0,
+			Text:   parts[2],
+		})
+	}
+
+	files = make([]GrepFileMatch, 0, len(order))
+	for _, p := range order {
+		files = append(files, *byPath[p])
+	}
+	return files, truncated
 }
 
 type fileSearchMatch struct {

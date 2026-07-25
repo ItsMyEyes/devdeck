@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,7 @@ func newTestSvc(t *testing.T, kill func(string) error) (*WorktreeService, port.S
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	return NewWorktreeService(st, kill), st
+	return NewWorktreeService(st, kill, nil), st
 }
 
 // mustInitGitRepo creates a temporary git repository with an initial commit
@@ -330,6 +331,84 @@ func mustRunGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out)
+}
+
+func TestCreateTriggersWarmInstallOnSuccessForBothModes(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st := store.New(db)
+
+	var warmed []string
+	svc := NewWorktreeService(st, nil, func(ctx context.Context, worktreeID string) {
+		warmed = append(warmed, worktreeID)
+	})
+
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoPath := mustInitGitRepo(t)
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := svc.Create(proj.ID, repoPath, "root", "", "", "", "", "")
+	if err != nil {
+		t.Fatalf("Create (root): %v", err)
+	}
+	branch, err := svc.Create(proj.ID, repoPath, "branch", "feat/warm", "main", "", "", "")
+	if err != nil {
+		t.Fatalf("Create (branch): %v", err)
+	}
+
+	want := map[string]bool{root.ID: true, branch.ID: true}
+	if len(warmed) != 2 {
+		t.Fatalf("warmInstall called %d times, want 2: %v", len(warmed), warmed)
+	}
+	for _, id := range warmed {
+		if !want[id] {
+			t.Errorf("warmInstall called with unexpected worktree ID %q", id)
+		}
+	}
+}
+
+func TestCreateToleratesNilWarmInstall(t *testing.T) {
+	svc, st := newTestSvc(t, nil)
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoPath := mustInitGitRepo(t)
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(proj.ID, repoPath, "root", "", "", "", "", ""); err != nil {
+		t.Fatalf("Create with nil warmInstall should not panic or error: %v", err)
+	}
+}
+
+func TestCreateDoesNotTriggerWarmInstallOnFailure(t *testing.T) {
+	svc, st := newTestSvc(t, nil)
+	svc.warmInstall = func(ctx context.Context, worktreeID string) {
+		t.Errorf("warmInstall called for a worktree that failed to create: %q", worktreeID)
+	}
+	ws, err := st.CreateWorkspace("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoPath := mustInitGitRepo(t)
+	proj, err := st.CreateProject(ws.ID, "core", repoPath, "acme/core", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(proj.ID, repoPath, "branch", "feat/x", "does-not-exist", "", "", ""); err == nil {
+		t.Fatal("expected error for unknown base branch, got nil")
+	}
 }
 
 func strPtr(s string) *string { return &s }

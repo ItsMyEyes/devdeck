@@ -231,7 +231,8 @@ func main() {
 	} else {
 		pSvc = service.NewProjectService(st)
 	}
-	wtSvc := service.NewWorktreeService(st, terminal.KillWorktreeSessions)
+	lspSrv := lsp.NewServer(st)
+	wtSvc := service.NewWorktreeService(st, terminal.KillWorktreeSessions, lspSrv.WarmInstall)
 	agentSvc := service.NewAgentService(agentReg)
 	seedSvc := service.NewSeedService(st)
 	fileSvc := service.NewWorktreeFileService(st)
@@ -287,7 +288,6 @@ func main() {
 
 	termSrv := terminal.NewServer(st)
 	termH := handler.NewTerminalHandler()
-	lspSrv := lsp.NewServer(st)
 	fsH := handler.NewFsHandler()
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
@@ -367,6 +367,8 @@ func main() {
 	mux.HandleFunc("POST /api/worktrees/{id}/files/delete", fileH.DeleteMany)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/zip", fileH.Archive)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/search", fileH.Search)
+	mux.HandleFunc("GET /api/worktrees/{id}/files/grep", fileH.Grep)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/grep/install-ripgrep", fileH.InstallRipgrep)
 	mux.HandleFunc("GET /api/worktrees/{id}/file", fileH.Read)
 	mux.HandleFunc("PUT /api/worktrees/{id}/file", fileH.Write)
 	mux.HandleFunc("DELETE /api/worktrees/{id}/file", fileH.Delete)
@@ -493,6 +495,8 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/delete", sshFileH.DeleteMany)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/zip", sshFileH.Archive)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/search", sshFileH.Search)
+		mux.HandleFunc("GET /api/ssh/connections/{id}/files/grep", sshFileH.Grep)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/grep/install-ripgrep", sshFileH.InstallRipgrep)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/file", sshFileH.Read)
 		mux.HandleFunc("PUT /api/ssh/connections/{id}/file", sshFileH.Write)
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)

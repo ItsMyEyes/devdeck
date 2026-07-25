@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestReadFrameRejectsMissingLength(t *testing.T) {
 }
 
 func TestLanguageServerAliases(t *testing.T) {
-	for _, language := range []string{"go", "typescript", "typescriptreact", "javascript", "javascriptreact", "python", "rust"} {
+	for _, language := range []string{"go", "java", "typescript", "typescriptreact", "javascript", "javascriptreact", "python", "rust"} {
 		if _, ok := languageServers[language]; !ok {
 			t.Errorf("language %q has no server", language)
 		}
@@ -148,6 +149,108 @@ func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
 	if rpc.ID != 7 || len(rpc.Result) == 0 {
 		t.Fatalf("response = %s", response)
 	}
+}
+
+func TestWebsocketGatewayAutoInstallsMissingLanguageServer(t *testing.T) {
+	t.Setenv("DEVDECK_LSP_HELPER", "1")
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+
+	prereqPath := filepath.Join(binDir, "fake-prereq")
+	if err := os.WriteFile(prereqPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	originalLang := languageServers["go"]
+	languageServers["go"] = serverSpec{
+		binary: "devdeck-test-lsp-target",
+		args:   []string{"-test.run=^TestLSPHelperProcess$"},
+	}
+	t.Cleanup(func() { languageServers["go"] = originalLang })
+
+	originalSpecs := installSpecs
+	installSpecs = map[string]installSpec{
+		"devdeck-test-lsp-target": {prereq: "fake-prereq", args: []string{"install"}},
+	}
+	t.Cleanup(func() { installSpecs = originalSpecs })
+
+	var installCalls int32
+	stubRunInstallCommand(t, func(ctx context.Context, resolvedPrereqPath string, args []string) error {
+		atomic.AddInt32(&installCalls, 1)
+		return copyExecutable(os.Args[0], filepath.Join(binDir, "devdeck-test-lsp-target"))
+	})
+
+	projectPath := t.TempDir()
+	db, err := store.Open(filepath.Join(t.TempDir(), "lsp-install-test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	workspace, err := st.CreateWorkspace("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := st.CreateProject(workspace.ID, "project", projectPath, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", project.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	httpServer := httptest.NewServer(http.HandlerFunc(NewServer(st).HandleWS))
+	t.Cleanup(httpServer.Close)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+		"?worktree=" + worktree.ID + "&language=go"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	_, installingPayload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read installing control message: %v", err)
+	}
+	var installing struct {
+		DevDeckLSP controlMessage `json:"devdeckLsp"`
+	}
+	if err := json.Unmarshal(installingPayload, &installing); err != nil {
+		t.Fatalf("decode installing control message: %v", err)
+	}
+	if installing.DevDeckLSP.Type != "installing" {
+		t.Fatalf("first control message type = %q, want %q", installing.DevDeckLSP.Type, "installing")
+	}
+
+	_, readyPayload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read ready control message: %v", err)
+	}
+	var ready struct {
+		DevDeckLSP controlMessage `json:"devdeckLsp"`
+	}
+	if err := json.Unmarshal(readyPayload, &ready); err != nil {
+		t.Fatalf("decode ready control message: %v", err)
+	}
+	if ready.DevDeckLSP.Type != "ready" || ready.DevDeckLSP.RootURI == "" {
+		t.Fatalf("ready control message = %+v", ready.DevDeckLSP)
+	}
+
+	if atomic.LoadInt32(&installCalls) != 1 {
+		t.Errorf("install command invoked %d times, want 1", installCalls)
+	}
+}
+
+func copyExecutable(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o755)
 }
 
 func TestLSPHelperProcess(t *testing.T) {

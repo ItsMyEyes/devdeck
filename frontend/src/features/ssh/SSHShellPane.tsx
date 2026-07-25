@@ -29,6 +29,8 @@ import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, Worktre
 import { TerminalExplorer } from '@/features/terminal/TerminalExplorer'
 import { SSHFileEditor } from '@/features/terminal/SSHFileEditor'
 import { FileQuickOpen } from '@/features/terminal/FileQuickOpen'
+import { ContentSearchPanel } from '@/features/terminal/ContentSearchPanel'
+import type { LineReveal } from '@/features/terminal/PlainCodeEditor'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
 
@@ -65,6 +67,9 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
 
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(() => new Set())
   const [quickOpen, setQuickOpen] = useState(false)
+  const [contentSearch, setContentSearch] = useState(false)
+  const [lineReveals, setLineReveals] = useState<Record<string, LineReveal>>({})
+  const revealRequest = useRef(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const isDesktop = useIsDesktop()
 
@@ -114,6 +119,12 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
       next.delete(path)
       return next
     })
+    setLineReveals((current) => {
+      if (!(path in current)) return current
+      const next = { ...current }
+      delete next[path]
+      return next
+    })
   }, [])
 
   const handleDirtyChange = useCallback((path: string, dirty: boolean) => {
@@ -145,6 +156,21 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [layout, connectionId],
+  )
+
+  /** Content search's "open at line" entry point (ContentSearchPanel's
+   *  onOpenMatch). Unlike the worktree side (ExpandedTerminal.tsx's
+   *  openAtLine, which reuses CodeFileEditor's existing LSP reveal), SSH
+   *  files render PlainCodeEditor with no LSP reveal mechanism, so this
+   *  tracks a small requestId-keyed LineReveal map instead — see
+   *  PlainCodeEditor.tsx's LineReveal doc comment. */
+  const openAtLine = useCallback(
+    (path: string, line: number, column: number, length: number) => {
+      revealRequest.current += 1
+      setLineReveals((current) => ({ ...current, [path]: { line, column, length, requestId: revealRequest.current } }))
+      openFile(path)
+    },
+    [openFile],
   )
 
   const handleFilesDeleted = useCallback(
@@ -273,6 +299,11 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
         setQuickOpen(true)
         return
       }
+      if (primary && event.shiftKey && key === 'f') {
+        event.preventDefault()
+        setContentSearch(true)
+        return
+      }
       if (primary && key === 't') {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
@@ -350,6 +381,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
           active={isActive}
           onDirtyChange={handleDirtyChange}
           onDeleted={(path) => handleFilesDeleted([path])}
+          reveal={lineReveals[content.path]}
         />
       )
     },
@@ -360,6 +392,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
         onOpenFile={openFile}
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
+        onRequestContentSearch={() => setContentSearch(true)}
       />
     ),
   }
@@ -388,6 +421,13 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
         target={{ kind: 'ssh', connectionId }}
         onClose={() => setQuickOpen(false)}
         onOpenFile={openFile}
+      />
+
+      <ContentSearchPanel
+        open={contentSearch}
+        target={{ kind: 'ssh', connectionId }}
+        onClose={() => setContentSearch(false)}
+        onOpenMatch={openAtLine}
       />
     </div>
   )

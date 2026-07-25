@@ -159,3 +159,36 @@ func (h *WorktreeFileHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, paths)
 }
+
+func (h *WorktreeFileHandler) Grep(w http.ResponseWriter, r *http.Request) {
+	opts := service.GrepOptions{
+		Regex:          queryBool(r, "regex"),
+		CaseSensitive:  queryBool(r, "caseSensitive"),
+		IncludePattern: r.URL.Query().Get("includePattern"),
+	}
+	result, err := h.svc.Grep(r.Context(), r.PathValue("id"), r.URL.Query().Get("query"), opts)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// InstallRipgrep downloads and installs ripgrep on whichever process owns
+// this worktree (the hub, or — via MachineProxyHandler's transparent
+// forwarding — a remote Machine's runtime process), so the next Grep call
+// can use it instead of the grep fallback.
+func (h *WorktreeFileHandler) InstallRipgrep(w http.ResponseWriter, r *http.Request) {
+	version, err := h.svc.InstallRipgrep(r.Context(), r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"installed": true, "version": version})
+}
+
+// queryBool parses a "1"/"true" boolean query param, same convention as the
+// inline includeDirs check above — shared here so the new Grep handlers
+// (worktree and SSH) don't each repeat it.
+func queryBool(r *http.Request, name string) bool {
+	v := r.URL.Query().Get(name)
+	return v == "1" || v == "true"
+}

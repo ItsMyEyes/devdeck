@@ -25,6 +25,8 @@ export const qk = {
     ['machines', machineId, 'worktrees', id, 'file', path] as const,
   worktreeFileSearch: (machineId: string, id: string, pattern: string) =>
     ['machines', machineId, 'worktrees', id, 'file-search', pattern] as const,
+  worktreeGrep: (machineId: string, id: string, query: string) =>
+    ['machines', machineId, 'worktrees', id, 'grep', query] as const,
   gitRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git'] as const,
   gitStatus: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'status'] as const,
   gitLog: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'log'] as const,
@@ -48,6 +50,7 @@ export const qk = {
   sshFiles: (connectionId: string, path: string) => ['ssh', connectionId, 'files', path] as const,
   sshFile: (connectionId: string, path: string) => ['ssh', connectionId, 'file', path] as const,
   sshFileSearch: (connectionId: string, pattern: string) => ['ssh', connectionId, 'file-search', pattern] as const,
+  sshGrep: (connectionId: string, query: string) => ['ssh', connectionId, 'grep', query] as const,
   dbConnections: ['dbConnections'] as const,
   dbEngines: ['dbEngines'] as const,
   dbSavedQueries: (connectionId: string) => ['db', connectionId, 'queries'] as const,

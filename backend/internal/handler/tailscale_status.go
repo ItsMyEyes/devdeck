@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+
+	"devdeck/backend/internal/detect"
 )
 
 // TailscaleStatusHandler answers whether this hub process is currently
@@ -49,11 +51,17 @@ func (h *TailscaleStatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, tailscaleStatusResponse{Ready: true, URL: url})
 }
 
+// resolveTailscale is overridable in tests so tailscaleSelfURL's
+// "not installed" branch doesn't depend on what's actually resolvable (PATH,
+// fallback dirs, login shell, macOS app bundle) on the machine running the
+// test suite.
+var resolveTailscale = detect.ResolveTailscale
+
 // tailscaleSelfURL runs `tailscale status --self --json` and derives this
 // device's tailnet-reachable URL, mirroring
 // frontend/src-tauri/src/tailscale.rs's parse_dns_name/public_url.
 func tailscaleSelfURL() (url string, reason string) {
-	bin, err := exec.LookPath("tailscale")
+	bin, err := resolveTailscale()
 	if err != nil {
 		return "", "not_installed"
 	}

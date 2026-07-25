@@ -58,3 +58,11 @@ docs/      Design specs and implementation plans (docs/superpowers/)
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full directory map.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Third-party dependency licenses are noted in [NOTICE](NOTICE).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.

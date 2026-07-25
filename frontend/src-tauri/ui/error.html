@@ -6,17 +6,82 @@
     <style>
       html, body { height: 100%; margin: 0; background: #0d1017; color: #c0c6d4;
         font: 13px/1.6 -apple-system, "Segoe UI", sans-serif; }
-      body { display: grid; place-items: center; }
-      main { max-width: 480px; }
-      h1 { font-size: 15px; color: #e46962; }
+      body { display: flex; flex-direction: column; align-items: center; padding: 40px 24px; box-sizing: border-box; }
+      main { max-width: 720px; width: 100%; }
+      h1 { font-size: 15px; color: #e46962; margin: 0 0 10px; }
       code { color: #8b93a7; word-break: break-all; }
+      .actions { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+      button { appearance: none; padding: 8px 12px; background: #1a1f2b; color: #c0c6d4;
+        border: 1px solid #2a3040; border-radius: 6px; cursor: pointer; font: inherit; }
+      button:hover { background: #232936; }
+      button:disabled { cursor: default; opacity: 0.5; }
+      #log-status { color: #5b6478; font-size: 12px; }
+      pre#log {
+        margin: 0; padding: 12px; background: #090b10; border: 1px solid #1f2531; border-radius: 8px;
+        max-height: 360px; overflow: auto; font: 11.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        color: #a9b0c2; white-space: pre-wrap; word-break: break-all;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>DevDeck failed to start</h1>
       <p id="msg">The bundled devdeck-server did not start.</p>
-      <p>Details are in the sidecar log:<br /><code id="logpath">app log directory / sidecar.log</code></p>
+      <p>Log file:<br /><code id="logpath">app log directory / sidecar.log</code></p>
+      <div class="actions">
+        <button id="open-btn">Open log file</button>
+        <button id="refresh-btn">Refresh log</button>
+        <span id="log-status"></span>
+      </div>
+      <pre id="log">Loading log…</pre>
     </main>
+    <script>
+      const invoke = window.__TAURI__.core.invoke
+      const $ = (id) => document.getElementById(id)
+      const msgEl = $('msg')
+      const logpathEl = $('logpath')
+      const logEl = $('log')
+      const statusEl = $('log-status')
+      const openBtn = $('open-btn')
+      const refreshBtn = $('refresh-btn')
+
+      async function loadMessage() {
+        try {
+          const msg = await invoke('get_startup_error')
+          if (msg) msgEl.textContent = msg
+        } catch (e) {
+          // Leave the default text — a failed invoke here isn't worth
+          // blocking the rest of the page on.
+        }
+      }
+
+      async function loadLog() {
+        statusEl.textContent = ''
+        try {
+          const { path, content, truncated } = await invoke('read_sidecar_log')
+          logpathEl.textContent = path
+          logEl.textContent = content || '(log file is empty)'
+          statusEl.textContent = truncated ? 'showing the last 64 KB' : ''
+        } catch (e) {
+          logEl.textContent = `Could not read the log file: ${e}`
+        }
+      }
+
+      openBtn.addEventListener('click', async () => {
+        openBtn.disabled = true
+        try {
+          await invoke('open_log_file')
+        } catch (e) {
+          statusEl.textContent = `Could not open the log file: ${e}`
+        } finally {
+          openBtn.disabled = false
+        }
+      })
+
+      refreshBtn.addEventListener('click', loadLog)
+
+      loadMessage()
+      loadLog()
+    </script>
   </body>
 </html>

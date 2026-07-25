@@ -10,8 +10,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use browser_tiles::BrowserTiles;
-use tauri::menu::MenuBuilder;
+use tauri::menu::{Menu, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -22,6 +23,12 @@ struct RuntimeServerProc(Mutex<Option<CommandChild>>);
 /// Last runtime-registration failure (reason, hub_url), if any, shown on
 /// demand via the "⚠ Runtime not registered" menu item.
 struct RuntimeWarning(Mutex<Option<(String, String)>>);
+/// Last local-hub sidecar launch failure message, if any, shown on
+/// error.html. Read via the get_startup_error command rather than injected
+/// with win.eval right after win.navigate — that eval routinely lost the
+/// race against the new page finishing its load, leaving error.html's
+/// static placeholder text on screen instead of the real message.
+struct StartupError(Mutex<Option<String>>);
 /// Set on ExitRequested so the monitor loop stops respawning during shutdown.
 struct ShuttingDown(AtomicBool);
 
@@ -36,10 +43,32 @@ enum LaunchEnd {
     Failed(String),
 }
 
+/// Builds the app's menu bar: a "DevDeck" submenu holding `items` (id, label
+/// pairs), plus a standard Edit submenu (Cut/Copy/Paste/Select All). On
+/// macOS the menubar may only contain Submenus — a bare top-level `.text()`
+/// item (the previous approach) leaves the OS with no native Edit menu, and
+/// without it Cmd+C/Cmd+V have nothing to bind to, so copy/paste silently
+/// stops working in every WKWebView text input in the app.
+fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>, items: &[(&str, &str)]) -> tauri::Result<Menu<R>> {
+    let mut app_menu = SubmenuBuilder::new(app, "DevDeck");
+    for (id, label) in items {
+        app_menu = app_menu.text(*id, *label);
+    }
+    let app_menu = app_menu.build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit").cut().copy().paste().select_all().build()?;
+
+    let menu = Menu::new(app)?;
+    menu.append(&app_menu)?;
+    menu.append(&edit_menu)?;
+    Ok(menu)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(BrowserTiles::new())
         .on_page_load(|webview, payload| {
             // Global hook (fires for every webview in the app, including
@@ -65,6 +94,10 @@ pub fn run() {
             browser_tiles::browser_tile_close,
             choose_hub_mode,
             change_hub,
+            get_startup_error,
+            read_sidecar_log,
+            open_log_file,
+            get_runtime_warning,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) && std::env::var_os("DEVDECK_TAURI_DEV_FULL").is_none() {
@@ -77,17 +110,15 @@ pub fn run() {
             app.manage(ServerProc(Mutex::new(None)));
             app.manage(RuntimeServerProc(Mutex::new(None)));
             app.manage(RuntimeWarning(Mutex::new(None)));
+            app.manage(StartupError(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
-            let menu = MenuBuilder::new(app).text(CHANGE_HUB_MENU_ID, "Change Hub…").build()?;
+            let menu = build_menu(app.handle(), &[(CHANGE_HUB_MENU_ID, "Change Hub…")])?;
             app.set_menu(menu)?;
             app.on_menu_event(move |app_handle, event| {
                 if event.id() == CHANGE_HUB_MENU_ID {
                     let _ = change_hub(app_handle.clone());
                 } else if event.id() == RUNTIME_WARNING_MENU_ID {
-                    let saved = app_handle.state::<RuntimeWarning>().0.lock().unwrap().clone();
-                    if let Some((reason, hub_url)) = saved {
-                        show_runtime_warning(app_handle, &reason, &hub_url);
-                    }
+                    show_runtime_warning(app_handle);
                 }
             });
             let handle = app.handle().clone();
@@ -184,36 +215,27 @@ async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
 fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, hub_url: &str) {
     log_runtime_line(handle, reason);
     *handle.state::<RuntimeWarning>().0.lock().unwrap() = Some((reason.to_string(), hub_url.to_string()));
-    if let Ok(menu) = MenuBuilder::new(handle)
-        .text(CHANGE_HUB_MENU_ID, "Change Hub…")
-        .text(RUNTIME_WARNING_MENU_ID, "⚠ Runtime not registered")
-        .build()
-    {
+    if let Ok(menu) = build_menu(
+        handle,
+        &[(CHANGE_HUB_MENU_ID, "Change Hub…"), (RUNTIME_WARNING_MENU_ID, "⚠ Runtime not registered")],
+    ) {
         let _ = handle.set_menu(menu);
     }
 }
 
-/// Navigates the main window to the bundled runtime-warning page, injecting
-/// the failure reason, log path, and the remote hub URL (for the page's own
-/// "Back to hub" button) via `win.eval` — same pattern as `show_error`.
-fn show_runtime_warning(handle: &AppHandle, reason: &str, hub_url: &str) {
-    let log_path = handle
-        .path()
-        .app_log_dir()
-        .map(|d| d.join("runtime-sidecar.log").to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "app log directory / runtime-sidecar.log".into());
+/// Navigates the main window to the bundled runtime-warning page. The page
+/// itself pulls the failure reason, log path, and remote hub URL via the
+/// get_runtime_warning command once it has actually loaded, rather than
+/// having them injected with win.eval right after win.navigate — that eval
+/// routinely lost the race against the new page's load, leaving the page's
+/// static placeholder text on screen instead of the real values.
+fn show_runtime_warning(handle: &AppHandle) {
     #[cfg(not(windows))]
     let warning_url = "tauri://localhost/runtime-warning.html";
     #[cfg(windows)]
     let warning_url = "http://tauri.localhost/runtime-warning.html";
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.navigate(warning_url.parse().expect("static runtime warning url"));
-        let _ = win.eval(format!(
-            "document.getElementById('reason').textContent = {}; document.getElementById('logpath').textContent = {}; document.body.dataset.hubUrl = {};",
-            serde_json::to_string(reason).unwrap_or_default(),
-            serde_json::to_string(&log_path).unwrap_or_default(),
-            serde_json::to_string(hub_url).unwrap_or_default(),
-        ));
         let _ = win.show();
     }
 }
@@ -527,13 +549,16 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     LaunchEnd::Crashed
 }
 
-/// Sends the main window to the bundled error page with the failure message.
+/// Sends the main window to the bundled error page with the failure
+/// message. The page itself pulls the message (and the sidecar log) via the
+/// get_startup_error/read_sidecar_log commands once it has actually loaded,
+/// rather than having them injected with win.eval right after win.navigate
+/// — that eval routinely lost the race against the new page's load, leaving
+/// error.html's static placeholder text on screen instead of the real
+/// message (what "app log directory / sidecar.log" verbatim on screen
+/// means: the substitution never ran).
 fn show_error(handle: &AppHandle, msg: &str) {
-    let log_path = handle
-        .path()
-        .app_log_dir()
-        .map(|d| d.join("sidecar.log").to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "app log directory / sidecar.log".into());
+    *handle.state::<StartupError>().0.lock().unwrap() = Some(msg.to_string());
     // Bundled frontendDist pages are served on the app's custom protocol:
     // tauri://localhost on macOS/Linux, http://tauri.localhost on Windows.
     #[cfg(not(windows))]
@@ -542,11 +567,82 @@ fn show_error(handle: &AppHandle, msg: &str) {
     let error_url = "http://tauri.localhost/error.html";
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.navigate(error_url.parse().expect("static error url"));
-        let _ = win.eval(format!(
-            "document.getElementById('msg').textContent = {}; document.getElementById('logpath').textContent = {};",
-            serde_json::to_string(msg).unwrap_or_default(),
-            serde_json::to_string(&log_path).unwrap_or_default(),
-        ));
         let _ = win.show();
     }
+}
+
+/// Absolute path to a log file this app writes under its log directory
+/// (sidecar.log, runtime-sidecar.log), resolved fresh on each call rather
+/// than cached — used by both the read/open commands below and kept in one
+/// place so they can never disagree on the path.
+fn app_log_path(app: &AppHandle, filename: &str) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_log_dir().map_err(|e| format!("resolve app log dir: {e}"))?;
+    Ok(dir.join(filename))
+}
+
+/// Returns the last local-hub sidecar launch failure message, if any, for
+/// error.html to render on load.
+#[tauri::command]
+fn get_startup_error(app: AppHandle) -> Option<String> {
+    app.state::<StartupError>().0.lock().unwrap().clone()
+}
+
+/// Returns the last runtime-registration failure (reason, log path, hub
+/// URL), if any, for runtime-warning.html to render on load.
+#[derive(serde::Serialize)]
+struct RuntimeWarningInfo {
+    reason: String,
+    #[serde(rename = "logPath")]
+    log_path: String,
+    #[serde(rename = "hubUrl")]
+    hub_url: String,
+}
+
+#[tauri::command]
+fn get_runtime_warning(app: AppHandle) -> Option<RuntimeWarningInfo> {
+    let saved = app.state::<RuntimeWarning>().0.lock().unwrap().clone();
+    saved.map(|(reason, hub_url)| RuntimeWarningInfo {
+        reason,
+        log_path: app_log_path(&app, "runtime-sidecar.log")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|e| e),
+        hub_url,
+    })
+}
+
+/// Sidecar log content shipped to error.html — bounded to the last
+/// SIDECAR_LOG_TAIL_BYTES so a multi-run, multi-MB log (see
+/// sidecar::LOG_TRUNCATE_BYTES) doesn't get sent across IPC whole.
+const SIDECAR_LOG_TAIL_BYTES: usize = 64 * 1024;
+
+#[derive(serde::Serialize)]
+struct SidecarLog {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+/// Reads the tail of the local-hub sidecar's log file, so error.html can
+/// show it in-page instead of sending the operator hunting for the file
+/// themselves.
+#[tauri::command]
+fn read_sidecar_log(app: AppHandle) -> Result<SidecarLog, String> {
+    let path = app_log_path(&app, "sidecar.log")?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let truncated = bytes.len() > SIDECAR_LOG_TAIL_BYTES;
+    let tail = if truncated { &bytes[bytes.len() - SIDECAR_LOG_TAIL_BYTES..] } else { &bytes[..] };
+    Ok(SidecarLog {
+        path: path.to_string_lossy().into_owned(),
+        content: String::from_utf8_lossy(tail).into_owned(),
+        truncated,
+    })
+}
+
+/// Opens the sidecar log file with the OS's default handler, so the
+/// operator can inspect it (or attach it to a bug report) without
+/// navigating Finder/Explorer to the app's log directory by hand.
+#[tauri::command]
+fn open_log_file(app: AppHandle) -> Result<(), String> {
+    let path = app_log_path(&app, "sidecar.log")?;
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }

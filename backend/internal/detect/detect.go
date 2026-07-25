@@ -106,6 +106,8 @@ func fallbackDirs() []string {
 		filepath.Join(home, ".npm-global", "bin"),
 		filepath.Join(home, ".volta", "bin"),
 		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".cargo", "bin"),
+		goBinDir(home),
 	)
 
 	if nodeVersions, err := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin")); err == nil {
@@ -113,6 +115,19 @@ func fallbackDirs() []string {
 	}
 
 	return dirs
+}
+
+// goBinDir returns the directory `go install` places built binaries in
+// (e.g. gopls): $GOPATH/bin if GOPATH is set, otherwise Go's default
+// $HOME/go/bin. The backend process doesn't inherit a login shell's
+// GOPATH-on-PATH export, so without this, any go-installed tool is
+// invisible to ResolveBinary even when it's exactly where `go install`
+// put it.
+func goBinDir(home string) string {
+	if gopath := os.Getenv("GOPATH"); gopath != "" {
+		return filepath.Join(gopath, "bin")
+	}
+	return filepath.Join(home, "go", "bin")
 }
 
 // shellPathDirs returns the PATH directories the user's interactive login
@@ -151,4 +166,82 @@ func ProbeAll() map[string]bool {
 		result[id] = Installed(id)
 	}
 	return result
+}
+
+// tailscaleExtraPaths lists well-known Tailscale CLI locations beyond
+// ResolveBinary's generic PATH/fallback-dir/login-shell search — notably the
+// official macOS Tailscale.app, which (unlike a Homebrew or npm install)
+// does not symlink a `tailscale` shim onto PATH unless the operator
+// explicitly runs its "Install Tailscale command line tool" menu action.
+// Overridable in tests, same pattern as shellPathDirs.
+var tailscaleExtraPaths = defaultTailscaleExtraPaths
+
+func defaultTailscaleExtraPaths() []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return []string{"/Applications/Tailscale.app/Contents/MacOS/Tailscale"}
+}
+
+// ResolveTailscale returns the absolute path to the tailscale CLI. It tries
+// ResolveBinary("tailscale") first (PATH, then the same fallback dirs and
+// login-shell PATH every other tool here uses), then tailscaleExtraPaths —
+// needed because a GUI-installed Tailscale commonly has no CLI shim on PATH
+// at all, unlike the npm-installed agent CLIs ResolveBinary was built for.
+func ResolveTailscale() (string, error) {
+	if p, err := ResolveBinary("tailscale"); err == nil {
+		return p, nil
+	}
+	for _, p := range tailscaleExtraPaths() {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("detect: tailscale: not found on PATH or in common install locations")
+}
+
+// projectLanguageMarkers maps a project-root marker filename to the LSP
+// language ID it implies. Keys match backend/internal/lsp's languageServers
+// map, so a caller can go straight from ProjectLanguages' result to a
+// serverSpec lookup there.
+var projectLanguageMarkers = map[string]string{
+	"go.mod":           "go",
+	"package.json":     "typescript",
+	"pyproject.toml":   "python",
+	"requirements.txt": "python",
+	"setup.py":         "python",
+	"Pipfile":          "python",
+	"Cargo.toml":       "rust",
+	"pom.xml":          "java",
+	"build.gradle":     "java",
+	"build.gradle.kts": "java",
+}
+
+// ProjectLanguages returns the distinct set of LSP languages implied by
+// marker files (go.mod, package.json, pyproject.toml, ...) found directly in
+// root. It only looks at root's immediate contents, not subdirectories —
+// project markers live at the repository/worktree root by convention, and a
+// deep walk would be needlessly slow and prone to false positives from
+// vendored dependencies. Returns nil (not an error) for a missing directory
+// or one with no recognized markers, since this is a best-effort hint for
+// proactive language-server installation, not a required signal.
+func ProjectLanguages(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(projectLanguageMarkers))
+	var languages []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		lang, ok := projectLanguageMarkers[entry.Name()]
+		if !ok || seen[lang] {
+			continue
+		}
+		seen[lang] = true
+		languages = append(languages, lang)
+	}
+	return languages
 }

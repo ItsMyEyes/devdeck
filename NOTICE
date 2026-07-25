@@ -1,0 +1,17 @@
+DevDeck
+Copyright (c) 2026 ItsMyEyes
+
+This product includes third-party open-source software. Third-party
+dependencies and their exact versions are declared in:
+
+  - backend/go.mod         (Go modules)
+  - frontend/package.json  (npm packages)
+  - frontend/src-tauri/Cargo.toml (Rust crates, desktop shell)
+
+Each dependency remains licensed under its own terms (predominantly MIT,
+BSD-3-Clause, and Apache-2.0). Consult the module's source repository or its
+package registry entry (pkg.go.dev, npmjs.com, crates.io) for the exact
+license text of a given dependency.
+
+This file does not itself grant any rights; see LICENSE for DevDeck's own
+license terms.

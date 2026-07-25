@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 
+	"devdeck/backend/internal/rginstall"
 	"devdeck/backend/internal/sshmgr"
 )
 
@@ -24,6 +27,17 @@ import (
 // SFTP round trip — a large or slow remote home directory could otherwise
 // keep an interactive quick-open search spinning indefinitely.
 const sshSearchBudget = 6 * time.Second
+
+// sshRgInstallTimeout bounds how long InstallRipgrep's GitHub API call +
+// asset download + extract + remote SFTP write may run before being
+// canceled — same spirit as worktree_file.go's rgInstallTimeout.
+const sshRgInstallTimeout = 60 * time.Second
+
+// installRipgrepOverSSH wraps rginstall.InstallOverSSH, overridable in
+// tests via direct reassignment — same pattern as
+// worktree_file.go's installRipgrepLocal — so InstallRipgrep's tests don't
+// require real network access.
+var installRipgrepOverSSH = rginstall.InstallOverSSH
 
 // SSHFileEntry is one visible item in an SSH connection's remote directory.
 // Same shape as WorktreeFileEntry — kept as its own type since the two
@@ -172,6 +186,100 @@ func (svc *SSHFileService) Search(ctx context.Context, connectionID, pattern str
 		}
 		return result, nil
 	})
+}
+
+// Grep searches remote file contents under connectionID's home directory
+// using ripgrep, if installed on the remote host, falling back to `grep`
+// when it isn't — mirrors WorktreeFileService.Grep's contract exactly (same
+// shared GrepOptions/GrepResult types, same rgGrepArgs/grepFallbackArgs and
+// parseRipgrepJSON/parseGrepOutput, same "neither engine found ->
+// GrepResult{RgAvailable: false}, nil error" behavior) but detects and
+// executes over the pooled SSH connection (sshmgr.CommandExists /
+// sshmgr.RunCommand) instead of a local subprocess. Unlike the worktree
+// path, there is no Windows special-case here: SSH remote hosts are assumed
+// POSIX (see the design spec's SSH scope note — every other SSH feature in
+// this codebase makes the same assumption), so the grep fallback is always
+// attempted when rg isn't found.
+//
+// Command construction safety: query/opts.IncludePattern are untrusted
+// HTTP-query-param input forwarded into a remote shell command. They are
+// never interpolated into a command string here — rgGrepArgs/
+// grepFallbackArgs return a []string argv, and sshmgr.RunCommand is the sole
+// place that turns it into one shell command, doing so through
+// shellJoin/shellQuote's strict POSIX single-quote escaping (see
+// sshmgr/exec.go) so every argument is delivered to the remote shell as one
+// literal word, never reinterpreted as shell syntax no matter what
+// characters it contains.
+func (svc *SSHFileService) Grep(ctx context.Context, connectionID, query string, opts GrepOptions) (GrepResult, error) {
+	if strings.TrimSpace(query) == "" {
+		return GrepResult{}, fmt.Errorf("query is required: %w", ErrValidation)
+	}
+
+	rgFound, err := sshmgr.CommandExists(ctx, svc.pool, connectionID, "rg")
+	if err != nil {
+		return GrepResult{}, err
+	}
+
+	engine := "rg"
+	if !rgFound {
+		grepFound, err := sshmgr.CommandExists(ctx, svc.pool, connectionID, "grep")
+		if err != nil {
+			return GrepResult{}, err
+		}
+		if !grepFound {
+			return GrepResult{RgAvailable: false}, nil
+		}
+		engine = "grep"
+	}
+
+	home, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (string, error) {
+		return client.Getwd()
+	})
+	if err != nil {
+		return GrepResult{}, fmt.Errorf("resolve home directory failed")
+	}
+
+	if engine == "rg" {
+		args := append([]string{"rg"}, rgGrepArgs(query, opts, home)...)
+		stdout, stderr, runErr := sshmgr.RunCommand(ctx, svc.pool, connectionID, args)
+		if runErr != nil && !isRemoteNoMatchExit(runErr) {
+			return GrepResult{}, grepError(string(stderr), runErr)
+		}
+		files, truncated := parseRipgrepJSON(stdout, home)
+		return GrepResult{Engine: "ripgrep", RgAvailable: true, Truncated: truncated, Files: files}, nil
+	}
+
+	args := append([]string{"grep"}, grepFallbackArgs(query, opts, home)...)
+	stdout, stderr, runErr := sshmgr.RunCommand(ctx, svc.pool, connectionID, args)
+	if runErr != nil && !isRemoteNoMatchExit(runErr) {
+		return GrepResult{}, grepError(string(stderr), runErr)
+	}
+	files, truncated := parseGrepOutput(stdout, home)
+	return GrepResult{Engine: "grep", RgAvailable: false, Truncated: truncated, Files: files}, nil
+}
+
+// InstallRipgrep downloads ripgrep on the hub (rginstall.InstallOverSSH
+// probes the remote OS/arch first) and writes it to connectionID's remote
+// ~/.local/bin/rg over the already-open pooled SFTP connection, so a
+// firewalled remote host never needs outbound internet access itself and
+// the very next Grep call picks it up.
+func (svc *SSHFileService) InstallRipgrep(ctx context.Context, connectionID string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, sshRgInstallTimeout)
+	defer cancel()
+	return installRipgrepOverSSH(ctx, svc.pool, connectionID)
+}
+
+// isRemoteNoMatchExit reports whether err is a remote *ssh.ExitError with
+// the "no matches found" exit code (1) POSIX grep and ripgrep both use for
+// success-with-zero-results — not a failure. Mirrors isLocalNoMatchExit for
+// the SSH exec transport, where a nonzero remote exit surfaces as
+// *ssh.ExitError instead of *exec.ExitError.
+func isRemoteNoMatchExit(err error) bool {
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitStatus() == 1
+	}
+	return false
 }
 
 func (svc *SSHFileService) Read(ctx context.Context, connectionID, relativePath string) (SSHFileContent, error) {

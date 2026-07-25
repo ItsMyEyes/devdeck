@@ -156,6 +156,78 @@ export function searchWorktreeFiles(
   return machineRequest<string[]>(machine, 'GET', `/worktrees/${worktreeId}/files/search?${params}`)
 }
 
+// ---- Worktree content search (grep) ----
+//
+// Mirrors backend/internal/service/worktree_file.go's GrepOptions/GrepResult
+// JSON shape exactly (field names/casing checked against the Go struct tags,
+// not the Go field names). Declared once here — rather than per data-source
+// file like SearchWorktreeFilesOptions/SearchSSHFilesOptions are — because
+// SSHFileService.Grep shares this exact same response shape on the backend
+// (same Go types, same package), and GrepFileMatch/GrepMatch's nesting makes
+// a field-for-field re-declaration in sshFileApi.ts more error-prone than
+// the trivial flat Search*Options duplication is; sshFileApi.ts imports
+// these types from here instead.
+
+export interface GrepOptions {
+  regex?: boolean
+  caseSensitive?: boolean
+  includePattern?: string
+}
+
+/** Column is a 1-based offset into `text` where the match starts; 0 when the
+ *  engine can't report one (the `grep` fallback doesn't emit columns). */
+export interface GrepMatch {
+  line: number
+  column: number
+  text: string
+}
+
+export interface GrepFileMatch {
+  path: string
+  matches: GrepMatch[]
+}
+
+export interface GrepResult {
+  engine: string
+  rgAvailable: boolean
+  truncated: boolean
+  files: GrepFileMatch[]
+}
+
+/** Exported so sshFileApi.ts's grepSSHFiles builds an identical query string
+ *  without duplicating this option-encoding logic. */
+export function grepParams(query: string, options: GrepOptions) {
+  const params = new URLSearchParams({ query })
+  if (options.regex) params.set('regex', '1')
+  if (options.caseSensitive) params.set('caseSensitive', '1')
+  if (options.includePattern) params.set('includePattern', options.includePattern)
+  return params
+}
+
+/** Go's zero-value `[]GrepFileMatch(nil)` (returned whenever neither rg nor
+ *  grep is available on the target — see GrepResult's backend doc comment)
+ *  has no `omitempty` on its json tag, so it serializes as JSON `null`, not
+ *  `[]`. Normalized to `[]` here so callers can rely on `files` always being
+ *  a real (possibly empty) array, matching this file's declared GrepResult
+ *  type. */
+export function normalizeGrepResult(result: GrepResult): GrepResult {
+  return result.files ? result : { ...result, files: [] }
+}
+
+export async function grepWorktreeFiles(
+  machine: Machine,
+  worktreeId: string,
+  query: string,
+  options: GrepOptions = {},
+): Promise<GrepResult> {
+  const result = await machineRequest<GrepResult>(
+    machine,
+    'GET',
+    `/worktrees/${worktreeId}/files/grep?${grepParams(query, options)}`,
+  )
+  return normalizeGrepResult(result)
+}
+
 // ---- Worktree git (source control) ----
 
 export interface GitStatusFile {

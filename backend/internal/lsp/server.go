@@ -34,6 +34,7 @@ type serverSpec struct {
 
 var languageServers = map[string]serverSpec{
 	"go":              {binary: "gopls"},
+	"java":            {binary: "jdtls"},
 	"javascript":      {binary: "typescript-language-server", args: []string{"--stdio"}},
 	"javascriptreact": {binary: "typescript-language-server", args: []string{"--stdio"}},
 	"python":          {binary: "pyright-langserver", args: []string{"--stdio"}},
@@ -44,11 +45,12 @@ var languageServers = map[string]serverSpec{
 
 // Server creates scoped local language-server processes for worktrees.
 type Server struct {
-	store port.Store
+	store     port.Store
+	installer *Installer
 }
 
 func NewServer(store port.Store) *Server {
-	return &Server{store: store}
+	return &Server{store: store, installer: NewInstaller()}
 }
 
 // HandleWS upgrades /ws/lsp and proxies JSON-RPC messages to a language server.
@@ -81,8 +83,22 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	binary, err := detect.ResolveBinary(spec.binary)
 	if err != nil {
-		s.closeWithError(ctx, conn, fmt.Sprintf("%s is not installed", spec.binary))
-		return
+		installErr := s.installer.EnsureInstalled(ctx, spec.binary, func() {
+			_ = writeControl(ctx, conn, controlMessage{
+				Type:     "installing",
+				Language: language,
+				Message:  fmt.Sprintf("Installing %s…", spec.binary),
+			})
+		})
+		if installErr != nil {
+			s.closeWithError(ctx, conn, installErr.Error())
+			return
+		}
+		binary, err = detect.ResolveBinary(spec.binary)
+		if err != nil {
+			s.closeWithError(ctx, conn, fmt.Sprintf("%s is not installed", spec.binary))
+			return
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, binary, spec.args...)
@@ -142,6 +158,31 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	if waitErr != nil && ctx.Err() == nil {
 		log.Printf("lsp: %s exited for %s: %v", spec.binary, worktreeID, waitErr)
 	}
+}
+
+// WarmInstall proactively installs missing language servers for a
+// worktree's detected project languages (go.mod, package.json, ...), in the
+// background. It's meant to be called right after a worktree is created, so
+// the server is usually already there by the time an editor first opens a
+// matching file — a best-effort speed-up, not a guarantee. Failures are only
+// logged: nothing is watching this call for a result, since no editor has
+// actually requested a language server yet.
+func (s *Server) WarmInstall(ctx context.Context, worktreeID string) {
+	go func() {
+		root, err := s.worktreeRoot(worktreeID)
+		if err != nil {
+			return
+		}
+		for _, language := range detect.ProjectLanguages(root) {
+			spec, ok := languageServers[language]
+			if !ok {
+				continue
+			}
+			if err := s.installer.EnsureInstalled(ctx, spec.binary, nil); err != nil {
+				log.Printf("lsp: warm install %s for worktree %s: %v", spec.binary, worktreeID, err)
+			}
+		}
+	}()
 }
 
 func (s *Server) worktreeRoot(worktreeID string) (string, error) {

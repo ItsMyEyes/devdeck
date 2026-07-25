@@ -154,6 +154,7 @@ import {
   gitPush,
   gitStage,
   gitUnstage,
+  grepWorktreeFiles,
   installAgentSkill,
   killTerminalSession,
   removeAgentEnvProfile,
@@ -171,6 +172,7 @@ import {
   type CreateWorktreeBody,
   type EnvProfileInput,
   type EnvProfilePatch,
+  type GrepOptions,
   type SearchWorktreeFilesOptions,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
@@ -179,6 +181,7 @@ import {
   deleteSSHPaths,
   fetchSSHFile,
   fetchSSHFiles,
+  grepSSHFiles,
   searchSSHFiles,
   writeSSHFile,
 } from '@/lib/sshFileApi'
@@ -1368,6 +1371,30 @@ export function useFileSearchTarget(
         ? searchSSHFiles(target.connectionId, pattern, options)
         : searchWorktreeFiles(target.machine, target.worktreeId, pattern, options),
     enabled: enabled && (target.kind === 'ssh' || target.worktreeId.length > 0),
+    staleTime: 0,
+  })
+}
+
+/** Content search (grep), sibling to useFileSearchTarget above — same
+ *  target.kind dispatch, same shape. `options` (regex/caseSensitive/
+ *  includePattern) is folded into the query key so toggling a search
+ *  option refetches instead of showing a stale result under a mismatched
+ *  key. */
+export function useContentSearchTarget(target: FilesTarget, query: string, enabled: boolean, options: GrepOptions = {}) {
+  return useQuery({
+    queryKey: [
+      ...(target.kind === 'ssh'
+        ? qk.sshGrep(target.connectionId, query)
+        : qk.worktreeGrep(target.machine.id, target.worktreeId, query)),
+      options.regex ?? false,
+      options.caseSensitive ?? false,
+      options.includePattern ?? '',
+    ] as const,
+    queryFn: () =>
+      target.kind === 'ssh'
+        ? grepSSHFiles(target.connectionId, query, options)
+        : grepWorktreeFiles(target.machine, target.worktreeId, query, options),
+    enabled: enabled && query.trim().length > 0 && (target.kind === 'ssh' || target.worktreeId.length > 0),
     staleTime: 0,
   })
 }

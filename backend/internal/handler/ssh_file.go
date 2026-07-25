@@ -38,6 +38,33 @@ func (h *SSHFileHandler) Search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, paths)
 }
 
+// Grep mirrors WorktreeFileHandler.Grep — same query params, same
+// service.GrepResult response shape — for a saved SSH connection's remote
+// filesystem instead of a local worktree.
+func (h *SSHFileHandler) Grep(w http.ResponseWriter, r *http.Request) {
+	opts := service.GrepOptions{
+		Regex:          queryBool(r, "regex"),
+		CaseSensitive:  queryBool(r, "caseSensitive"),
+		IncludePattern: r.URL.Query().Get("includePattern"),
+	}
+	result, err := h.svc.Grep(r.Context(), r.PathValue("id"), r.URL.Query().Get("query"), opts)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// InstallRipgrep downloads ripgrep on the hub and installs it onto
+// connectionID's remote host over the already-open pooled SFTP connection,
+// so the next Grep call can use it instead of the grep fallback.
+func (h *SSHFileHandler) InstallRipgrep(w http.ResponseWriter, r *http.Request) {
+	version, err := h.svc.InstallRipgrep(r.Context(), r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"installed": true, "version": version})
+}
+
 func (h *SSHFileHandler) Read(w http.ResponseWriter, r *http.Request) {
 	content, err := h.svc.Read(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
 	if handleStoreErr(w, err) {

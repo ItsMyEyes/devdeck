@@ -5,9 +5,18 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
   "permissions": [
     "core:default",
     "allow-browser-tiles",
-    "process:allow-restart"
+    "allow-hub-mode",
+    "allow-diagnostics",
+    "process:allow-restart",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$APPLOG/*" }]
+    }
   ]
 }

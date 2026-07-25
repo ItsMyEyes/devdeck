@@ -8,6 +8,7 @@ import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
+import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
 import { FileQuickOpen } from './FileQuickOpen'
 import { GitPanel } from './GitPanel'
@@ -47,6 +48,9 @@ interface Props {
 function basename(path: string) {
   return path.split('/').pop() ?? path
 }
+
+/** Safely larger than any real line's length — see openAtLine's doc comment. */
+const LINE_END_CHAR_OFFSET = 1_000_000
 
 function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
@@ -152,6 +156,7 @@ function TerminalWorkspace({
   const containerRef = useRef<HTMLDivElement>(null)
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
+  const [contentSearch, setContentSearch] = useState(false)
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(() => new Set())
   const [definitionReveals, setDefinitionReveals] = useState<Record<string, DefinitionReveal>>({})
   const isDesktop = useIsDesktop()
@@ -260,6 +265,26 @@ function TerminalWorkspace({
       openFile(path)
     },
     [openFile],
+  )
+
+  /** Content search's "open at line" entry point (ContentSearchPanel's
+   *  onOpenMatch) — reuses openDefinition's existing open+reveal mechanism
+   *  (CodeFileEditor already knows how to scroll/select an arbitrary LSP
+   *  range on open) instead of needing a parallel reveal system just for
+   *  grep matches. `length <= 0` (span unknown) selects through the rest of
+   *  the line — LINE_END_CHAR_OFFSET is larger than any real line, and
+   *  CodeFileEditor's positionToOffset clamps a too-large character offset
+   *  to the line's actual end. */
+  const openAtLine = useCallback(
+    (path: string, line: number, column: number, length: number) => {
+      const zeroLine = Math.max(0, line - 1)
+      const startChar = Math.max(0, column - 1)
+      const endChar = length > 0 ? startChar + length : startChar + LINE_END_CHAR_OFFSET
+      openDefinition(path, {
+        range: { start: { line: zeroLine, character: startChar }, end: { line: zeroLine, character: endChar } },
+      })
+    },
+    [openDefinition],
   )
 
   const handleFilesDeleted = useCallback(
@@ -435,6 +460,11 @@ function TerminalWorkspace({
         setQuickOpen(true)
         return
       }
+      if (primary && event.shiftKey && key === 'f') {
+        event.preventDefault()
+        setContentSearch(true)
+        return
+      }
       if (primary && key === 't') {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
@@ -581,6 +611,7 @@ function TerminalWorkspace({
         onOpenFile={openFile}
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
+        onRequestContentSearch={() => setContentSearch(true)}
       />
     ),
   }
@@ -613,6 +644,13 @@ function TerminalWorkspace({
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         onClose={() => setQuickOpen(false)}
         onOpenFile={openFile}
+      />
+
+      <ContentSearchPanel
+        open={contentSearch}
+        target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
+        onClose={() => setContentSearch(false)}
+        onOpenMatch={openAtLine}
       />
     </div>
   )

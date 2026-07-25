@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,7 +44,14 @@ func TestTailscaleStatusServeDisabled(t *testing.T) {
 }
 
 func TestTailscaleStatusNotInstalled(t *testing.T) {
-	t.Setenv("PATH", t.TempDir()) // empty dir: `tailscale` isn't on PATH
+	// detect.ResolveTailscale also checks fallback dirs, the login shell's
+	// PATH, and (on macOS) the Tailscale.app bundle — stripping PATH alone
+	// no longer guarantees "not found" on a machine that has any of those,
+	// so stub the resolver directly instead.
+	orig := resolveTailscale
+	resolveTailscale = func() (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { resolveTailscale = orig })
+
 	h := NewTailscaleStatusHandler(true)
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "not_installed" {

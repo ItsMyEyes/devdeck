@@ -35,6 +35,12 @@ type FilePool struct {
 	entries map[string]*filePoolEntry
 }
 
+// filePoolEntry caches one connectionID's live SSH client plus, lazily, its
+// paired SFTP session: sftp starts nil and is only opened the first time
+// something actually needs it (Get). GetSSH's exec-primitive callers
+// (WithSSHClient, RunCommand) never need SFTP, so they share the same
+// entry's ssh client without paying for a subsystem handshake they don't
+// use.
 type filePoolEntry struct {
 	ssh      *ssh.Client
 	sftp     *sftp.Client
@@ -42,7 +48,9 @@ type filePoolEntry struct {
 }
 
 func (e *filePoolEntry) close() {
-	_ = e.sftp.Close()
+	if e.sftp != nil {
+		_ = e.sftp.Close()
+	}
 	_ = e.ssh.Close()
 }
 
@@ -75,14 +83,17 @@ func (p *FilePool) reapIdle() {
 	}
 }
 
-// Get returns a live *sftp.Client for connectionID, reusing a cached pair
-// when one exists or dialing (and running the SFTP subsystem handshake)
-// fresh otherwise.
-func (p *FilePool) Get(ctx context.Context, connectionID string) (*sftp.Client, error) {
+// GetSSH returns a live *ssh.Client for connectionID, reusing a cached
+// entry's SSH half when one exists or dialing fresh otherwise. Unlike Get,
+// this never triggers an SFTP subsystem handshake — callers that only need
+// to run commands (WithSSHClient, RunCommand) share the same pooled
+// transport Get's SFTP clients ride on, without paying for a capability
+// they don't use.
+func (p *FilePool) GetSSH(ctx context.Context, connectionID string) (*ssh.Client, error) {
 	p.mu.Lock()
 	if entry, ok := p.entries[connectionID]; ok {
 		entry.lastUsed = time.Now()
-		client := entry.sftp
+		client := entry.ssh
 		p.mu.Unlock()
 		return client, nil
 	}
@@ -92,23 +103,68 @@ func (p *FilePool) Get(ctx context.Context, connectionID string) (*sftp.Client, 
 	if err != nil {
 		return nil, err
 	}
+
+	p.mu.Lock()
+	if existing, ok := p.entries[connectionID]; ok {
+		// Lost a race with a concurrent GetSSH/Get for the same connection
+		// — keep the one already installed and close the redundant dial.
+		p.mu.Unlock()
+		_ = sshClient.Close()
+		existing.lastUsed = time.Now()
+		return existing.ssh, nil
+	}
+	p.entries[connectionID] = &filePoolEntry{ssh: sshClient, lastUsed: time.Now()}
+	p.mu.Unlock()
+	return sshClient, nil
+}
+
+// Get returns a live *sftp.Client for connectionID, reusing a cached one
+// when its entry already has it, opening the SFTP subsystem lazily on top
+// of GetSSH's (possibly freshly dialed, possibly reused) SSH client
+// otherwise.
+func (p *FilePool) Get(ctx context.Context, connectionID string) (*sftp.Client, error) {
+	sshClient, err := p.GetSSH(ctx, connectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if entry, ok := p.entries[connectionID]; ok && entry.ssh == sshClient && entry.sftp != nil {
+		client := entry.sftp
+		entry.lastUsed = time.Now()
+		p.mu.Unlock()
+		return client, nil
+	}
+	p.mu.Unlock()
+
 	sftpClient, err := sftp.NewClient(sshClient)
 	if err != nil {
-		sshClient.Close()
 		return nil, fmt.Errorf("open sftp session: %w", err)
 	}
 
 	p.mu.Lock()
-	if existing, ok := p.entries[connectionID]; ok {
-		// Lost a race with a concurrent Get for the same connection — keep
-		// the one already installed and close the redundant pair.
+	entry, ok := p.entries[connectionID]
+	if !ok || entry.ssh != sshClient {
+		// The ssh client we opened this sftp session against was
+		// evicted/replaced (e.g. a concurrent Evict) while we were
+		// mid-handshake — drop the now-orphaned sftp client rather than
+		// attaching it to an entry it doesn't belong to; the caller
+		// (WithSFTPClient) will see this as an ordinary error, not a
+		// connection error, so it isn't auto-retried, but the next request
+		// dials fresh normally.
 		p.mu.Unlock()
 		_ = sftpClient.Close()
-		_ = sshClient.Close()
-		existing.lastUsed = time.Now()
-		return existing.sftp, nil
+		return nil, fmt.Errorf("sshmgr: pooled connection %s changed while opening sftp session", connectionID)
 	}
-	p.entries[connectionID] = &filePoolEntry{ssh: sshClient, sftp: sftpClient, lastUsed: time.Now()}
+	if entry.sftp != nil {
+		// Lost a race with a concurrent Get for the same connection.
+		p.mu.Unlock()
+		_ = sftpClient.Close()
+		entry.lastUsed = time.Now()
+		return entry.sftp, nil
+	}
+	entry.sftp = sftpClient
+	entry.lastUsed = time.Now()
 	p.mu.Unlock()
 	return sftpClient, nil
 }

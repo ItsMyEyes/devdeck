@@ -6,6 +6,7 @@
 
 import { ApiError, request } from './api'
 import type { TransferProgress } from './machineClient'
+import { grepParams, normalizeGrepResult, type GrepOptions, type GrepResult } from './machineApi'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
@@ -53,6 +54,18 @@ export function searchSSHFiles(
   const params = new URLSearchParams({ pattern })
   if (options.includeDirs) params.set('includeDirs', '1')
   return request<string[]>('GET', `/ssh/connections/${connectionId}/files/search?${params}`)
+}
+
+/** Same GrepOptions/GrepResult shape as machineApi.ts's grepWorktreeFiles —
+ *  see that file's comment for why the types are shared instead of
+ *  re-declared here. */
+export async function grepSSHFiles(
+  connectionId: string,
+  query: string,
+  options: GrepOptions = {},
+): Promise<GrepResult> {
+  const result = await request<GrepResult>('GET', `/ssh/connections/${connectionId}/files/grep?${grepParams(query, options)}`)
+  return normalizeGrepResult(result)
 }
 
 interface XhrOpts {

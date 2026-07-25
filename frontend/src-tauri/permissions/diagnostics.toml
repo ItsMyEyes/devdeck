@@ -1,0 +1,16 @@
+# frontend/src-tauri/permissions/diagnostics.toml
+#
+# Grants the bundled error.html and runtime-warning.html pages permission to
+# call this app's own diagnostics commands. Required for the same reason as
+# browser-tiles.toml/hub-mode.toml: once an ACL manifest
+# (capabilities/default.json) exists, Tauri enforces ACL checks on every
+# command, not just `core:*`/plugin ones.
+[[permission]]
+identifier = "allow-diagnostics"
+description = "Allows the startup-failure/runtime-warning diagnostics commands (get_startup_error/read_sidecar_log/open_log_file/get_runtime_warning)."
+commands.allow = [
+    "get_startup_error",
+    "read_sidecar_log",
+    "open_log_file",
+    "get_runtime_warning",
+]

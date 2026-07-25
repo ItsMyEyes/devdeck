@@ -25,6 +25,7 @@ tauri = { version = "2.11.3", features = ["unstable"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
+tauri-plugin-opener = "2"
 getrandom = "0.4"
 tokio = { version = "1", features = ["time", "signal", "macros", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
 import { useIsFetching } from '@tanstack/react-query'
-import { Archive, ChevronRight, FilePlus2, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
+import { Archive, ChevronRight, FilePlus2, FileSearch, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -33,6 +33,8 @@ interface TerminalExplorerProps {
   onFileDeleted: (paths: string[]) => void
   /** Omitted for SSH connections — there's no remote file quick-open (yet). */
   onRequestQuickOpen?: () => void
+  /** Opens the "Search in Files" content-search panel (Ctrl+Shift+F). */
+  onRequestContentSearch?: () => void
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -64,7 +66,14 @@ function filesRootKey(target: FilesTarget) {
   return target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
 }
 
-export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted, onRequestQuickOpen }: TerminalExplorerProps) {
+export function TerminalExplorer({
+  target,
+  rootLabel,
+  onOpenFile,
+  onFileDeleted,
+  onRequestQuickOpen,
+  onRequestContentSearch,
+}: TerminalExplorerProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
@@ -342,6 +351,20 @@ export function TerminalExplorer({ target, rootLabel, onOpenFile, onFileDeleted,
           <span>Search files / folders</span>
           <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
             Ctrl P
+          </kbd>
+        </button>
+      ) : null}
+
+      {onRequestContentSearch ? (
+        <button
+          type="button"
+          onClick={onRequestContentSearch}
+          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-surface-2 px-3 text-left font-mono text-[10.5px] text-devdeck-muted hover:text-devdeck-fg-2"
+        >
+          <FileSearch size={12} />
+          <span>Search in files</span>
+          <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
+            Ctrl Shift F
           </kbd>
         </button>
       ) : null}

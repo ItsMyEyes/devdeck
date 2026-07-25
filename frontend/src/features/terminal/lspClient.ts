@@ -59,12 +59,14 @@ interface RpcMessage {
   result?: unknown
   error?: { code?: number; message?: string }
   devdeckLsp?: {
-    type: 'ready' | 'error'
+    type: 'ready' | 'error' | 'installing'
     message?: string
     language?: string
     rootUri?: string
   }
 }
+
+export type LspStatus = 'connecting' | 'installing' | 'ready' | 'error'
 
 interface InitializeResult {
   capabilities?: {
@@ -90,6 +92,8 @@ export function languageIdForPath(path: string): string | null {
   switch (extension) {
     case 'go':
       return 'go'
+    case 'java':
+      return 'java'
     case 'ts':
       return 'typescript'
     case 'tsx':
@@ -164,6 +168,9 @@ export class LspClient {
     string,
     Set<(diagnostics: LspDiagnostic[]) => void>
   >()
+  private status: LspStatus = 'connecting'
+  private statusMessage: string | undefined
+  private readonly statusListeners = new Set<(status: LspStatus, message?: string) => void>()
   private requestId = 0
   private rootUri = ''
   private initialized = false
@@ -183,12 +190,14 @@ export class LspClient {
     this.socket.addEventListener('message', (event) => this.handleMessage(event))
     this.socket.addEventListener('close', () => {
       if (!this.disposed && !this.initialized) {
+        this.setStatus('error')
         this.rejectReady(new Error('Language server connection closed'))
       }
       this.rejectPending(new Error('Language server connection closed'))
     })
     this.socket.addEventListener('error', () => {
       if (!this.initialized) {
+        this.setStatus('error')
         this.rejectReady(new Error('Could not connect to the language server'))
       }
     })
@@ -256,6 +265,30 @@ export class LspClient {
 
   getDiagnostics(path: string) {
     return this.diagnostics.get(path) ?? []
+  }
+
+  getStatus() {
+    return this.status
+  }
+
+  getStatusMessage() {
+    return this.statusMessage
+  }
+
+  subscribeStatus(listener: (status: LspStatus, message?: string) => void) {
+    this.statusListeners.add(listener)
+    return () => {
+      this.statusListeners.delete(listener)
+    }
+  }
+
+  private setStatus(status: LspStatus, message?: string) {
+    if (this.status === status && this.statusMessage === message) return
+    this.status = status
+    this.statusMessage = message
+    for (const listener of this.statusListeners) {
+      listener(status, message)
+    }
   }
 
   subscribeDiagnostics(
@@ -377,6 +410,7 @@ export class LspClient {
     this.syncKind = typeof sync === 'number' ? sync : (sync?.change ?? 1)
     this.initialized = true
     this.notify('initialized', {})
+    this.setStatus('ready')
     this.resolveReady()
     for (const document of this.documents.values()) {
       await this.ensureDocumentOpen(document)
@@ -415,14 +449,20 @@ export class LspClient {
 
     if (message.devdeckLsp) {
       if (message.devdeckLsp.type === 'error') {
-        this.rejectReady(
-          new Error(message.devdeckLsp.message ?? 'Language server unavailable'),
-        )
+        const errorMessage = message.devdeckLsp.message ?? 'Language server unavailable'
+        this.setStatus('error', errorMessage)
+        this.rejectReady(new Error(errorMessage))
+        return
+      }
+      if (message.devdeckLsp.type === 'installing') {
+        this.setStatus('installing', message.devdeckLsp.message)
         return
       }
       if (message.devdeckLsp.type === 'ready' && message.devdeckLsp.rootUri) {
         void this.initialize(message.devdeckLsp.rootUri).catch((error: unknown) => {
-          this.rejectReady(toError(error))
+          const err = toError(error)
+          this.setStatus('error', err.message)
+          this.rejectReady(err)
         })
       }
       return

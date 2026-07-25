@@ -35,6 +35,7 @@ import {
   type LspDiagnostic,
   type LspPosition,
   type LspRange,
+  type LspStatus,
 } from './lspClient'
 
 export interface DefinitionReveal {
@@ -550,6 +551,24 @@ export function CodeFileEditor({
       if (view) forceLinting(view)
     })
   }, [lspClient, path])
+
+  useEffect(() => {
+    if (!lspClient || !languageId) return
+    const toastId = `lsp-status-${worktreeId}-${languageId}`
+    let sawInstalling = false
+    const handleStatus = (status: LspStatus, message?: string) => {
+      if (status === 'installing') {
+        sawInstalling = true
+        toast.loading(message ?? `Installing ${languageId} language server…`, { id: toastId })
+      } else if (status === 'ready' && sawInstalling) {
+        toast.success('Language server ready', { id: toastId })
+      } else if (status === 'error') {
+        toast.error(message ?? 'Language server unavailable', { id: toastId })
+      }
+    }
+    handleStatus(lspClient.getStatus(), lspClient.getStatusMessage())
+    return lspClient.subscribeStatus(handleStatus)
+  }, [lspClient, languageId, worktreeId])
 
   const completionExtension = useMemo(
     () =>

@@ -1,0 +1,13 @@
+# frontend/src-tauri/permissions/hub-mode.toml
+#
+# Grants the bundled first-run choice screen (choose.html) permission to call
+# this app's own hub-mode commands. Required for the same reason as
+# browser-tiles.toml: once an ACL manifest (capabilities/default.json) exists,
+# Tauri enforces ACL checks on every custom command, not just `core:*` ones.
+[[permission]]
+identifier = "allow-hub-mode"
+description = "Allows the hub-mode commands (choose_hub_mode/change_hub)."
+commands.allow = [
+    "choose_hub_mode",
+    "change_hub",
+]

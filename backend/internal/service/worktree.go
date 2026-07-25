@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -16,13 +17,28 @@ type WorktreeService struct {
 	// kill terminates the background agent process for a session, if one is
 	// running. It must be idempotent (nil error when nothing is running).
 	kill func(sessionID string) error
+	// warmInstall proactively installs language servers for a newly created
+	// worktree's detected project languages. It's expected to background
+	// itself (return immediately) — Create calls it synchronously right
+	// after a successful creation. Typically lsp.Server.WarmInstall. May be
+	// nil, in which case Create simply skips it.
+	warmInstall func(ctx context.Context, worktreeID string)
 }
 
 // NewWorktreeService creates a worktree service. kill is called to stop a
 // worktree's background agent process(es) on Kill/Delete; it's typically
-// terminal.KillWorktreeSessions.
-func NewWorktreeService(s port.Store, kill func(sessionID string) error) *WorktreeService {
-	return &WorktreeService{store: s, kill: kill}
+// terminal.KillWorktreeSessions. warmInstall, if non-nil, is called after
+// every successful Create to speculatively install language servers for
+// whatever languages the new worktree's directory looks like it uses.
+func NewWorktreeService(s port.Store, kill func(sessionID string) error, warmInstall func(ctx context.Context, worktreeID string)) *WorktreeService {
+	return &WorktreeService{store: s, kill: kill, warmInstall: warmInstall}
+}
+
+func (svc *WorktreeService) triggerWarmInstall(worktreeID string) {
+	if svc.warmInstall == nil {
+		return
+	}
+	svc.warmInstall(context.Background(), worktreeID)
 }
 
 // Create creates a worktree. Branch mode always spawns an agent, so an empty
@@ -51,7 +67,11 @@ func (svc *WorktreeService) Create(projectID, path, mode, branch, base, model, a
 		}
 	}
 	if mode != "branch" {
-		return svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task, path)
+		wt, err := svc.store.CreateWorktree(projectID, mode, branch, base, model, agent, task, path)
+		if err == nil {
+			svc.triggerWarmInstall(wt.ID)
+		}
+		return wt, err
 	}
 
 	if base == "" {
@@ -86,6 +106,7 @@ func (svc *WorktreeService) Create(projectID, path, mode, branch, base, model, a
 		_ = svc.store.DeleteWorktree(wt.ID)
 		return domain.Worktree{}, fmt.Errorf("git worktree add: %w", err)
 	}
+	svc.triggerWarmInstall(wt.ID)
 	return wt, nil
 }
 

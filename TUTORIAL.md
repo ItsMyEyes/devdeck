@@ -118,7 +118,7 @@ The rest of the page is everyday dev utilities: JWT decode, Base64, URL encode/d
 
 ## 13. Deployment modes: hub, both, and desktop
 
-DevDeck is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.4](#134-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
+DevDeck is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.5](#135-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
 
 ### The one rule that applies to every mode: a project needs a Machine
 
@@ -160,7 +160,40 @@ make dev-hub       # terminal 1 — hub on :8989, with a fixed dev bearer key
 make dev-runtime   # terminal 2 — runtime on :9199, self-registers with the hub above
 ```
 
-### 13.3 Desktop app
+### 13.3 Signing in directly to a runtime, and surviving a hub outage
+
+Every `--role runtime` process serves its own copy of the web UI at its own address, and holds a read-only replica of its slice of the hub's catalog — so it stays usable for the projects assigned to it even while the hub is down. This walks through both.
+
+**1. Start a hub and a runtime that self-registers with it.**
+
+```bash
+cd backend && go run ./cmd/server --role hub --key hubk --2fa=false --addr 127.0.0.1:8989 --db /tmp/hub.db --open=false
+cd backend && go run ./cmd/server --role runtime --key rtk --addr 127.0.0.1:9199 --db /tmp/rt.db --open=false \
+  --hub-url http://127.0.0.1:8989 --hub-key hubk --public-url http://127.0.0.1:9199 --name builder
+```
+
+**2. On the hub**, log in (or register, since `--2fa=false`) at `http://127.0.0.1:8989`, create a workspace, and add a project assigned to the `builder` machine (it now appears in the **New project** machine dropdown, since it self-registered).
+
+**3. Watch the runtime pull it down.** The runtime polls the hub every 30s; its stdout logs `catalog sync: 1 workspace(s), 1 project(s), 0 ssh connection(s)` once the pull succeeds. You can also confirm it directly:
+
+```bash
+curl -s -H 'Authorization: Bearer rtk' http://127.0.0.1:9199/api/workspaces   # shows the same project, without going through the hub
+```
+
+**4. Open the runtime's own UI.** Visit `http://127.0.0.1:9199` in a browser — this is a separate address from the hub, and it now renders a sign-in page instead of a blank 401. Two ways in:
+
+- **Paste the runtime's key** (`rtk` above) into the field and submit. This always works, including with the hub unreachable, since it only checks the key against this process.
+- **"Sign in via hub"** button — shown only once the runtime has self-registered (it needs to know the hub's URL and its own hub-assigned machine id, both exposed via `GET /api/whoami`). Clicking it does a full top-level navigation to the hub's `/handover` route, which mints a short-lived signed token there (using your already-logged-in hub session) and redirects back to the runtime with `?t=<token>`. You land signed in without typing anything — effectively SSO from the hub session, inheriting whatever 2FA you already passed there.
+
+Either path lands on the same UI as the hub, scoped to this runtime's own workspaces/projects.
+
+**5. Prove the offline case.** Stop the hub process (`Ctrl-C` or `kill`), then reload the runtime's UI at `http://127.0.0.1:9199`. It keeps serving the last snapshot it pulled — the workspace and project from step 2 are still there — instead of going blank. This is the whole point of the replica: routine hub restarts/maintenance/network blips don't interrupt work already running on a runtime.
+
+**One caveat to know about:** if a runtime has never successfully synced (wrong `--hub-key`, unreachable `--hub-url`, or you just haven't waited 30s yet), its sidebar shows a **"Never synced with the hub"** notice instead of a plain empty list — that distinction exists specifically so a misconfigured `--hub-key` doesn't look identical to "this account just has no projects." If you see that notice, check the runtime's own log output for `catalog sync: fetch: ...` or `catalog sync: apply: ...` errors.
+
+A `--role both` process (§13.1) never does any of this — it *is* the hub, so there's nothing to sync from; visiting its own address just shows the normal hub UI directly.
+
+### 13.4 Desktop app
 
 DevDeck also ships as a native app (macOS/Windows/Linux, via Tauri) — `make dev-tauri` for development, `cd frontend && npm run tauri:build` for a release bundle (see [COMMANDS.md's "Desktop app (Tauri)"](COMMANDS.md#desktop-app-tauri) for exact build commands). The first launch asks how to run it — revisit the choice anytime from the app menu's **Change Hub…** item.
 
@@ -177,7 +210,7 @@ If Tailscale isn't installed (or this device isn't joined to a tailnet), that ba
 
 Desktop data lives in the OS app-data directory (macOS: `~/Library/Application Support/dev.kiyora.devdeck/`) — separate databases per mode (`devdeck.db` for "Host locally", `devdeck-runtime.db` for the background runtime spawned by "Connect to a hub"), plus a persisted `runtime-key` so that background runtime keeps the same identity across restarts.
 
-### 13.4 Which one should I use?
+### 13.5 Which one should I use?
 
 | Situation | Use |
 |---|---|

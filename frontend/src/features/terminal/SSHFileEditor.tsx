@@ -8,6 +8,7 @@ import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { FilesTarget } from './filesTarget'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import type { LineReveal } from './PlainCodeEditor'
 
 const PlainCodeEditor = lazy(() =>
   import('./PlainCodeEditor').then((module) => ({ default: module.PlainCodeEditor })),
@@ -19,6 +20,8 @@ interface SSHFileEditorProps {
   active: boolean
   onDirtyChange: (path: string, dirty: boolean) => void
   onDeleted: (path: string) => void
+  /** Content search's "open at line" entry point — see PlainCodeEditor.tsx's LineReveal doc comment. */
+  reveal?: LineReveal
 }
 
 function basename(path: string) {
@@ -33,7 +36,7 @@ function isMarkdownPath(path: string) {
  *  save/revert/delete, markdown special-case), but the buffer is a remote
  *  file over SFTP and there is no per-language server, so it renders
  *  PlainCodeEditor instead of the worktree's LSP-backed CodeFileEditor. */
-export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDeleted }: SSHFileEditorProps) {
+export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDeleted, reveal }: SSHFileEditorProps) {
   const target: FilesTarget = { kind: 'ssh', connectionId }
   const [draft, setDraft] = useState('')
   const [initialized, setInitialized] = useState(false)
@@ -176,7 +179,7 @@ export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDel
             </div>
           }
         >
-          <PlainCodeEditor path={path} value={draft} onChange={setDraft} />
+          <PlainCodeEditor path={path} value={draft} onChange={setDraft} reveal={reveal} />
         </Suspense>
       )}
     </div>
