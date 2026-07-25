@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, gitConfig } from './shared';
+import { appName, basePath, gitConfig } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -8,7 +8,7 @@ export function baseOptions(): BaseLayoutProps {
       title: (
         <>
           <Image
-            src="/devdeck-logo.png"
+            src={`${basePath}/devdeck-logo.png`}
             alt="DevDeck"
             width={24}
             height={24}
