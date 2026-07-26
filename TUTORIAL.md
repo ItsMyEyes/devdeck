@@ -118,7 +118,35 @@ The rest of the page is everyday dev utilities: JWT decode, Base64, URL encode/d
 
 ## 13. Deployment modes: hub, both, and desktop
 
+> Adding a runtime machine to an existing hub is one command — see
+> [Install](README.md#install). The rest of this section covers what the modes
+> mean and how to configure them by hand.
+
 DevDeck is one binary (plus an optional native desktop shell around it), run in different shapes depending on your situation — everything below builds on the single-hub setup from §§1-8. Skip to [§13.5](#135-which-one-should-i-use) for a one-line recommendation, or read on for how each mode actually works.
+
+### The fastest path: `devdeck setup`
+
+Every mode below can be configured by hand with flags, and all of those flags still work. But you don't have to assemble them — run the wizard once and it writes a `devdeck.yaml` holding every setting:
+
+```bash
+./devdeck setup
+```
+
+It walks you through it step by step: role, machine name, listen address, database path, an API key it generates for you, and (for a runtime) your public URL, which it pre-fills by asking Tailscale for this device's tailnet name. If you give it a hub URL and key, it checks them live against the hub's `/api/whoami` **before** writing anything, so a wrong key fails right there instead of silently surfacing as "Never synced with the hub" half a minute after boot. Nothing is written until you confirm the review screen; `ctrl+c` before that leaves the disk untouched.
+
+For a runtime it finishes by printing the line you paste into the hub (§13.2), and saves the same line to `copy-this.md` beside the config:
+
+```
+  builder|https://builder.tail-abc.ts.net|a1b2c3d4…
+```
+
+Re-running `devdeck setup` later pre-fills every answer from the existing file, so it doubles as the reconfigure path.
+
+Starting the binary on a machine with no `devdeck.yaml` opens the same wizard automatically — **unless** there's no terminal attached (a systemd or launchd service, the desktop sidecar, CI), in which case it writes a commented defaults file, logs where it put it, and boots normally. A background service never blocks waiting for an answer nobody can give.
+
+Precedence, lowest to highest: **built-in default → `devdeck.yaml` → `DEVDECK_*` env var → command-line flag.** The file is a baseline you can always override for a single run without editing it. `--config <path>` (or `DEVDECK_CONFIG`) names a specific file; otherwise DevDeck looks for `./devdeck.yaml`, then `devdeck.yaml` beside the binary. A commented template of every key lives at [`devdeck.yaml.example`](devdeck.yaml.example). A key that isn't in that template is a hard error at startup, so a typo stops the server instead of silently doing nothing.
+
+`devdeck.yaml` and `copy-this.md` both contain a live API key. Both are written mode `0600` and both are gitignored — keep them that way.
 
 ### The one rule that applies to every mode: a project needs a Machine
 

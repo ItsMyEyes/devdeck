@@ -19,6 +19,44 @@ cd frontend && npm run dev:api
 cd backend && go run ./cmd/server --db devdeck.db --open=false
 ```
 
+### `devdeck setup` — interactive configuration
+
+```bash
+./devdeck setup                       # step-by-step wizard, writes devdeck.yaml
+./devdeck setup --config /etc/devdeck.yaml   # write somewhere specific
+```
+
+The only subcommand. It configures any role (hub / runtime / both), generates
+the API key, pre-fills a runtime's public URL from `tailscale status`, verifies
+`hub.url` + `hub.key` against the hub's `/api/whoami` before saving, and prints
+the `name|url|key` line for the hub's Machines page (also written to
+`copy-this.md`). Nothing touches disk until the review step is confirmed.
+
+Re-running it pre-fills from the existing file, so it is also the reconfigure
+path. It requires a real terminal — with stdin or stdout redirected it exits
+non-zero rather than hanging. It always exits when done; it never goes on to
+start the server.
+
+Launching the binary with no `devdeck.yaml` present opens the wizard
+automatically when a terminal is attached; otherwise (service, sidecar, CI) it
+writes a commented defaults file, logs the path, and boots normally.
+
+### Configuration precedence
+
+**built-in default → `devdeck.yaml` → `DEVDECK_*` env var → command-line flag**
+(later wins). Every flag below has a corresponding YAML key, named in its
+`--help` text.
+
+- `--config <path>` — explicit config file; also `DEVDECK_CONFIG`. A path given
+  here that does not exist is an error. Without it, DevDeck looks for
+  `./devdeck.yaml`, then `devdeck.yaml` beside the executable; finding neither
+  is not an error.
+- Unknown YAML keys are rejected at startup, naming the key and its line, so a
+  typo fails loudly instead of silently doing nothing.
+- `devdeck.yaml.example` at the repo root documents every key. The real
+  `devdeck.yaml` and `copy-this.md` hold live API keys — written `0600` and
+  gitignored.
+
 The Go backend accepts flags:
 - `--role` — server role: `hub` (organizational data + machine registry +
   proxy + web UI), `runtime` (headless execution daemon, key auth only), or
@@ -136,6 +174,38 @@ curl -s -H 'Authorization: Bearer soloK' http://127.0.0.1:9197/api/machines  # a
 
 See `ARCHITECTURE.md` for the roles paragraph and `CONTRACTS.md` for the
 key-auth rules and the machines registry/proxy API shapes.
+
+## Installer scripts
+
+`scripts/install.sh` (Linux/macOS) and `scripts/install.ps1` (Windows) download
+a release binary and optionally register the machine as a runtime. They are
+published to the public docs site by `.github/workflows/deploy-docs.yml`, so the
+one-liner needs no credential to fetch the script — only the binary download is
+authenticated.
+
+```bash
+# Install only
+curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh | GITHUB_TOKEN=ghp_xxx sh
+
+# Install, then self-register as a runtime and verify it reached the hub
+curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh | \
+  GITHUB_TOKEN=ghp_xxx DEVDECK_HUB_URL=https://hub.ts.net DEVDECK_HUB_KEY=hubk sh
+
+# Pin a version, install somewhere else, write config without starting
+curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh | \
+  GITHUB_TOKEN=ghp_xxx DEVDECK_VERSION=v1.4.0 DEVDECK_INSTALL_DIR=/opt/devdeck \
+  DEVDECK_NO_START=1 sh
+```
+
+Every variable is listed in [`scripts/README.md`](scripts/README.md). They are
+the same `DEVDECK_*` names the server already reads, so the generated
+`~/.config/devdeck/runtime.env` can be sourced directly.
+
+No service is installed. A runtime started by the installer does not survive a
+reboot; the script prints the command to start it again.
+
+Run the script tests with `sh scripts/test/install_test.sh` and
+`shellcheck -s sh scripts/install.sh`.
 
 ## Forward proxy for remote dev servers (SOCKS5 / HTTP)
 

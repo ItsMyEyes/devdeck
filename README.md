@@ -17,7 +17,41 @@ New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from 
 - **Tools page** — document → Markdown (`markitdown`) and Markdown → Word/PDF (`pandoc`, with Mermaid diagrams rendered inline), plus a handful of everyday dev utilities (JWT/Base64/hash/UUID/etc).
 - **Multi-machine, or all-in-one.** Split into a **hub** (organizational data — workspaces, projects, invoices, the machine registry) and any number of **runtime** machines (execution — git, worktrees, terminals, LSP), talking directly to each other over one Tailscale tailnet, with self-registration so a runtime can add itself with no manual step; or run solo with one `--role both` process, or the desktop app, which can also self-register your own machine as a runtime against a hub you host elsewhere — see [TUTORIAL.md](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
 
-## Quick start
+## Install
+
+One command, no toolchain — downloads the release binary for your platform.
+
+```bash
+# Linux / macOS
+curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh | GITHUB_TOKEN=ghp_xxx sh
+```
+
+```powershell
+# Windows
+$env:GITHUB_TOKEN="ghp_xxx"; irm https://kiyora.is-a.dev/devdeck/install.ps1 | iex
+```
+
+Add `DEVDECK_HUB_URL` and `DEVDECK_HUB_KEY` to the same command to register the
+machine as a runtime against an existing hub in one step:
+
+```bash
+curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh | \
+  GITHUB_TOKEN=ghp_xxx DEVDECK_HUB_URL=https://hub.ts.net DEVDECK_HUB_KEY=hubk sh
+```
+
+`GITHUB_TOKEN` is required because this repository is private — create a
+fine-grained token with **Contents: read**. The scripts are served from the
+public docs site, so you can read one before piping it. Full options:
+[`scripts/README.md`](scripts/README.md).
+
+> **Until the first release is published**, the Pages URL and the release assets
+> do not exist yet. Fetch the script straight from the repo instead:
+> `curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/ItsMyEyes/devdeck/main/scripts/install.sh | GITHUB_TOKEN=$GITHUB_TOKEN sh`
+> Delete this note once `kiyora.is-a.dev/devdeck/install.sh` resolves.
+
+Building from source instead:
+
+### From source
 
 **Prerequisites:** Go 1.25+, Node.js 22+, git. A coding-agent CLI (`claude`, `codex`, `gemini`, `pi`, or `opencode`) is only needed to actually spawn an agent — the app runs fine without one.
 
@@ -31,6 +65,14 @@ make dev       # frontend (:5173) + backend (:8989)
 Then open **http://localhost:5173**.
 
 > `make dev` also tries to run `tailscale serve --bg 5173` so the dev UI is reachable from another device on your tailnet. If you don't have Tailscale installed, run `cd frontend && npm run dev` instead — same result, no Tailscale dependency.
+
+**Running a release binary instead?** Configure it once with the wizard:
+
+```bash
+./devdeck setup   # step-by-step; writes devdeck.yaml, then start with ./devdeck
+```
+
+It covers every deployment mode (hub, runtime, or both), generates your API key, pre-fills a runtime's public URL from Tailscale, verifies your hub URL and key before saving, and prints the `name|url|key` line you paste into the hub's Machines page. Every setting lands in one `devdeck.yaml` ([template](devdeck.yaml.example)); flags and `DEVDECK_*` env vars still work and override it. See [TUTORIAL.md §13](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
 
 ## Documentation
 
