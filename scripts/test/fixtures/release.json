@@ -1,0 +1,66 @@
+{
+  "tag_name": "v1.4.0",
+  "name": "v1.4.0",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/ItsMyEyes/devdeck/releases/assets/111",
+      "id": 111,
+      "node_id": "RA_kwDOAAAA",
+      "name": "devdeck-runtime-darwin-amd64",
+      "label": null,
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 26158640,
+      "browser_download_url": "https://github.com/ItsMyEyes/devdeck/releases/download/v1.4.0/devdeck-runtime-darwin-amd64"
+    },
+    {
+      "url": "https://api.github.com/repos/ItsMyEyes/devdeck/releases/assets/222",
+      "id": 222,
+      "node_id": "RA_kwDOBBBB",
+      "name": "devdeck-runtime-linux-arm64",
+      "label": null,
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 24537603,
+      "browser_download_url": "https://github.com/ItsMyEyes/devdeck/releases/download/v1.4.0/devdeck-runtime-linux-arm64"
+    },
+    {
+      "url": "https://api.github.com/repos/ItsMyEyes/devdeck/releases/assets/333",
+      "id": 333,
+      "node_id": "RA_kwDOCCCC",
+      "name": "devdeck-runtime-windows-amd64.exe",
+      "label": null,
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 26291200,
+      "browser_download_url": "https://github.com/ItsMyEyes/devdeck/releases/download/v1.4.0/devdeck-runtime-windows-amd64.exe"
+    },
+    {
+      "url": "https://api.github.com/repos/ItsMyEyes/devdeck/releases/assets/444",
+      "id": 444,
+      "node_id": "RA_kwDODDDD",
+      "name": "checksums.txt",
+      "label": null,
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282
+      },
+      "content_type": "text/plain",
+      "state": "uploaded",
+      "size": 402,
+      "browser_download_url": "https://github.com/ItsMyEyes/devdeck/releases/download/v1.4.0/checksums.txt"
+    }
+  ]
+}

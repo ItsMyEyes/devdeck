@@ -68,5 +68,33 @@ assert_eq "port_of loopback" "$(port_of 127.0.0.1:8989)" "8989"
 assert_eq "port_of wildcard" "$(port_of 0.0.0.0:9199)" "9199"
 assert_eq "port_of bare colon" "$(port_of :8080)" "8080"
 
+FIXTURES="$SCRIPT_DIR/test/fixtures"
+
+# ── parse_asset_id ───────────────────────────────────────────
+assert_eq "parse_asset_id first asset" \
+	"$(parse_asset_id devdeck-runtime-darwin-amd64 <"$FIXTURES/release.json")" "111"
+assert_eq "parse_asset_id middle asset" \
+	"$(parse_asset_id devdeck-runtime-linux-arm64 <"$FIXTURES/release.json")" "222"
+assert_eq "parse_asset_id .exe asset" \
+	"$(parse_asset_id devdeck-runtime-windows-amd64.exe <"$FIXTURES/release.json")" "333"
+assert_eq "parse_asset_id checksums manifest" \
+	"$(parse_asset_id checksums.txt <"$FIXTURES/release.json")" "444"
+# The nested uploader object carries its own "id" — a greedy parser returns
+# 41898282 here instead of the asset id.
+assert_fails "parse_asset_id rejects a missing asset" \
+	sh -c ". '$SCRIPT_DIR/install.sh'; parse_asset_id devdeck-runtime-linux-amd64 < '$FIXTURES/release.json'"
+assert_fails "parse_asset_id rejects a malformed body" \
+	sh -c ". '$SCRIPT_DIR/install.sh'; printf 'not json' | parse_asset_id devdeck-runtime-darwin-amd64"
+
+# ── checksum_for ─────────────────────────────────────────────
+assert_eq "checksum_for darwin" \
+	"$(checksum_for devdeck-runtime-darwin-amd64 <"$FIXTURES/checksums.txt")" \
+	"1111111111111111111111111111111111111111111111111111111111111111"
+assert_eq "checksum_for .exe" \
+	"$(checksum_for devdeck-runtime-windows-amd64.exe <"$FIXTURES/checksums.txt")" \
+	"3333333333333333333333333333333333333333333333333333333333333333"
+assert_fails "checksum_for rejects a missing entry" \
+	sh -c ". '$SCRIPT_DIR/install.sh'; checksum_for devdeck-runtime-linux-amd64 < '$FIXTURES/checksums.txt'"
+
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ]

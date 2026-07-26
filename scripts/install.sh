@@ -70,6 +70,43 @@ port_of() {
 	printf '%s' "${1##*:}"
 }
 
+# parse_asset_id reads a GitHub release JSON body on stdin and prints the
+# numeric id of the asset named $1.
+#
+# jq is used when present. The fallback exists because a freshly-imaged
+# machine rarely has jq, and it anchors on GitHub's field order within an
+# asset object (url, id, node_id, name). All whitespace is stripped first
+# because the API pretty-prints its JSON. Anchoring on the id/node_id/name
+# run is what keeps the nested "uploader" object's own id from matching.
+parse_asset_id() {
+	want="$1"
+	id=""
+
+	if command -v jq >/dev/null 2>&1; then
+		id=$(jq -r --arg n "$want" 'first(.assets[]? | select(.name == $n) | .id) // empty' 2>/dev/null || printf '')
+	else
+		id=$(tr -d ' \n\t\r' |
+			grep -o '"id":[0-9][0-9]*,"node_id":"[^"]*","name":"'"$want"'"' |
+			head -n 1 |
+			sed -n 's/^"id":\([0-9][0-9]*\).*/\1/p')
+	fi
+
+	case "$id" in
+	'' | *[!0-9]*)
+		return 1
+		;;
+	esac
+
+	printf '%s' "$id"
+}
+
+# checksum_for reads a sha256sum-format manifest on stdin and prints the
+# digest for the file named $1. GNU sha256sum prefixes binary-mode names
+# with '*', so both forms are accepted.
+checksum_for() {
+	awk -v name="$1" '$2 == name || $2 == "*" name { print $1; found = 1; exit } END { exit !found }'
+}
+
 # detect_platform prints "<os> <arch>", resolving Rosetta on Darwin.
 detect_platform() {
 	uname_s=$(uname -s)
