@@ -246,6 +246,7 @@ func main() {
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
 	selfH := handler.NewSelfHandler(*managed)
+	hubKeyH := handler.NewHubKeyHandler(*apiKey)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
 	wtH := handler.NewWorktreeHandler(wtSvc)
@@ -455,6 +456,12 @@ func main() {
 	}
 
 	if !isRuntime {
+		// Hub-only: a runtime has no hub key to hand out. Lives with the
+		// machines routes because its only consumer is the Add-runtime
+		// dialog. Not in RequireAuth's publicPaths, so it stays behind the
+		// session-cookie/bearer-key check.
+		mux.HandleFunc("GET /api/self/hub-key", hubKeyH.ServeHTTP)
+
 		mux.HandleFunc("GET /api/machines", machineH.GetMachines)
 		mux.HandleFunc("POST /api/machines", machineH.PostMachine)
 		mux.HandleFunc("PATCH /api/machines/{id}", machineH.PatchMachine)
