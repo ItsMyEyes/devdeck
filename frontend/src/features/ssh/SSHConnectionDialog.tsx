@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
@@ -15,10 +15,12 @@ import {
 } from '@/features/data/queries'
 import type { CreateSSHConnectionBody, UpdateSSHConnectionBody } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { buildJumpHostRequest, defaultJumpHostDraft, isJumpHostDraftValid } from './jumpHostDraft'
 import { SSHAuthFields } from './SSHAuthFields'
 
 const HUB_DECIDES = ''
 const DIRECT = ''
+const ADD_NEW_JUMP = '__new__'
 
 export function SSHConnectionDialog() {
   const dialog = useDevDeckStore((s) => s.sshDialog)
@@ -30,6 +32,13 @@ export function SSHConnectionDialog() {
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
   const connections = useSSHConnections().data ?? []
+  const [addingJump, setAddingJump] = useState(false)
+  const [jumpDraft, setJumpDraft] = useState(defaultJumpHostDraft())
+
+  useEffect(() => {
+    if (!dialog.open) setAddingJump(false)
+  }, [dialog.open])
+
   const groupOptions = useMemo(
     () => Array.from(new Set(connections.map((c) => c.group.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [connections],
@@ -62,8 +71,35 @@ export function SSHConnectionDialog() {
   // the one obviously-cyclic choice out of the list.
   const jumpOptions = [
     { value: DIRECT, label: 'Direct connection' },
+    { value: ADD_NEW_JUMP, label: '+ Add new jump host…' },
     ...connections.filter((c) => c.id !== dialog.editingId).map((c) => ({ value: c.id, label: c.name })),
   ]
+
+  function handleJumpChange(value: string) {
+    if (value === ADD_NEW_JUMP) {
+      setJumpDraft(defaultJumpHostDraft())
+      setAddingJump(true)
+      return
+    }
+    setAddingJump(false)
+    setDialog({ jumpConnectionId: value })
+  }
+
+  function cancelAddJump() {
+    setAddingJump(false)
+  }
+
+  function createJumpHost() {
+    if (!isJumpHostDraftValid(jumpDraft) || busy) return
+    createConnection.mutate(buildJumpHostRequest(jumpDraft), {
+      onSuccess: (created) => {
+        setDialog({ jumpConnectionId: created.id })
+        setAddingJump(false)
+        showToast(`Added jump host "${created.name}"`)
+      },
+      onError: (err) => showToast(err instanceof Error ? err.message : 'Failed to add jump host'),
+    })
+  }
 
   function submit() {
     if (!canSubmit) return
@@ -211,17 +247,69 @@ export function SSHConnectionDialog() {
 
           <Label>2. Connect via</Label>
           <Select
-            value={dialog.jumpConnectionId}
-            onValueChange={(v) => setDialog({ jumpConnectionId: v })}
+            value={addingJump ? ADD_NEW_JUMP : dialog.jumpConnectionId}
+            onValueChange={handleJumpChange}
             options={jumpOptions}
             disabled={busy}
             aria-label="Connect via"
           />
-          <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
-            {dialog.jumpConnectionId
-              ? 'The executor dials the jump host first, then tunnels the SSH handshake through it to reach this host.'
-              : 'The executor dials this host directly.'}
-          </p>
+          {addingJump ? (
+            <div className="mt-2 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
+              <Label>Host</Label>
+              <Input
+                value={jumpDraft.host}
+                disabled={busy}
+                onChange={(e) => setJumpDraft((d) => ({ ...d, host: e.target.value }))}
+                placeholder="bastion.example.com"
+                className="mb-2.5 font-mono"
+              />
+              <div className="mb-2.5 flex gap-3">
+                <div className="min-w-0 flex-1">
+                  <Label>Username</Label>
+                  <Input
+                    value={jumpDraft.username}
+                    disabled={busy}
+                    onChange={(e) => setJumpDraft((d) => ({ ...d, username: e.target.value }))}
+                    placeholder="deploy"
+                    className="font-mono"
+                  />
+                </div>
+                <div className="w-[90px] flex-none">
+                  <Label>Port</Label>
+                  <Input
+                    value={jumpDraft.port}
+                    disabled={busy}
+                    onChange={(e) => setJumpDraft((d) => ({ ...d, port: e.target.value }))}
+                    placeholder="22"
+                    className="font-mono"
+                  />
+                </div>
+              </div>
+              <SSHAuthFields
+                authType={jumpDraft.authType}
+                password={jumpDraft.password}
+                privateKey={jumpDraft.privateKey}
+                privateKeyPath={jumpDraft.privateKeyPath}
+                passphrase={jumpDraft.passphrase}
+                onChange={(patch) => setJumpDraft((d) => ({ ...d, ...patch }))}
+                disabled={busy}
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" size="sm" onClick={cancelAddJump} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={createJumpHost} disabled={!isJumpHostDraftValid(jumpDraft) || busy}>
+                  Create
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
+              {dialog.jumpConnectionId
+                ? 'The executor dials the jump host first, then tunnels the SSH handshake through it to reach this host.'
+                : 'The executor dials this host directly.'}
+            </p>
+          )}
         </div>
       </div>
 
