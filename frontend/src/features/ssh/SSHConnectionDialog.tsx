@@ -56,6 +56,7 @@ export function SSHConnectionDialog() {
     dialog.username.trim().length > 0 &&
     portOK &&
     secretOK &&
+    !addingJump &&
     !busy
 
   const machineOptions = [
