@@ -154,7 +154,13 @@ function Test-DevDeckChecksum {
     }
 
     $manifestPath = Join-Path $WorkDir 'checksums.txt'
-    Save-DevDeckAsset -Release $Release -Name 'checksums.txt' -Token $Token -Destination $manifestPath
+    try {
+        Save-DevDeckAsset -Release $Release -Name 'checksums.txt' -Token $Token -Destination $manifestPath
+    }
+    catch {
+        Write-DevDeckWarn 'could not download checksums.txt - skipping integrity verification'
+        return
+    }
 
     $line = Get-Content $manifestPath | Where-Object { $_ -match "\s\*?$([regex]::Escape($Name))$" } | Select-Object -First 1
     if (-not $line) {

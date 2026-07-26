@@ -212,7 +212,8 @@ the command to start it again. Skipped entirely under `DEVDECK_NO_START=1`.
 ### confirm
 
 Poll `GET http://127.0.0.1:<port>/api/health` — where `<port>` is the port half
-of the resolved `DEVDECK_ADDR` — until 200, up to 15 seconds. Then
+of the resolved `DEVDECK_ADDR` — until 200, up to 30 seconds (30 attempts, 1s
+apart). Then
 `GET $DEVDECK_HUB_URL/api/machines` with the hub key and check that
 `DEVDECK_MACHINE_NAME` appears in the response.
 
