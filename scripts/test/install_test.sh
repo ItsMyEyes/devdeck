@@ -162,6 +162,13 @@ assert_eq "machine_registered rejects a prefix collision" \
 	"$(printf '[{"id":"m-1","name":"my-laptop-2"}]' | machine_registered my-laptop || echo no)" "no"
 assert_eq "machine_registered rejects an empty list" \
 	"$(printf '[]' | machine_registered my-laptop || echo no)" "no"
+# Hostnames routinely contain dots, and '.' is a regex wildcard. Matching as a
+# pattern would let confirm_registration report success against a DIFFERENT
+# machine, which is the one thing that step exists to rule out.
+assert_eq "machine_registered treats the name as a literal, not a pattern" \
+	"$(printf '[{"id":"m-1","name":"my-hostXlocal"}]' | machine_registered my-host.local || echo no)" "no"
+assert_eq "machine_registered still finds a dotted name" \
+	"$(printf '[{"id":"m-1","name":"my-host.local"}]' | machine_registered my-host.local && echo yes)" "yes"
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ]

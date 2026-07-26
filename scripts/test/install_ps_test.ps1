@@ -6,6 +6,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $env:DEVDECK_INSTALL_TEST = '1'
+
+# LOCALAPPDATA and APPDATA are Windows-only, but these assertions cover pure
+# helpers that are worth running anywhere pwsh exists — including the Linux CI
+# runner and a macOS dev machine. Standing in a temp path keeps the harness
+# self-sufficient instead of pushing the requirement onto every caller.
+if (-not $env:LOCALAPPDATA) { $env:LOCALAPPDATA = [System.IO.Path]::GetTempPath() }
+if (-not $env:APPDATA) { $env:APPDATA = [System.IO.Path]::GetTempPath() }
+
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'install.ps1')
 
 $passed = 0

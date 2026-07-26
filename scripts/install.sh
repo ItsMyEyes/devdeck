@@ -428,10 +428,17 @@ wait_healthy() {
 }
 
 # machine_registered reads the hub's /api/machines response on stdin and
-# reports whether $1 is present. The pattern includes the closing quote so a
-# machine named "web" does not match "webhook-runner".
+# reports whether $1 is present.
+#
+# -F matters: hostnames routinely contain dots, and as a regex '.' would match
+# any character, so "my-host.local" would report success against a machine
+# actually named "my-hostXlocal" — the exact mistake confirm_registration
+# exists to catch. The closing quote keeps "web" from matching
+# "webhook-runner". No space is allowed after the colon because the hub
+# encodes with json.NewEncoder (backend/internal/handler/middleware.go:19),
+# which emits compact JSON.
 machine_registered() {
-	grep -q "\"name\":[ ]*\"$1\"" 2>/dev/null
+	grep -qF "\"name\":\"$1\"" 2>/dev/null
 }
 
 # confirm_registration is the difference between "the process started" and

@@ -32,14 +32,11 @@ jobs:
       - name: Installer unit tests
         run: sh scripts/test/install_test.sh
 
-      # ubuntu-latest ships pwsh but not Windows env vars. install.ps1 only
-      # reads LOCALAPPDATA/APPDATA for path defaults, and the test only
-      # asserts one of them (LOCALAPPDATA), so a placeholder is enough to
-      # exercise the cross-platform-safe helpers on a Linux runner.
+      # ubuntu-latest ships pwsh but not the Windows-only LOCALAPPDATA/APPDATA
+      # that install.ps1 reads for its path defaults. The test script stands
+      # those in itself, so this step needs no env plumbing.
       - name: PowerShell installer tests
         shell: pwsh
-        env:
-          LOCALAPPDATA: ${{ runner.temp }}
         run: pwsh -NoProfile -File scripts/test/install_ps_test.ps1
 
       - name: Frontend install
