@@ -280,10 +280,28 @@ it proves.
 `shellcheck -s sh scripts/install.sh` must pass clean. `install.ps1` is checked
 with `PSScriptAnalyzer` if available in CI, otherwise reviewed by hand.
 
-## Open risk
+## Open risks
 
-The Pages URL only goes live on the next `v*.*.*` tag, since `deploy-docs.yml`
-does not run on pushes to `main`. Until that tag is cut, the documented
-one-liner 404s. The README therefore documents the `raw.githubusercontent.com`
-+ token form as an explicitly temporary fallback, to be deleted once
-`kiyora.is-a.dev/devdeck/install.sh` resolves.
+**Nothing is published yet.** `ItsMyEyes/devdeck` currently has **zero GitHub
+releases**, and no tags are pushed to `origin` (`git ls-remote --tags origin` is
+empty; the `v1.0.0`–`v1.3.0` tags exist only locally). `release.yml` has
+therefore never run, so there are no `devdeck-runtime-*` assets to download.
+Both this installer and the existing `--updates` flag stay inert until
+`make tag VERSION=vX.Y.Z` pushes a tag and the release workflow completes.
+
+A consequence: the "missing `checksums.txt` is a warning" rule protects against
+releases cut between this change landing and the CI checksum step landing, not
+against a back catalogue — there is no back catalogue.
+
+**The Pages URL goes live on the same tag.** `deploy-docs.yml` also only runs on
+`v*.*.*`, so `kiyora.is-a.dev/devdeck/install.sh` 404s until that first tag.
+The README documents the `raw.githubusercontent.com` + token form as an
+explicitly temporary fallback, to be deleted once the Pages URL resolves.
+
+**Field-order dependency in the jq-less parser.** The fallback parser anchors on
+GitHub emitting `"url"`, `"id"`, `"node_id"`, `"name"` in that order within each
+asset object, and on stripping all whitespace from the response first (the API
+pretty-prints, so `"id": 123` has a space the pattern would otherwise miss).
+Verified against a live response on 2026-07-26. If GitHub reorders those fields
+the parser fails loudly rather than silently picking a wrong id, and installing
+`jq` is the documented workaround.
