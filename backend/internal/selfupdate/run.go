@@ -12,7 +12,7 @@ import (
 // not configurable.
 const (
 	Owner = "ItsMyEyes"
-	Repo  = "enginer-workspaces"
+	Repo  = "devdeck"
 )
 
 // releaseFetcher is the subset of *Client that Run depends on, so tests can

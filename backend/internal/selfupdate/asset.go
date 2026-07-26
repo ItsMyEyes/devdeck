@@ -3,9 +3,11 @@ package selfupdate
 import "fmt"
 
 // AssetName returns the release asset filename for a platform, matching the
-// naming `make portable-all` produces (see Makefile's portable-all target).
+// names .github/workflows/release.yml publishes — `make portable-all` builds
+// `devdeck-<os>-<arch>` and the release job renames them with a `-runtime`
+// infix to distinguish server binaries from the `-desktop` Tauri bundles.
 func AssetName(goos, goarch string) string {
-	name := fmt.Sprintf("devdeck-%s-%s", goos, goarch)
+	name := fmt.Sprintf("devdeck-runtime-%s-%s", goos, goarch)
 	if goos == "windows" {
 		name += ".exe"
 	}
