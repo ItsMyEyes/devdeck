@@ -1,4 +1,4 @@
-import { Copy, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -7,21 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseConnectionString } from '@/features/machines/connectionString'
 import { useCreateMachine, useTailscaleStatus, useUpdateMachine } from '@/features/data/queries'
+import { RuntimeInstallCommand } from '@/features/machines/RuntimeInstallCommand'
 import type { TailscaleHubStatus } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
-
-/** 32 random bytes as 64 lowercase hex chars — mirrors the desktop sidecar's generate_key(). */
-function generateRuntimeKey(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function runtimeCommand(key: string, hubUrl: string, name: string): string {
-  return [
-    `./devdeck.exe --role runtime --key ${key} --addr 0.0.0.0:9199 --db runtime.db --open=false \\`,
-    `  --hub-url ${hubUrl} --hub-key <your-hub-key> --public-url http://<hostname>:9199 --name ${name.trim() || '<name>'}`,
-  ].join('\n')
-}
 
 function tailscaleGuidance(reason: TailscaleHubStatus['reason']): {
   title: string
@@ -63,12 +51,10 @@ export function MachineDialog() {
   const busy = updateMachine.isPending || createMachine.isPending
   const canSubmit = dialog.name.trim().length > 0 && dialog.url.trim().length > 0 && dialog.key.trim().length > 0 && !busy
 
-  const [runtimeKey, setRuntimeKey] = useState('')
   const [pasteMode, setPasteMode] = useState(false)
   const [pasteText, setPasteText] = useState('')
   useEffect(() => {
     if (dialog.open && !isEdit) {
-      setRuntimeKey(generateRuntimeKey())
       setPasteMode(false)
       setPasteText('')
     }
@@ -85,11 +71,6 @@ export function MachineDialog() {
 
   const parsedPaste = pasteText.trim().length > 0 ? parseConnectionString(pasteText) : null
   const pasteInvalid = pasteText.trim().length > 0 && parsedPaste === null
-
-  function copyCommand() {
-    void navigator.clipboard.writeText(runtimeCommand(runtimeKey, resolvedHubUrl ?? window.location.origin, dialog.name))
-    toast.success('Command copied')
-  }
 
   function copyTailscaleLink(value: string) {
     void navigator.clipboard.writeText(value)
@@ -220,26 +201,7 @@ export function MachineDialog() {
           ) : isLoopbackHub && tailscaleStatus.isLoading ? (
             <p className="mb-5 font-mono text-[10.5px] text-devdeck-dim-2">Checking Tailscale…</p>
           ) : (
-            <>
-              <Label>Runtime command</Label>
-              <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
-                Run this on the target runtime — replace &lt;your-hub-key&gt; and &lt;hostname&gt;. It self-registers with
-                this hub on startup.
-              </p>
-              <div className="relative mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 pr-9">
-                <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-devdeck-fg">
-                  {runtimeCommand(runtimeKey, resolvedHubUrl ?? window.location.origin, dialog.name)}
-                </pre>
-                <button
-                  type="button"
-                  onClick={copyCommand}
-                  aria-label="Copy command"
-                  className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
-                >
-                  <Copy size={12} />
-                </button>
-              </div>
-            </>
+            <RuntimeInstallCommand hubUrl={resolvedHubUrl ?? window.location.origin} machineName={dialog.name} />
           )}
         </>
       )}
@@ -258,12 +220,7 @@ export function MachineDialog() {
             {busy && <Loader2 size={14} className="animate-spin" />}
             Connect
           </Button>
-        ) : tailscaleNotReady || (isLoopbackHub && tailscaleStatus.isLoading) ? null : (
-          <Button onClick={copyCommand}>
-            <Copy size={13} />
-            Copy command
-          </Button>
-        )}
+        ) : null}
       </div>
     </Dialog>
   )
