@@ -119,5 +119,48 @@ assert_eq "resolve_install_dir honours the override" \
 assert_eq "resolve_install_dir defaults under HOME" \
 	"$(HOME=/home/tester DEVDECK_INSTALL_DIR='' resolve_install_dir)" "/home/tester/.local/bin"
 
+# ── resolve_addr ─────────────────────────────────────────────
+# Self-registering means the hub has to reach this process, so the default
+# binds all interfaces. --role runtime refuses to start without --key, so
+# every route but /api/health is behind bearer auth either way.
+assert_eq "resolve_addr binds wide when self-registering" \
+	"$(DEVDECK_ADDR='' resolve_addr 1)" "0.0.0.0:8989"
+assert_eq "resolve_addr stays on loopback otherwise" \
+	"$(DEVDECK_ADDR='' resolve_addr 0)" "127.0.0.1:8989"
+assert_eq "resolve_addr honours the override" \
+	"$(DEVDECK_ADDR=10.0.0.5:9199 resolve_addr 1)" "10.0.0.5:9199"
+
+# ── should_register ──────────────────────────────────────────
+assert_eq "should_register with both vars" \
+	"$(DEVDECK_HUB_URL=https://h DEVDECK_HUB_KEY=k should_register && echo yes)" "yes"
+assert_eq "should_register without the key" \
+	"$(DEVDECK_HUB_URL=https://h DEVDECK_HUB_KEY='' should_register || echo no)" "no"
+assert_eq "should_register without the url" \
+	"$(DEVDECK_HUB_URL='' DEVDECK_HUB_KEY=k should_register || echo no)" "no"
+
+# ── config_path ──────────────────────────────────────────────
+assert_eq "config_path honours XDG_CONFIG_HOME" \
+	"$(XDG_CONFIG_HOME=/x/cfg config_path)" "/x/cfg/devdeck/runtime.env"
+assert_eq "config_path defaults under HOME" \
+	"$(HOME=/home/tester XDG_CONFIG_HOME='' config_path)" "/home/tester/.config/devdeck/runtime.env"
+
+# ── generate_key ─────────────────────────────────────────────
+GEN_KEY=$(generate_key)
+assert_eq "generate_key returns 64 hex chars" "$(printf '%s' "$GEN_KEY" | wc -c | tr -d ' ')" "64"
+assert_eq "generate_key is hex only" \
+	"$(printf '%s' "$GEN_KEY" | tr -d '0-9a-f' | wc -c | tr -d ' ')" "0"
+assert_eq "generate_key is not constant" \
+	"$([ "$(generate_key)" != "$(generate_key)" ] && echo differs)" "differs"
+
+# ── machine_registered ───────────────────────────────────────
+# Matches on the JSON-encoded name field rather than a bare substring, so a
+# machine called "web" does not match an unrelated "webhook-runner".
+assert_eq "machine_registered finds an exact name" \
+	"$(printf '[{"id":"m-1","name":"my-laptop"}]' | machine_registered my-laptop && echo yes)" "yes"
+assert_eq "machine_registered rejects a prefix collision" \
+	"$(printf '[{"id":"m-1","name":"my-laptop-2"}]' | machine_registered my-laptop || echo no)" "no"
+assert_eq "machine_registered rejects an empty list" \
+	"$(printf '[]' | machine_registered my-laptop || echo no)" "no"
+
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ]
