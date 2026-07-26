@@ -107,6 +107,181 @@ checksum_for() {
 	awk -v name="$1" '$2 == name || $2 == "*" name { print $1; found = 1; exit } END { exit !found }'
 }
 
+# require_token resolves the GitHub token. The repo is private, so there is
+# no anonymous path — failing here with instructions beats a confusing 404
+# three steps later.
+require_token() {
+	token="${GITHUB_TOKEN:-}"
+	if [ -z "$token" ]; then
+		token="${GH_TOKEN:-}"
+	fi
+	if [ -z "$token" ]; then
+		die "GITHUB_TOKEN is required — $OWNER/$REPO is a private repository.
+  Create a fine-grained token with 'Contents: read' on $OWNER/$REPO at
+  https://github.com/settings/personal-access-tokens/new then re-run:
+    curl -fsSL <this-url> | GITHUB_TOKEN=ghp_xxx sh"
+	fi
+	printf '%s' "$token"
+}
+
+# resolve_install_dir picks the destination directory. Always under $HOME by
+# default — an installer piped from the internet must never need sudo.
+resolve_install_dir() {
+	if [ -n "${DEVDECK_INSTALL_DIR:-}" ]; then
+		printf '%s' "$DEVDECK_INSTALL_DIR"
+	else
+		printf '%s/.local/bin' "$HOME"
+	fi
+}
+
+# have checks whether a command exists on PATH.
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# http_get fetches $1 to stdout with the given Accept header ($2) and the
+# bearer token ($3). curl is preferred; wget covers minimal images that ship
+# only busybox wget. Both are told to fail loudly on HTTP errors.
+http_get() {
+	url="$1"
+	accept="$2"
+	token="$3"
+
+	if have curl; then
+		curl -fsSL \
+			-H "Authorization: Bearer $token" \
+			-H "Accept: $accept" \
+			-H "X-GitHub-Api-Version: 2022-11-28" \
+			"$url"
+	elif have wget; then
+		wget -qO- \
+			--header="Authorization: Bearer $token" \
+			--header="Accept: $accept" \
+			--header="X-GitHub-Api-Version: 2022-11-28" \
+			"$url"
+	else
+		die "neither curl nor wget is available — install one of them and re-run"
+	fi
+}
+
+# http_status prints only the HTTP status code for $1, used to turn an
+# opaque transfer failure into a specific message.
+http_status() {
+	if have curl; then
+		curl -o /dev/null -s -w '%{http_code}' \
+			-H "Authorization: Bearer $2" \
+			-H "Accept: application/vnd.github+json" \
+			"$1" 2>/dev/null || printf '000'
+	else
+		printf '000'
+	fi
+}
+
+# release_url returns the API endpoint for the requested release: the pinned
+# tag when DEVDECK_VERSION is set, otherwise the latest published release.
+release_url() {
+	version="${DEVDECK_VERSION:-latest}"
+	if [ "$version" = "latest" ]; then
+		printf '%s/repos/%s/%s/releases/latest' "$API" "$OWNER" "$REPO"
+	else
+		printf '%s/repos/%s/%s/releases/tags/%s' "$API" "$OWNER" "$REPO" "$version"
+	fi
+}
+
+# explain_release_failure maps a status code onto the actual cause. A 404
+# here means one of three very different things, and guessing wastes the
+# user's time.
+explain_release_failure() {
+	case "$1" in
+	401 | 403)
+		die "GitHub rejected the token (HTTP $1) — check it is not expired and has 'Contents: read' on $OWNER/$REPO"
+		;;
+	404)
+		die "no release found (HTTP 404) — either the token cannot see the private repo $OWNER/$REPO, or the tag '${DEVDECK_VERSION:-latest}' does not exist.
+  Note: $OWNER/$REPO has no published releases until a v*.*.* tag is pushed."
+		;;
+	*)
+		die "could not fetch the release metadata (HTTP $1)"
+		;;
+	esac
+}
+
+# sha256_of prints the SHA-256 of a file. GNU coreutils ships sha256sum,
+# macOS ships shasum; openssl is the last resort.
+sha256_of() {
+	if have sha256sum; then
+		sha256sum "$1" | awk '{print $1}'
+	elif have shasum; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	elif have openssl; then
+		openssl dgst -sha256 "$1" | awk '{print $NF}'
+	else
+		return 1
+	fi
+}
+
+# verify_checksum compares the downloaded binary against the release
+# manifest. A manifest that is present and disagrees is fatal. A manifest
+# that is absent is only a warning: checksums.txt is newer than the release
+# workflow, so releases cut before it exists must still be installable.
+verify_checksum() {
+	file="$1"
+	name="$2"
+	manifest="$3"
+
+	if [ ! -s "$manifest" ]; then
+		warn "release has no checksums.txt — skipping integrity verification"
+		return 0
+	fi
+
+	want=$(checksum_for "$name" <"$manifest") || {
+		warn "checksums.txt has no entry for $name — skipping integrity verification"
+		return 0
+	}
+
+	got=$(sha256_of "$file") || {
+		warn "no sha256 tool available (sha256sum/shasum/openssl) — skipping integrity verification"
+		return 0
+	}
+
+	if [ "$got" != "$want" ]; then
+		die "checksum mismatch for $name
+  expected: $want
+  actual:   $got
+  The download was corrupted or tampered with. Nothing was installed."
+	fi
+
+	info "checksum verified"
+}
+
+# install_binary moves the verified download into place and sets
+# INSTALL_PATH. The temp file is created in the destination directory so the
+# final mv is a same-filesystem rename — atomic, so a concurrent or
+# interrupted run never leaves a half-written binary named devdeck.
+install_binary() {
+	src="$1"
+	dir=$(resolve_install_dir)
+
+	mkdir -p "$dir" 2>/dev/null ||
+		die "cannot create $dir — set DEVDECK_INSTALL_DIR to a writable directory"
+	[ -w "$dir" ] ||
+		die "$dir is not writable — set DEVDECK_INSTALL_DIR to a writable directory"
+
+	staged="$dir/.$BIN_NAME.$$"
+	cp "$src" "$staged" || die "could not stage the binary in $dir"
+	chmod 755 "$staged" || die "could not make $staged executable"
+	mv -f "$staged" "$dir/$BIN_NAME" || die "could not install into $dir"
+
+	INSTALL_PATH="$dir/$BIN_NAME"
+	info "installed $INSTALL_PATH"
+
+	case ":$PATH:" in
+	*":$dir:"*) ;;
+	*)
+		warn "$dir is not on your PATH — add it with:
+    echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile && export PATH=\"$dir:\$PATH\""
+		;;
+	esac
+}
+
 # detect_platform prints "<os> <arch>", resolving Rosetta on Darwin.
 detect_platform() {
 	uname_s=$(uname -s)
@@ -133,6 +308,40 @@ main() {
 	os=${platform% *}
 	arch=${platform#* }
 	info "detected $os/$arch"
+
+	token=$(require_token)
+	name=$(asset_name "$os" "$arch")
+
+	WORK_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t devdeck) ||
+		die "could not create a temporary directory"
+	trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
+
+	info "resolving ${DEVDECK_VERSION:-latest} release..."
+	url=$(release_url)
+	http_get "$url" "application/vnd.github+json" "$token" >"$WORK_DIR/release.json" ||
+		explain_release_failure "$(http_status "$url" "$token")"
+
+	asset_id=$(parse_asset_id "$name" <"$WORK_DIR/release.json") ||
+		die "release has no asset named $name.
+  Either this platform was not built for that release, or the GitHub API
+  response shape changed — installing jq and re-running uses a more robust parser."
+
+	info "downloading $name..."
+	http_get "$API/repos/$OWNER/$REPO/releases/assets/$asset_id" \
+		"application/octet-stream" "$token" >"$WORK_DIR/$name" ||
+		die "failed to download $name"
+	[ -s "$WORK_DIR/$name" ] || die "downloaded $name is empty"
+
+	# A missing manifest is expected on older releases, so this failure is
+	# swallowed here and reported by verify_checksum.
+	if sums_id=$(parse_asset_id checksums.txt <"$WORK_DIR/release.json" 2>/dev/null); then
+		http_get "$API/repos/$OWNER/$REPO/releases/assets/$sums_id" \
+			"application/octet-stream" "$token" >"$WORK_DIR/checksums.txt" 2>/dev/null || true
+	fi
+	verify_checksum "$WORK_DIR/$name" "$name" "$WORK_DIR/checksums.txt"
+
+	install_binary "$WORK_DIR/$name"
+	info "$("$INSTALL_PATH" --version 2>/dev/null || printf 'installed')"
 }
 
 if [ "${DEVDECK_INSTALL_TEST:-0}" != "1" ]; then

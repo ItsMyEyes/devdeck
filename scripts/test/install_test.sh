@@ -96,5 +96,28 @@ assert_eq "checksum_for .exe" \
 assert_fails "checksum_for rejects a missing entry" \
 	sh -c ". '$SCRIPT_DIR/install.sh'; checksum_for devdeck-runtime-linux-amd64 < '$FIXTURES/checksums.txt'"
 
+# ── http_get / fetch tooling ─────────────────────────────────
+# require_token resolves GITHUB_TOKEN then GH_TOKEN, and fails when neither
+# is set — the private repo makes an anonymous install impossible.
+assert_eq "require_token prefers GITHUB_TOKEN" \
+	"$(GITHUB_TOKEN=aaa GH_TOKEN=bbb require_token)" "aaa"
+assert_eq "require_token falls back to GH_TOKEN" \
+	"$(GITHUB_TOKEN='' GH_TOKEN=bbb require_token)" "bbb"
+assert_fails "require_token rejects both unset" \
+	sh -c ". '$SCRIPT_DIR/install.sh'; GITHUB_TOKEN= GH_TOKEN= require_token"
+
+# ── sha256_of ────────────────────────────────────────────────
+# Digest of the empty string, a value every SHA-256 implementation agrees on.
+: >"$FIXTURES/empty.bin"
+assert_eq "sha256_of empty file" "$(sha256_of "$FIXTURES/empty.bin")" \
+	"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+rm -f "$FIXTURES/empty.bin"
+
+# ── resolve_install_dir ──────────────────────────────────────
+assert_eq "resolve_install_dir honours the override" \
+	"$(DEVDECK_INSTALL_DIR=/opt/dd resolve_install_dir)" "/opt/dd"
+assert_eq "resolve_install_dir defaults under HOME" \
+	"$(HOME=/home/tester DEVDECK_INSTALL_DIR='' resolve_install_dir)" "/home/tester/.local/bin"
+
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ]
