@@ -30,11 +30,17 @@ var redactedHeaders = map[string]bool{
 }
 
 // sensitiveJSONField matches JSON keys that carry secrets (password, TOTP
-// code/otpauth URI, tokens, backup codes) together with their value — string,
-// array, or number, possibly cut off by the capture cap. Operating on raw
-// text keeps redaction working even when the captured body is truncated
-// mid-value. Over-matching (e.g. "postalCode") is the safe direction.
-var sensitiveJSONField = regexp.MustCompile(`(?i)("[a-z0-9_]*(?:password|secret|token|otp|code)[a-z0-9_-]*"\s*:\s*)("(?:[^"\\]|\\.)*"?|\[[^\]]*\]?|-?[0-9.]+)`)
+// code/otpauth URI, tokens, backup codes, API/machine keys) together with
+// their value — string, array, or number, possibly cut off by the capture
+// cap. Operating on raw text keeps redaction working even when the captured
+// body is truncated mid-value. Over-matching (e.g. "postalCode", "keyword")
+// is the safe direction.
+//
+// "key" earns its place: it is the field name used by GET /api/self/hub-key
+// for this hub's own bearer key, and by POST/PATCH /api/machines for a
+// runtime's key. Both are live credentials, and without this they were
+// written to the access log in cleartext.
+var sensitiveJSONField = regexp.MustCompile(`(?i)("[a-z0-9_]*(?:password|secret|token|otp|code|key)[a-z0-9_-]*"\s*:\s*)("(?:[^"\\]|\\.)*"?|\[[^\]]*\]?|-?[0-9.]+)`)
 
 func redactJSON(s string) string {
 	return sensitiveJSONField.ReplaceAllString(s, `$1"[redacted]"`)

@@ -35,6 +35,24 @@ func TestRedactJSON(t *testing.T) {
 			`{"password":"[redacted]"`,
 		},
 		{
+			// GET /api/self/hub-key answers with the hub's own bearer key in a
+			// field named exactly "key" (hubkey.go), and POST /api/machines
+			// carries a runtime's key in the same field. Both are credentials.
+			"bare key field hidden",
+			`{"configured":true,"key":"hub-secret-abcdef"}`,
+			`{"configured":true,"key":"[redacted]"}`,
+		},
+		{
+			"key field alongside non-secret machine fields",
+			`{"name":"builder","url":"https://builder.ts.net","key":"runtime-key-123"}`,
+			`{"name":"builder","url":"https://builder.ts.net","key":"[redacted]"}`,
+		},
+		{
+			"compound key names hidden",
+			`{"apiKey":"a","publicKey":"b","signingKeyPath":"c"}`,
+			`{"apiKey":"[redacted]","publicKey":"[redacted]","signingKeyPath":"[redacted]"}`,
+		},
+		{
 			"non-sensitive keys untouched",
 			`{"name":"acme","status":"paid"}`,
 			`{"name":"acme","status":"paid"}`,
