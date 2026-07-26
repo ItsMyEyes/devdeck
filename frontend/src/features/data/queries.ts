@@ -55,6 +55,7 @@ import {
   fetchDBShowCreate,
   fetchDBStats,
   fetchDBTree,
+  fetchHubKey,
   fetchIssueEvents,
   fetchMachineHealth,
   fetchMachines,
@@ -296,6 +297,21 @@ export function useTailscaleStatus(enabled: boolean) {
     queryFn: fetchTailscaleStatus,
     enabled,
     staleTime: 5_000,
+  })
+}
+
+/** The hub's own bearer key, used only to compose the Add-runtime install
+ *  command. Enabled only while that dialog is open, so the app never fetches a
+ *  long-lived credential speculatively. gcTime is 0 so the key is dropped from
+ *  the cache as soon as the dialog unmounts rather than lingering for the
+ *  default five minutes. */
+export function useHubKey(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.hubKey,
+    queryFn: fetchHubKey,
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
   })
 }
 

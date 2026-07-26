@@ -688,6 +688,21 @@ export function fetchTailscaleStatus(): Promise<TailscaleHubStatus> {
   return request<TailscaleHubStatus>('GET', '/tailscale-status')
 }
 
+export interface HubKeyStatus {
+  /** False when this hub was started without --key, which makes runtime
+   *  self-registration impossible. */
+  configured: boolean
+  /** The hub's bearer key, or '' when not configured. */
+  key: string
+}
+
+/** Fetches this hub's own bearer key so the Add-runtime dialog can build a
+ *  copy-pasteable install command. Hub and `both` roles only — see
+ *  backend/internal/handler/hubkey.go. */
+export function fetchHubKey(): Promise<HubKeyStatus> {
+  return request<HubKeyStatus>('GET', '/self/hub-key')
+}
+
 // ---- SSH connections (hub registry; secrets are write-only) ----
 
 export interface CreateSSHConnectionBody {
