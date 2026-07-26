@@ -40,6 +40,13 @@ jobs:
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
 
+      # The installer one-liners are fetched from the public Pages site, so a
+      # private repo does not block them. scripts/ stays the single source of
+      # truth and the copy happens at deploy time, so there is no second copy
+      # to drift.
+      - name: Stage installer scripts
+        run: cp scripts/install.sh scripts/install.ps1 scripts/install.cmd docs-site/out/
+
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs-site/out

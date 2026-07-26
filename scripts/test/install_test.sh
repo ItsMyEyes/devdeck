@@ -8,10 +8,11 @@
 
 set -u
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DEVDECK_INSTALL_TEST=1
 export DEVDECK_INSTALL_TEST
 # shellcheck source=../install.sh
+# shellcheck disable=SC1091 # only resolvable with -x; the file exists at test time
 . "$SCRIPT_DIR/install.sh"
 
 PASSED=0

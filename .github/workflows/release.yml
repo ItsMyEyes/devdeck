@@ -65,10 +65,18 @@ jobs:
           cd dist
           for f in devdeck-*; do mv "$f" "devdeck-runtime-${f#devdeck-}"; done
 
+      # The install scripts verify this manifest before putting anything on
+      # disk. Generated after the rename so the names in checksums.txt are
+      # the names the release actually publishes.
+      - name: Generate checksums
+        run: cd dist && sha256sum devdeck-runtime-* > checksums.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: backend-binaries
-          path: dist/devdeck-runtime-*
+          path: |
+            dist/devdeck-runtime-*
+            dist/checksums.txt
           if-no-files-found: error
 
   build-desktop:

@@ -25,6 +25,23 @@ jobs:
       - name: Go test
         run: cd backend && go test ./...
 
+      # shellcheck is preinstalled on ubuntu-latest runners.
+      - name: Shellcheck installer
+        run: shellcheck -s sh scripts/install.sh scripts/test/install_test.sh
+
+      - name: Installer unit tests
+        run: sh scripts/test/install_test.sh
+
+      # ubuntu-latest ships pwsh but not Windows env vars. install.ps1 only
+      # reads LOCALAPPDATA/APPDATA for path defaults, and the test only
+      # asserts one of them (LOCALAPPDATA), so a placeholder is enough to
+      # exercise the cross-platform-safe helpers on a Linux runner.
+      - name: PowerShell installer tests
+        shell: pwsh
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}
+        run: pwsh -NoProfile -File scripts/test/install_ps_test.ps1
+
       - name: Frontend install
         run: cd frontend && npm ci
 
