@@ -37,6 +37,9 @@ func TestCapabilities(t *testing.T) {
 	if caps.QuoteChar != `"` {
 		t.Errorf("QuoteChar = %q, want double quote", caps.QuoteChar)
 	}
+	if caps.ExplainPrefix != "EXPLAIN" {
+		t.Errorf("ExplainPrefix = %q, want EXPLAIN", caps.ExplainPrefix)
+	}
 }
 
 // descriptorFromEnv parses DEVDECK_TEST_PG_DSN into a DSNDescriptor, skipping

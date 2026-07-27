@@ -184,6 +184,19 @@ CREATE TABLE IF NOT EXISTS machines (
   is_local INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id            TEXT PRIMARY KEY,
+  machine_id    TEXT NOT NULL DEFAULT '',
+  group_name    TEXT NOT NULL DEFAULT '',
+  title         TEXT NOT NULL DEFAULT '',
+  url           TEXT NOT NULL DEFAULT '',
+  icon_data_url TEXT NOT NULL DEFAULT ''
+);
+
+-- Re-starring a page the operator already saved on the same machine updates
+-- that row instead of stacking duplicates; see store.CreateBookmark.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_machine_url ON bookmarks (machine_id, url);
+
 CREATE TABLE IF NOT EXISTS ssh_connections (
   id                   TEXT PRIMARY KEY,
   name                 TEXT NOT NULL DEFAULT '',
@@ -238,6 +251,24 @@ CREATE TABLE IF NOT EXISTS db_saved_queries (
   sql_text      TEXT NOT NULL DEFAULT '',
   updated_at    TEXT NOT NULL DEFAULT ''
 );
+
+-- db_query_history records SQL editor executions, successes and failures
+-- alike. error holds the already-redacted client-facing message (see
+-- domain.DBQueryHistoryEntry); a raw driver error must never land here,
+-- because it routinely quotes the connection string it failed to dial.
+-- Pruned to the newest store.dbHistoryMaxPerConnection rows per connection on
+-- every insert.
+CREATE TABLE IF NOT EXISTS db_query_history (
+  id            TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  sql_text      TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'success',
+  error         TEXT NOT NULL DEFAULT '',
+  elapsed_ms    INTEGER NOT NULL DEFAULT 0,
+  row_count     INTEGER NOT NULL DEFAULT 0,
+  executed_at   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_db_query_history_conn ON db_query_history(connection_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),

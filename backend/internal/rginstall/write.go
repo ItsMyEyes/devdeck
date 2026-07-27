@@ -16,12 +16,12 @@ import (
 func writeExecutable(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create install directory: %w", err)
+		return fmt.Errorf("create install directory: %s", firstLine(err.Error()))
 	}
 
 	tmp, err := os.CreateTemp(dir, ".rg-install-*")
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return fmt.Errorf("create temp file: %s", firstLine(err.Error()))
 	}
 	tmpPath := tmp.Name()
 
@@ -29,19 +29,19 @@ func writeExecutable(path string, data []byte) error {
 	closeErr := tmp.Close()
 	if writeErr != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("write ripgrep binary: %w", writeErr)
+		return fmt.Errorf("write ripgrep binary: %s", firstLine(writeErr.Error()))
 	}
 	if closeErr != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("close temp file: %w", closeErr)
+		return fmt.Errorf("close temp file: %s", firstLine(closeErr.Error()))
 	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("chmod ripgrep binary: %w", err)
+		return fmt.Errorf("chmod ripgrep binary: %s", firstLine(err.Error()))
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("move ripgrep binary into place: %w", err)
+		return fmt.Errorf("move ripgrep binary into place: %s", firstLine(err.Error()))
 	}
 	return nil
 }

@@ -64,6 +64,7 @@ var caps = port.DBCaps{
 	RowIdentifier: "",
 	SizeStats:     true,
 	QuoteChar:     "`",
+	ExplainPrefix: "EXPLAIN",
 }
 
 type mysqlDriver struct{}

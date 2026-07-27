@@ -92,27 +92,27 @@ func writeRemoteExecutable(ctx context.Context, pool *sshmgr.FilePool, connectio
 	_, err := sshmgr.WithSFTPClient(ctx, pool, connectionID, func(client *sftp.Client) (struct{}, error) {
 		home, err := client.Getwd()
 		if err != nil {
-			return struct{}{}, fmt.Errorf("resolve remote home directory: %w", err)
+			return struct{}{}, fmt.Errorf("resolve remote home directory: %s", firstLine(err.Error()))
 		}
 		binDir := path.Join(home, ".local", "bin")
 		if err := client.MkdirAll(binDir); err != nil {
-			return struct{}{}, fmt.Errorf("create remote install directory: %w", err)
+			return struct{}{}, fmt.Errorf("create remote install directory: %s", firstLine(err.Error()))
 		}
 		binPath := path.Join(binDir, "rg")
 		f, err := client.Create(binPath)
 		if err != nil {
-			return struct{}{}, fmt.Errorf("create remote ripgrep binary: %w", err)
+			return struct{}{}, fmt.Errorf("create remote ripgrep binary: %s", firstLine(err.Error()))
 		}
 		_, writeErr := f.Write(data)
 		closeErr := f.Close()
 		if writeErr != nil {
-			return struct{}{}, fmt.Errorf("write remote ripgrep binary: %w", writeErr)
+			return struct{}{}, fmt.Errorf("write remote ripgrep binary: %s", firstLine(writeErr.Error()))
 		}
 		if closeErr != nil {
-			return struct{}{}, fmt.Errorf("close remote ripgrep binary: %w", closeErr)
+			return struct{}{}, fmt.Errorf("close remote ripgrep binary: %s", firstLine(closeErr.Error()))
 		}
 		if err := client.Chmod(binPath, 0o755); err != nil {
-			return struct{}{}, fmt.Errorf("chmod remote ripgrep binary: %w", err)
+			return struct{}{}, fmt.Errorf("chmod remote ripgrep binary: %s", firstLine(err.Error()))
 		}
 		return struct{}{}, nil
 	})

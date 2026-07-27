@@ -33,16 +33,15 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
   const [view, setView] = useState<'cards' | 'list'>('cards')
 
   const selectedProject = selectedProjectId ? projects.find((project) => project.id === selectedProjectId) : undefined
-  const scopedProjects = selectedProject ? [selectedProject] : projects
   const spawnProjectId = selectedProject?.id ?? null
   const searchNeedle = query.trim().toLowerCase()
-  const allWorktrees = scopedProjects.flatMap((project) => project.worktrees)
+  const allWorktrees = projects.flatMap((project) => project.worktrees)
   const branchCount = allWorktrees.filter((worktree) => !worktree.root).length
   const rootCount = allWorktrees.length - branchCount
   const activeCount = allWorktrees.filter((worktree) => worktree.state === 'running' || worktree.state === 'waiting').length
 
   const groups = useMemo<ProjectGroup[]>(() => {
-    return scopedProjects
+    return projects
       .map((project, index) => {
         const projectHaystack = [project.name, project.repo, project.path].filter(Boolean).join(' ').toLowerCase()
         const projectMatches = Boolean(searchNeedle && projectHaystack.includes(searchNeedle))
@@ -52,7 +51,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
         return { project, worktrees, color: GROUP_COLORS[index % GROUP_COLORS.length] }
       })
       .filter((group) => !searchNeedle || group.worktrees.length > 0)
-  }, [scopedProjects, searchNeedle])
+  }, [projects, searchNeedle])
 
   const hasProjects = projects.length > 0
   const hasMatches = groups.some((group) => group.worktrees.length > 0) || (!searchNeedle && groups.length > 0)

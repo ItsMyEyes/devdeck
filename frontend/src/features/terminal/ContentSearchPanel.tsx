@@ -7,7 +7,7 @@ import type { GrepMatch } from '@/lib/machineApi'
 import { dismissRipgrepInstall, isRipgrepInstallDismissed, ripgrepInstallTargetId } from '@/lib/ripgrepInstallPrefs'
 import { useContentSearchTarget, useInstallRipgrepTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { MaterialFileIcon } from './MaterialFileIcon'
 import type { FilesTarget } from './filesTarget'
 
@@ -97,8 +97,7 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const deferredQuery = useDeferredValue(query)
-  const pushNativeOverlayBlocker = useDevDeckStore((s) => s.pushNativeOverlayBlocker)
-  const popNativeOverlayBlocker = useDevDeckStore((s) => s.popNativeOverlayBlocker)
+  useNativeOverlayBlocker(open)
 
   const search = useContentSearchTarget(target, deferredQuery, open, { regex: regexMode, caseSensitive })
   const result = search.data
@@ -122,15 +121,6 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
     setDismissed(isRipgrepInstallDismissed(target))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, targetId])
-
-  // Same rationale as FileQuickOpen's identical effect: a Browser tile's
-  // native webview always stacks above this dialog's z-index, so it has to
-  // be told to get out of the way for as long as this is open.
-  useEffect(() => {
-    if (!open) return
-    pushNativeOverlayBlocker()
-    return () => popNativeOverlayBlocker()
-  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
 
   const flat = useMemo<FlatMatch[]>(() => {
     if (!result) return []
@@ -161,9 +151,11 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
   }
 
   function choose(row: FlatMatch) {
+    // row.match.column is ripgrep's UTF-8 byte offset (+1), not a JS/UTF-16
+    // char index — always use matchSpan's client-recomputed span instead of
+    // the raw backend value, even when the backend did report one.
     const span = matchSpan(row.match.text, row.match.column, deferredQuery, regexMode, caseSensitive)
-    const column = row.match.column > 0 ? row.match.column : span.start + 1
-    onOpenMatch(row.path, row.match.line, column, span.length)
+    onOpenMatch(row.path, row.match.line, span.start + 1, span.length)
     onClose()
   }
 

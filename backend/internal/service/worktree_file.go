@@ -162,6 +162,44 @@ func (svc *WorktreeFileService) Read(worktreeID, relativePath string) (WorktreeF
 	return WorktreeFileContent{Path: clean, Content: string(data)}, nil
 }
 
+// Download opens a worktree file for raw byte-for-byte transfer. It shares
+// Read's path validation (svc.resolve, including symlink-escape rejection)
+// but deliberately applies neither maxEditableFileSize nor the UTF-8/NUL
+// check: those exist to protect the editor, and a download has neither
+// constraint — this is what makes binary and oversized files retrievable at
+// all. Directories are rejected; they go through Archive instead. The caller
+// owns the returned handle and must close it.
+func (svc *WorktreeFileService) Download(worktreeID, relativePath string) (*os.File, os.FileInfo, string, error) {
+	_, target, clean, err := svc.resolve(worktreeID, relativePath, false, false)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	// Archive applies this via resolveSelection; without it here, Download
+	// would be the one route that serves .git/.wt bytes (credentials in
+	// .git/config, packfiles, sibling worktrees) that List never even shows.
+	if err := rejectReservedPath(clean, false); err != nil {
+		return nil, nil, "", err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil, nil, "", fileOperationError("read file", clean, err)
+	}
+	if info.IsDir() {
+		return nil, nil, "", fmt.Errorf("%q is a folder — use zip to download folders: %w", clean, ErrValidation)
+	}
+	// os.Open on a FIFO blocks until a writer appears, and the server sets no
+	// WriteTimeout, so anything but a regular file would park the handler
+	// goroutine for the process lifetime.
+	if !info.Mode().IsRegular() {
+		return nil, nil, "", fmt.Errorf("%q is not a regular file: %w", clean, ErrValidation)
+	}
+	file, err := os.Open(target)
+	if err != nil {
+		return nil, nil, "", fileOperationError("read file", clean, err)
+	}
+	return file, info, clean, nil
+}
+
 func (svc *WorktreeFileService) Write(worktreeID, relativePath, content string) (WorktreeFileContent, error) {
 	if len(content) > maxEditableFileSize {
 		return WorktreeFileContent{}, fmt.Errorf(
@@ -547,12 +585,14 @@ func rgGrepArgs(query string, opts GrepOptions, root string) []string {
 // invoked when ripgrep isn't installed: recursive (-r), line numbers (-n),
 // skip binary files (-I — rg does this automatically, grep needs it spelled
 // out), `--exclude-dir=DIR` for the same directories rgGrepArgs excludes via
-// --glob, case-insensitive (-i) unless opts.CaseSensitive, and literal-string
-// matching (-F) unless opts.Regex — grep's default is POSIX basic regex, not
-// literal, unlike ripgrep's default. "--" ends option parsing so a query
-// starting with "-" is never misread as a flag, and root is the final
-// positional argument, matching rgGrepArgs so parseGrepOutput can strip the
-// same absolute-root prefix regardless of which engine produced the output.
+// --glob, an optional `--include=GLOB` matching rgGrepArgs's --glob
+// opts.IncludePattern, case-insensitive (-i) unless opts.CaseSensitive, and
+// literal-string matching (-F) unless opts.Regex — grep's default is POSIX
+// basic regex, not literal, unlike ripgrep's default. "--" ends option
+// parsing so a query starting with "-" is never misread as a flag, and root
+// is the final positional argument, matching rgGrepArgs so parseGrepOutput
+// can strip the same absolute-root prefix regardless of which engine
+// produced the output.
 func grepFallbackArgs(query string, opts GrepOptions, root string) []string {
 	args := []string{"-r", "-n", "-I"}
 	skipDirs := make([]string, 0, len(searchSkipDirs))
@@ -562,6 +602,9 @@ func grepFallbackArgs(query string, opts GrepOptions, root string) []string {
 	sort.Strings(skipDirs)
 	for _, dir := range skipDirs {
 		args = append(args, "--exclude-dir="+dir)
+	}
+	if opts.IncludePattern != "" {
+		args = append(args, "--include="+opts.IncludePattern)
 	}
 	if !opts.CaseSensitive {
 		args = append(args, "-i")
@@ -623,10 +666,13 @@ type rgJSONEvent struct {
 // passed as rg's final positional argument by rgGrepArgs — from each
 // match's path so results come back relative, regardless of whether the
 // absolute root was a local worktree checkout or a remote SSH home
-// directory. Caps at maxGrepFiles distinct files and maxGrepMatchesPerFile
-// matches per file, reporting truncated=true if either cap was hit.
+// directory. Uses filepath.Rel + filepath.ToSlash (same pattern as Search,
+// above) rather than a hardcoded "/"-separated prefix, since rg prints paths
+// using the host OS's native separator (backslash on Windows), which a
+// forward-slash TrimPrefix would silently fail to strip. Caps at
+// maxGrepFiles distinct files and maxGrepMatchesPerFile matches per file,
+// reporting truncated=true if either cap was hit.
 func parseRipgrepJSON(output []byte, rootPrefix string) (files []GrepFileMatch, truncated bool) {
-	prefix := strings.TrimSuffix(rootPrefix, "/") + "/"
 	byPath := make(map[string]*GrepFileMatch)
 	order := make([]string, 0)
 
@@ -641,7 +687,10 @@ func parseRipgrepJSON(output []byte, rootPrefix string) (files []GrepFileMatch, 
 		if err := json.Unmarshal(line, &event); err != nil || event.Type != "match" {
 			continue
 		}
-		relPath := strings.TrimPrefix(event.Data.Path.Text, prefix)
+		relPath := event.Data.Path.Text
+		if rel, err := filepath.Rel(rootPrefix, relPath); err == nil {
+			relPath = filepath.ToSlash(rel)
+		}
 		entry, ok := byPath[relPath]
 		if !ok {
 			if len(order) >= maxGrepFiles {

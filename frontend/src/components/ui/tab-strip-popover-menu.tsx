@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { cn } from '@/lib/utils'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 export interface TabStripPopoverMenuProps {
   trigger: ReactNode
@@ -23,8 +24,11 @@ export function TabStripPopoverMenu({
   align = 'start',
   children,
 }: TabStripPopoverMenuProps) {
+  const [open, setOpen] = useState(false)
+  useNativeOverlayBlocker(open)
+
   return (
-    <Popover.Root>
+    <Popover.Root onOpenChange={setOpen}>
       <Popover.Trigger className={triggerClassName} title={triggerTitle} aria-label={triggerAriaLabel}>
         {trigger}
       </Popover.Trigger>

@@ -1,10 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
-	"os/exec"
-	"strings"
 
 	"devdeck/backend/internal/detect"
 )
@@ -32,18 +29,12 @@ type tailscaleStatusResponse struct {
 	URL    string `json:"url,omitempty"`
 }
 
-type tailscaleSelfStatus struct {
-	Self struct {
-		DNSName string `json:"DNSName"`
-	} `json:"Self"`
-}
-
 func (h *TailscaleStatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.tailscaleServeEnabled {
 		writeJSON(w, http.StatusOK, tailscaleStatusResponse{Reason: "serve_disabled"})
 		return
 	}
-	url, reason := tailscaleSelfURL()
+	url, reason := detect.TailscaleSelfURLWith(resolveTailscale)
 	if reason != "" {
 		writeJSON(w, http.StatusOK, tailscaleStatusResponse{Reason: reason})
 		return
@@ -51,31 +42,9 @@ func (h *TailscaleStatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, tailscaleStatusResponse{Ready: true, URL: url})
 }
 
-// resolveTailscale is overridable in tests so tailscaleSelfURL's
-// "not installed" branch doesn't depend on what's actually resolvable (PATH,
-// fallback dirs, login shell, macOS app bundle) on the machine running the
-// test suite.
+// resolveTailscale is the CLI lookup handed to detect.TailscaleSelfURLWith.
+// It's overridable in tests so the "not installed" branch doesn't depend on
+// what's actually resolvable (PATH, fallback dirs, login shell, macOS app
+// bundle) on the machine running the test suite. The URL derivation itself
+// lives in internal/detect so the setup wizard shares one implementation.
 var resolveTailscale = detect.ResolveTailscale
-
-// tailscaleSelfURL runs `tailscale status --self --json` and derives this
-// device's tailnet-reachable URL, mirroring
-// frontend/src-tauri/src/tailscale.rs's parse_dns_name/public_url.
-func tailscaleSelfURL() (url string, reason string) {
-	bin, err := resolveTailscale()
-	if err != nil {
-		return "", "not_installed"
-	}
-	out, err := exec.Command(bin, "status", "--self", "--json").Output()
-	if err != nil {
-		return "", "not_ready"
-	}
-	var status tailscaleSelfStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return "", "not_ready"
-	}
-	dns := strings.TrimSuffix(status.Self.DNSName, ".")
-	if dns == "" {
-		return "", "not_ready"
-	}
-	return "https://" + dns, ""
-}

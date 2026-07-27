@@ -40,6 +40,9 @@ func TestCapabilitiesUsesBacktickQuoting(t *testing.T) {
 	if !caps.SizeStats {
 		t.Error("information_schema.TABLES exposes per-table byte sizes")
 	}
+	if caps.ExplainPrefix != "EXPLAIN" {
+		t.Errorf("ExplainPrefix = %q, want EXPLAIN", caps.ExplainPrefix)
+	}
 }
 
 func TestOpenAttemptsTunnelDialWhenConfigured(t *testing.T) {

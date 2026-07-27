@@ -1,6 +1,8 @@
 import { PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
+import { useIsDesktop } from '@/features/terminal/ExpandedTerminal'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { useScope } from '@/features/useScope'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -29,6 +31,12 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   const hasSidebarPanel = canExpandPanel && railExpanded
   const isLoopbackHub = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
   const showDesktopSettings = useIsTauri() && isLoopbackHub
+  const isDesktopWidth = useIsDesktop()
+  // Below `md`, this becomes a fixed overlay drawer (see `mobileDrawer` prop
+  // doc) that must appear above a Browser tile's native webview — see
+  // useNativeOverlayBlocker's doc comment. At `md` and up it's laid out
+  // inline and never needs to block anything.
+  useNativeOverlayBlocker(mobileDrawer && sidebarOpen && !isDesktopWidth)
 
   const railControlClass =
     'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-devdeck-muted transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'

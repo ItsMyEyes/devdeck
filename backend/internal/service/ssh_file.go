@@ -2,6 +2,7 @@ package service
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -21,11 +22,11 @@ import (
 	"devdeck/backend/internal/sshmgr"
 )
 
-// sshSearchBudget bounds how long Search walks the remote tree before
-// returning whatever it has found so far. Unlike WorktreeFileService.Search
-// (local disk, effectively free), every directory descended here costs one
-// SFTP round trip — a large or slow remote home directory could otherwise
-// keep an interactive quick-open search spinning indefinitely.
+// sshSearchBudget bounds how long Search's remote `find` may run before its
+// context is canceled — a safety net for a huge or slow remote home
+// directory, not the common case: unlike the old SFTP-walk implementation
+// (one round trip per directory), `find` runs entirely on the remote host and
+// returns its full listing in one round trip, so this budget is rarely hit.
 const sshSearchBudget = 6 * time.Second
 
 // sshRgInstallTimeout bounds how long InstallRipgrep's GitHub API call +
@@ -126,66 +127,126 @@ func (svc *SSHFileService) List(ctx context.Context, connectionID, relativePath 
 	})
 }
 
+// findListArgs builds a `find <root> ...` argv that lists every file (or,
+// when wantDirs is true, every directory) under root, one per line, skipping
+// the same directories by name (wherever they occur, not just at the top
+// level) that WorktreeFileService.Search's local walk and rgGrepArgs/
+// grepFallbackArgs already exclude (searchSkipDirs). `-mindepth 1` excludes
+// root itself, matching the old walker's "skip the starting entry" check.
+// find's default (non `-L`) `-type f`/`-type d` tests never match a symlink
+// (its own type is `l`), so symlinks are skipped for free, mirroring the old
+// walker's explicit os.ModeSymlink check. Only skip-dir names and the
+// (server-controlled) root path go into this command — the user-supplied
+// search pattern never does; matching happens entirely in Go afterward via
+// filePathMatcher, so there is no shell-injection surface here the way there
+// is for Grep's query/includePattern.
+func findListArgs(root string, wantDirs bool) []string {
+	skipDirs := make([]string, 0, len(searchSkipDirs))
+	for dir := range searchSkipDirs {
+		skipDirs = append(skipDirs, dir)
+	}
+	sort.Strings(skipDirs)
+
+	args := []string{"find", root, "-mindepth", "1"}
+	if len(skipDirs) > 0 {
+		args = append(args, "(")
+		for i, dir := range skipDirs {
+			if i > 0 {
+				args = append(args, "-o")
+			}
+			args = append(args, "-name", dir)
+		}
+		args = append(args, ")", "-prune", "-o")
+	}
+	if wantDirs {
+		args = append(args, "-type", "d", "-print")
+	} else {
+		args = append(args, "-type", "f", "-print")
+	}
+	return args
+}
+
+// listRemotePaths runs findListArgs(root, wantDirs) over connectionID's
+// pooled SSH connection and scores each returned line against matcher,
+// appending hits to matches. A nonzero find exit status (e.g. one
+// permission-denied subdirectory among many readable ones) is not treated as
+// fatal — whatever it printed to stdout before that is still used, mirroring
+// the old walker's "skip permission-denied entries, keep going" behavior;
+// only a transport-level failure (already retried once inside
+// sshmgr.RunCommand) leaves stdout empty.
+func listRemotePaths(
+	ctx context.Context,
+	pool *sshmgr.FilePool,
+	connectionID, root, homePrefix string,
+	matcher filePathMatcher,
+	matches *[]fileSearchMatch,
+	wantDirs bool,
+) error {
+	stdout, _, _ := sshmgr.RunCommand(ctx, pool, connectionID, findListArgs(root, wantDirs))
+	scanner := bufio.NewScanner(bytes.NewReader(stdout))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		relative := strings.TrimPrefix(line, homePrefix)
+		if wantDirs {
+			addFileSearchMatch(matches, matcher, relative+"/", true)
+		} else {
+			addFileSearchMatch(matches, matcher, relative, false)
+		}
+	}
+	return scanner.Err()
+}
+
 // Search returns remote file paths matched by the same fuzzy/regex matcher
 // as WorktreeFileService.Search (shared filePathMatcher, searchSkipDirs,
-// maxFileSearchResults — defined in worktree_file.go, same package), walked
-// over SFTP instead of the local filesystem.
+// maxFileSearchResults — defined in worktree_file.go, same package). Unlike
+// the old implementation (an sftp.Client.Walk costing one SFTP round trip per
+// directory — slow enough that an interactive quick-open search needed its
+// own time budget to avoid hanging), this execs `find` once (twice when
+// includeDirs is set: once for files, once for directories) over the pooled
+// SSH connection via sshmgr.RunCommand, same transport Grep already uses —
+// trading many small round trips for one or two, with the whole listing
+// streamed back in a single response.
 func (svc *SSHFileService) Search(ctx context.Context, connectionID, pattern string, includeDirs bool) ([]string, error) {
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]string, error) {
-		home, err := client.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home directory failed")
-		}
-		homePrefix := strings.TrimSuffix(home, "/") + "/"
+	ctx, cancel := context.WithTimeout(ctx, sshSearchBudget)
+	defer cancel()
 
-		matcher := newFilePathMatcher(pattern)
-		matches := make([]fileSearchMatch, 0)
-		deadline := time.Now().Add(sshSearchBudget)
-		walker := client.Walk(home)
-		for walker.Step() {
-			if time.Now().After(deadline) {
-				break // time's up — return the best matches found so far rather than hang
-			}
-			current := walker.Path()
-			if current == home {
-				continue
-			}
-			if walker.Err() != nil {
-				continue // permission-denied entries are skipped, mirroring the worktree walker's fs.ErrPermission handling
-			}
-			info := walker.Stat()
-			if info.IsDir() && searchSkipDirs[info.Name()] {
-				walker.SkipDir()
-				continue
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			relative := strings.TrimPrefix(current, homePrefix)
-			if info.IsDir() {
-				if includeDirs {
-					addFileSearchMatch(&matches, matcher, relative+"/", true)
-				}
-				continue
-			}
-			addFileSearchMatch(&matches, matcher, relative, false)
-		}
-
-		sort.Slice(matches, func(i, j int) bool {
-			if matches[i].score != matches[j].score {
-				return matches[i].score < matches[j].score
-			}
-			return matches[i].path < matches[j].path
-		})
-		if len(matches) > maxFileSearchResults {
-			matches = matches[:maxFileSearchResults]
-		}
-		result := make([]string, 0, len(matches))
-		for _, match := range matches {
-			result = append(result, match.path)
-		}
-		return result, nil
+	home, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (string, error) {
+		return client.Getwd()
 	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory failed")
+	}
+	homePrefix := strings.TrimSuffix(home, "/") + "/"
+
+	matcher := newFilePathMatcher(pattern)
+	matches := make([]fileSearchMatch, 0)
+	if err := listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, matcher, &matches, false); err != nil {
+		return nil, fmt.Errorf("search files failed")
+	}
+	if includeDirs {
+		if err := listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, matcher, &matches, true); err != nil {
+			return nil, fmt.Errorf("search files failed")
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score < matches[j].score
+		}
+		return matches[i].path < matches[j].path
+	})
+	if len(matches) > maxFileSearchResults {
+		matches = matches[:maxFileSearchResults]
+	}
+	result := make([]string, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, match.path)
+	}
+	return result, nil
 }
 
 // Grep searches remote file contents under connectionID's home directory
@@ -320,6 +381,56 @@ func (svc *SSHFileService) Read(ctx context.Context, connectionID, relativePath 
 			return SSHFileContent{}, fmt.Errorf("%q is not a UTF-8 text file: %w", clean, ErrValidation)
 		}
 		return SSHFileContent{Path: clean, Content: string(data)}, nil
+	})
+}
+
+// SSHDownloadMeta describes a downloaded remote file, carrying what the
+// handler needs for its response headers once the bytes are already streamed.
+type SSHDownloadMeta struct {
+	Path    string
+	Size    int64
+	ModTime time.Time
+}
+
+// Download streams a remote file's raw bytes into dst. Validation mirrors
+// Read (normalizeRelativePath -> remoteAbsPath -> Stat, rejecting
+// directories) but deliberately applies neither maxEditableFileSize nor the
+// UTF-8/NUL check: those protect the editor, and a download has neither
+// constraint — this is what makes binary and oversized remote files
+// retrievable at all.
+//
+// It takes a destination writer rather than returning a handle because
+// sshmgr.WithSFTPClient scopes the *sftp.Client to its callback, so a live
+// remote handle cannot outlive it — same shape as Archive above.
+func (svc *SSHFileService) Download(ctx context.Context, connectionID, relativePath string, dst io.Writer) (SSHDownloadMeta, error) {
+	clean, err := normalizeRelativePath(relativePath, false)
+	if err != nil {
+		return SSHDownloadMeta{}, err
+	}
+	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHDownloadMeta, error) {
+		abs, err := remoteAbsPath(client, clean)
+		if err != nil {
+			return SSHDownloadMeta{}, err
+		}
+		info, err := client.Stat(abs)
+		if err != nil {
+			return SSHDownloadMeta{}, fileOperationError("read file", clean, err)
+		}
+		if info.IsDir() {
+			return SSHDownloadMeta{}, fmt.Errorf("%q is a folder — use zip to download folders: %w", clean, ErrValidation)
+		}
+		file, err := client.Open(abs)
+		if err != nil {
+			return SSHDownloadMeta{}, fileOperationError("read file", clean, err)
+		}
+		defer file.Close()
+		written, err := io.Copy(dst, file)
+		if err != nil {
+			return SSHDownloadMeta{}, fileOperationError("read file", clean, err)
+		}
+		// Report what was actually transferred, not the pre-copy Stat size:
+		// the remote file may have been appended to or truncated in between.
+		return SSHDownloadMeta{Path: clean, Size: written, ModTime: info.ModTime()}, nil
 	})
 }
 

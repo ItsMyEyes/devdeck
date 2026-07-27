@@ -1,7 +1,7 @@
-import { useEffect, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 interface SideDrawerProps {
   open: boolean
@@ -14,14 +14,7 @@ interface SideDrawerProps {
 
 /** Right-anchored settings drawer (worktree / project / workspace details). */
 export function SideDrawer({ open, onOpenChange, children, width = 380, z = 50, className }: SideDrawerProps) {
-  const pushNativeOverlayBlocker = useDevDeckStore((s) => s.pushNativeOverlayBlocker)
-  const popNativeOverlayBlocker = useDevDeckStore((s) => s.popNativeOverlayBlocker)
-
-  useEffect(() => {
-    if (!open) return
-    pushNativeOverlayBlocker()
-    return () => popNativeOverlayBlocker()
-  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
+  useNativeOverlayBlocker(open)
 
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>

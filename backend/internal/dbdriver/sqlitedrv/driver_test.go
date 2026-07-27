@@ -46,6 +46,11 @@ func TestCapabilities(t *testing.T) {
 	if caps.QuoteChar != `"` {
 		t.Errorf("QuoteChar = %q, want double quote", caps.QuoteChar)
 	}
+	// SQLite's plain EXPLAIN dumps VDBE bytecode, which is not a query plan.
+	// EXPLAIN QUERY PLAN is the statement an operator actually wants.
+	if caps.ExplainPrefix != "EXPLAIN QUERY PLAN" {
+		t.Errorf("ExplainPrefix = %q, want EXPLAIN QUERY PLAN", caps.ExplainPrefix)
+	}
 }
 
 func TestTreeListsTablesAndViews(t *testing.T) {

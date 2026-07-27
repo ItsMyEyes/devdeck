@@ -9,7 +9,8 @@ export const Route = createFileRoute('/w/$wsId/p/$projectId/')({
 function CardsRoute() {
   const { wsId, projectId } = Route.useParams()
   // Loading / error are handled by the workspace layout; here data is present.
-  const project = useWorkspace(wsId).data?.projects.find((p) => p.id === projectId)
+  const projects = useWorkspace(wsId).data?.projects ?? []
+  const project = projects.find((p) => p.id === projectId)
   if (!project) return null
-  return <WorktreeCardsGrid project={project} wsId={wsId} />
+  return <WorktreeCardsGrid project={project} projects={projects} wsId={wsId} />
 }

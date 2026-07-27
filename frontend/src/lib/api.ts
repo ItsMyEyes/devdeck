@@ -1,12 +1,15 @@
 // Typed fetch client for the devdeck Go + SQLite backend.
 // The backend is the source of truth; these functions mirror the REST contract.
 
+import { parseContentDispositionFilename } from '@/lib/contentDisposition'
 import type {
   Attachment,
   Bank,
+  Bookmark,
   Company,
   DBConnection,
   DBEngine,
+  DBQueryHistoryEntry,
   DBSavedQuery,
   Invoice,
   InvoiceItem,
@@ -678,6 +681,39 @@ export function mintHandoverToken(machineId: string): Promise<{ token: string }>
   return request<{ token: string }>('POST', `/machines/${machineId}/token`)
 }
 
+// ---- Bookmarks (machine-proxied Browser tile's saved pages) ----
+
+export interface CreateBookmarkBody {
+  machineId?: string
+  group?: string
+  title: string
+  url: string
+}
+
+export interface UpdateBookmarkBody {
+  group?: string
+  title?: string
+}
+
+export function fetchBookmarks(): Promise<Bookmark[]> {
+  return request<Bookmark[]>('GET', '/bookmarks')
+}
+
+/** Saves a page, fetching its favicon server-side — see FaviconService.
+ *  Re-saving the same machine+url updates that bookmark instead of creating a
+ *  duplicate (see store.CreateBookmark), so this doubles as "refresh icon". */
+export function createBookmark(body: CreateBookmarkBody): Promise<Bookmark> {
+  return request<Bookmark>('POST', '/bookmarks', body)
+}
+
+export function updateBookmark(id: string, patch: UpdateBookmarkBody): Promise<Bookmark> {
+  return request<Bookmark>('PATCH', `/bookmarks/${id}`, patch)
+}
+
+export function deleteBookmark(id: string): Promise<void> {
+  return request<void>('DELETE', `/bookmarks/${id}`)
+}
+
 export interface TailscaleHubStatus {
   ready: boolean
   reason?: 'not_installed' | 'not_ready' | 'serve_disabled'
@@ -756,6 +792,9 @@ export interface DBCaps {
   rowIdentifier: string
   sizeStats: boolean
   quoteChar: string
+  /** Statement prefix that renders a query plan for this engine, without a
+   *  trailing space ("EXPLAIN", "EXPLAIN QUERY PLAN"). */
+  explainPrefix: string
 }
 
 export interface CreateDBConnectionBody {
@@ -829,6 +868,19 @@ export function updateDBSavedQuery(id: string, patch: { name?: string; sql?: str
 
 export function deleteDBSavedQuery(id: string): Promise<void> {
   return request<void>('DELETE', `/db/queries/${id}`)
+}
+
+// ---- DB query history (SQL editor executions, newest first) ----
+
+/** Newest first. The server clamps `limit` rather than rejecting it, and
+ *  defaults to 50 when it is omitted. */
+export function fetchDBQueryHistory(connectionId: string, limit?: number): Promise<DBQueryHistoryEntry[]> {
+  const qs = limit === undefined ? '' : `?limit=${limit}`
+  return request<DBQueryHistoryEntry[]>('GET', `/db/connections/${connectionId}/history${qs}`)
+}
+
+export function clearDBQueryHistory(connectionId: string): Promise<void> {
+  return request<void>('DELETE', `/db/connections/${connectionId}/history`)
 }
 
 // ---- DB tree / metadata (read path) ----
@@ -998,4 +1050,68 @@ export function applyDBDDL(connectionId: string, plan: DBTablePlan): Promise<DBC
 
 export function fetchDBShowCreate(connectionId: string, object: DBObjectRef): Promise<{ ddl: string }> {
   return request<{ ddl: string }>('POST', `/db/connections/${connectionId}/show-create`, { object })
+}
+
+// ---- DB export (streaming; the one DB endpoint that is not JSON) ----
+
+export type DBExportFormat = 'csv' | 'json' | 'sql'
+
+export interface DBExportRequest {
+  object: DBObjectRef
+  filters: DBFilter[]
+  sort: DBSortKey[]
+  format: DBExportFormat
+  /** 0/omitted means "up to the server cap" (1,000,000 rows). */
+  limit?: number
+}
+
+/** Downloads a table export as a Blob plus the server's suggested filename.
+ *
+ *  Deliberately not built on `request()`: that helper parses every response as
+ *  JSON, and this endpoint streams a csv/json/sql file that may be hundreds of
+ *  megabytes. Only the failure path is JSON — the server fetches its first
+ *  page and runs the encoder's preamble *before* writing any byte, so a
+ *  rejected identifier or an unreachable database still arrives as the normal
+ *  `{"error":...}` envelope with the status intact. That is why the non-OK
+ *  branch below can reuse `toApiError` unchanged, and why a caller can catch
+ *  `ApiError` here exactly as it would from `request()`.
+ *
+ *  A failure *after* the first byte cannot be an envelope (the status line is
+ *  already committed); the server aborts the connection instead, which
+ *  surfaces here as the fetch/stream rejecting — an ApiError with status 0,
+ *  same as any other network fault.
+ */
+export async function exportDBTable(
+  connectionId: string,
+  body: DBExportRequest,
+): Promise<{ blob: Blob; filename: string }> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/db/connections/${connectionId}/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+
+  let blob: Blob
+  try {
+    blob = await res.blob()
+  } catch (err) {
+    // The server aborted mid-stream (see the doc comment) — a partial file is
+    // worse than a visible failure, so this never resolves with what arrived.
+    const message = err instanceof Error ? err.message : 'Export stream failed'
+    throw new ApiError(message, 0)
+  }
+
+  const fallback = `${body.object.name || 'export'}.${body.format}`
+  const filename = parseContentDispositionFilename(res.headers.get('Content-Disposition'), fallback)
+  return { blob, filename }
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -32,44 +33,87 @@ import (
 	"devdeck/backend/internal/registry"
 	"devdeck/backend/internal/selfupdate"
 	"devdeck/backend/internal/service"
+	"devdeck/backend/internal/setupui"
 	"devdeck/backend/internal/sshmgr"
 	"devdeck/backend/internal/store"
 	"devdeck/backend/internal/terminal"
 	"devdeck/backend/internal/version"
 	"devdeck/backend/internal/webui"
+
+	"github.com/mattn/go-isatty"
 )
 
 func main() {
+	// `devdeck setup` is a subcommand, not a flag, so it must be recognised and
+	// removed before the flag package sees the arguments.
+	args, wantSetup := stripSetupArg(os.Args)
+	os.Args = args
+
+	// devdeck.yaml supplies the default for almost every flag below, so it has
+	// to be resolved first. --config and --managed are therefore read by hand
+	// here, ahead of flag.Parse.
+	explicitConfig, _ := stringFlagFromArgs(args, "config")
+	if explicitConfig == "" {
+		explicitConfig = os.Getenv(config.EnvVar)
+	}
+	cfg, configPath, err := config.Resolve(explicitConfig)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	managed := isManaged(args, os.Getenv("DEVDECK_MANAGED"))
+
+	if wantSetup {
+		runSetup(cfg, configPath)
+		return
+	}
+	switch decideBoot(configPath, isTerminal(os.Stdin), isTerminal(os.Stdout), managed) {
+	case bootWizard:
+		runSetup(cfg, configPath)
+		return
+	case bootWriteDefaults:
+		path := config.DefaultPath()
+		if err := config.WriteDefaults(path); err != nil {
+			log.Printf("config: could not write %s: %v (continuing with built-in defaults)", path, err)
+		} else {
+			log.Printf("config: wrote %s (defaults)", path)
+		}
+	}
+
+	flag.String("config", explicitConfig, "path to devdeck.yaml; also DEVDECK_CONFIG (default: ./devdeck.yaml, then devdeck.yaml beside the binary)")
 	showVersion := flag.Bool("version", false, "print the devdeck version and exit")
+	// Every flag below resolves flag > env > devdeck.yaml > built-in default.
+	// config.Pick / config.PickBool supply the YAML layer; passing them as the
+	// flag's default is what makes an explicit flag outrank the file for free.
 	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server (requires -github-token / DEVDECK_GITHUB_TOKEN)")
-	githubToken := flag.String("github-token", envOr("DEVDECK_GITHUB_TOKEN", ""), "GitHub token used to check for and download updates from the private release repo")
+	githubToken := flag.String("github-token", envOr("DEVDECK_GITHUB_TOKEN", config.Pick(cfg.Updates.GitHubToken, "")), "GitHub token used to check for and download updates from the private release repo (devdeck.yaml: updates.github_token)")
 	envFile := flag.String("env", envOr("DEVDECK_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
-	addr := flag.String("addr", envOr("DEVDECK_ADDR", "127.0.0.1:8989"), "listen address")
-	dbPath := flag.String("db", envOr("DEVDECK_DB", defaultDBPath()), "sqlite database path")
+	addr := flag.String("addr", envOr("DEVDECK_ADDR", config.Pick(cfg.Addr, "127.0.0.1:8989")), "listen address (devdeck.yaml: addr)")
+	dbPath := flag.String("db", envOr("DEVDECK_DB", config.Pick(cfg.DB, defaultDBPath())), "sqlite database path (devdeck.yaml: db)")
 	jadiURL := flag.String("jadi", envOr("DEVDECK_JADI_URL", ""), "jadi backend URL (empty = static registry)")
-	openUI := flag.Bool("open", true, "open the embedded UI in the default browser")
-	onlyFrom := flag.String("only-from", envOr("DEVDECK_ONLY_FROM", ""), "comma-separated IPs/CIDRs allowed to access the server (empty = no restriction)")
-	trustedProxies := flag.String("trusted-proxies", envOr("DEVDECK_TRUSTED_PROXIES", ""), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP")
-	clientIPHeader := flag.String("client-ip-header", envOr("DEVDECK_CLIENT_IP_HEADER", ""), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies")
-	twoFA := flag.Bool("2fa", envBool("DEVDECK_2FA", true), "require TOTP two-factor authentication for login (--2fa=false disables it)")
-	secureCookiesFlag := flag.Bool("secure-cookies", envBool("DEVDECK_SECURE_COOKIES", true), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false)")
-	turnstileSiteKey := flag.String("turnstile-site-key", envOr("DEVDECK_TURNSTILE_SITE_KEY", ""), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge")
-	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("DEVDECK_TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify login challenges server-side")
-	pythonBin := flag.String("python-bin", envOr("DEVDECK_PYTHON_BIN", defaultPythonBin()), "python interpreter used to run the markitdown conversion script")
-	pandocBin := flag.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", "pandoc"), "pandoc binary used for markdown -> docx/pdf export")
-	mmdcBin := flag.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", "mmdc"), "mermaid-cli binary used to render mermaid diagrams for markdown export")
-	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("DEVDECK_TAILSCALE_SERVE", false), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI)")
-	managed := flag.Bool("managed", envBool("DEVDECK_MANAGED", false), "mark this process as supervised by an external respawn loop (set by the Tauri desktop sidecar) — /api/self/restart won't spawn its own replacement, and /api/self/stop will refuse, since the supervisor already owns this process's respawn lifecycle")
-	role := flag.String("role", envOr("DEVDECK_ROLE", "hub"), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address)")
-	apiKey := flag.String("key", envOr("DEVDECK_KEY", ""), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients)")
-	hubURL := flag.String("hub-url", envOr("DEVDECK_HUB_URL", ""), "hub base URL this runtime should self-register with on startup; empty disables self-registration")
-	hubKey := flag.String("hub-key", envOr("DEVDECK_HUB_KEY", ""), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set")
-	publicURL := flag.String("public-url", envOr("DEVDECK_PUBLIC_URL", ""), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>)")
-	machineName := flag.String("name", envOr("DEVDECK_MACHINE_NAME", ""), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname)")
-	socks5Addr := flag.String("socks5-addr", envOr("DEVDECK_SOCKS5_ADDR", ""), "listen address for a SOCKS5 forward proxy (empty = disabled); point a browser's SOCKS5 setting here to route its traffic through this app")
-	httpProxyAddr := flag.String("http-proxy-addr", envOr("DEVDECK_HTTP_PROXY_ADDR", ""), "listen address for an HTTP/HTTPS forward proxy (empty = disabled); point a browser's HTTP proxy setting here")
-	proxyKey := flag.String("proxy-key", envOr("DEVDECK_PROXY_KEY", ""), "credential required by --socks5-addr/--http-proxy-addr (SOCKS5 password or HTTP Proxy-Authorization password, any username); empty = no auth")
+	openUI := flag.Bool("open", config.PickBool(cfg.Open, true), "open the embedded UI in the default browser (devdeck.yaml: open)")
+	onlyFrom := flag.String("only-from", envOr("DEVDECK_ONLY_FROM", config.Pick(config.JoinList(cfg.Network.OnlyFrom), "")), "comma-separated IPs/CIDRs allowed to access the server (empty = no restriction) (devdeck.yaml: network.only_from)")
+	trustedProxies := flag.String("trusted-proxies", envOr("DEVDECK_TRUSTED_PROXIES", config.Pick(config.JoinList(cfg.Network.TrustedProxies), "")), "comma-separated proxy IPs/CIDRs whose forwarding headers are trusted when resolving the client IP (devdeck.yaml: network.trusted_proxies)")
+	clientIPHeader := flag.String("client-ip-header", envOr("DEVDECK_CLIENT_IP_HEADER", config.Pick(cfg.Network.ClientIPHeader, "")), "trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a Cloudflare Tunnel; only honored when the direct peer is in --trusted-proxies (devdeck.yaml: network.client_ip_header)")
+	twoFA := flag.Bool("2fa", envBool("DEVDECK_2FA", config.PickBool(cfg.Auth.TwoFA, true)), "require TOTP two-factor authentication for login (--2fa=false disables it) (devdeck.yaml: auth.two_fa)")
+	secureCookiesFlag := flag.Bool("secure-cookies", envBool("DEVDECK_SECURE_COOKIES", config.PickBool(cfg.Auth.SecureCookies, true)), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false) (devdeck.yaml: auth.secure_cookies)")
+	turnstileSiteKey := flag.String("turnstile-site-key", envOr("DEVDECK_TURNSTILE_SITE_KEY", config.Pick(cfg.Auth.Turnstile.SiteKey, "")), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge (devdeck.yaml: auth.turnstile.site_key)")
+	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("DEVDECK_TURNSTILE_SECRET_KEY", config.Pick(cfg.Auth.Turnstile.SecretKey, "")), "Cloudflare Turnstile secret key used to verify login challenges server-side (devdeck.yaml: auth.turnstile.secret_key)")
+	pythonBin := flag.String("python-bin", envOr("DEVDECK_PYTHON_BIN", config.Pick(cfg.Tools.PythonBin, defaultPythonBin())), "python interpreter used to run the markitdown conversion script (devdeck.yaml: tools.python_bin)")
+	pandocBin := flag.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", config.Pick(cfg.Tools.PandocBin, "pandoc")), "pandoc binary used for markdown -> docx/pdf export (devdeck.yaml: tools.pandoc_bin)")
+	mmdcBin := flag.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", config.Pick(cfg.Tools.MmdcBin, "mmdc")), "mermaid-cli binary used to render mermaid diagrams for markdown export (devdeck.yaml: tools.mmdc_bin)")
+	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("DEVDECK_TAILSCALE_SERVE", config.PickBool(cfg.Tailscale.Serve, false)), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI) (devdeck.yaml: tailscale.serve)")
+	managedFlag := flag.Bool("managed", managed, "mark this process as supervised by an external respawn loop (set by the Tauri desktop sidecar) — /api/self/restart won't spawn its own replacement, and /api/self/stop will refuse, since the supervisor already owns this process's respawn lifecycle")
+	role := flag.String("role", envOr("DEVDECK_ROLE", config.Pick(cfg.Role, "hub")), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address) (devdeck.yaml: role)")
+	apiKey := flag.String("key", envOr("DEVDECK_KEY", config.Pick(cfg.Key, "")), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients) (devdeck.yaml: key)")
+	hubURL := flag.String("hub-url", envOr("DEVDECK_HUB_URL", config.Pick(cfg.Hub.URL, "")), "hub base URL this runtime should self-register with on startup; empty disables self-registration (devdeck.yaml: hub.url)")
+	hubKey := flag.String("hub-key", envOr("DEVDECK_HUB_KEY", config.Pick(cfg.Hub.Key, "")), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set (devdeck.yaml: hub.key)")
+	publicURL := flag.String("public-url", envOr("DEVDECK_PUBLIC_URL", config.Pick(cfg.Machine.PublicURL, "")), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>) (devdeck.yaml: machine.public_url)")
+	machineName := flag.String("name", envOr("DEVDECK_MACHINE_NAME", config.Pick(cfg.Machine.Name, "")), "display name for this machine in the hub's Machines UI during self-registration (default: OS hostname) (devdeck.yaml: machine.name)")
+	socks5Addr := flag.String("socks5-addr", envOr("DEVDECK_SOCKS5_ADDR", config.Pick(cfg.Proxy.Socks5Addr, "")), "listen address for a SOCKS5 forward proxy (empty = disabled); point a browser's SOCKS5 setting here to route its traffic through this app (devdeck.yaml: proxy.socks5_addr)")
+	httpProxyAddr := flag.String("http-proxy-addr", envOr("DEVDECK_HTTP_PROXY_ADDR", config.Pick(cfg.Proxy.HTTPAddr, "")), "listen address for an HTTP/HTTPS forward proxy (empty = disabled); point a browser's HTTP proxy setting here (devdeck.yaml: proxy.http_addr)")
+	proxyKey := flag.String("proxy-key", envOr("DEVDECK_PROXY_KEY", config.Pick(cfg.Proxy.Key, "")), "credential required by --socks5-addr/--http-proxy-addr (SOCKS5 password or HTTP Proxy-Authorization password, any username); empty = no auth (devdeck.yaml: proxy.key)")
 	flag.Parse()
+	managed = *managedFlag
 
 	if *showVersion {
 		fmt.Println(version.Version)
@@ -245,7 +289,7 @@ func main() {
 	}
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
-	selfH := handler.NewSelfHandler(*managed)
+	selfH := handler.NewSelfHandler(managed)
 	hubKeyH := handler.NewHubKeyHandler(*apiKey)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
@@ -266,6 +310,7 @@ func main() {
 	settingsH := handler.NewSettingsHandler(st)
 	seedH := handler.NewSeedHandler(seedSvc)
 	machineH := handler.NewMachineHandler(st, healthCache, authSvc, signingKey)
+	bookmarkH := handler.NewBookmarkHandler(st, service.NewFaviconService(st))
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
 	sshH := handler.NewSSHHandler(st, sshSecrets)
@@ -367,6 +412,7 @@ func main() {
 	mux.HandleFunc("POST /api/worktrees/{id}/files/upload", fileH.Upload)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/delete", fileH.DeleteMany)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/zip", fileH.Archive)
+	mux.HandleFunc("GET /api/worktrees/{id}/files/download", fileH.Download)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/search", fileH.Search)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/grep", fileH.Grep)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/grep/install-ripgrep", fileH.InstallRipgrep)
@@ -472,6 +518,11 @@ func main() {
 		mux.HandleFunc("POST /api/machines/{id}/stop", machineH.PostMachineStop)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 
+		mux.HandleFunc("GET /api/bookmarks", bookmarkH.GetBookmarks)
+		mux.HandleFunc("POST /api/bookmarks", bookmarkH.PostBookmark)
+		mux.HandleFunc("PATCH /api/bookmarks/{id}", bookmarkH.PatchBookmark)
+		mux.HandleFunc("DELETE /api/bookmarks/{id}", bookmarkH.DeleteBookmark)
+
 		// Catalog: a runtime pulls its own machine-scoped slice here, using
 		// its own key (never the hub key). The nested mux is deliberate:
 		// RequireMachineKey must wrap only this route, not the whole hub —
@@ -501,6 +552,7 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/upload", sshFileH.Upload)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/delete", sshFileH.DeleteMany)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/zip", sshFileH.Archive)
+		mux.HandleFunc("GET /api/ssh/connections/{id}/files/download", sshFileH.Download)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/search", sshFileH.Search)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/grep", sshFileH.Grep)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/grep/install-ripgrep", sshFileH.InstallRipgrep)
@@ -520,6 +572,11 @@ func main() {
 		mux.HandleFunc("PATCH /api/db/queries/{qid}", dbH.PatchSavedQuery)
 		mux.HandleFunc("DELETE /api/db/queries/{qid}", dbH.DeleteSavedQuery)
 
+		// SQL editor execution history. Recorded hub-side by PostQuery for
+		// both hub-local and runtime-forwarded execution.
+		mux.HandleFunc("GET /api/db/connections/{id}/history", dbH.GetQueryHistory)
+		mux.HandleFunc("DELETE /api/db/connections/{id}/history", dbH.DeleteQueryHistory)
+
 		// Read path. Each of these executes on the hub, or forwards the
 		// connection's descriptor to its executor runtime, transparently.
 		mux.HandleFunc("GET /api/db/engines", dbExecH.GetEngines)
@@ -536,6 +593,10 @@ func main() {
 		mux.HandleFunc("POST /api/db/connections/{id}/ddl/preview", dbExecH.PostDDLPreview)
 		mux.HandleFunc("POST /api/db/connections/{id}/ddl/apply", dbExecH.PostDDLApply)
 		mux.HandleFunc("POST /api/db/connections/{id}/show-create", dbExecH.PostShowCreate)
+
+		// Bulk export. Streams its body instead of writing one JSON document,
+		// so it pages through the same read path the grid uses.
+		mux.HandleFunc("POST /api/db/connections/{id}/export", dbExecH.PostExport)
 	}
 
 	// Runtime execution endpoints. These accept a descriptor carrying
@@ -722,6 +783,177 @@ func defaultDBPath() string {
 		return filepath.Join("data", "devdeck.db")
 	}
 	return filepath.Join(filepath.Dir(executable), "data", "devdeck.db")
+}
+
+// setupSubcommand is the one subcommand devdeck accepts. Everything else on
+// the command line is a flag.
+const setupSubcommand = "setup"
+
+// stripSetupArg removes a leading `setup` subcommand, returning the argument
+// list the flag package should see and whether the subcommand was present.
+// Flags start with '-', so no existing invocation is ambiguous, and `setup`
+// only counts in first position — `--role hub setup` is not a setup run.
+//
+// The input slice is never modified: main passes os.Args straight in and both
+// flag.Parse and the wizard read it afterwards.
+func stripSetupArg(args []string) ([]string, bool) {
+	if len(args) < 2 || args[1] != setupSubcommand {
+		return args, false
+	}
+	stripped := make([]string, 0, len(args)-1)
+	stripped = append(stripped, args[0])
+	stripped = append(stripped, args[2:]...)
+	return stripped, true
+}
+
+// managedFromArgs scans for --managed before flag.Parse runs, because the
+// decision to launch the wizard has to be made while the flags' defaults are
+// still being assembled from devdeck.yaml. It understands every form the flag
+// package accepts for a bool, stops at the `--` terminator, and reports
+// whether the flag appeared at all. The last occurrence wins, matching the
+// flag package.
+func managedFromArgs(args []string) (value bool, ok bool) {
+	if len(args) < 2 {
+		return false, false
+	}
+	for _, arg := range args[1:] {
+		if arg == "--" {
+			break
+		}
+		name, val, hasVal := strings.Cut(arg, "=")
+		if name != "--managed" && name != "-managed" {
+			continue
+		}
+		if !hasVal {
+			value, ok = true, true // a bare bool flag means true
+			continue
+		}
+		parsed, err := strconv.ParseBool(val)
+		if err != nil {
+			// flag.Parse would reject this outright; leaving it unset lets the
+			// real parse report the error properly a moment later.
+			continue
+		}
+		value, ok = parsed, true
+	}
+	return value, ok
+}
+
+// stringFlagFromArgs is managedFromArgs for a string flag, handling both
+// --name=value and --name value. It exists for --config, which has to be read
+// before the flags that depend on the file it names.
+func stringFlagFromArgs(args []string, name string) (string, bool) {
+	if len(args) < 2 {
+		return "", false
+	}
+	long, short := "--"+name, "-"+name
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		arg := rest[i]
+		if arg == "--" {
+			break
+		}
+		key, val, hasVal := strings.Cut(arg, "=")
+		if key != long && key != short {
+			continue
+		}
+		if hasVal {
+			return val, true
+		}
+		if i+1 < len(rest) {
+			return rest[i+1], true
+		}
+		return "", true
+	}
+	return "", false
+}
+
+// isManaged combines the pre-parsed flag with DEVDECK_MANAGED, flag winning.
+func isManaged(args []string, env string) bool {
+	if v, ok := managedFromArgs(args); ok {
+		return v
+	}
+	v, err := strconv.ParseBool(env)
+	return err == nil && v
+}
+
+// bootAction is what to do about a missing devdeck.yaml.
+type bootAction int
+
+const (
+	// bootServer — a config file was found; start normally.
+	bootServer bootAction = iota
+	// bootWizard — no config and a human is watching; ask them.
+	bootWizard
+	// bootWriteDefaults — no config and nobody to ask; write one and carry on.
+	bootWriteDefaults
+)
+
+func (a bootAction) String() string {
+	switch a {
+	case bootServer:
+		return "server"
+	case bootWizard:
+		return "wizard"
+	case bootWriteDefaults:
+		return "write-defaults"
+	}
+	return "bootAction(" + strconv.Itoa(int(a)) + ")"
+}
+
+// decideBoot chooses what a start with no config file should do.
+//
+// The rule that matters: a headless process must never block on a prompt. A
+// service started by systemd, launchd, or the Tauri sidecar has no terminal
+// and no operator, so it writes a defaults file and keeps booting rather than
+// hanging forever on step 1 of a wizard nobody can see. --managed is part of
+// the test because the desktop sidecar always sets it.
+func decideBoot(configPath string, stdinTTY, stdoutTTY, managed bool) bootAction {
+	if configPath != "" {
+		return bootServer
+	}
+	if managed || !stdinTTY || !stdoutTTY {
+		return bootWriteDefaults
+	}
+	return bootWizard
+}
+
+// isTerminal reports whether f is a real terminal. This deliberately uses
+// go-isatty rather than checking os.ModeCharDevice, because /dev/null is also
+// a character device — `devdeck setup < /dev/null` must be treated as
+// non-interactive, not as a terminal.
+func isTerminal(f *os.File) bool {
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+}
+
+// runSetup shows the wizard and prints its summary. It always returns to a
+// caller that exits: the wizard never chains into starting the server, whether
+// it was reached by `devdeck setup` or auto-launched by a missing config.
+func runSetup(existing *config.Config, configPath string) {
+	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+		fmt.Fprintln(os.Stderr, "devdeck setup needs an interactive terminal; edit devdeck.yaml directly")
+		os.Exit(1)
+	}
+
+	dir := filepath.Dir(config.DefaultPath())
+	if configPath != "" {
+		dir = filepath.Dir(configPath)
+	} else {
+		// Nothing on disk yet, so nothing was pre-filled either.
+		existing = nil
+	}
+
+	res, err := setupui.Run(context.Background(), setupui.Options{Dir: dir, Existing: existing})
+	if err != nil {
+		if errors.Is(err, setupui.ErrAborted) {
+			fmt.Fprintln(os.Stderr, "setup cancelled; nothing was written")
+			os.Exit(1)
+		}
+		log.Fatalf("setup: %v", err)
+	}
+	// Printed after the Bubble Tea program has exited so it survives the
+	// alternate screen and stays pipeable.
+	fmt.Print(res.Summary())
 }
 
 func envOr(key, fallback string) string {

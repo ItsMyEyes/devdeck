@@ -3,7 +3,7 @@ import { FileSearch, Search, X } from 'lucide-react'
 import { ApiError } from '@/lib/api'
 import { useFileSearchTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { MaterialFileIcon } from './MaterialFileIcon'
 import { computeHighlight, type HighlightRange } from './fileMatchHighlight'
 import type { FilesTarget } from './filesTarget'
@@ -65,8 +65,7 @@ export function FileQuickOpen({
   const deferredPattern = useDeferredValue(pattern)
   const search = useFileSearchTarget(target, deferredPattern, open, { includeDirs: true })
   const results = search.data ?? []
-  const pushNativeOverlayBlocker = useDevDeckStore((s) => s.pushNativeOverlayBlocker)
-  const popNativeOverlayBlocker = useDevDeckStore((s) => s.popNativeOverlayBlocker)
+  useNativeOverlayBlocker(open)
 
   useEffect(() => {
     if (!open) return
@@ -74,16 +73,6 @@ export function FileQuickOpen({
     setSelected(0)
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [open])
-
-  // A Browser tile's native webview is a separate OS surface Tauri always
-  // stacks above the app's own DOM (see `nativeOverlayBlockers`'s doc
-  // comment) — this dialog's `z-[70]` does nothing against it, so the
-  // webview must be told to get out of the way for as long as this is open.
-  useEffect(() => {
-    if (!open) return
-    pushNativeOverlayBlocker()
-    return () => popNativeOverlayBlocker()
-  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
 
   useEffect(() => {
     setSelected(0)
@@ -141,6 +130,9 @@ export function FileQuickOpen({
             placeholder="Search files/folders: terminal file editor"
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-dim"
           />
+          <span className="flex-none rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim">
+            {target.kind === 'ssh' ? 'SSH' : 'Projects · Paths'}
+          </span>
           <span className="rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim">
             Fuzzy
           </span>

@@ -241,6 +241,34 @@ type Machine struct {
 	SigningPublicKey string `json:"signingPublicKey"`
 }
 
+// Bookmark is a saved page in the machine-proxied Browser tile. Bookmarks are
+// scoped to the Machine they were saved from and stored server-side rather than
+// in localStorage: a `localhost:3000` bookmark only resolves on the runtime that
+// served it, and the operator reaches the same hub from the desktop app and from
+// a phone browser, so a per-device store would show a different list on each.
+type Bookmark struct {
+	ID string `json:"id"`
+	// MachineID is the runtime this page was browsed through. Empty string is
+	// allowed (an unassigned bookmark) and sorts under "Unassigned" in the UI,
+	// mirroring Project.MachineID's treatment of the same value.
+	MachineID string `json:"machineId"`
+	// Group is the operator's own folder label, e.g. "Portal". Never empty —
+	// the store normalizes a blank group to DefaultBookmarkGroup.
+	Group string `json:"group"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	// IconDataURL is a `data:image/…;base64,…` favicon captured server-side by
+	// fetching the page through the machine's own forward proxy, because
+	// neither the SPA nor the hub can reach an internal host directly. Empty
+	// when the site has no reachable icon; the UI falls back to a letter chip.
+	IconDataURL string `json:"iconDataUrl"`
+}
+
+// DefaultBookmarkGroup is the folder a bookmark lands in when the operator
+// doesn't name one. Matches the label the pre-server localStorage store used,
+// so imported bookmarks keep their original grouping.
+const DefaultBookmarkGroup = "Portal"
+
 // SSHConnection is a saved connection to an arbitrary external SSH host —
 // a separate concept from Machine (an already-running DevDeck runtime trusted
 // via a shared key). Mirrors the frontend SSHConnection type. Credentials
@@ -326,6 +354,25 @@ type DBSavedQuery struct {
 	Name         string `json:"name"`
 	SQL          string `json:"sql"`
 	UpdatedAt    string `json:"updatedAt"`
+}
+
+// DBQueryHistoryEntry is one recorded SQL editor execution against a
+// connection — the "History" panel beside the saved-query list. Failures are
+// recorded alongside successes: an operator debugging a statement needs to see
+// what failed, not only what worked.
+//
+// Error carries the already-redacted message the client received, never a raw
+// driver error: a driver routinely quotes the connection string it failed to
+// dial, and this table is read back over the API.
+type DBQueryHistoryEntry struct {
+	ID           string `json:"id"`
+	ConnectionID string `json:"connectionId"`
+	SQL          string `json:"sql"`
+	Status       string `json:"status"` // "success" | "error"
+	Error        string `json:"error"`
+	ElapsedMS    int64  `json:"elapsedMs"`
+	RowCount     int    `json:"rowCount"`
+	ExecutedAt   string `json:"executedAt"` // ISO 8601, UTC
 }
 
 // FsEntry describes a single directory entry returned by the filesystem browser.

@@ -195,7 +195,12 @@ export function DatabaseModule() {
                           onApplied={(object) => openDBTab(activeConnection.id, { kind: 'ddl', object })}
                         />
                       ) : (
-                        <DBSqlEditor connectionId={activeConnection.id} onDirtyChange={(d) => setTabDirty(tab.id, d)} />
+                        <DBSqlEditor
+                          connectionId={activeConnection.id}
+                          engine={activeConnection.engine}
+                          caps={engines?.[activeConnection.engine]}
+                          onDirtyChange={(d) => setTabDirty(tab.id, d)}
+                        />
                       )}
                     </div>
                   ))

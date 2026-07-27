@@ -1,7 +1,8 @@
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 import { Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 /** Wraps any single trigger element (e.g. an icon button) with a hover/focus label.
  *  `open` is uncontrolled (default: hover/focus, per Base UI) unless the caller passes it
@@ -17,8 +18,11 @@ export function Tooltip({
   open?: boolean
   children: ReactElement
 }) {
+  const [localOpen, setLocalOpen] = useState(false)
+  useNativeOverlayBlocker(open ?? localOpen)
+
   return (
-    <BaseTooltip.Root open={open}>
+    <BaseTooltip.Root open={open} onOpenChange={setLocalOpen}>
       <BaseTooltip.Trigger delay={150} render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 70 }}>
@@ -40,8 +44,11 @@ export function Tooltip({
 
 /** Small "i" icon that shows explanatory text in a tooltip on hover/focus. */
 export function InfoTooltip({ text, className }: { text: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  useNativeOverlayBlocker(open)
+
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root onOpenChange={setOpen}>
       <BaseTooltip.Trigger
         delay={150}
         render={<button type="button" aria-label="More info" />}

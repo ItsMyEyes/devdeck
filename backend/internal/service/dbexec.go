@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"devdeck/backend/internal/dbdriver"
 	"devdeck/backend/internal/domain"
@@ -150,6 +151,41 @@ func (s *DBExecService) IsRemote(connID string) (bool, domain.Machine, error) {
 		return false, domain.Machine{}, err
 	}
 	return true, m, nil
+}
+
+// EngineCaps returns an engine's capability set, for callers that need to
+// build SQL text (identifier quoting) without opening a connection.
+func (s *DBExecService) EngineCaps(engine string) (port.DBCaps, error) {
+	drv, err := dbdriver.Get(engine)
+	if err != nil {
+		return port.DBCaps{}, err
+	}
+	return drv.Capabilities(), nil
+}
+
+// RecordQueryHistory appends one SQL editor execution to connID's history.
+//
+// It exists so the handler can record without holding a raw store: DBExecService
+// already owns the port.Store, and handing a store to a handler that otherwise
+// only speaks to this service would widen its reach for no reason.
+//
+// errMsg must already be the redacted, client-facing message produced by
+// mapDriverErr — never a raw driver error, which routinely quotes the
+// connection string it failed to dial.
+func (s *DBExecService) RecordQueryHistory(connID, sqlText, status, errMsg string, elapsedMS int64, rowCount int) error {
+	_, err := s.st.AddDBQueryHistory(connID, sqlText, status, errMsg, elapsedMS, rowCount,
+		time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// QueryHistory returns connID's recorded executions, newest first.
+func (s *DBExecService) QueryHistory(connID string, limit int) ([]domain.DBQueryHistoryEntry, error) {
+	return s.st.DBQueryHistory(connID, limit)
+}
+
+// ClearQueryHistory drops every recorded execution for connID.
+func (s *DBExecService) ClearQueryHistory(connID string) error {
+	return s.st.ClearDBQueryHistory(connID)
 }
 
 // Conn opens a hub-local connection to connID's database. The returned

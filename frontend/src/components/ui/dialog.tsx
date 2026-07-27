@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 export const DialogPrimitive = BaseDialog
 
@@ -18,14 +18,7 @@ interface DialogProps {
 
 /** Centered modal card matching the devdeck overlay style. */
 export function Dialog({ open, onOpenChange, children, width = 480, z = 60, className }: DialogProps) {
-  const pushNativeOverlayBlocker = useDevDeckStore((s) => s.pushNativeOverlayBlocker)
-  const popNativeOverlayBlocker = useDevDeckStore((s) => s.popNativeOverlayBlocker)
-
-  React.useEffect(() => {
-    if (!open) return
-    pushNativeOverlayBlocker()
-    return () => popNativeOverlayBlocker()
-  }, [open, pushNativeOverlayBlocker, popNativeOverlayBlocker])
+  useNativeOverlayBlocker(open)
 
   return (
     <BaseDialog.Root open={open} onOpenChange={onOpenChange}>

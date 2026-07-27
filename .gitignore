@@ -1,2 +1,16 @@
 /dist/
 .DS_Store
+
+# Secrets. devdeck.yaml and copy-this.md both carry a live API key, and the
+# *.key files are the session-signing and handover-signing keys. All are
+# written 0600 and generated per machine — none of them belongs in git.
+# devdeck.yaml.example is a different filename, so it stays tracked.
+*.key
+devdeck.yaml
+copy-this.md
+
+# Local databases and their WAL/shm sidecars.
+*.db
+*.db-shm
+*.db-wal
+temp

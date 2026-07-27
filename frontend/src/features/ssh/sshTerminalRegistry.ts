@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame } from '@/lib/terminalClient'
 import { sshShellWsUrl } from '@/lib/sshClient'
-import { TERMINAL_THEME } from '@/features/terminal/Terminal'
+import { isQuickOpenShortcut, TERMINAL_THEME } from '@/features/terminal/Terminal'
 
 /**
  * Module-level (not React-owned) registry of live SSH shell sessions, keyed
@@ -58,6 +58,10 @@ function createSession(connectionId: string): SSHSession {
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.loadAddon(new WebLinksAddon())
+  // See Terminal.tsx's isQuickOpenShortcut doc comment: without this, Ctrl/Cmd+P
+  // never reaches SSHShellPane's window-level quick-open shortcut while the
+  // terminal has focus — xterm swallows it as its own "send DLE" binding.
+  term.attachCustomKeyEventHandler((event) => !isQuickOpenShortcut(event))
 
   const session: SSHSession = { term, fit, ws: null }
 

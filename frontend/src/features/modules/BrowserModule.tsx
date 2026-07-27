@@ -41,6 +41,12 @@ interface BrowserBookmark {
   group: string
 }
 
+/** 28px toolbar buttons are unhittable with a thumb, so they grow to 36px on
+ *  touch pointers only — the row wraps, so the extra width is free. Mirrors
+ *  `BrowserTile`'s own copy: the two browsers are separate surfaces and
+ *  deliberately don't share styling (see `lib/browserTileBookmarks.ts`). */
+const toolbarButtonClass = 'pointer-coarse:h-9 pointer-coarse:w-9'
+
 const HOME_URL = 'https://example.com'
 const SEARCH_URL = 'https://duckduckgo.com/?q='
 const BOOKMARKS_STORAGE_KEY = 'devdeck.browser.bookmarks'
@@ -332,7 +338,10 @@ export function BrowserModule() {
   }
 
   return (
-    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-bg">
+    // `@container/browser` — the address row below reflows on this surface's own
+    // width, so it degrades the same way whether it's narrow because the viewport
+    // is a phone or because the module is sharing a split (see `BrowserTile`).
+    <div ref={rootRef} className="@container/browser flex min-h-0 flex-1 flex-col bg-devdeck-bg">
       {!focusMode && (
         <>
           <ModuleHeader
@@ -404,38 +413,52 @@ export function BrowserModule() {
             </Button>
           </div>
 
-          <form onSubmit={submit} className="flex flex-none items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-3 py-2">
-            <Button size="icon-sm" variant="secondary" onClick={() => goHistory(-1)} disabled={!canGoBack} aria-label="Back">
+          {/* Wraps rather than crushing: the controls flanking the address bar are
+              all fixed-width, so on a narrow surface the input was the only thing
+              that could shrink. Below 32rem it takes its own full-width row. */}
+          <form onSubmit={submit} className="flex flex-none flex-wrap items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-3 py-2">
+            <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => goHistory(-1)} disabled={!canGoBack} aria-label="Back">
               <ArrowLeft size={13} />
             </Button>
-            <Button size="icon-sm" variant="secondary" onClick={() => goHistory(1)} disabled={!canGoForward} aria-label="Forward">
+            <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => goHistory(1)} disabled={!canGoForward} aria-label="Forward">
               <ArrowRight size={13} />
             </Button>
-            <Button size="icon-sm" variant="secondary" onClick={reload} aria-label="Reload">
+            <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={reload} aria-label="Reload">
               <RefreshCw size={13} />
             </Button>
             <Input
               value={active.draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Search or enter URL"
-              className="h-8 flex-1 font-mono text-[12px]"
+              /* 16px on touch: below that, mobile Safari zooms the page on focus. */
+              className="order-last h-8 w-full min-w-0 font-mono text-[12px] pointer-coarse:h-9 pointer-coarse:text-[16px] @lg/browser:order-none @lg/browser:w-auto @lg/browser:flex-1"
             />
-            <Button size="sm" type="submit">
+            <Button size="sm" type="submit" className="pointer-coarse:h-9">
               Go
             </Button>
             <Button
               size="icon-sm"
               type="button"
               variant="secondary"
+              className={toolbarButtonClass}
               onClick={addBookmark}
               aria-label={`Save bookmark to ${bookmarkGroup.trim() || 'Portal'}`}
               title={`Save to ${bookmarkGroup.trim() || 'Portal'}`}
             >
               <Star size={13} />
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={openRealBrowser} title="Open in your real browser">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="ml-auto px-2 pointer-coarse:h-9 @lg/browser:ml-0 @lg/browser:px-2.5"
+              onClick={openRealBrowser}
+              aria-label="Open in your real browser"
+              title="Open in your real browser"
+            >
               <ExternalLink size={13} />
-              Real browser
+              {/* Label is the widest thing in the row — icon-only when space is tight. */}
+              <span className="hidden @lg/browser:inline">Real browser</span>
             </Button>
           </form>
 

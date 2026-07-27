@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
 import { useIsFetching } from '@tanstack/react-query'
-import { Archive, ChevronRight, FilePlus2, FileSearch, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
+import { Archive, ChevronRight, Download, FilePlus2, FileSearch, Loader2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
+import { canPickSaveLocation, pickSaveTarget, SAVE_CANCELLED, type SaveTarget } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 import { qk } from '@/features/data/keys'
 import {
@@ -13,6 +14,8 @@ import {
   useWriteFileTarget,
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { archiveDefaultName } from './archiveName'
+import { ArchiveNameDialog } from './ArchiveNameDialog'
 import { DeleteFilesDialog } from './DeleteFilesDialog'
 import type { FilesTarget } from './filesTarget'
 import {
@@ -46,22 +49,6 @@ function parentPath(filePath: string) {
   return index >= 0 ? filePath.slice(0, index) : ''
 }
 
-function archiveFileName(entries: readonly SelectedEntry[]) {
-  if (entries.length === 1) return `${entries[0]?.name ?? 'selection'}.zip`
-  return 'selection.zip'
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
 function filesRootKey(target: FilesTarget) {
   return target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
 }
@@ -79,12 +66,13 @@ export function TerminalExplorer({
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
   const treeContainerRef = useRef<HTMLDivElement>(null)
   const [pendingDelete, setPendingDelete] = useState<SelectedEntry[] | null>(null)
+  const [pendingArchive, setPendingArchive] = useState<SelectedEntry[] | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const root = useFilesList(target, '')
   const writeFile = useWriteFileTarget(target)
-  const { uploadFiles, downloadZip, uploading, zipping } = useFileTransfers(target)
+  const { uploadFiles, downloadZip, downloadFile, uploading, downloading } = useFileTransfers(target)
   const deletePaths = useDeletePathsTarget(target)
   const invalidateFiles = useInvalidateFilesTarget(target)
   const isFetching = useIsFetching({ queryKey: filesRootKey(target) }) > 0
@@ -98,6 +86,9 @@ export function TerminalExplorer({
     return entry.isDir ? entry.path : parentPath(entry.path)
   }, [selectedEntries])
   const uploadTargetLabel = uploadTarget || 'root'
+  // Memoized because ArchiveNameDialog re-seeds its input whenever defaultName
+  // changes — a fresh array each render would wipe what the user typed.
+  const archiveDefault = useMemo(() => archiveDefaultName(pendingArchive ?? []), [pendingArchive])
 
   function toggleDir(path: string) {
     setExpanded((current) => {
@@ -229,15 +220,63 @@ export function TerminalExplorer({
     void uploadToFolder(uploadTarget, files)
   }
 
-  async function zipSelected() {
-    if (selectedPaths.length === 0 || zipping) return
-    const filename = archiveFileName(selectedEntries)
+  /**
+   * Zips `entries` into `filename` and saves it to `saveTarget`.
+   * Callers own picking the destination, because the native save dialog has
+   * to open while the click's user activation is still fresh.
+   */
+  async function archiveTo(entries: readonly SelectedEntry[], filename: string, saveTarget: SaveTarget) {
+    const paths = entries.map((entry) => entry.path)
     try {
-      const blob = await downloadZip(selectedPaths, filename)
-      downloadBlob(blob, filename)
-      toast.success(`Zipped ${selectedPaths.length} item${selectedPaths.length === 1 ? '' : 's'}`)
+      const blob = await downloadZip(paths, filename)
+      await saveTarget.write(blob)
+      toast.success(`Zipped ${paths.length} item${paths.length === 1 ? '' : 's'}`)
     } catch (error) {
       toast.error(errorMessage(error, 'Could not zip selection'))
+    }
+  }
+
+  /**
+   * Entry point for both the toolbar button and a folder row's Download.
+   * Where the OS dialog exists it collects the archive name *and* the
+   * location in one step, so ArchiveNameDialog would be a redundant second
+   * prompt — it is only used to name the file when there's no native picker.
+   */
+  async function requestArchive(entries: readonly SelectedEntry[]) {
+    if (entries.length === 0 || downloading) return
+    if (!canPickSaveLocation()) {
+      setPendingArchive([...entries])
+      return
+    }
+    const filename = archiveDefaultName(entries)
+    const saveTarget = await pickSaveTarget(filename)
+    if (saveTarget === SAVE_CANCELLED) return
+    await archiveTo(entries, filename, saveTarget)
+  }
+
+  async function performArchive(filename: string) {
+    if (!pendingArchive || pendingArchive.length === 0 || downloading) return
+    const entries = pendingArchive
+    setPendingArchive(null)
+    // No native picker here by definition, so this resolves to the anchor
+    // fallback and saves straight to the browser's download folder.
+    const saveTarget = await pickSaveTarget(filename)
+    if (saveTarget === SAVE_CANCELLED) return
+    await archiveTo(entries, filename, saveTarget)
+  }
+
+  async function downloadEntry(entry: SelectedEntry) {
+    if (downloading) return
+    // Picked before awaiting the bytes: showSaveFilePicker needs transient
+    // activation, which would be gone by the time a large file finished.
+    const saveTarget = await pickSaveTarget(entry.name)
+    if (saveTarget === SAVE_CANCELLED) return
+    try {
+      const blob = await downloadFile(entry.path, entry.name)
+      await saveTarget.write(blob)
+      toast.success(`Downloaded ${entry.name}`)
+    } catch (error) {
+      toast.error(errorMessage(error, `Could not download ${entry.name}`))
     }
   }
 
@@ -277,12 +316,12 @@ export function TerminalExplorer({
         </button>
         <button
           type="button"
-          onClick={zipSelected}
-          disabled={selectedCount === 0 || zipping}
+          onClick={() => void requestArchive(selectedEntries)}
+          disabled={selectedCount === 0 || downloading}
           title="Zip selected files and folders"
           className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {zipping ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
+          {downloading ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
         </button>
         <button
           type="button"
@@ -335,9 +374,12 @@ export function TerminalExplorer({
           onSelectEntry={selectEntry}
           onOpenFile={onOpenFile}
           onRemovePath={removeEntry}
+          onRequestArchive={(entry) => void requestArchive([entry])}
+          onDownloadFile={(entry) => void downloadEntry(entry)}
           onSetDropTarget={setDropTargetPath}
           onDropFilesToFolder={(path, files) => void uploadToFolder(path, files)}
           deletePending={deletePaths.isPending}
+          downloadPending={downloading}
         />
       </div>
 
@@ -376,6 +418,15 @@ export function TerminalExplorer({
         onCancel={() => setPendingDelete(null)}
         onConfirm={performDelete}
       />
+
+      <ArchiveNameDialog
+        open={pendingArchive !== null}
+        defaultName={archiveDefault}
+        itemCount={pendingArchive?.length ?? 0}
+        pending={downloading}
+        onCancel={() => setPendingArchive(null)}
+        onConfirm={(filename) => void performArchive(filename)}
+      />
     </aside>
   )
 }
@@ -392,9 +443,12 @@ interface TreeLevelProps {
   onSelectEntry: (entry: SelectedEntry, modifier: ClickModifier) => void
   onOpenFile: (path: string) => void
   onRemovePath: (entry: SelectedEntry) => void
+  onRequestArchive: (entry: SelectedEntry) => void
+  onDownloadFile: (entry: SelectedEntry) => void
   onSetDropTarget: (path: string | null) => void
   onDropFilesToFolder: (path: string, files: File[]) => void
   deletePending: boolean
+  downloadPending: boolean
 }
 
 function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
@@ -490,7 +544,10 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
             >
               <button
                 type="button"
-                onClick={(event: MouseEvent) => {
+                onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                  // WebKit doesn't focus buttons on click, so without this the
+                  // aside's onPaste (Cmd+V a screenshot into the selected folder) never fires.
+                  event.currentTarget.focus()
                   const modifier = modifierFromEvent(event)
                   rest.onSelectEntry(selectedEntry, modifier)
                   if (modifier === 'none') {
@@ -512,6 +569,17 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 />
                 <MaterialFileIcon name={entry.name} isDir={entry.isDir} size={16} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg-2">{entry.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  entry.isDir ? rest.onRequestArchive(selectedEntry) : rest.onDownloadFile(selectedEntry)
+                }
+                disabled={rest.downloadPending}
+                title={`Download ${entry.name}`}
+                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+              >
+                <Download size={11} />
               </button>
               <button
                 type="button"

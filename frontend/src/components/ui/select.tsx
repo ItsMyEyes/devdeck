@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Select as BaseSelect } from '@base-ui/react/select'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 export interface SelectOption {
   value: string
@@ -21,17 +23,26 @@ interface SelectProps {
 
 /** Thin wrapper over Base UI Select with the devdeck menu styling. */
 export function Select({ value, onValueChange, options, className, triggerClassName, disabled, ...rest }: SelectProps) {
+  const [open, setOpen] = useState(false)
+  // A Browser tile's native webview always stacks above this popup (see
+  // useNativeOverlayBlocker's doc comment) — most visibly for this
+  // component, since it's the machine picker inside BrowserTile's own
+  // toolbar, sitting right on top of the surface it needs to appear above.
+  useNativeOverlayBlocker(open)
+
   return (
     <BaseSelect.Root
       items={options}
       value={value}
       onValueChange={(v) => onValueChange(String(v))}
       disabled={disabled}
+      open={open}
+      onOpenChange={setOpen}
     >
       <BaseSelect.Trigger
         aria-label={rest['aria-label']}
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5',
+          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5',
           'font-mono text-xs text-devdeck-fg transition-colors select-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[popup-open]:border-devdeck-border-accent',
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
@@ -39,8 +50,11 @@ export function Select({ value, onValueChange, options, className, triggerClassN
           className,
         )}
       >
-        <BaseSelect.Value />
-        <BaseSelect.Icon className="text-devdeck-dim">
+        {/* The trigger is a fixed-height row, so a long value (e.g. a machine
+            hostname in a narrow browser toolbar) has to truncate — left to wrap
+            it doubles the trigger's height and pushes its own toolbar out. */}
+        <BaseSelect.Value className="truncate" />
+        <BaseSelect.Icon className="flex-none text-devdeck-dim">
           <ChevronDown size={13} />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>

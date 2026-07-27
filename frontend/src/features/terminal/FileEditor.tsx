@@ -103,7 +103,7 @@ export function FileEditor({
   return (
     <div
       className={cn(
-        'min-h-0 flex-1 flex-col bg-devdeck-terminal',
+        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal',
         active ? 'flex' : 'hidden',
       )}
     >

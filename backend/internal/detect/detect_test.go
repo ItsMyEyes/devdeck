@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -149,6 +150,86 @@ func TestResolveTailscaleErrorsWhenNowhereToBeFound(t *testing.T) {
 
 	if _, err := ResolveTailscale(); err == nil {
 		t.Error("ResolveTailscale() expected error when binary is not installed anywhere, got nil")
+	}
+}
+
+// fakeTailscaleBin writes a stub `tailscale` executable whose behaviour is
+// driven by script and returns its absolute path, so the JSON-parsing paths
+// below can be exercised without a real tailnet.
+func fakeTailscaleBin(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tailscale")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatalf("write fake tailscale: %v", err)
+	}
+	return path
+}
+
+func TestTailscaleSelfURLWith(t *testing.T) {
+	tests := []struct {
+		name       string
+		script     string // shell body of the fake CLI
+		resolvable bool   // false: the CLI can't be located at all
+		wantURL    string
+		wantReason string
+	}{
+		{
+			name:       "cli not installed",
+			wantReason: "not_installed",
+		},
+		{
+			name:       "cli exits non-zero",
+			script:     "exit 1\n",
+			resolvable: true,
+			wantReason: "not_ready",
+		},
+		{
+			name:       "cli prints unparseable json",
+			script:     "echo not-json\n",
+			resolvable: true,
+			wantReason: "not_ready",
+		},
+		{
+			name:       "logged out: empty dns name",
+			script:     `echo '{"Self":{"DNSName":""}}'` + "\n",
+			resolvable: true,
+			wantReason: "not_ready",
+		},
+		{
+			name:       "trailing dot trimmed",
+			script:     `echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'` + "\n",
+			resolvable: true,
+			wantURL:    "https://my-mac.tail1234.ts.net",
+		},
+		{
+			name:       "dns name without trailing dot",
+			script:     `echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net"}}'` + "\n",
+			resolvable: true,
+			wantURL:    "https://my-mac.tail1234.ts.net",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolve := func() (string, error) { return "", errors.New("not found") }
+			if tt.resolvable {
+				bin := fakeTailscaleBin(t, tt.script)
+				resolve = func() (string, error) { return bin, nil }
+			}
+			gotURL, gotReason := TailscaleSelfURLWith(resolve)
+			if gotURL != tt.wantURL || gotReason != tt.wantReason {
+				t.Errorf("TailscaleSelfURLWith() = (%q, %q), want (%q, %q)", gotURL, gotReason, tt.wantURL, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestTailscaleSelfURLResolvesTheCLIItself(t *testing.T) {
+	bin := fakeTailscaleBin(t, `echo '{"Self":{"DNSName":"builder.tail-abc.ts.net."}}'`+"\n")
+	t.Setenv("PATH", filepath.Dir(bin))
+
+	gotURL, gotReason := TailscaleSelfURL()
+	if gotURL != "https://builder.tail-abc.ts.net" || gotReason != "" {
+		t.Errorf("TailscaleSelfURL() = (%q, %q), want (%q, %q)", gotURL, gotReason, "https://builder.tail-abc.ts.net", "")
 	}
 }
 

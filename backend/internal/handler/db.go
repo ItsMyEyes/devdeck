@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"devdeck/backend/internal/port"
@@ -328,6 +329,49 @@ func (h *DBHandler) PatchSavedQuery(w http.ResponseWriter, r *http.Request) {
 
 func (h *DBHandler) DeleteSavedQuery(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, h.st.DeleteDBSavedQuery(r.PathValue("qid"))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// History query-parameter bounds. The default is what the panel shows without
+// asking; the maximum matches the per-connection retention cap in
+// store.AddDBQueryHistory, so a larger request cannot return more anyway.
+const (
+	defaultHistoryLimit = 50
+	maxHistoryLimit     = 200
+)
+
+// GetQueryHistory lists a connection's recorded SQL editor executions, newest
+// first. ?limit= is optional; an out-of-range value is clamped rather than
+// rejected, but an unparseable one is a client bug worth reporting.
+func (h *DBHandler) GetQueryHistory(w http.ResponseWriter, r *http.Request) {
+	limit := defaultHistoryLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "limit must be an integer")
+			return
+		}
+		limit = n
+	}
+	if limit <= 0 {
+		limit = defaultHistoryLimit
+	}
+	if limit > maxHistoryLimit {
+		limit = maxHistoryLimit
+	}
+	list, err := h.st.DBQueryHistory(r.PathValue("id"), limit)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// DeleteQueryHistory clears a connection's recorded executions. Clearing an
+// already-empty history is not an error — see store.ClearDBQueryHistory.
+func (h *DBHandler) DeleteQueryHistory(w http.ResponseWriter, r *http.Request) {
+	if handleStoreErr(w, h.st.ClearDBQueryHistory(r.PathValue("id"))) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

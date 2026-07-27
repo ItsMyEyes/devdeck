@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -599,5 +600,187 @@ func TestSSHFileServiceInstallRipgrepPropagatesInstallError(t *testing.T) {
 
 	if _, err := svc.InstallRipgrep(context.Background(), "sc-test"); err == nil {
 		t.Fatal("expected InstallRipgrep to propagate the install error, got nil")
+	}
+}
+
+// TestSSHFileServiceSearchFindsFilesAndSkipsExcludedDirs proves Search's new
+// `find`-over-exec implementation (replacing the old sftp.Client.Walk, one
+// round trip per directory) still excludes node_modules/.git exactly like
+// WorktreeFileService.Search and the SSH Grep tests above — same fixture,
+// same expectation. An empty pattern matches every candidate (filePathMatcher's
+// "raw == \"\"" branch), so this also proves the full, unfiltered listing
+// itself is correct before any fuzzy-match narrowing is layered on.
+func TestSSHFileServiceSearchFindsFilesAndSkipsExcludedDirs(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, _ := newGrepTestSSHConnection(t, "")
+
+	results, err := svc.Search(context.Background(), "sc-test", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	want := map[string]bool{"src/main.go": true, "README.md": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Search results = %v, want %v (node_modules/.git must be excluded)", got, want)
+	}
+}
+
+// TestSSHFileServiceSearchNarrowsByFuzzyPattern proves a non-empty pattern
+// actually narrows the listing (not just that the unfiltered listing is
+// correct) — searching "main" should surface src/main.go and nothing else.
+func TestSSHFileServiceSearchNarrowsByFuzzyPattern(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, _ := newGrepTestSSHConnection(t, "")
+
+	results, err := svc.Search(context.Background(), "sc-test", "main", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0] != "src/main.go" {
+		t.Fatalf("Search(%q) = %v, want just [src/main.go]", "main", results)
+	}
+}
+
+// TestSSHFileServiceSearchIncludesDirectoriesWithTrailingSlash proves
+// includeDirs surfaces directories (trailing-slash-suffixed, per
+// FileQuickOpen's isDirectoryResult contract) alongside files, while pruned
+// directories (node_modules, .git) still never appear as directory results
+// either — find's `-prune` skips both descending into and printing a matched
+// directory itself, matching the old walker's SkipDir behavior.
+func TestSSHFileServiceSearchIncludesDirectoriesWithTrailingSlash(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, _ := newGrepTestSSHConnection(t, "")
+
+	results, err := svc.Search(context.Background(), "sc-test", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	if !got["src/"] {
+		t.Errorf("Search results = %v, want to include src/", results)
+	}
+	for _, excluded := range []string{".git/", "node_modules/", "node_modules/pkg/"} {
+		if got[excluded] {
+			t.Errorf("Search results = %v, must not include excluded dir %q", results, excluded)
+		}
+	}
+}
+
+// newDownloadTestSSHConnection serves a Download fixture over the same real
+// in-process SFTP server the Grep/Search tests use: a UTF-8 text file, a
+// binary file containing a NUL byte (the case Read refuses), and a directory.
+// There is no symlink-escape case here — SSHFileService deliberately has no
+// symlink hardening (see its doc comment: the remote sshd governs reach).
+func newDownloadTestSSHConnection(t *testing.T) (svc *SSHFileService, homeDir string) {
+	t.Helper()
+	homeDir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(homeDir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, "README.md"), []byte("read me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, "docs", "logo.png"), binaryFixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	addr := startTestSSHFileServer(t, homeDir, "")
+	pool := newTestSSHFilePool(t, addr)
+	return NewSSHFileService(pool), homeDir
+}
+
+func TestSSHFileServiceDownloadReturnsExactBytes(t *testing.T) {
+	svc, _ := newDownloadTestSSHConnection(t)
+
+	var dst bytes.Buffer
+	meta, err := svc.Download(context.Background(), "sc-test", "README.md", &dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Path != "README.md" {
+		t.Errorf("meta.Path = %q, want README.md", meta.Path)
+	}
+	if meta.Size != int64(len("read me\n")) {
+		t.Errorf("meta.Size = %d, want %d", meta.Size, len("read me\n"))
+	}
+	if meta.ModTime.IsZero() {
+		t.Error("meta.ModTime is zero, want the remote file's mtime")
+	}
+	if dst.String() != "read me\n" {
+		t.Errorf("downloaded bytes = %q, want %q", dst.String(), "read me\n")
+	}
+}
+
+// TestSSHFileServiceDownloadSucceedsForBinaryFile is the SSH counterpart of
+// the worktree binary test: Read rejects this file as non-UTF-8, Download
+// must stream its bytes unchanged.
+func TestSSHFileServiceDownloadSucceedsForBinaryFile(t *testing.T) {
+	svc, _ := newDownloadTestSSHConnection(t)
+
+	if _, err := svc.Read(context.Background(), "sc-test", "docs/logo.png"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Read of a binary file error = %v, want ErrValidation (fixture must be one Read refuses)", err)
+	}
+
+	var dst bytes.Buffer
+	meta, err := svc.Download(context.Background(), "sc-test", "docs/logo.png", &dst)
+	if err != nil {
+		t.Fatalf("Download of a binary file: %v", err)
+	}
+	if meta.Size != int64(len(binaryFixture)) {
+		t.Errorf("meta.Size = %d, want %d", meta.Size, len(binaryFixture))
+	}
+	if !bytes.Equal(dst.Bytes(), binaryFixture) {
+		t.Errorf("downloaded bytes = %#v, want %#v", dst.Bytes(), binaryFixture)
+	}
+}
+
+func TestSSHFileServiceDownloadIgnoresTheEditorSizeLimit(t *testing.T) {
+	svc, homeDir := newDownloadTestSSHConnection(t)
+	big := bytes.Repeat([]byte("x"), maxEditableFileSize+1)
+	if err := os.WriteFile(filepath.Join(homeDir, "big.log"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Read(context.Background(), "sc-test", "big.log"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Read of an oversized file error = %v, want ErrValidation", err)
+	}
+
+	var dst bytes.Buffer
+	meta, err := svc.Download(context.Background(), "sc-test", "big.log", &dst)
+	if err != nil {
+		t.Fatalf("Download of an oversized file: %v", err)
+	}
+	if meta.Size != int64(len(big)) || dst.Len() != len(big) {
+		t.Errorf("meta.Size = %d, wrote %d bytes, want %d for both", meta.Size, dst.Len(), len(big))
+	}
+}
+
+func TestSSHFileServiceDownloadRejectsDirectoryAndBadPaths(t *testing.T) {
+	svc, _ := newDownloadTestSSHConnection(t)
+
+	var dst bytes.Buffer
+	if _, err := svc.Download(context.Background(), "sc-test", "docs", &dst); !errors.Is(err, ErrValidation) {
+		t.Errorf("directory Download error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Download(context.Background(), "sc-test", "", &dst); !errors.Is(err, ErrValidation) {
+		t.Errorf("empty-path Download error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Download(context.Background(), "sc-test", "../outside.txt", &dst); !errors.Is(err, ErrValidation) {
+		t.Errorf("traversal Download error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Download(context.Background(), "sc-test", "/etc/passwd", &dst); !errors.Is(err, ErrValidation) {
+		t.Errorf("absolute-path Download error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Download(context.Background(), "sc-test", "nope.txt", &dst); err == nil {
+		t.Error("missing-file Download error = nil, want an error")
+	}
+	if dst.Len() != 0 {
+		t.Errorf("rejected downloads wrote %d bytes, want 0", dst.Len())
 	}
 }

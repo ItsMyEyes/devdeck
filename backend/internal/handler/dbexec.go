@@ -178,6 +178,12 @@ func (h *DBExecHandler) PostLOB(w http.ResponseWriter, r *http.Request) {
 
 // PostQuery runs read SQL from the editor. Phase 2 is read-only; statements
 // that modify data arrive with the write path in Phase 3.
+//
+// Every execution is recorded to the connection's history, successes and
+// failures alike — an operator debugging a statement needs to see what failed,
+// not only what worked. Recording happens here, hub-side, for both hub-local
+// and runtime-forwarded execution, so a connection pinned to a runtime builds
+// the same history as a local one.
 func (h *DBExecHandler) PostQuery(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		SQL  string `json:"sql"`
@@ -191,9 +197,55 @@ func (h *DBExecHandler) PostQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "sql is required")
 		return
 	}
+	connID := r.PathValue("id")
 	var out port.ResultSet
-	h.dispatch(w, r, runtimeExecPath, runtimeDBRequest{Op: "query", SQL: body.SQL, Args: body.Args}, &out,
-		func(ctx context.Context, c port.DBConn) (any, error) { return c.Query(ctx, body.SQL, body.Args) })
+	h.dispatchHook(w, r, runtimeExecPath, runtimeDBRequest{Op: "query", SQL: body.SQL, Args: body.Args}, &out,
+		func(ctx context.Context, c port.DBConn) (any, error) { return c.Query(ctx, body.SQL, body.Args) },
+		func(res any, errMsg string) {
+			h.recordQuery(connID, body.SQL, res, errMsg)
+		})
+}
+
+// recordQuery appends one execution to connID's history.
+//
+// errMsg is the message the client is being handed, which mapDriverErr has
+// already scrubbed of every credential in the descriptor — the raw driver
+// error never reaches this function, and so never reaches the table this
+// endpoint reads back.
+//
+// A history write failure is logged and swallowed: losing a convenience log
+// entry is not a reason to fail a query the database already answered.
+func (h *DBExecHandler) recordQuery(connID, sqlText string, res any, errMsg string) {
+	status := "success"
+	if errMsg != "" {
+		status = "error"
+	}
+	var elapsed int64
+	var rowCount int
+	if rs, ok := resultSetOf(res); ok {
+		elapsed = rs.ElapsedMS
+		rowCount = len(rs.Rows)
+	}
+	if err := h.exec.RecordQueryHistory(connID, sqlText, status, errMsg, elapsed, rowCount); err != nil {
+		log.Printf("db query history: connection %s: %v", connID, err)
+	}
+}
+
+// resultSetOf normalizes dispatch's result, which is a port.ResultSet value on
+// the hub-local path and the *port.ResultSet the runtime reply was decoded
+// into on the remote path.
+func resultSetOf(v any) (port.ResultSet, bool) {
+	switch rs := v.(type) {
+	case port.ResultSet:
+		return rs, true
+	case *port.ResultSet:
+		if rs == nil {
+			return port.ResultSet{}, false
+		}
+		return *rs, true
+	default:
+		return port.ResultSet{}, false
+	}
 }
 
 // PostTest opens the connection, runs a trivial liveness query, and closes it.
@@ -261,6 +313,34 @@ func (h *DBExecHandler) dispatch(
 	out any,
 	local func(context.Context, port.DBConn) (any, error),
 ) {
+	h.dispatchHook(w, r, runtimePath, req, out, local, nil)
+}
+
+// dispatchHook is dispatch with a completion callback, invoked once the
+// operation has resolved on either transport and before the response is
+// written.
+//
+// done receives the result value on success (nil result, non-empty message on
+// failure), where the message is the same already-redacted text the client is
+// about to receive. It is the seam PostQuery uses to record history without
+// duplicating the hub/runtime routing; a nil done reproduces dispatch's
+// behavior exactly, so every other endpoint is untouched.
+//
+// Store-level failures (unknown connection, an unusable executor) deliberately
+// do not fire the hook: there is no resolved connection to attribute the
+// outcome to, and those are configuration faults rather than executions.
+func (h *DBExecHandler) dispatchHook(
+	w http.ResponseWriter,
+	r *http.Request,
+	runtimePath string,
+	req runtimeDBRequest,
+	out any,
+	local func(context.Context, port.DBConn) (any, error),
+	done func(res any, errMsg string),
+) {
+	if done == nil {
+		done = func(any, string) {}
+	}
 	connID := r.PathValue("id")
 	// Derived from the request context, so closing the browser tab cancels the
 	// in-flight statement instead of leaving it pinning a connection.
@@ -281,25 +361,33 @@ func (h *DBExecHandler) dispatch(
 	if remote {
 		req.Descriptor = d
 		if err := machineclient.RunDBRequest(ctx, machine, runtimePath, req, out); err != nil {
-			writeErr(w, statusForDBErr(err), mapDriverErr(req.Op, err, d))
+			msg := mapDriverErr(req.Op, err, d)
+			done(nil, msg)
+			writeErr(w, statusForDBErr(err), msg)
 			return
 		}
+		done(out, "")
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
 
 	conn, release, err := h.exec.Conn(ctx, connID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, mapDriverErr("connect", err, d))
+		msg := mapDriverErr("connect", err, d)
+		done(nil, msg)
+		writeErr(w, http.StatusInternalServerError, msg)
 		return
 	}
 	defer release()
 
 	res, err := local(ctx, conn)
 	if err != nil {
-		writeErr(w, statusForDBErr(err), mapDriverErr(req.Op, err, d))
+		msg := mapDriverErr(req.Op, err, d)
+		done(nil, msg)
+		writeErr(w, statusForDBErr(err), msg)
 		return
 	}
+	done(res, "")
 	writeJSON(w, http.StatusOK, res)
 }
 

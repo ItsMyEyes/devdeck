@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/store"
 
 	"nhooyr.io/websocket"
@@ -151,6 +152,39 @@ func TestWebsocketGatewayProxiesJSONRPC(t *testing.T) {
 	}
 }
 
+// TestHandleWSDisablesCompression verifies the LSP socket refuses
+// permessage-deflate even when the client asks for it. WebKit clients (the
+// Tauri desktop app's WKWebView, iOS Safari) close the connection with a
+// protocol error once compressed traffic flows, which broke go-to-definition
+// the moment the editor sent didOpen. Mirrors the terminal server's guard.
+func TestHandleWSDisablesCompression(t *testing.T) {
+	t.Setenv("DEVDECK_LSP_HELPER", "1")
+	original := languageServers["go"]
+	languageServers["go"] = serverSpec{
+		binary: os.Args[0],
+		args:   []string{"-test.run=^TestLSPHelperProcess$"},
+	}
+	t.Cleanup(func() { languageServers["go"] = original })
+
+	st, worktree := newTestWorktree(t)
+	httpServer := httptest.NewServer(http.HandlerFunc(NewServer(st).HandleWS))
+	t.Cleanup(httpServer.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx,
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"?worktree="+worktree.ID+"&language=go",
+		&websocket.DialOptions{CompressionMode: websocket.CompressionContextTakeover})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if ext := resp.Header.Get("Sec-WebSocket-Extensions"); strings.Contains(ext, "permessage-deflate") {
+		t.Fatalf("compression unexpectedly negotiated; Sec-WebSocket-Extensions=%q", ext)
+	}
+}
+
 func TestWebsocketGatewayAutoInstallsMissingLanguageServer(t *testing.T) {
 	t.Setenv("DEVDECK_LSP_HELPER", "1")
 	binDir := t.TempDir()
@@ -243,6 +277,31 @@ func TestWebsocketGatewayAutoInstallsMissingLanguageServer(t *testing.T) {
 	if atomic.LoadInt32(&installCalls) != 1 {
 		t.Errorf("install command invoked %d times, want 1", installCalls)
 	}
+}
+
+// newTestWorktree builds a store holding a single root worktree, which is the
+// minimum HandleWS needs to resolve a language-server root.
+func newTestWorktree(t *testing.T) (*store.Store, domain.Worktree) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "lsp-test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	workspace, err := st.CreateWorkspace("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := st.CreateProject(workspace.ID, "project", t.TempDir(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", project.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, worktree
 }
 
 func copyExecutable(src, dst string) error {

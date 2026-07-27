@@ -57,7 +57,14 @@ func NewServer(store port.Store) *Server {
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
-		CompressionMode:    websocket.CompressionContextTakeover,
+		// permessage-deflate breaks WebKit's WebSocket client, which drops the
+		// connection with a StatusProtocolError close frame as soon as real
+		// traffic flows — here, the moment the editor sends initialized +
+		// didOpen and the language server answers. That killed every
+		// go-to-definition inside the Tauri desktop app (WKWebView) and iOS
+		// Safari. Same failure and same fix as the terminal and SSH sockets;
+		// see the note in internal/terminal/server.go.
+		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
 		log.Printf("lsp: websocket accept: %v", err)

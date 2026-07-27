@@ -1,6 +1,6 @@
 import type { Project } from '@/store/types'
 import { WorkspaceHostsView } from './WorkspaceHostsView'
 
-export function WorktreeCardsGrid({ project, wsId }: { project: Project; wsId: string }) {
-  return <WorkspaceHostsView wsId={wsId} projects={[project]} selectedProjectId={project.id} />
+export function WorktreeCardsGrid({ project, projects, wsId }: { project: Project; projects: Project[]; wsId: string }) {
+  return <WorkspaceHostsView wsId={wsId} projects={projects} selectedProjectId={project.id} />
 }

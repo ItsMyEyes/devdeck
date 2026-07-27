@@ -7,10 +7,12 @@ import type { Machine, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
   applyDBDDL,
+  clearDBQueryHistory,
   clearDoneTodos,
   cloneProject,
   commitDBEdits,
   createBank,
+  createBookmark,
   createCompany,
   createComment,
   createDBConnection,
@@ -26,6 +28,7 @@ import {
   createWorkspace,
   deleteAttachment,
   deleteBank,
+  deleteBookmark,
   deleteComment,
   deleteCompany,
   deleteDBConnection,
@@ -39,8 +42,10 @@ import {
   deleteSSHConnection,
   deleteTodo,
   deleteWorkspace,
+  exportDBTable,
   fetchAttachments,
   fetchBanks,
+  fetchBookmarks,
   fetchComments,
   fetchCompanies,
   fetchDBColumns,
@@ -50,6 +55,7 @@ import {
   fetchDBEngines,
   fetchDBIndexes,
   fetchDBQuery,
+  fetchDBQueryHistory,
   fetchDBRows,
   fetchDBSavedQueries,
   fetchDBShowCreate,
@@ -73,6 +79,7 @@ import {
   testDBConnection,
   uploadAttachment,
   updateBank,
+  updateBookmark,
   updateComment,
   updateCompany,
   updateDBConnection,
@@ -91,6 +98,7 @@ import {
 import type {
   CloneProjectBody,
   CreateBankBody,
+  CreateBookmarkBody,
   CreateCommentBody,
   CreateCompanyBody,
   CreateDBConnectionBody,
@@ -103,6 +111,7 @@ import type {
   CreateSSHConnectionBody,
   CreateTodoBody,
   CreateWorkspaceBody,
+  DBExportRequest,
   DBFilter,
   DBObjectRef,
   DBRowEdit,
@@ -112,6 +121,7 @@ import type {
   MachineHealth,
   SettingsPatch,
   UpdateBankBody,
+  UpdateBookmarkBody,
   UpdateCommentBody,
   UpdateCompanyBody,
   UpdateDBConnectionBody,
@@ -157,6 +167,7 @@ import {
   gitUnstage,
   grepWorktreeFiles,
   installAgentSkill,
+  installWorktreeRipgrep,
   killTerminalSession,
   removeAgentEnvProfile,
   removeAgentMCPServer,
@@ -183,6 +194,7 @@ import {
   fetchSSHFile,
   fetchSSHFiles,
   grepSSHFiles,
+  installSSHRipgrep,
   searchSSHFiles,
   writeSSHFile,
 } from '@/lib/sshFileApi'
@@ -284,6 +296,36 @@ export function useMachineHealth(id: string | undefined) {
     enabled: !!id,
     staleTime: 5_000,
     refetchInterval: 15_000,
+  })
+}
+
+// ---- Bookmarks (machine-proxied Browser tile's saved pages) ----
+
+export function useBookmarks() {
+  return useQuery({ queryKey: qk.bookmarks, queryFn: fetchBookmarks, staleTime: 10_000 })
+}
+
+export function useCreateBookmark() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateBookmarkBody) => createBookmark(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.bookmarks }),
+  })
+}
+
+export function useUpdateBookmark() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateBookmarkBody }) => updateBookmark(id, patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.bookmarks }),
+  })
+}
+
+export function useDeleteBookmark() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteBookmark(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.bookmarks }),
   })
 }
 
@@ -452,6 +494,28 @@ export function useDeleteDBSavedQuery() {
   })
 }
 
+// ---- DB query history ----
+
+/** staleTime 0: the server appends a row on every execution (including the
+ *  ones this client just ran), so a cached list is stale the moment the panel
+ *  is reopened. */
+export function useDBQueryHistory(connectionId: string) {
+  return useQuery({
+    queryKey: qk.dbQueryHistory(connectionId),
+    queryFn: () => fetchDBQueryHistory(connectionId),
+    enabled: Boolean(connectionId),
+    staleTime: 0,
+  })
+}
+
+export function useClearDBQueryHistory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (connectionId: string) => clearDBQueryHistory(connectionId),
+    onSuccess: (_data, connectionId) => queryClient.invalidateQueries({ queryKey: qk.dbQueryHistory(connectionId) }),
+  })
+}
+
 // ---- DB tree / metadata (read path) ----
 
 export function useDBTree(connectionId: string, path: DBTreePath, enabled = true) {
@@ -496,8 +560,13 @@ export function useDBRows(connectionId: string, req: DBRowsRequest, enabled = tr
 }
 
 export function useRunDBQuery() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ connectionId, sql }: { connectionId: string; sql: string }) => fetchDBQuery(connectionId, sql),
+    // The server records a history row for BOTH outcomes — an operator
+    // debugging a statement needs to see what failed, not only what worked —
+    // so the panel has to refresh on error too, not just on success.
+    onSettled: (_data, _err, vars) => queryClient.invalidateQueries({ queryKey: qk.dbQueryHistory(vars.connectionId) }),
   })
 }
 
@@ -544,6 +613,36 @@ export function useDBShowCreate(connectionId: string, object: DBObjectRef, enabl
     queryKey: qk.dbShowCreate(connectionId, object),
     queryFn: () => fetchDBShowCreate(connectionId, object),
     enabled: enabled && Boolean(connectionId) && Boolean(object.name),
+  })
+}
+
+// ---- DB export / imperative row paging ----
+
+/** A mutation rather than a query: an export is an operator action producing a
+ *  file, not cacheable server state — and the Blob it resolves with must never
+ *  be retained by the query cache. */
+export function useExportDBTable() {
+  return useMutation({
+    mutationFn: ({ connectionId, body }: { connectionId: string; body: DBExportRequest }) =>
+      exportDBTable(connectionId, body),
+  })
+}
+
+/** Imperative single-page read, for the cross-connection transfer loop.
+ *
+ *  Deliberately not `useDBRows`: that hook is declarative and caches by
+ *  request, which for a transfer would pin every page of a whole table in
+ *  memory. This fetches a page, hands it over, and keeps nothing.
+ *
+ *  Bulk writers (import, transfer) need no invalidation hook of their own —
+ *  they commit through `useCommitDBEdits`, whose onSuccess already invalidates
+ *  `['db', <that commit's connectionId>, 'rows']` after every batch, which is
+ *  the source grid for an import and the target grid for a transfer.
+ */
+export function useFetchDBRowsPage() {
+  return useMutation({
+    mutationFn: ({ connectionId, req }: { connectionId: string; req: DBRowsRequest }) =>
+      fetchDBRows(connectionId, req),
   })
 }
 
@@ -1412,6 +1511,25 @@ export function useContentSearchTarget(target: FilesTarget, query: string, enabl
         : grepWorktreeFiles(target.machine, target.worktreeId, query, options),
     enabled: enabled && query.trim().length > 0 && (target.kind === 'ssh' || target.worktreeId.length > 0),
     staleTime: 0,
+  })
+}
+
+/** Ripgrep auto-install (the ContentSearchPanel install-offer banner) —
+ *  same target.kind dispatch as every other *Target hook. On success,
+ *  invalidates every cached content-search result for this target
+ *  (qk.worktreeGrepRoot/qk.sshGrepRoot are prefixes of
+ *  useContentSearchTarget's full query key, which also folds in
+ *  query/regex/caseSensitive/includePattern) so an open ContentSearchPanel's
+ *  active query refetches automatically and picks up `engine: "ripgrep"`. */
+export function useInstallRipgrepTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      target.kind === 'ssh' ? installSSHRipgrep(target.connectionId) : installWorktreeRipgrep(target.machine, target.worktreeId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: target.kind === 'ssh' ? qk.sshGrepRoot(target.connectionId) : qk.worktreeGrepRoot(target.machine.id, target.worktreeId),
+      }),
   })
 }
 

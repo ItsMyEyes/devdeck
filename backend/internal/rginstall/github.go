@@ -53,7 +53,7 @@ func LatestRelease(ctx context.Context) (*Release, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request latest ripgrep release: %w", err)
+		return nil, fmt.Errorf("request latest ripgrep release: %s", firstLine(err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -79,7 +79,7 @@ func downloadAsset(ctx context.Context, asset Asset) ([]byte, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("download asset %s: %w", asset.Name, err)
+		return nil, fmt.Errorf("download asset %s: %s", asset.Name, firstLine(err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -89,7 +89,7 @@ func downloadAsset(ctx context.Context, asset Asset) ([]byte, error) {
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read asset %s: %w", asset.Name, err)
+		return nil, fmt.Errorf("read asset %s: %s", asset.Name, firstLine(err.Error()))
 	}
 	return data, nil
 }

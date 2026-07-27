@@ -27,6 +27,10 @@ export const qk = {
     ['machines', machineId, 'worktrees', id, 'file-search', pattern] as const,
   worktreeGrep: (machineId: string, id: string, query: string) =>
     ['machines', machineId, 'worktrees', id, 'grep', query] as const,
+  /** Prefix of worktreeGrep (drops the query text) — lets a successful
+   *  install-ripgrep mutation invalidate every cached content-search result
+   *  for a target regardless of what was last searched. */
+  worktreeGrepRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'grep'] as const,
   gitRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git'] as const,
   gitStatus: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'status'] as const,
   gitLog: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'log'] as const,
@@ -46,17 +50,26 @@ export const qk = {
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
   tailscaleStatus: ['tailscaleStatus'] as const,
   hubKey: ['hubKey'] as const,
+  bookmarks: ['bookmarks'] as const,
   sshConnections: ['sshConnections'] as const,
   sshFilesRoot: (connectionId: string) => ['ssh', connectionId, 'files'] as const,
   sshFiles: (connectionId: string, path: string) => ['ssh', connectionId, 'files', path] as const,
   sshFile: (connectionId: string, path: string) => ['ssh', connectionId, 'file', path] as const,
   sshFileSearch: (connectionId: string, pattern: string) => ['ssh', connectionId, 'file-search', pattern] as const,
   sshGrep: (connectionId: string, query: string) => ['ssh', connectionId, 'grep', query] as const,
+  /** Prefix of sshGrep — see worktreeGrepRoot's comment above. */
+  sshGrepRoot: (connectionId: string) => ['ssh', connectionId, 'grep'] as const,
   dbConnections: ['dbConnections'] as const,
   dbEngines: ['dbEngines'] as const,
   dbSavedQueries: (connectionId: string) => ['db', connectionId, 'queries'] as const,
+  dbQueryHistory: (connectionId: string) => ['db', connectionId, 'history'] as const,
   dbTree: (connectionId: string, path: DBTreePath) => ['db', connectionId, 'tree', path] as const,
   dbColumns: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'columns', object] as const,
+  /** Prefixes of dbTree/dbColumns (they drop the path/object descriptor) —
+   *  the SQL editor reads every cached branch under them to build its
+   *  autocomplete schema without issuing a request. */
+  dbTreeRoot: (connectionId: string) => ['db', connectionId, 'tree'] as const,
+  dbColumnsRoot: (connectionId: string) => ['db', connectionId, 'columns'] as const,
   dbIndexes: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'indexes', object] as const,
   dbStats: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'stats', object] as const,
   dbRows: (connectionId: string, req: DBRowsRequest) => ['db', connectionId, 'rows', req] as const,

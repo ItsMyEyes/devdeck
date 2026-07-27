@@ -4,6 +4,7 @@ package detect
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -198,6 +199,52 @@ func ResolveTailscale() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("detect: tailscale: not found on PATH or in common install locations")
+}
+
+// tailscaleSelfStatus is the subset of `tailscale status --self --json` that
+// TailscaleSelfURL reads.
+type tailscaleSelfStatus struct {
+	Self struct {
+		DNSName string `json:"DNSName"`
+	} `json:"Self"`
+}
+
+// TailscaleSelfURL runs `tailscale status --self --json` and derives this
+// device's tailnet-reachable URL, mirroring
+// frontend/src-tauri/src/tailscale.rs's parse_dns_name/public_url.
+//
+// On success url is "https://<DNSName>" with the trailing dot stripped and
+// reason is "". Otherwise url is "" and reason says why:
+//
+//	"not_installed" — the tailscale CLI isn't anywhere ResolveTailscale looks
+//	"not_ready"     — the CLI failed, printed unparseable JSON, or reported an
+//	                  empty DNSName (logged out, or MagicDNS off)
+func TailscaleSelfURL() (url string, reason string) {
+	return TailscaleSelfURLWith(ResolveTailscale)
+}
+
+// TailscaleSelfURLWith is TailscaleSelfURL with the CLI lookup injected, so
+// callers can fake the "not installed" branch instead of depending on what's
+// actually resolvable (PATH, fallback dirs, login shell, macOS app bundle) on
+// the machine running their tests.
+func TailscaleSelfURLWith(resolve func() (string, error)) (url string, reason string) {
+	bin, err := resolve()
+	if err != nil {
+		return "", "not_installed"
+	}
+	out, err := exec.Command(bin, "status", "--self", "--json").Output()
+	if err != nil {
+		return "", "not_ready"
+	}
+	var status tailscaleSelfStatus
+	if err := json.Unmarshal(out, &status); err != nil {
+		return "", "not_ready"
+	}
+	dns := strings.TrimSuffix(status.Self.DNSName, ".")
+	if dns == "" {
+		return "", "not_ready"
+	}
+	return "https://" + dns, ""
 }
 
 // projectLanguageMarkers maps a project-root marker filename to the LSP

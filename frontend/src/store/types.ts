@@ -152,6 +152,20 @@ export interface Machine {
   signingPublicKey: string
 }
 
+/** A saved page in the machine-proxied Browser tile. Server-side (not
+ *  localStorage) so the same bookmarks show up whether you're on the desktop
+ *  app or a phone hitting the same hub — see backend/internal/domain.Bookmark. */
+export interface Bookmark {
+  id: string
+  /** Empty string means unassigned; groups under "Unassigned" in the UI. */
+  machineId: string
+  group: string
+  title: string
+  url: string
+  /** `data:image/…;base64,…`, or empty when no icon could be fetched. */
+  iconDataUrl: string
+}
+
 /** A saved SSH connection (operator-global registry — mirrors the backend's
  *  domain.SSHConnection). Secrets are write-only: they ride on create/update
  *  requests and never serialize back, unlike Machine.key which clients need
@@ -196,6 +210,21 @@ export interface DBSavedQuery {
   name: string
   sql: string
   updatedAt: string
+}
+
+/** Mirrors backend domain.DBQueryHistoryEntry — one recorded SQL editor
+ *  execution. Failures are recorded alongside successes; `error` carries the
+ *  already-redacted message the client received (never a raw driver error)
+ *  and is the empty string for a success. */
+export interface DBQueryHistoryEntry {
+  id: string
+  connectionId: string
+  sql: string
+  status: 'success' | 'error'
+  error: string
+  elapsedMs: number
+  rowCount: number
+  executedAt: string
 }
 
 export interface InvoiceItem {

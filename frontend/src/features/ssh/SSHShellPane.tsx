@@ -11,7 +11,6 @@ import {
   addContentToLeaf,
   allocateTerminalContent,
   closeTab,
-  collectTerminalSessionKeys,
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
@@ -61,7 +60,17 @@ function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string
  * FileEditor; file quick-open (Ctrl/Cmd+P) works the same as the worktree
  * side, backed by the SSH FilesTarget.
  */
-export function SSHShellPane({ connectionId }: { connectionId: string }) {
+export function SSHShellPane({
+  connectionId,
+  isFocused,
+}: {
+  connectionId: string
+  /** Whether this tile is the workspace's currently focused leaf — gates the
+   *  window-level keyboard shortcuts below so pressing e.g. Ctrl+P with two
+   *  tiles open side by side only opens quick-open in the one the user is
+   *  actually in, not both. */
+  isFocused: boolean
+}) {
   const connections = useSSHConnections().data ?? []
   const connection = connections.find((c) => c.id === connectionId)
 
@@ -86,16 +95,12 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
     setSSHTileLayout(connectionId, next)
   }
 
-  // Real teardown for every live session still in this tree, but only when
-  // the whole SSH shell tab unmounts — not on every render, hence the ref
-  // (closing over the latest layout without retriggering the effect).
-  const layoutRef = useRef(layout)
-  layoutRef.current = layout
-  useEffect(() => {
-    return () => {
-      collectTerminalSessionKeys(layoutRef.current.root).forEach(disposeSSHSession)
-    }
-  }, [])
+  // Real teardown for every live session still in this tree happens in the
+  // caller (`WorkspaceTileArea`'s `handleCloseTab`), triggered explicitly by
+  // the tab actually closing — NOT by this component unmounting. A
+  // drag-to-split/relocate of the outer ssh-shell tab (`moveTileTab` always
+  // allocates a fresh leaf id) also unmounts this component as a pure view
+  // change, which must not tear down the live sessions it doesn't own.
 
   useEffect(() => {
     setDirtyFileCount(dirtyFiles.size)
@@ -291,7 +296,11 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
-      if (containerRef.current?.offsetParent === null) return
+      // `isFocused` is false when another tile is the one the user's actually
+      // in (two tiles can be visible side by side) — ignore the shortcut then.
+      // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
+      // i.e. some other tab within *this* tile is the one currently on screen.
+      if (!isFocused || containerRef.current?.offsetParent === null) return
       const primary = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
       if (primary && key === 'p') {
@@ -327,7 +336,7 @@ export function SSHShellPane({ connectionId }: { connectionId: string }) {
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, dirtyFiles])
+  }, [layout, dirtyFiles, isFocused])
 
   function tabIcon(content: PaneContent): ReactNode {
     if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />

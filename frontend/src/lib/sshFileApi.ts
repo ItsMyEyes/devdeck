@@ -6,7 +6,7 @@
 
 import { ApiError, request } from './api'
 import type { TransferProgress } from './machineClient'
-import { grepParams, normalizeGrepResult, type GrepOptions, type GrepResult } from './machineApi'
+import { grepParams, normalizeGrepResult, type GrepOptions, type GrepResult, type InstallRipgrepResult } from './machineApi'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
@@ -68,10 +68,17 @@ export async function grepSSHFiles(
   return normalizeGrepResult(result)
 }
 
+/** Same InstallRipgrepResult shape as machineApi.ts's installWorktreeRipgrep
+ *  — see grepSSHFiles's comment above for why the type is imported instead
+ *  of re-declared here. No request body. */
+export function installSSHRipgrep(connectionId: string): Promise<InstallRipgrepResult> {
+  return request<InstallRipgrepResult>('POST', `/ssh/connections/${connectionId}/files/grep/install-ripgrep`)
+}
+
 interface XhrOpts {
-  method: 'POST'
+  method: 'GET' | 'POST'
   path: string
-  body: XMLHttpRequestBodyInit
+  body?: XMLHttpRequestBodyInit
   headers?: Record<string, string>
   onUploadProgress?: (progress: TransferProgress) => void
   onDownloadProgress?: (progress: TransferProgress) => void
@@ -113,7 +120,7 @@ function apiXhr<T>(opts: XhrOpts): Promise<T> {
       const message = data && typeof data.error === 'string' ? data.error : `Request failed with status ${xhr.status}`
       reject(new ApiError(message, xhr.status))
     }
-    xhr.send(opts.body)
+    xhr.send(opts.body ?? null)
   })
 }
 
@@ -131,6 +138,22 @@ export function uploadSSHFileWithProgress(
     body: form,
     onUploadProgress: onProgress,
     responseType: 'json',
+  })
+}
+
+/** Raw bytes for a single remote file. Hub-scoped, so unlike the worktree
+ *  equivalent no auth header is needed — it shares apiXhr only for the
+ *  download-progress events. */
+export function downloadSSHFileWithProgress(
+  connectionId: string,
+  filePath: string,
+  onProgress: (progress: TransferProgress) => void,
+): Promise<Blob> {
+  return apiXhr<Blob>({
+    method: 'GET',
+    path: `/ssh/connections/${connectionId}/files/download?path=${encodeURIComponent(filePath)}`,
+    onDownloadProgress: onProgress,
+    responseType: 'blob',
   })
 }
 

@@ -1,0 +1,94 @@
+# devdeck.yaml — DevDeck server configuration.
+#
+# Every key is optional. An omitted or empty value falls back to the built-in
+# default noted in the comment above it. Precedence, lowest to highest:
+#
+#   built-in default  <  this file  <  DEVDECK_* env var  <  command-line flag
+#
+# Unknown keys are a hard error: a typo here stops the server at startup
+# instead of silently doing nothing. Changes take effect on restart.
+#
+# This file may contain live API keys; it is written with mode 0600 and must
+# stay out of version control.
+
+# Server role (--role):
+#   hub     organizational data + machine registry + proxy + web UI
+#   runtime headless execution daemon, key auth only
+#   both    a hub that also self-registers as its own execution machine
+role: hub
+
+# Listen address (--addr). Runtimes usually want 0.0.0.0:9199.
+addr: 127.0.0.1:8989
+
+# SQLite database path (--db). Empty = <dir of executable>/data/devdeck.db
+db: ""
+
+# This machine's static API key (--key). Required for role runtime; optional
+# bearer auth for role hub (desktop clients).
+key: ""
+
+# Open the embedded UI in the default browser on start (--open).
+open: true
+
+machine:
+  # Display name in the hub's Machines UI (--name). Empty = OS hostname.
+  name: ""
+  # This machine's own reachable URL, advertised to the hub during
+  # self-registration (--public-url). Empty = http://<addr>
+  public_url: ""
+
+# Runtime only: the hub this machine self-registers with on startup.
+hub:
+  # Hub base URL (--hub-url). Empty disables self-registration.
+  url: ""
+  # The hub's bearer key (--hub-key). Required when url is set.
+  key: ""
+
+tailscale:
+  # Expose the server on your tailnet by running `tailscale serve <port>`
+  # alongside it (--enable-tailscale-serve). Requires the tailscale CLI.
+  serve: false
+
+auth:
+  # Require TOTP two-factor authentication at login (--2fa).
+  two_fa: true
+  # Set the Secure attribute on auth cookies (--secure-cookies).
+  # Disable only for loopback desktop deployments.
+  secure_cookies: true
+  turnstile:
+    # Cloudflare Turnstile keys (--turnstile-site-key / --turnstile-secret-key).
+    # With both set, login requires passing a Turnstile challenge.
+    site_key: ""
+    secret_key: ""
+
+network:
+  # IPs/CIDRs allowed to reach the server (--only-from). Empty = no restriction.
+  only_from: []
+  # Proxy IPs/CIDRs whose forwarding headers are trusted when resolving the
+  # client IP (--trusted-proxies).
+  trusted_proxies: []
+  # Trusted header carrying the real client IP, e.g. CF-Connecting-IP behind a
+  # Cloudflare Tunnel (--client-ip-header). Only honored when the direct peer
+  # is listed in trusted_proxies.
+  client_ip_header: ""
+
+tools:
+  # Python interpreter running the markitdown conversion script (--python-bin).
+  # Empty = ./tools/venv/bin/python3 when present, otherwise python3.
+  python_bin: ""
+  # pandoc binary for markdown -> docx/pdf export (--pandoc-bin).
+  pandoc_bin: pandoc
+  # mermaid-cli binary for rendering diagrams during export (--mmdc-bin).
+  mmdc_bin: mmdc
+
+proxy:
+  # SOCKS5 forward-proxy listen address (--socks5-addr). Empty = disabled.
+  socks5_addr: ""
+  # HTTP/HTTPS forward-proxy listen address (--http-proxy-addr). Empty = disabled.
+  http_addr: ""
+  # Credential required by the forward proxies (--proxy-key). Empty = no auth.
+  key: ""
+
+updates:
+  # GitHub token used to check for and download releases (--github-token).
+  github_token: ""

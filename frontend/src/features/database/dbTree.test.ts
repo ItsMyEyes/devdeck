@@ -30,6 +30,7 @@ const POSTGRES_CAPS: DBCaps = {
   rowIdentifier: 'ctid',
   sizeStats: true,
   quoteChar: '"',
+  explainPrefix: 'EXPLAIN',
 }
 
 const MYSQL_CAPS: DBCaps = {
@@ -40,6 +41,7 @@ const MYSQL_CAPS: DBCaps = {
   rowIdentifier: 'pk',
   sizeStats: true,
   quoteChar: '`',
+  explainPrefix: 'EXPLAIN',
 }
 
 const SQLITE_CAPS: DBCaps = {
@@ -50,6 +52,7 @@ const SQLITE_CAPS: DBCaps = {
   rowIdentifier: 'rowid',
   sizeStats: false,
   quoteChar: '"',
+  explainPrefix: 'EXPLAIN QUERY PLAN',
 }
 
 check('postgres root lists databases (multiDatabase wins over schemas)', () => {

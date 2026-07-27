@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 interface ComboboxProps {
   value: string
@@ -20,6 +21,7 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open)
 
   const matches = useMemo(() => {
     const needle = value.trim().toLowerCase()

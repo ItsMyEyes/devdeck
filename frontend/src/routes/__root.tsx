@@ -37,7 +37,10 @@ function RootComponent() {
       <Outlet />
       <Toaster
         theme="dark"
-        position="bottom-center"
+        // top-center, not bottom-center: bottom-center sits over a Browser
+        // tile's body, and that native webview always paints above the DOM
+        // (see useNativeOverlayBlocker's doc comment) — no z-index fixes it.
+        position="top-center"
         toastOptions={{
           style: {
             background: 'var(--devdeck-elevated)',

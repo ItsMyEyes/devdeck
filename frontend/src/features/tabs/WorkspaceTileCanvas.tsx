@@ -2,9 +2,9 @@ import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
-import { Cable, Globe, LayoutGrid, Plus, X } from 'lucide-react'
+import { Cable, ChevronLeft, ChevronRight, Globe, LayoutGrid, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { StatusDot } from '@/components/ui/status-dot'
+import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
 
@@ -21,6 +21,10 @@ export type SSHShellTileTab = Extract<TileTab, { kind: 'ssh-shell' }>
 
 export interface WorkspaceTileCanvasProps {
   root: TileNode
+  /** Leaf whose tabs own the keyboard — its active tab lights its dot green,
+   *  every other leaf's active tab keeps a dimmed one. Without it a split
+   *  shows two identically-lit tabs and neither says "you're typing here". */
+  focusedLeafId: string
   renderers: {
     agents: (ctx: { leafId: string }) => ReactNode
     worktree: (ctx: { leafId: string; tab: WorktreeTileTab }) => ReactNode
@@ -33,11 +37,12 @@ export interface WorkspaceTileCanvasProps {
   onSelectTab: (leafId: string, tabId: string) => void
   onCloseTab: (leafId: string, tabId: string) => void
   onNewTab: (leafId: string) => void
-  /** Live label/status-color for a worktree tab, resolved by the caller
-   *  from react-query data (not stored statically, since a worktree's
-   *  branch/state can change while its tab stays open). `undefined` hides
-   *  the tab (e.g. a worktree deleted right before pruning catches up). */
-  resolveWorktreeTab: (tab: WorktreeTileTab) => { label: string; color: string } | undefined
+  /** Live label parts for a worktree tab, resolved by the caller from
+   *  react-query data (not stored statically, since a worktree's branch — and
+   *  its project's machine — can change while its tab stays open).
+   *  `undefined` hides the tab (e.g. a worktree deleted right before pruning
+   *  catches up). */
+  resolveWorktreeTab: (tab: WorktreeTileTab) => WorktreeTabLabel | undefined
   /** Live title for a browser tab, resolved from the store's `browserTiles`
    *  slice (not stored in the tile tree itself). `undefined` hides the tab
    *  (mirrors `resolveWorktreeTab`'s contract). */
@@ -61,13 +66,10 @@ interface ChromeRect {
 
 interface TileRenderContext {
   topLeftLeafId: string
+  focusedLeafId: string
   topChromeLeafIds: Set<string>
   chromeRects: Record<string, ChromeRect>
   registerLeafElement: (leafId: string, element: HTMLDivElement | null) => void
-  /** "Workspace (A + B)" summary shown in the pinned strip once a split
-   *  exists, using the same labels as the visible tab pills/sidebar rows;
-   *  `null` while there's only one leaf (nothing to summarize). */
-  workspaceTitle: string | null
   renderers: WorkspaceTileCanvasProps['renderers']
   onFocusLeaf: (leafId: string) => void
   onSelectTab: (leafId: string, tabId: string) => void
@@ -78,10 +80,6 @@ interface TileRenderContext {
   resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
   resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab']
   hoverZone: { leafId: string; zone: TileDropZone } | null
-}
-
-function collectLeaves(node: TileNode): TileLeaf[] {
-  return node.type === 'leaf' ? [node] : node.children.flatMap(collectLeaves)
 }
 
 function collectTopChromeLeafIds(node: TileNode): string[] {
@@ -98,20 +96,30 @@ function sameChromeRects(a: Record<string, ChromeRect>, b: Record<string, Chrome
   return aKeys.every((key) => a[key]?.left === b[key]?.left && a[key]?.width === b[key]?.width)
 }
 
-/** Display name for whichever tab is active in a leaf — the same label used
- *  by the tab pill/sidebar row. Used to build the "Workspace (A + B)" summary title. */
-function leafShortTitle(
-  leaf: TileLeaf,
-  resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab'],
-  resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab'],
-  resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab'],
-): string {
-  const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0]
-  if (!tab) return ''
-  if (tab.kind === 'agents') return 'Agents'
-  if (tab.kind === 'browser') return resolveBrowserTab(tab)?.label ?? 'Browser'
-  if (tab.kind === 'ssh-shell') return resolveSSHShellTab(tab)?.label ?? 'SSH'
-  return resolveWorktreeTab(tab)?.label ?? tab.wtId
+/** Leading dot on every tab pill: green on the active tab of the focused
+ *  leaf, a dimmed green on the active tab of any other leaf (its content is
+ *  visible but it doesn't own the keyboard), inert grey otherwise. Worktree
+ *  tabs deliberately no longer show their agent's run-state colour here — one
+ *  dot per pill, and it answers "which tab am I looking at". */
+function TabDot({ active, focused }: { active: boolean; focused: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'size-1.5 flex-none rounded-full transition-[background-color,box-shadow] duration-150',
+        active
+          ? focused
+            ? 'bg-devdeck-green shadow-[0_0_0_2px_rgba(86,213,138,0.14),0_0_7px_rgba(86,213,138,0.22)]'
+            : 'bg-devdeck-green/40'
+          : 'bg-devdeck-dim-3',
+      )}
+    />
+  )
+}
+
+function primaryShortcutLabel(index: number): string {
+  const isApple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+  return isApple ? `⌘${index}` : `Ctrl+${index}`
 }
 
 function clamp01(value: number): number {
@@ -255,7 +263,9 @@ function TileTabButton({
   leafId,
   tab,
   active,
+  focused,
   compact,
+  shortcutNumber,
   resolveWorktreeTab,
   resolveBrowserTab,
   resolveSSHShellTab,
@@ -265,9 +275,14 @@ function TileTabButton({
   leafId: string
   tab: TileTab
   active: boolean
+  /** Whether this tab's own leaf is the focused one — only affects how bright
+   *  an *active* tab's dot burns (see `TabDot`). */
+  focused: boolean
   /** Non-top-left leaves render a visually lighter strip so a split never
    *  reads as "two full tab strips stacked" — see TileLeafView. */
   compact: boolean
+  /** 1-based Cmd/Ctrl shortcut for the first four tabs in this leaf. */
+  shortcutNumber?: number
   resolveWorktreeTab: WorkspaceTileCanvasProps['resolveWorktreeTab']
   resolveBrowserTab: WorkspaceTileCanvasProps['resolveBrowserTab']
   resolveSSHShellTab: WorkspaceTileCanvasProps['resolveSSHShellTab']
@@ -279,15 +294,32 @@ function TileTabButton({
     data: { tabId: tab.id, sourceLeafId: leafId },
   })
 
+  // Numeric shortcuts are scoped to the focused leaf, so only advertise
+  // them on the strip they currently control.
+  const shortcut = shortcutNumber && focused ? primaryShortcutLabel(shortcutNumber) : null
+  const selectButtonClass =
+    'flex min-w-0 flex-1 items-center gap-1.5 rounded-[7px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60'
+
   const wrapperClass = (dragging: boolean) =>
     cn(
-      'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-lg font-mono active:cursor-grabbing',
-      compact ? 'h-6 max-w-[150px] pl-2 pr-1 text-[11px]' : 'h-7 max-w-[180px] pl-2.5 pr-1.5 text-[11.5px]',
-      active ? 'bg-devdeck-elevated text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+      'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-[9px] border font-mono',
+      'transition-[background-color,border-color,color,box-shadow,opacity] duration-150 active:cursor-grabbing',
+      // Wider than the old label-only pills: a worktree tab now carries a
+      // "<project>/<machine> · " origin prefix ahead of its session name.
+      compact
+        ? 'h-6 max-w-[200px] rounded-[7px] pl-2 pr-1 text-[11px]'
+        : 'h-8 max-w-[270px] pl-2.5 pr-1.5 text-[11.5px]',
+      active && focused
+        ? 'border-devdeck-border-strong bg-devdeck-elevated text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_1px_3px_rgba(0,0,0,0.24)]'
+        : active
+          ? 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]'
+          : 'border-transparent bg-transparent text-devdeck-muted hover:border-devdeck-border-card hover:bg-devdeck-surface-2 hover:text-devdeck-fg-2',
       dragging && 'opacity-40',
     )
 
-  const closeButton = (label: string) =>
+  const titleWithShortcut = (title: string) => (shortcut ? `${title} — ${shortcut}` : title)
+
+  const closeButton = (label: string, className?: string) =>
     onClose ? (
       <button
         type="button"
@@ -296,22 +328,75 @@ function TileTabButton({
           onClose()
         }}
         aria-label={`Close ${label}`}
-        className="flex-none rounded p-0.5 text-devdeck-dim opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100"
+        className={cn(
+          'pointer-events-none flex-none rounded p-0.5 text-devdeck-dim opacity-0 transition-[background-color,color,opacity]',
+          'hover:bg-devdeck-hover-wash-menu hover:text-devdeck-fg group-hover:pointer-events-auto group-hover:opacity-100',
+          'focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
+          className,
+        )}
       >
         <X size={11} />
       </button>
     ) : null
 
+  const trailingAction = (label: string) => {
+    if (compact || !shortcut) return closeButton(label)
+    if (!onClose) {
+      return (
+        <kbd
+          aria-label={`Shortcut ${shortcut}`}
+          className={cn(
+            'flex h-[17px] flex-none items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
+            'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity',
+            active ? 'opacity-75' : 'opacity-35 group-hover:opacity-65',
+          )}
+        >
+          {shortcut}
+        </kbd>
+      )
+    }
+    return (
+      <span className="relative flex h-[18px] min-w-[36px] flex-none items-center justify-end">
+        <kbd
+          aria-label={`Shortcut ${shortcut}`}
+          className={cn(
+            'flex h-[17px] items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
+            'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            active ? 'opacity-75' : 'opacity-35',
+          )}
+        >
+          {shortcut}
+        </kbd>
+        {closeButton(label, 'absolute right-0')}
+      </span>
+    )
+  }
+
   if (tab.kind === 'worktree') {
     const info = resolveWorktreeTab(tab)
     if (!info) return null
     return (
-      <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
-          <StatusDot color={info.color} />
-          <span className="truncate">{info.label}</span>
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        data-tab-id={tab.id}
+        title={titleWithShortcut(info.title)}
+        className={wrapperClass(isDragging)}
+      >
+        <button type="button" onClick={onSelect} className={selectButtonClass}>
+          <TabDot active={active} focused={focused} />
+          {/* The origin prefix carries almost all of the shrink (`shrink-[0.02]`
+              on the name only lets it give way once the prefix is gone), so a
+              cramped pill degrades to "devd… · shell 3" — never to a row of
+              identical "devdeck/kal…" stubs with the session name cut off. */}
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 shrink truncate text-devdeck-dim">{info.prefix}</span>
+            <span className="flex-none text-devdeck-dim-3">·</span>
+            <span className="min-w-0 shrink-[0.02] truncate">{info.name}</span>
+          </span>
         </button>
-        {closeButton(info.label)}
+        {trailingAction(info.name)}
       </div>
     )
   }
@@ -320,12 +405,20 @@ function TileTabButton({
     const info = resolveSSHShellTab(tab)
     if (!info) return null
     return (
-      <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
-          <Cable size={12} />
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        data-tab-id={tab.id}
+        title={titleWithShortcut(info.label)}
+        className={wrapperClass(isDragging)}
+      >
+        <button type="button" onClick={onSelect} className={selectButtonClass}>
+          <TabDot active={active} focused={focused} />
+          <Cable size={12} className="flex-none" />
           <span className="truncate">{info.label}</span>
         </button>
-        {closeButton(info.label)}
+        {trailingAction(info.label)}
       </div>
     )
   }
@@ -334,22 +427,144 @@ function TileTabButton({
     const info = resolveBrowserTab(tab)
     if (!info) return null
     return (
-      <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
-          <Globe size={12} />
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        data-tab-id={tab.id}
+        title={titleWithShortcut(info.label)}
+        className={wrapperClass(isDragging)}
+      >
+        <button type="button" onClick={onSelect} className={selectButtonClass}>
+          <TabDot active={active} focused={focused} />
+          <Globe size={12} className="flex-none" />
           <span className="truncate">{info.label}</span>
         </button>
-        {closeButton(info.label)}
+        {trailingAction(info.label)}
       </div>
     )
   }
 
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={wrapperClass(isDragging)}>
-      <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5">
-        <LayoutGrid size={12} />
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      data-tab-id={tab.id}
+      title={titleWithShortcut('Agents')}
+      className={wrapperClass(isDragging)}
+    >
+      <button type="button" onClick={onSelect} className={selectButtonClass}>
+        <TabDot active={active} focused={focused} />
+        <LayoutGrid size={12} className="flex-none" />
         <span className="truncate">Agents</span>
       </button>
+      {trailingAction('Agents')}
+    </div>
+  )
+}
+
+function ScrollableTabStrip({
+  activeTabId,
+  itemsKey,
+  children,
+}: {
+  activeTabId: string
+  itemsKey: string
+  children: ReactNode
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [overflowing, setOverflowing] = useState(false)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const updateScrollState = useCallback(() => {
+    const container = containerRef.current
+    const scroller = scrollerRef.current
+    if (!container || !scroller) return
+
+    const nextOverflowing = scroller.scrollWidth > container.clientWidth + 1
+    const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+    setOverflowing(nextOverflowing)
+    setCanScrollLeft(nextOverflowing && scroller.scrollLeft > 1)
+    setCanScrollRight(nextOverflowing && scroller.scrollLeft < maxScrollLeft - 1)
+  }, [])
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    const scroller = scrollerRef.current
+    if (!container || !scroller) return
+
+    updateScrollState()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollState)
+    observer?.observe(container)
+    observer?.observe(scroller)
+
+    return () => observer?.disconnect()
+  }, [itemsKey, updateScrollState])
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const activeTab = Array.from(scroller.children).find(
+      (child) => child instanceof HTMLElement && child.dataset.tabId === activeTabId,
+    )
+    if (!(activeTab instanceof HTMLElement)) return
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    activeTab.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest', inline: 'nearest' })
+    const frame = window.requestAnimationFrame(updateScrollState)
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeTabId, itemsKey, updateScrollState])
+
+  function scroll(direction: -1 | 1) {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    scroller.scrollBy({
+      left: direction * Math.max(160, scroller.clientWidth * 0.7),
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    })
+  }
+
+  const scrollButtonClass =
+    'flex h-full w-7 flex-none items-center justify-center border-devdeck-border text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-devdeck-dim'
+
+  return (
+    <div ref={containerRef} className="flex min-w-0 flex-1 self-stretch">
+      {overflowing ? (
+        <button
+          type="button"
+          onClick={() => scroll(-1)}
+          disabled={!canScrollLeft}
+          aria-label="Scroll tabs left"
+          title="Scroll tabs left"
+          className={cn(scrollButtonClass, 'border-r')}
+        >
+          <ChevronLeft size={13} />
+        </button>
+      ) : null}
+      <div
+        ref={scrollerRef}
+        data-tauri-drag-region
+        onScroll={updateScrollState}
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {children}
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          onClick={() => scroll(1)}
+          disabled={!canScrollRight}
+          aria-label="Scroll tabs right"
+          title="Scroll tabs right"
+          className={cn(scrollButtonClass, 'border-l')}
+        >
+          <ChevronRight size={13} />
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -362,12 +577,17 @@ function TileLeafHeader({
   leaf,
   isTopLeft,
   topChrome,
+  focused,
   chromeRect,
   ctx,
 }: {
   leaf: TileLeaf
   isTopLeft: boolean
   topChrome: boolean
+  /** Passed in rather than derived from `ctx.focusedLeafId`: when this header
+   *  renders standalone (`showContent === false`) it is the only strip on
+   *  screen, so it reads as focused whatever the tree's stored focus says. */
+  focused: boolean
   chromeRect?: ChromeRect
   ctx: TileRenderContext
 }) {
@@ -388,60 +608,60 @@ function TileLeafHeader({
       ref={setHeaderDropRef}
       style={headerStyle}
       className={cn(
-        'flex items-center overflow-x-auto border-b border-devdeck-border bg-devdeck-surface',
+        'flex items-center overflow-hidden border-b border-devdeck-border',
         topChrome
           ? // Every leaf touching the workspace's top edge gets a real chrome
             // strip. The first one starts at the true viewport edge so it
             // still fuses with macOS's overlaid traffic lights; sibling top
             // strips are measured to their split column, filling the blank
             // upper area instead of pushing a second row into the pane body.
-            'fixed top-0 z-40 h-10'
+            'fixed top-0 z-40 h-10 bg-devdeck-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.018)]'
           : // Lower split panes keep the lighter in-pane header; they don't
             // compete with the app chrome or steal vertical space from top panes.
-            'h-8 flex-none',
+            'h-8 flex-none bg-devdeck-surface-2',
         topChrome && !isTopLeft && 'border-l border-devdeck-border',
       )}
     >
       {topChrome && isTopLeft ? (
         <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
       ) : null}
-      {leaf.tabs.map((tab, i) => (
-        <Fragment key={tab.id}>
-          <TileTabButton
-            leafId={leaf.id}
-            tab={tab}
-            active={tab.id === leaf.activeTabId}
-            compact={!topChrome}
-            resolveWorktreeTab={ctx.resolveWorktreeTab}
-            resolveBrowserTab={ctx.resolveBrowserTab}
-            resolveSSHShellTab={ctx.resolveSSHShellTab}
-            onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
-            onClose={tab.kind !== 'agents' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
-          />
-          {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
-          {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
-            <div className="mx-1.5 h-4 w-px flex-none bg-devdeck-border-menu" />
-          ) : null}
-        </Fragment>
-      ))}
+      <ScrollableTabStrip activeTabId={leaf.activeTabId} itemsKey={leaf.tabs.map((tab) => tab.id).join('|')}>
+        {leaf.tabs.map((tab, i) => (
+          <Fragment key={tab.id}>
+            <TileTabButton
+              leafId={leaf.id}
+              tab={tab}
+              active={tab.id === leaf.activeTabId}
+              focused={focused}
+              compact={!topChrome}
+              shortcutNumber={i < 4 ? i + 1 : undefined}
+              resolveWorktreeTab={ctx.resolveWorktreeTab}
+              resolveBrowserTab={ctx.resolveBrowserTab}
+              resolveSSHShellTab={ctx.resolveSSHShellTab}
+              onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
+              onClose={tab.kind !== 'agents' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
+            />
+            {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
+            {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
+              <div className="mx-1.5 h-4 w-px flex-none bg-devdeck-border-menu" />
+            ) : null}
+          </Fragment>
+        ))}
+      </ScrollableTabStrip>
       <button
         type="button"
         onClick={() => ctx.onNewTab(leaf.id)}
         aria-label="New tab"
+        title="New tab"
         className={cn(
-          'ml-1 flex flex-none items-center justify-center rounded-lg text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
-          topChrome ? 'h-7 w-7' : 'h-6 w-6',
+          'ml-0.5 mr-1 flex flex-none items-center justify-center rounded-[8px] border border-transparent text-devdeck-dim',
+          'transition-[background-color,border-color,color] hover:border-devdeck-border-card hover:bg-devdeck-surface-2 hover:text-devdeck-fg',
+          'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
+          topChrome ? 'h-7 w-7' : 'h-6 w-6 rounded-[7px]',
         )}
       >
         <Plus size={topChrome ? 13 : 11} />
       </button>
-      {topChrome ? (
-        <div data-tauri-drag-region className="flex h-full flex-1 items-center justify-center overflow-hidden px-2">
-          {isTopLeft && ctx.workspaceTitle ? (
-            <span className="truncate font-mono text-[11px] text-devdeck-dim">{ctx.workspaceTitle}</span>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -459,7 +679,14 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
 
   return (
     <div ref={setLeafRef} className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
-      <TileLeafHeader leaf={leaf} isTopLeft={isTopLeft} topChrome={topChrome} chromeRect={ctx.chromeRects[leaf.id]} ctx={ctx} />
+      <TileLeafHeader
+        leaf={leaf}
+        isTopLeft={isTopLeft}
+        topChrome={topChrome}
+        focused={leaf.id === ctx.focusedLeafId}
+        chromeRect={ctx.chromeRects[leaf.id]}
+        ctx={ctx}
+      />
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {leaf.tabs.map((tab) => (
           <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
@@ -492,6 +719,7 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
  *  matching callback prop. */
 export function WorkspaceTileCanvas({
   root,
+  focusedLeafId,
   renderers,
   onTreeChange,
   onFocusLeaf,
@@ -518,17 +746,6 @@ export function WorkspaceTileCanvas({
     const found = findTileLeaf(root, topLeftLeafId)
     return found?.type === 'leaf' ? found : null
   }, [root, topLeftLeafId])
-  // Only meaningful once a split exists (root.type === 'split' implies >= 2
-  // leaves per tileTree.ts's collapse invariant) — a single unsplit leaf
-  // shows no title, matching today's clean single-pane look.
-  const workspaceTitle = useMemo(() => {
-    if (root.type !== 'split') return null
-    const titles = collectLeaves(root)
-      .map((leaf) => leafShortTitle(leaf, resolveWorktreeTab, resolveBrowserTab, resolveSSHShellTab))
-      .filter(Boolean)
-    return titles.length > 1 ? `Workspace (${titles.join(' + ')})` : null
-  }, [root, resolveWorktreeTab, resolveBrowserTab, resolveSSHShellTab])
-
   const registerLeafElement = useCallback((leafId: string, element: HTMLDivElement | null) => {
     if (element) leafElementsRef.current.set(leafId, element)
     else leafElementsRef.current.delete(leafId)
@@ -614,10 +831,10 @@ export function WorkspaceTileCanvas({
 
   const ctx: TileRenderContext = {
     topLeftLeafId,
+    focusedLeafId,
     topChromeLeafIds,
     chromeRects,
     registerLeafElement,
-    workspaceTitle,
     renderers,
     onFocusLeaf,
     onSelectTab,
@@ -642,26 +859,25 @@ export function WorkspaceTileCanvas({
         {showContent ? (
           <TileNodeView node={root} ctx={ctx} />
         ) : topLeftLeaf ? (
-          <TileLeafHeader leaf={topLeftLeaf} isTopLeft topChrome ctx={ctx} />
+          <TileLeafHeader leaf={topLeftLeaf} isTopLeft topChrome focused ctx={ctx} />
         ) : null}
       </div>
       <DragOverlay>
         {dragTab ? (
-          <div className="flex h-8 max-w-[200px] items-center gap-1.5 rounded border border-devdeck-border bg-devdeck-terminal px-3 font-mono text-[11px] text-devdeck-fg shadow-[0_10px_28px_rgba(0,0,0,0.5)]">
+          <div className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-[9px] border border-devdeck-border-strong bg-devdeck-elevated px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]">
+            <TabDot active focused />
             {dragTab.kind === 'agents' ? (
-              <LayoutGrid size={12} />
-            ) : dragTab.kind === 'worktree' ? (
-              <StatusDot color={resolveWorktreeTab(dragTab)?.color ?? '#6b7280'} />
+              <LayoutGrid size={12} className="flex-none" />
             ) : dragTab.kind === 'ssh-shell' ? (
-              <Cable size={12} />
-            ) : (
-              <Globe size={12} />
-            )}
+              <Cable size={12} className="flex-none" />
+            ) : dragTab.kind === 'browser' ? (
+              <Globe size={12} className="flex-none" />
+            ) : null}
             <span className="truncate">
               {dragTab.kind === 'agents'
                 ? 'Agents'
                 : dragTab.kind === 'worktree'
-                  ? (resolveWorktreeTab(dragTab)?.label ?? dragTab.wtId)
+                  ? (resolveWorktreeTab(dragTab)?.name ?? dragTab.wtId)
                   : dragTab.kind === 'ssh-shell'
                     ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
                     : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}

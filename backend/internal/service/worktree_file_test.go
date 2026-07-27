@@ -622,6 +622,24 @@ func TestGrepFallbackArgsBuildsExpectedFlags(t *testing.T) {
 	}
 }
 
+// TestGrepFallbackArgsAppliesIncludePattern proves the grep-fallback engine
+// (used whenever ripgrep isn't installed) respects opts.IncludePattern the
+// same way rgGrepArgs does via --glob — previously grepFallbackArgs silently
+// dropped it, so a fallback search would scan every file in the tree instead
+// of honoring the filter.
+func TestGrepFallbackArgsAppliesIncludePattern(t *testing.T) {
+	args := grepFallbackArgs("needle", GrepOptions{IncludePattern: "*.md"}, "/tmp/root")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--include=*.md") {
+		t.Errorf("grepFallbackArgs with IncludePattern = %q, missing --include=*.md", joined)
+	}
+
+	noPattern := grepFallbackArgs("needle", GrepOptions{}, "/tmp/root")
+	if strings.Contains(strings.Join(noPattern, " "), "--include=") {
+		t.Errorf("grepFallbackArgs with no IncludePattern unexpectedly added --include: %v", noPattern)
+	}
+}
+
 // TestParseGrepOutputSplitsOnlyFirstTwoColons proves parseGrepOutput's
 // SplitN(line, ":", 3) correctly preserves colons that appear inside the
 // matched text (a very common case — URLs, "key: value" pairs, timestamps)
@@ -731,5 +749,184 @@ func TestWorktreeFileServiceInstallRipgrepPropagatesInstallError(t *testing.T) {
 	svc, worktreeID := newGrepTestWorktree(t)
 	if _, err := svc.InstallRipgrep(context.Background(), worktreeID); err == nil {
 		t.Fatal("expected InstallRipgrep to propagate the install error, got nil")
+	}
+}
+
+// newDownloadTestWorktree builds a worktree fixture for the Download tests:
+// a UTF-8 text file, a binary file containing a NUL byte (which Read refuses
+// and Download must not), a directory, and a symlink pointing outside the
+// worktree root.
+func newDownloadTestWorktree(t *testing.T) (*WorktreeFileService, string, string) {
+	t.Helper()
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	root := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("read me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "logo.png"), binaryFixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside-secret.txt")
+	if err := os.WriteFile(outside, []byte("not yours"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(base, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	workspace, err := st.CreateWorkspace("Workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := st.CreateProject(workspace.ID, "Project", "~/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", "~/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewWorktreeFileService(st), worktree.ID, root
+}
+
+// binaryFixture is deliberately non-UTF-8 and NUL-containing: it is exactly
+// the byte pattern Read rejects, so downloading it intact is what proves
+// Download drops Read's editor-only constraints.
+var binaryFixture = []byte{0x89, 'P', 'N', 'G', 0x00, 0x1a, 0x0a, 0xff, 0xfe, 0x00}
+
+func TestWorktreeFileServiceDownloadReturnsExactBytes(t *testing.T) {
+	svc, worktreeID, _ := newDownloadTestWorktree(t)
+
+	file, info, clean, err := svc.Download(worktreeID, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if clean != "README.md" {
+		t.Errorf("clean = %q, want README.md", clean)
+	}
+	if info.Size() != int64(len("read me\n")) {
+		t.Errorf("info.Size() = %d, want %d", info.Size(), len("read me\n"))
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "read me\n" {
+		t.Errorf("downloaded bytes = %q, want %q", data, "read me\n")
+	}
+}
+
+// TestWorktreeFileServiceDownloadSucceedsForBinaryFile is the test that proves
+// the new capability: Read rejects this file as non-UTF-8, Download must hand
+// back its bytes unchanged.
+func TestWorktreeFileServiceDownloadSucceedsForBinaryFile(t *testing.T) {
+	svc, worktreeID, _ := newDownloadTestWorktree(t)
+
+	if _, err := svc.Read(worktreeID, "docs/logo.png"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Read of a binary file error = %v, want ErrValidation (fixture must be one Read refuses)", err)
+	}
+
+	file, info, _, err := svc.Download(worktreeID, "docs/logo.png")
+	if err != nil {
+		t.Fatalf("Download of a binary file: %v", err)
+	}
+	defer file.Close()
+	if info.Size() != int64(len(binaryFixture)) {
+		t.Errorf("info.Size() = %d, want %d", info.Size(), len(binaryFixture))
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, binaryFixture) {
+		t.Errorf("downloaded bytes = %#v, want %#v", data, binaryFixture)
+	}
+}
+
+// TestWorktreeFileServiceDownloadIgnoresTheEditorSizeLimit covers the other
+// half of the deliberate Read/Download divergence.
+func TestWorktreeFileServiceDownloadIgnoresTheEditorSizeLimit(t *testing.T) {
+	svc, worktreeID, root := newDownloadTestWorktree(t)
+	big := bytes.Repeat([]byte("x"), maxEditableFileSize+1)
+	if err := os.WriteFile(filepath.Join(root, "big.log"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Read(worktreeID, "big.log"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Read of an oversized file error = %v, want ErrValidation", err)
+	}
+
+	file, info, _, err := svc.Download(worktreeID, "big.log")
+	if err != nil {
+		t.Fatalf("Download of an oversized file: %v", err)
+	}
+	defer file.Close()
+	if info.Size() != int64(len(big)) {
+		t.Errorf("info.Size() = %d, want %d", info.Size(), len(big))
+	}
+}
+
+func TestWorktreeFileServiceDownloadRejectsDirectoryAndBadPaths(t *testing.T) {
+	svc, worktreeID, _ := newDownloadTestWorktree(t)
+
+	if _, _, _, err := svc.Download(worktreeID, "docs"); !errors.Is(err, ErrValidation) {
+		t.Errorf("directory Download error = %v, want ErrValidation", err)
+	}
+	if _, _, _, err := svc.Download(worktreeID, ""); !errors.Is(err, ErrValidation) {
+		t.Errorf("empty-path Download error = %v, want ErrValidation", err)
+	}
+	if _, _, _, err := svc.Download(worktreeID, "../outside-secret.txt"); !errors.Is(err, ErrValidation) {
+		t.Errorf("traversal Download error = %v, want ErrValidation", err)
+	}
+	if _, _, _, err := svc.Download(worktreeID, "escape.txt"); !errors.Is(err, ErrValidation) {
+		t.Errorf("escaping-symlink Download error = %v, want ErrValidation", err)
+	}
+	if _, _, _, err := svc.Download(worktreeID, "nope.txt"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("missing-file Download error = %v, want store.ErrNotFound", err)
+	}
+	if _, _, _, err := svc.Download("w-does-not-exist", "README.md"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown-worktree Download error = %v, want store.ErrNotFound", err)
+	}
+}
+
+// TestWorktreeFileServiceDownloadRejectsReservedPaths pins Download to the
+// same reserved-path rule Archive enforces via resolveSelection. Without it
+// Download is the one route that hands out raw .git/.wt bytes — credentials
+// in .git/config, packfiles, sibling worktrees — none of which List even
+// shows.
+func TestWorktreeFileServiceDownloadRejectsReservedPaths(t *testing.T) {
+	svc, worktreeID, root := newDownloadTestWorktree(t)
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[remote]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".wt", "w-sibling"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".wt", "w-sibling", "secrets.db"), []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, reserved := range []string{".git/config", ".wt/w-sibling/secrets.db"} {
+		file, _, _, err := svc.Download(worktreeID, reserved)
+		if file != nil {
+			file.Close()
+		}
+		if !errors.Is(err, ErrValidation) {
+			t.Errorf("Download(%q) error = %v, want ErrValidation", reserved, err)
+		}
 	}
 }

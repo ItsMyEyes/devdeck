@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import {
+  downloadWorktreeFileWithProgress,
   downloadWorktreeZipWithProgress,
   uploadWorktreeFileWithProgress,
   type WorktreeFileEntry,
 } from '@/lib/machineApi'
-import { downloadSSHZipWithProgress, uploadSSHFileWithProgress } from '@/lib/sshFileApi'
+import { downloadSSHFileWithProgress, downloadSSHZipWithProgress, uploadSSHFileWithProgress } from '@/lib/sshFileApi'
 import { qk } from '@/features/data/keys'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { FilesTarget } from './filesTarget'
@@ -20,7 +21,9 @@ export function useFileTransfers(target: FilesTarget) {
   const updateTransferProgress = useDevDeckStore((s) => s.updateTransferProgress)
   const finishTransfer = useDevDeckStore((s) => s.finishTransfer)
   const [uploading, setUploading] = useState(false)
-  const [zipping, setZipping] = useState(false)
+  /** Shared by downloadZip and downloadFile — they gate the same buttons and
+   *  neither should run while the other is in flight. */
+  const [downloading, setDownloading] = useState(false)
 
   const uploadFiles = useCallback(
     async (folderPath: string, files: readonly File[]): Promise<WorktreeFileEntry[]> => {
@@ -96,7 +99,7 @@ export function useFileTransfers(target: FilesTarget) {
         loadedBytes: 0,
         status: 'active',
       })
-      setZipping(true)
+      setDownloading(true)
       try {
         const onProgress = (progress: { loaded: number; total: number }) =>
           updateTransferProgress(id, { loadedBytes: progress.loaded, totalBytes: progress.total })
@@ -110,11 +113,46 @@ export function useFileTransfers(target: FilesTarget) {
         finishTransfer(id, 'error', error instanceof Error ? error.message : undefined)
         throw error
       } finally {
-        setZipping(false)
+        setDownloading(false)
       }
     },
     [target, startTransfer, updateTransferProgress, finishTransfer],
   )
 
-  return { uploadFiles, downloadZip, uploading, zipping }
+  /** Raw bytes for one file, no zipping. Same transfer lifecycle as
+   *  downloadZip so both show up in TransferStatusPanel identically. */
+  const downloadFile = useCallback(
+    async (path: string, label: string): Promise<Blob> => {
+      const id = crypto.randomUUID()
+      startTransfer({
+        id,
+        kind: 'download',
+        label,
+        totalFiles: 1,
+        completedFiles: 0,
+        totalBytes: 0,
+        loadedBytes: 0,
+        status: 'active',
+      })
+      setDownloading(true)
+      try {
+        const onProgress = (progress: { loaded: number; total: number }) =>
+          updateTransferProgress(id, { loadedBytes: progress.loaded, totalBytes: progress.total })
+        const blob =
+          target.kind === 'ssh'
+            ? await downloadSSHFileWithProgress(target.connectionId, path, onProgress)
+            : await downloadWorktreeFileWithProgress(target.machine, target.worktreeId, path, onProgress)
+        finishTransfer(id, 'done')
+        return blob
+      } catch (error) {
+        finishTransfer(id, 'error', error instanceof Error ? error.message : undefined)
+        throw error
+      } finally {
+        setDownloading(false)
+      }
+    },
+    [target, startTransfer, updateTransferProgress, finishTransfer],
+  )
+
+  return { uploadFiles, downloadZip, downloadFile, uploading, downloading }
 }

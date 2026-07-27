@@ -47,6 +47,7 @@ var caps = port.DBCaps{
 	RowIdentifier: "ctid",
 	SizeStats:     true,
 	QuoteChar:     `"`,
+	ExplainPrefix: "EXPLAIN",
 }
 
 type pgDriver struct{}

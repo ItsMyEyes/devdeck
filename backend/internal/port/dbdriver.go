@@ -27,6 +27,11 @@ type DBCaps struct {
 	SizeStats bool `json:"sizeStats"`
 	// QuoteChar is the identifier quote character: '"' or '`'.
 	QuoteChar string `json:"quoteChar"`
+	// ExplainPrefix is the statement prefix that renders a query plan for this
+	// engine — "EXPLAIN" on PostgreSQL and MySQL, "EXPLAIN QUERY PLAN" on
+	// SQLite (whose bare EXPLAIN dumps VDBE bytecode, not a plan). Empty means
+	// the engine exposes no plan statement, and the UI hides the action.
+	ExplainPrefix string `json:"explainPrefix"`
 }
 
 // ObjectRef addresses one database object. Schema is empty on engines

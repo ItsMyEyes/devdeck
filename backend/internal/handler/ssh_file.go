@@ -4,6 +4,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 
 	"devdeck/backend/internal/service"
 )
@@ -71,6 +72,38 @@ func (h *SSHFileHandler) Read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, content)
+}
+
+// Download serves a remote file's raw bytes, with none of Read's
+// editor-oriented size/UTF-8 restrictions. The service streams into a temp
+// file rather than straight to w — sshmgr.WithSFTPClient scopes its client to
+// the callback, so there is no handle to seek — and that temp file is then
+// served via http.ServeContent so range requests still work, exactly as the
+// Archive handler above does. Content-Type is pinned before ServeContent to
+// suppress its sniffing, same reasoning as WorktreeFileHandler.Download.
+func (h *SSHFileHandler) Download(w http.ResponseWriter, r *http.Request) {
+	tmp, err := os.CreateTemp("", "devdeck-ssh-download-*")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "download failed")
+		return
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer tmp.Close()
+
+	meta, err := h.svc.Download(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), tmp)
+	if handleStoreErr(w, err) {
+		return
+	}
+	if _, err := tmp.Seek(0, 0); err != nil {
+		writeErr(w, http.StatusInternalServerError, "download failed")
+		return
+	}
+
+	name := path.Base(meta.Path)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", contentDisposition(name))
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, name, meta.ModTime, tmp)
 }
 
 func (h *SSHFileHandler) Write(w http.ResponseWriter, r *http.Request) {

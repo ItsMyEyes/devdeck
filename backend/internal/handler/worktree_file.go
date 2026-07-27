@@ -4,6 +4,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 
 	"devdeck/backend/internal/service"
 )
@@ -33,6 +34,26 @@ func (h *WorktreeFileHandler) Read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, content)
+}
+
+// Download serves a worktree file's raw bytes, with none of Read's
+// editor-oriented size/UTF-8 restrictions. Content-Type is pinned to
+// application/octet-stream before http.ServeContent so ServeContent never
+// sniffs: this serves user-controlled repo content, and a sniffed text/html
+// would be same-origin under /api/machines/{id}/proxy/... — the attachment
+// disposition is a second layer, not the only one.
+func (h *WorktreeFileHandler) Download(w http.ResponseWriter, r *http.Request) {
+	file, info, clean, err := h.svc.Download(r.PathValue("id"), r.URL.Query().Get("path"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	defer file.Close()
+
+	name := path.Base(clean)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", contentDisposition(name))
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 func (h *WorktreeFileHandler) Write(w http.ResponseWriter, r *http.Request) {

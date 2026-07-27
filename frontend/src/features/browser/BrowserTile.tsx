@@ -1,20 +1,16 @@
 import type { FormEvent } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Globe, Home, Maximize2, Minimize2, Plus, RefreshCw, Star, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { useMachines, useMachinesHealth } from '@/features/data/queries'
-import {
-  addBrowserTileBookmark,
-  groupBrowserTileBookmarks,
-  loadBrowserTileBookmarks,
-  removeBrowserTileBookmark,
-} from '@/lib/browserTileBookmarks'
-import type { BrowserTileBookmark } from '@/lib/browserTileBookmarks'
+import { useBookmarks, useCreateBookmark, useDeleteBookmark, useMachines, useMachinesHealth } from '@/features/data/queries'
+import { takeLegacyBrowserTileBookmarks } from '@/lib/browserTileBookmarks'
 import { startProxy } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
+import type { Bookmark, Machine } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { BookmarkDialog } from './BookmarkDialog'
 import {
   closeBrowserTile as closeNativeBrowserTile,
   hideBrowserTile,
@@ -24,11 +20,84 @@ import {
   openBrowserTile,
   reloadBrowserTile,
   setBrowserTileBounds,
+  showBrowserTile,
 } from './browserTilesBridge'
 
 interface BrowserTileProps {
   tabId: string
 }
+
+/** True exactly once across this page load, regardless of how many
+ *  BrowserTile instances mount (e.g. a split view with two browser tiles) —
+ *  otherwise every tile would re-import the same handful of legacy
+ *  bookmarks the instant it mounts. */
+let legacyBookmarksMigrated = false
+
+const UNASSIGNED_MACHINE_LABEL = 'Unassigned'
+
+function machineLabelFor(machineId: string, machines: Machine[]): string {
+  if (!machineId) return UNASSIGNED_MACHINE_LABEL
+  return machines.find((m) => m.id === machineId)?.name ?? 'Unknown machine'
+}
+
+/** Groups bookmarks by machine (top-level), then by the operator's own
+ *  `group` field within each machine — approved as "all, grouped by
+ *  machine" so switching machines never hides a bookmark, it just needs an
+ *  extra glance to find. */
+function groupBookmarksByMachine(bookmarks: Bookmark[], machines: Machine[]): [string, [string, Bookmark[]][]][] {
+  const byMachine = new Map<string, Bookmark[]>()
+  for (const b of bookmarks) {
+    const label = machineLabelFor(b.machineId, machines)
+    byMachine.set(label, [...(byMachine.get(label) ?? []), b])
+  }
+  return [...byMachine.entries()]
+    .sort(([a], [b]) => (a === UNASSIGNED_MACHINE_LABEL ? 1 : b === UNASSIGNED_MACHINE_LABEL ? -1 : a.localeCompare(b)))
+    .map(([machineLabel, items]) => {
+      const byGroup = new Map<string, Bookmark[]>()
+      for (const b of items) {
+        const group = b.group.trim() || 'Portal'
+        byGroup.set(group, [...(byGroup.get(group) ?? []), b])
+      }
+      return [machineLabel, [...byGroup.entries()]] as [string, [string, Bookmark[]][]]
+    })
+}
+
+/** First letter of the bookmark's title on a color picked from its id, shown
+ *  whenever FaviconService couldn't resolve a real icon (page has none, or
+ *  the owning machine was unreachable at save time). */
+const CHIP_COLORS = [
+  'bg-devdeck-accent-tint text-devdeck-accent-soft',
+  'bg-devdeck-green-tint text-devdeck-green-soft',
+  'bg-devdeck-yellow/20 text-devdeck-yellow',
+  'bg-devdeck-red-tint text-devdeck-red-soft',
+]
+
+function chipColorFor(seed: string): string {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return CHIP_COLORS[hash % CHIP_COLORS.length]
+}
+
+function BookmarkIcon({ bookmark }: { bookmark: Bookmark }) {
+  if (bookmark.iconDataUrl) {
+    return <img src={bookmark.iconDataUrl} alt="" className="h-5 w-5 flex-none rounded-[3px]" />
+  }
+  return (
+    <div
+      className={cn(
+        'flex h-5 w-5 flex-none items-center justify-center rounded-[3px] text-[10px] font-semibold',
+        chipColorFor(bookmark.id),
+      )}
+    >
+      {(bookmark.title.trim()[0] ?? '?').toUpperCase()}
+    </div>
+  )
+}
+
+/** The 28px toolbar buttons are fine under a mouse but far too small to hit
+ *  reliably with a thumb, so they grow to 36px on touch pointers only — the
+ *  toolbar wraps, so the extra width costs nothing. */
+const toolbarButtonClass = 'pointer-coarse:h-9 pointer-coarse:w-9'
 
 function normalizeAddress(value: string): string {
   const raw = value.trim()
@@ -65,14 +134,32 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const nativeOverlayBlockers = useDevDeckStore((s) => s.nativeOverlayBlockers)
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
+  const bookmarks = useBookmarks().data ?? []
+  const createBookmark = useCreateBookmark()
+  const deleteBookmark = useDeleteBookmark()
+  const bookmarksByMachine = useMemo(() => groupBookmarksByMachine(bookmarks, machines), [bookmarks, machines])
   const [draft, setDraft] = useState('')
-  const [bookmarks, setBookmarks] = useState<BrowserTileBookmark[]>(loadBrowserTileBookmarks)
+  const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     ensureBrowserTile(tabId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
+
+  // One-shot migration off the old localStorage bookmark store — see
+  // takeLegacyBrowserTileBookmarks's doc comment. Fire-and-forget: a failed
+  // import of a handful of old bookmarks is a cheap loss next to leaking the
+  // legacy key forever, and useCreateBookmark already invalidates qk.bookmarks
+  // on each success so the New Tab list picks them up as they land.
+  useEffect(() => {
+    if (legacyBookmarksMigrated) return
+    legacyBookmarksMigrated = true
+    for (const legacy of takeLegacyBrowserTileBookmarks()) {
+      createBookmark.mutate({ title: legacy.title, url: legacy.url, group: legacy.group })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const doc = tile?.docs.find((d) => d.id === tile.activeDocId)
   const openedDocsRef = useRef<Set<string>>(new Set())
@@ -130,10 +217,10 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   // Native webviews are separate OS surfaces the window manager always
   // stacks above the app's DOM — no CSS z-index can put a dialog/command
   // palette in front of one (see `nativeOverlayBlockers`'s doc comment).
-  // Zero the webview out for as long as any such overlay is open, then
-  // reassert this doc's real rect once the last one closes — mirrors the
-  // machine-switch path above, since the ResizeObserver won't fire on its
-  // own (the placeholder's on-screen size hasn't actually changed).
+  // Hide the webview for as long as any such overlay is open, then restore
+  // it once the last one closes — mirrors the machine-switch path above,
+  // since the ResizeObserver won't fire on its own (the placeholder's
+  // on-screen size hasn't actually changed).
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
@@ -144,7 +231,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     const el = bodyRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    void setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+    void showBrowserTile(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
   }, [nativeOverlayBlockers, tabId, doc?.id, doc?.url])
 
   // Sync the address bar/title from real in-page navigation inside the native webview.
@@ -248,9 +335,28 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     await reloadBrowserTile(tabId, doc.id)
   }
 
-  const addBookmark = () => {
+  // Opening the dialog is the whole action — BookmarkDialog itself owns the
+  // useCreateBookmark() call once the operator confirms title/group (see
+  // BookmarkDialog.tsx). This just seeds it with the current page.
+  const openBookmarkDialog = () => {
     if (!doc.url) return
-    setBookmarks((current) => addBrowserTileBookmark(current, { title: doc.title, url: doc.url as string, group: 'Portal' }))
+    setBookmarkDialogOpen(true)
+  }
+
+  /** Opening a bookmark saved from a *different* machine than this doc's
+   *  current one switches machines first — mirrors `selectMachine`, but
+   *  skips its native-webview teardown/rebuild dance since a New Tab (where
+   *  bookmarks are the only thing rendered) never has one to begin with. */
+  const openBookmark = async (bookmark: Bookmark) => {
+    const proxy =
+      bookmark.machineId && bookmark.machineId !== doc.machineId
+        ? await ensureProxyForMachine(bookmark.machineId)
+        : (doc.proxy ?? (doc.machineId ? await ensureProxyForMachine(doc.machineId) : null))
+    if (!proxy) return
+    const url = normalizeAddress(bookmark.url)
+    if (!url) return
+    const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
+    setBrowserDocState(tabId, doc.id, { url, title: bookmark.title, loading: true, history, historyIndex: history.length - 1 })
   }
 
   const closeInternalTab = async (docId: string) => {
@@ -264,12 +370,14 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     closeBrowserDoc(tabId, docId)
   }
 
-  const bookmarkGroups = groupBrowserTileBookmarks(bookmarks)
   const canGoBack = doc.historyIndex > 0
   const canGoForward = doc.historyIndex < doc.history.length - 1
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-bg">
+    // `@container/tile` — the toolbar below reflows on the *tile's* width, not
+    // the viewport's: a browser tile split three ways on a desktop is just as
+    // narrow as a full-width one on a phone, and needs the same layout.
+    <div className="@container/tile flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-bg">
       {tile.fullscreen && (
         <div className="flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-devdeck-border bg-devdeck-surface px-2">
           {tile.docs.map((d) => (
@@ -291,7 +399,9 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
                     e.stopPropagation()
                     void closeInternalTab(d.id)
                   }}
-                  className="opacity-0 group-hover:opacity-100"
+                  // Touch devices never fire hover, so the reveal-on-hover close
+                  // affordance leaves internal tabs impossible to close there.
+                  className="flex-none opacity-0 group-hover:opacity-100 pointer-coarse:h-3.5 pointer-coarse:w-3.5 pointer-coarse:opacity-100"
                 />
               )}
             </button>
@@ -307,30 +417,37 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-none items-center gap-1.5 overflow-x-auto border-b border-devdeck-border bg-devdeck-bg px-2 py-1.5">
-        <Globe size={13} className="flex-none text-devdeck-dim" />
-        <Button size="icon-sm" variant="secondary" onClick={() => void goHistory(-1)} disabled={!canGoBack} aria-label="Back">
+      {/* Wraps rather than scrolls: every control here is fixed-width, so the
+          old `overflow-x-auto` row had nothing to give but the address bar,
+          which collapsed to a few unreadable pixels long before the row ever
+          became scrollable. Below 32rem the address bar drops to its own
+          full-width line instead (`order-last` + `w-full`). */}
+      <div className="flex min-w-0 flex-none flex-wrap items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-2 py-1.5">
+        <Globe size={13} className="hidden flex-none text-devdeck-dim @lg/tile:block" />
+        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHistory(-1)} disabled={!canGoBack} aria-label="Back">
           <ArrowLeft size={12} />
         </Button>
-        <Button size="icon-sm" variant="secondary" onClick={() => void goHistory(1)} disabled={!canGoForward} aria-label="Forward">
+        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHistory(1)} disabled={!canGoForward} aria-label="Forward">
           <ArrowRight size={12} />
         </Button>
-        <Button size="icon-sm" variant="secondary" onClick={() => void goHome()} aria-label="Home">
+        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHome()} aria-label="Home">
           <Home size={12} />
         </Button>
-        <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-1.5">
+        <form onSubmit={submit} className="order-last flex w-full min-w-0 items-center gap-1.5 @lg/tile:order-none @lg/tile:w-auto @lg/tile:flex-1">
           <Input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={doc.machineId ? 'Search or enter URL' : 'Choose a machine first'}
             disabled={!doc.machineId}
-            className="h-7 flex-1 font-mono text-[11.5px]"
+            /* 16px on touch: anything smaller makes mobile Safari zoom the
+               whole page in on focus, which drags the native webview off-screen. */
+            className="h-7 min-w-0 flex-1 font-mono text-[11.5px] pointer-coarse:h-9 pointer-coarse:text-[16px]"
           />
         </form>
-        <Button size="icon-sm" variant="secondary" onClick={() => void reload()} disabled={!doc.url} aria-label="Reload">
+        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void reload()} disabled={!doc.url} aria-label="Reload">
           <RefreshCw size={12} />
         </Button>
-        <Button size="icon-sm" variant="secondary" onClick={addBookmark} disabled={!doc.url} aria-label="Bookmark this page">
+        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={openBookmarkDialog} disabled={!doc.url} aria-label="Bookmark this page">
           <Star size={12} />
         </Button>
         <Select
@@ -341,12 +458,13 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
             label: m.name,
             disabled: machineHealth.get(m.id)?.status === 'offline',
           }))}
-          triggerClassName="h-7 w-32"
+          triggerClassName="h-7 min-w-24 max-w-40 flex-1 pointer-coarse:h-9 @lg/tile:w-32 @lg/tile:max-w-none @lg/tile:flex-none"
           aria-label="Machine"
         />
         <Button
           size="icon-sm"
           variant="secondary"
+          className={cn(toolbarButtonClass, 'ml-auto @lg/tile:ml-0')}
           onClick={() => setBrowserTileFullscreen(tabId, !tile.fullscreen)}
           aria-label={tile.fullscreen ? 'Exit full screen' : 'Full screen'}
         >
@@ -356,34 +474,48 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
 
       <div className="relative min-h-0 min-w-0 flex-1">
         {!doc.url ? (
-          <div className="flex h-full flex-col items-center gap-4 overflow-auto p-6">
-            {bookmarkGroups.length === 0 ? (
+          <div className="flex h-full flex-col items-center gap-5 overflow-auto p-4 @sm/tile:p-6">
+            {bookmarksByMachine.length === 0 ? (
               <div className="mt-16 text-[12px] text-devdeck-muted">No bookmarks yet — enter a URL above to start browsing.</div>
             ) : (
-              bookmarkGroups.map(([group, items]) => (
-                <div key={group} className="w-full max-w-[520px]">
-                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {items.map((bookmark) => (
-                      <button
-                        key={bookmark.id}
-                        type="button"
-                        onClick={() => void navigate(bookmark.url)}
-                        className="flex items-center justify-between rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 px-3 py-2.5 text-left hover:border-devdeck-border-accent"
-                      >
-                        <span className="truncate text-[12px] text-devdeck-fg-2">{bookmark.title}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setBookmarks((current) => removeBrowserTileBookmark(current, bookmark.id))
-                          }}
-                          aria-label={`Remove ${bookmark.title}`}
-                          className="text-devdeck-muted-2 hover:text-devdeck-red-soft"
-                        >
-                          <X size={12} />
-                        </button>
-                      </button>
+              bookmarksByMachine.map(([machineLabel, groups]) => (
+                <div key={machineLabel} className="w-full max-w-[520px]">
+                  <div className="mb-2.5 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-devdeck-fg-2">{machineLabel}</span>
+                    <div className="h-px flex-1 bg-devdeck-border" />
+                  </div>
+                  <div className="grid gap-3">
+                    {groups.map(([group, items]) => (
+                      <div key={group}>
+                        <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</div>
+                        <div className="grid grid-cols-1 gap-2 @sm/tile:grid-cols-2">
+                          {items.map((bookmark) => (
+                            // Open and remove are siblings, not nested <button>s — nesting
+                            // is invalid HTML and made the two tap targets overlap.
+                            <div
+                              key={bookmark.id}
+                              className="flex items-center gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 pr-1 focus-within:border-devdeck-border-accent hover:border-devdeck-border-accent"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => void openBookmark(bookmark)}
+                                className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-3 text-left"
+                              >
+                                <BookmarkIcon bookmark={bookmark} />
+                                <span className="min-w-0 flex-1 truncate text-[12px] text-devdeck-fg-2">{bookmark.title}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteBookmark.mutate(bookmark.id)}
+                                aria-label={`Remove ${bookmark.title}`}
+                                className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-devdeck-muted-2 hover:text-devdeck-red-soft pointer-coarse:h-9 pointer-coarse:w-9"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -394,6 +526,15 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
           <div ref={bodyRef} className="absolute inset-0" />
         )}
       </div>
+
+      <BookmarkDialog
+        open={bookmarkDialogOpen}
+        onOpenChange={setBookmarkDialogOpen}
+        machineId={doc.machineId}
+        machineName={machineLabelFor(doc.machineId ?? '', machines)}
+        url={doc.url ?? ''}
+        initialTitle={doc.title}
+      />
     </div>
   )
 }

@@ -141,6 +141,23 @@ export function downloadWorktreeZipWithProgress(
   })
 }
 
+/** Raw bytes for a single file. Goes through machineXhr rather than a plain
+ *  `<a download>` link because direct mode needs an Authorization header,
+ *  which an anchor can't carry. */
+export function downloadWorktreeFileWithProgress(
+  machine: Machine,
+  worktreeId: string,
+  filePath: string,
+  onProgress: (progress: TransferProgress) => void,
+): Promise<Blob> {
+  return machineXhr<Blob>(machine, {
+    method: 'GET',
+    path: `/worktrees/${worktreeId}/files/download?path=${encodeURIComponent(filePath)}`,
+    onDownloadProgress: onProgress,
+    responseType: 'blob',
+  })
+}
+
 export interface SearchWorktreeFilesOptions {
   includeDirs?: boolean
 }
@@ -226,6 +243,23 @@ export async function grepWorktreeFiles(
     `/worktrees/${worktreeId}/files/grep?${grepParams(query, options)}`,
   )
   return normalizeGrepResult(result)
+}
+
+/** Mirrors the backend's `{"installed": true, "version": "..."}` success
+ *  envelope exactly (see internal/handler/worktree_file.go's InstallRipgrep
+ *  and internal/handler/ssh_file.go's InstallRipgrep — same shape on both
+ *  routes, declared once here for the same reason GrepResult is). */
+export interface InstallRipgrepResult {
+  installed: boolean
+  version: string
+}
+
+/** POST .../grep/install-ripgrep — downloads ripgrep and installs it on
+ *  whichever process owns this worktree (the hub for local/unassigned
+ *  projects, or the remote runtime process for Machine-assigned ones, via
+ *  the existing MachineProxyHandler forwarding). No request body. */
+export function installWorktreeRipgrep(machine: Machine, worktreeId: string): Promise<InstallRipgrepResult> {
+  return machineRequest<InstallRipgrepResult>(machine, 'POST', `/worktrees/${worktreeId}/files/grep/install-ripgrep`)
 }
 
 // ---- Worktree git (source control) ----

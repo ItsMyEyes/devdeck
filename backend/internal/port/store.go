@@ -84,6 +84,13 @@ type Store interface {
 	MachineByID(id string) (domain.Machine, error)
 	MachineByKey(key string) (domain.Machine, error)
 
+	// Bookmarks (Browser tile, hub role only)
+	Bookmarks() ([]domain.Bookmark, error)
+	BookmarkByID(id string) (domain.Bookmark, error)
+	CreateBookmark(machineID, group, title, url, iconDataURL string) (domain.Bookmark, error)
+	UpdateBookmark(id string, p BookmarkPatch) (domain.Bookmark, error)
+	DeleteBookmark(id string) error
+
 	// Catalog (hub role only — a runtime's machine-scoped replica source).
 	// See docs/superpowers/specs/2026-07-19-hub-runtime-catalog-split-design.md.
 	ProjectsByMachine(machineID string) ([]domain.Project, error)
@@ -125,6 +132,12 @@ type Store interface {
 	CreateDBSavedQuery(connectionID, name, sqlText, updatedAt string) (domain.DBSavedQuery, error)
 	UpdateDBSavedQuery(id, updatedAt string, p DBSavedQueryPatch) (domain.DBSavedQuery, error)
 	DeleteDBSavedQuery(id string) error
+
+	// SQL editor execution history. errMsg must already be redacted — see
+	// domain.DBQueryHistoryEntry.
+	AddDBQueryHistory(connectionID, sqlText, status, errMsg string, elapsedMS int64, rowCount int, executedAt string) (domain.DBQueryHistoryEntry, error)
+	DBQueryHistory(connectionID string, limit int) ([]domain.DBQueryHistoryEntry, error)
+	ClearDBQueryHistory(connectionID string) error
 
 	// Recurring invoice templates (workspace-scoped; auto-generate draft Invoices on schedule)
 	CreateRecurringTemplate(wsID, companyName, companyAddress string, items []domain.InvoiceItem, bankName, bankAccountName, bankAccountNumber string, dayOfMonth, paymentTermDays int, createdAt string) (domain.RecurringInvoiceTemplate, error)
@@ -222,6 +235,15 @@ type MachinePatch struct {
 	URL     *string
 	Key     *string
 	IsLocal *bool
+}
+
+// BookmarkPatch carries optional fields for a partial bookmark update.
+// MachineID and URL are not patchable — re-pointing a bookmark at a different
+// machine or page is a new bookmark (delete + CreateBookmark), not an edit.
+type BookmarkPatch struct {
+	Group       *string
+	Title       *string
+	IconDataURL *string
 }
 
 // SSHConnectionPatch carries optional fields for a partial SSH-connection

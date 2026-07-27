@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Plus, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowRightLeft, Plus, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { Button } from '@/components/ui/button'
 import { Pill } from '@/components/ui/pill'
 import { useDBColumns, useDBRows } from '@/features/data/queries'
 import type { DBFilter, DBObjectRef, DBRowEdit, DBSortKey } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { classifyDataType, DB_TYPE_BADGE } from './dbColors'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { DBExportMenu } from './DBExportMenu'
 import { DBFilterBar } from './DBFilterBar'
+import { DBImportWizard } from './DBImportWizard'
 import { DBTableInfo } from './DBTableInfo'
+import { DBTransferDialog } from './DBTransferDialog'
 
 const ROW_HEIGHT = 30
 const PAGE_LIMIT = 200
@@ -39,6 +43,8 @@ export function DBTableGrid({
   const [cursorStack, setCursorStack] = useState<(unknown[] | null)[]>([null])
   const pageIndex = cursorStack.length - 1
   const openCommitDialog = useDevDeckStore((s) => s.openCommitDialog)
+  const [importOpen, setImportOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
 
   const [pendingEdits, setPendingEdits] = useState<Map<string, unknown>>(new Map())
   const [pendingDeletes, setPendingDeletes] = useState<Set<number>>(new Set())
@@ -50,6 +56,10 @@ export function DBTableGrid({
     setPendingEdits(new Map())
     setPendingDeletes(new Set())
     setPendingInserts([])
+    // The wizards are bound to one object; leaving them open across a switch
+    // would let a mapping built for the old table run against the new one.
+    setImportOpen(false)
+    setTransferOpen(false)
   }, [connectionId, object.database, object.schema, object.name])
 
   function cellKey(rowIndex: number, column: string) {
@@ -208,6 +218,21 @@ export function DBTableGrid({
             <Plus size={11} />
             Add row
           </button>
+          <div className="flex items-center gap-0.5">
+            <DBExportMenu connectionId={connectionId} object={object} filters={filters} sort={sort} />
+            <Button variant="ghost" size="icon-sm" onClick={() => setImportOpen(true)} title="Import rows from a CSV file" aria-label="Import rows">
+              <Upload size={13} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setTransferOpen(true)}
+              title="Transfer this table to another connection"
+              aria-label="Transfer table"
+            >
+              <ArrowRightLeft size={13} />
+            </Button>
+          </div>
           {page?.usedOffsetPaging ? <span className="text-devdeck-yellow-tint-text">offset paging — no usable row identity</span> : null}
           {page?.truncated ? <span>showing first {page.rows.length} rows</span> : null}
           <button type="button" onClick={prevPage} disabled={pageIndex === 0} className="disabled:opacity-30">
@@ -344,6 +369,15 @@ export function DBTableGrid({
           ))}
         </div>
       )}
+
+      {/* Mounted only while open: both dialogs fetch columns and hold a whole
+          run's state, and a per-tab grid stays mounted when its tab is hidden. */}
+      {importOpen ? (
+        <DBImportWizard open={importOpen} onOpenChange={setImportOpen} connectionId={connectionId} object={object} />
+      ) : null}
+      {transferOpen ? (
+        <DBTransferDialog open={transferOpen} onOpenChange={setTransferOpen} connectionId={connectionId} object={object} />
+      ) : null}
     </div>
   )
 }

@@ -5,10 +5,11 @@ import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/b
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { WorkspaceHostsView } from '@/features/agents/WorkspaceHostsView'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
-import { useSSHConnections, useWorkspace } from '@/features/data/queries'
+import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
 import { SSHShellPane } from '@/features/ssh/SSHShellPane'
-import { STATE } from '@/lib/constants'
-import { worktreeLabel } from '@/lib/worktreeLabel'
+import { disposeSSHSession } from '@/features/ssh/sshTerminalRegistry'
+import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
+import { worktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { NewTabDialog } from './NewTabDialog'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
@@ -42,6 +43,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
   const sshConnections = useSSHConnections().data ?? []
+  const machines = useMachines().data ?? []
   const projectsById = new Map(workspace ? workspace.projects.map((p) => [p.id, p]) : [])
 
   function commit(next: WorkspaceTileLayout) {
@@ -96,6 +98,16 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   // (see tileTree.ts's `closeTileTab`), so it's reused as-is for the
   // generic tree removal regardless of tab kind.
   //
+  // Closing an 'ssh-shell' tab must likewise tear down every live SSH
+  // session still in its own inner pane tree explicitly, here, rather than
+  // from an unmount effect inside `SSHShellPane` — a drag-to-split/relocate
+  // of the ssh-shell tab itself (`moveTileTab` always allocates a fresh
+  // leaf id, see tileTree.ts) also unmounts `SSHShellPane` as a pure view
+  // change, which must NOT kill the remote shell (its lifetime IS its
+  // socket's lifetime, unlike the worktree Terminal's server-reattached
+  // PTY). See `sshTerminalRegistry.ts`'s doc comment for the same hazard
+  // one layer down.
+  //
   // Closing a 'worktree' tab only drops it from this workspace's tab strip —
   // the worktree itself, its primary terminal session, AND any *spawned*
   // extra Terminal panes inside it (ExpandedTerminal's "Terminal 2", ...)
@@ -113,6 +125,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         )
       }
       removeBrowserTile(tabId)
+    } else if (tab?.kind === 'ssh-shell') {
+      const sshLayout = deserializeLayout(useDevDeckStore.getState().sshTileLayouts[tab.connectionId])
+      if (sshLayout) collectTerminalSessionKeys(sshLayout.root).forEach(disposeSSHSession)
     }
     closeWorktreeTab(wsId, tabId)
     const next = useDevDeckStore.getState().workspaceTileLayouts[wsId]
@@ -139,15 +154,19 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     commit({ ...layout, root, focusedLeafId })
   }
 
+  // A project with no `machineId` is unassigned — it runs in whichever process
+  // is serving this UI, so the tab strip calls that "local" rather than
+  // leaving the machine segment blank.
+  function machineNameFor(project: { machineId: string } | undefined) {
+    if (!project?.machineId) return 'local'
+    return machines.find((m) => m.id === project.machineId)?.name ?? 'local'
+  }
+
   function resolveWorktreeTab(tab: WorktreeTileTab) {
     const worktree = worktrees.find((w) => w.id === tab.wtId)
     if (!worktree) return undefined
-    const st = STATE[worktree.state]
     const project = projectsById.get(tab.projectId)
-    return {
-      label: worktreeLabel(project, worktree),
-      color: st.color,
-    }
+    return worktreeTabLabel(project, worktree, machineNameFor(project))
   }
 
   function resolveBrowserTab(tab: BrowserTileTab) {
@@ -166,6 +185,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   // TerminalWorkspace's own "new terminal" tab, so Cmd/Ctrl+O opens the
   // workspace tab chooser instead. Cmd/Ctrl+W closes the focused leaf's active
   // tab, except visible worktree terminals handle their own pane tab strip.
+  // Cmd/Ctrl+1..4 selects the matching tab in the focused leaf (Agents is #1).
   // Cmd+Shift+[ / Cmd+Shift+] cycle the focused leaf's own tab strip.
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
@@ -177,6 +197,14 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
       const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId)
       const inTerminalWorkspace = showContent && activeTab?.kind === 'worktree'
       const key = event.key.toLowerCase()
+
+      if (!event.altKey && !event.shiftKey && /^[1-4]$/.test(event.key)) {
+        const nextTab = leaf.tabs[Number(event.key) - 1]
+        if (!nextTab) return
+        event.preventDefault()
+        handleSelectTab(leaf.id, nextTab.id)
+        return
+      }
 
       if ((key === 't' && !inTerminalWorkspace) || (key === 'o' && inTerminalWorkspace)) {
         event.preventDefault()
@@ -210,13 +238,14 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     <>
       <WorkspaceTileCanvas
         root={layout.root}
+        focusedLeafId={layout.focusedLeafId}
         renderers={{
           agents: () => {
             if (!workspace) return null
             if (!currentProjectId) return <WorkspaceHostsView wsId={wsId} projects={workspace.projects} />
             const project = workspace.projects.find((p) => p.id === currentProjectId)
             if (!project) return null
-            return <WorktreeCardsGrid project={project} wsId={wsId} />
+            return <WorktreeCardsGrid project={project} projects={workspace.projects} wsId={wsId} />
           },
           worktree: ({ leafId, tab }) => {
             const worktree = worktrees.find((w) => w.id === tab.wtId)
@@ -226,12 +255,15 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
                 worktree={worktree}
                 wsId={wsId}
                 projectId={tab.projectId}
+                isFocused={leafId === layout.focusedLeafId}
                 onPrimaryExit={() => void handleCloseTab(leafId, tab.id)}
               />
             )
           },
           browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
-          sshShell: ({ tab }) => <SSHShellPane connectionId={tab.connectionId} />,
+          sshShell: ({ leafId, tab }) => (
+            <SSHShellPane connectionId={tab.connectionId} isFocused={leafId === layout.focusedLeafId} />
+          ),
         }}
         onTreeChange={handleTreeChange}
         onFocusLeaf={handleFocusLeaf}

@@ -17,5 +17,5 @@ function TerminalRoute() {
       <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-dim">worktree not found</div>
     )
   }
-  return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={projectId} />
+  return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={projectId} isFocused />
 }

@@ -58,6 +58,16 @@ function isTerminalExitedFrame(data: string) {
   }
 }
 
+/** Cmd/Ctrl+P without Alt/Shift is xterm's own binding for "send DLE (0x10) to
+ *  the shell" — its keydown listener runs in the capture phase and calls
+ *  `stopPropagation`, so the window-level quick-open shortcut in
+ *  ExpandedTerminal.tsx/SSHShellPane.tsx never sees the keystroke while a
+ *  terminal has focus. `attachCustomKeyEventHandler` returning `false` is
+ *  xterm's documented way to let a key combo escape untouched instead. */
+export function isQuickOpenShortcut(event: KeyboardEvent) {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p'
+}
+
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   { session, machine, ctrlArmed = false, onCtrlConsumed, onExit },
@@ -138,6 +148,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     } catch {
       // WebGL unavailable (headless env, old GPU driver) — falls back to xterm's default renderer.
     }
+    term.attachCustomKeyEventHandler((event) => !isQuickOpenShortcut(event))
     term.open(host)
     fit.fit()
     termRef.current = term

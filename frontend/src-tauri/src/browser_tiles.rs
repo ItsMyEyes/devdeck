@@ -25,6 +25,27 @@ fn webview_label(tab_id: &str, doc_id: &str) -> String {
     format!("browser-{tab_id}-{doc_id}")
 }
 
+/// User-Agent for Browser-tile webviews on macOS. A bare WKWebView reports
+/// `…AppleWebKit/605.1.15 (KHTML, like Gecko)` and stops there — no `Version/x`,
+/// no `Safari/x` — so any site that parses a browser version out of the UA finds
+/// none and falls through to its "please update your browser" branch (YouTube's
+/// live chat does exactly this, and the page it serves is the only symptom).
+///
+/// Shaped as current Safari rather than spoofing Chrome: the engine really is
+/// WebKit, so claiming Blink invites sites to ship code paths this webview
+/// cannot run. Windows is deliberately left on the WebView2 default, which
+/// already carries a full `Chrome/… Edg/…` string. Linux/WebKitGTK is untested
+/// here — if it turns out to report a stale `Version/`, it needs its own
+/// constant with an X11 platform token, not this Mac one.
+///
+/// Keep this claiming a *current* browser alongside `browser_proxy.go`'s own
+/// `browserUserAgent`, which covers the server-side fetch for the web Browser
+/// module. That header cannot help here: the "old browser" screen is rendered
+/// client-side from `navigator.userAgent`.
+#[cfg(target_os = "macos")]
+const BROWSER_TILE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+    AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
+
 /// Creates the native child webview for one Browser-tile document, proxied
 /// through `proxy_url` (an `http://` or `socks5://` URL) and immediately
 /// navigated to `initial_url`. Called once per document, the first time the
@@ -75,6 +96,11 @@ pub fn browser_tile_open(
                 serde_json::json!({ "label": webview.label(), "title": title }),
             );
         });
+
+    // Shadowed rather than `let mut` + `#[cfg]` block, so non-macOS builds don't
+    // trip `unused_mut`. See BROWSER_TILE_USER_AGENT for why only macOS needs it.
+    #[cfg(target_os = "macos")]
+    let builder = builder.user_agent(BROWSER_TILE_USER_AGENT);
 
     // NOTE: `Window::add_child` is defined on `tauri::window::Window`;
     // `WebviewWindow` (returned by `get_webview_window`) derefs to it. If a
@@ -133,17 +159,23 @@ pub fn browser_tile_set_bounds(
     webview.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())
 }
 
-/// Moves a backgrounded internal tab's webview to zero size instead of
-/// destroying it, so switching between a fullscreen tile's internal tabs
-/// doesn't force a full reload each time.
+/// Hides a backgrounded internal tab's webview instead of destroying it, so
+/// switching between a fullscreen tile's internal tabs — or a DOM overlay
+/// needing to appear in front of it, see `nativeOverlayBlockers` — doesn't
+/// force a full reload each time. Uses the real `Webview::hide`, not a
+/// zero-size resize: sizing to 0x0 forces the loaded page to reflow to that
+/// viewport and back on restore, a visible stall on a heavy page.
 #[tauri::command]
 pub fn browser_tile_hide(state: tauri::State<'_, BrowserTiles>, tab_id: String, doc_id: String) -> Result<(), String> {
     let label = webview_label(&tab_id, &doc_id);
     let map = state.0.lock().unwrap();
     let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
-    webview.set_size(LogicalSize::new(0.0, 0.0)).map_err(|e| e.to_string())
+    webview.hide().map_err(|e| e.to_string())
 }
 
+/// Reverses `browser_tile_hide`: reasserts the on-screen rect first, then
+/// shows the webview — so it never paints for a frame at its last (possibly
+/// stale) bounds before snapping to the correct one.
 #[tauri::command]
 pub fn browser_tile_show(
     state: tauri::State<'_, BrowserTiles>,
@@ -154,7 +186,11 @@ pub fn browser_tile_show(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    browser_tile_set_bounds(state, tab_id, doc_id, x, y, width, height)
+    browser_tile_set_bounds(state.clone(), tab_id.clone(), doc_id.clone(), x, y, width, height)?;
+    let label = webview_label(&tab_id, &doc_id);
+    let map = state.0.lock().unwrap();
+    let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
+    webview.show().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

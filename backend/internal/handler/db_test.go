@@ -48,6 +48,8 @@ func newDBTestServer(t *testing.T) *dbTestServer {
 	mux.HandleFunc("POST /api/db/connections/{id}/queries", h.PostSavedQuery)
 	mux.HandleFunc("PATCH /api/db/queries/{qid}", h.PatchSavedQuery)
 	mux.HandleFunc("DELETE /api/db/queries/{qid}", h.DeleteSavedQuery)
+	mux.HandleFunc("GET /api/db/connections/{id}/history", h.GetQueryHistory)
+	mux.HandleFunc("DELETE /api/db/connections/{id}/history", h.DeleteQueryHistory)
 
 	// Phase 2 read/execution routes, same shapes as main.go's hub block.
 	mux.HandleFunc("GET /api/db/engines", execH.GetEngines)
@@ -59,6 +61,7 @@ func newDBTestServer(t *testing.T) *dbTestServer {
 	mux.HandleFunc("POST /api/db/connections/{id}/rows", execH.PostRows)
 	mux.HandleFunc("POST /api/db/connections/{id}/lob", execH.PostLOB)
 	mux.HandleFunc("POST /api/db/connections/{id}/query", execH.PostQuery)
+	mux.HandleFunc("POST /api/db/connections/{id}/export", execH.PostExport)
 
 	return &dbTestServer{st: st, h: h, dbExecH: execH, mux: mux}
 }

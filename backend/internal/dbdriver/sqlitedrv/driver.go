@@ -41,6 +41,9 @@ var caps = port.DBCaps{
 	RowIdentifier: "rowid",
 	SizeStats:     false,
 	QuoteChar:     `"`,
+	// Bare EXPLAIN emits VDBE bytecode on SQLite; the plan lives behind
+	// EXPLAIN QUERY PLAN.
+	ExplainPrefix: "EXPLAIN QUERY PLAN",
 }
 
 type sqliteDriver struct{}

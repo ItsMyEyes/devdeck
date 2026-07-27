@@ -42,6 +42,11 @@ interface Props {
   worktree: Worktree
   wsId: string
   projectId: string
+  /** Whether this tile is the workspace's currently focused leaf — gates the
+   *  window-level keyboard shortcuts below so pressing e.g. Ctrl+P with two
+   *  tiles open side by side only opens quick-open in the one the user is
+   *  actually in, not both. */
+  isFocused: boolean
   onPrimaryExit?: () => void
 }
 
@@ -103,7 +108,7 @@ export function OverflowItem({
   )
 }
 
-export function ExpandedTerminal({ worktree: w, wsId, projectId, onPrimaryExit }: Props) {
+export function ExpandedTerminal({ worktree: w, wsId, projectId, isFocused, onPrimaryExit }: Props) {
   const project = useWorkspace(wsId).data?.projects.find((candidate) => candidate.id === projectId)
   const machines = useMachines().data
   const machine = machines?.find((m) => m.id === project?.machineId)
@@ -127,6 +132,7 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId, onPrimaryExit }
       machine={machine}
       projectName={project?.name}
       label={worktreeLabel(project, w)}
+      isFocused={isFocused}
       onPrimaryExit={onPrimaryExit}
     />
   )
@@ -137,12 +143,14 @@ function TerminalWorkspace({
   machine,
   projectName,
   label,
+  isFocused,
   onPrimaryExit,
 }: {
   worktree: Worktree
   machine: Machine
   projectName?: string
   label: string
+  isFocused: boolean
   onPrimaryExit?: () => void
 }) {
   const termHandles = useRef(new Map<string, TerminalHandle>())
@@ -450,9 +458,11 @@ function TerminalWorkspace({
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
+      // `isFocused` is false when another tile is the one the user's actually
+      // in (two tiles can be visible side by side) — ignore the shortcut then.
       // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
-      // i.e. some other tab is the one currently on screen. Ignore the shortcut then.
-      if (containerRef.current?.offsetParent === null) return
+      // i.e. some other tab within *this* tile is the one currently on screen.
+      if (!isFocused || containerRef.current?.offsetParent === null) return
       const primary = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
       if (primary && key === 'p') {
@@ -492,7 +502,7 @@ function TerminalWorkspace({
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [layout, dirtyFiles])
+  }, [layout, dirtyFiles, isFocused])
 
   const focusedPane = findPane(layout.root, layout.focusedPaneId)
   const focusedActiveContent =
