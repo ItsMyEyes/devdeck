@@ -29,7 +29,7 @@ import type {
 } from './types'
 
 export type EditKind = 'worktree' | 'project' | 'workspace' | 'machine' | 'ssh' | 'ssh-group'
-export type MachineAction = 'restart' | 'stop'
+export type MachineAction = 'restart' | 'stop' | 'update'
 
 export interface Transfer {
   id: string
@@ -66,11 +66,14 @@ interface SpawnState {
   open: boolean
   projectId: string | null
   chooseProject: boolean
-  mode: 'branch' | 'root'
+  mode: 'branch' | 'root' | 'existing'
   branch: string
   base: string
   model: string
   task: string
+  /** Selected worktree id when mode === 'existing' — reuses an already-checked-out
+   *  worktree instead of creating a new branch/root session. */
+  existingWtId: string
 }
 interface EditState {
   kind: EditKind | null
@@ -211,7 +214,15 @@ interface DevDeckState {
   browse: { open: boolean; target: BrowseTarget; path: string[]; machineId: string }
   edit: EditState
   confirmDelete: { kind: EditKind; id: string; name: string } | null
-  confirmMachineAction: { action: MachineAction; id: string; name: string } | null
+  confirmMachineAction: {
+    action: MachineAction
+    id: string
+    name: string
+    /** Target release tag, set only for 'update'. */
+    version?: string
+    /** Live PTY sessions that a restart will disconnect, from the update check. */
+    activeSessions?: number
+  } | null
   todoDraft: { text: string; pri: Priority }
   todoFilter: TodoFilter
   machineDialog: MachineDialogState
@@ -257,6 +268,13 @@ interface DevDeckState {
    *  see `FileQuickOpen`'s `useEffect` for the push/pop pattern other
    *  full-screen overlays should follow. */
   nativeOverlayBlockers: number
+  /** True for the duration of an interactive pane-divider drag (see
+   *  `WorkspaceTileCanvas.tsx`'s `TileSplitView`). Native child webviews
+   *  (Browser tiles) ignore CSS `overflow-hidden` clipping and can visibly
+   *  lag behind a fast divider drag — `BrowserTile` hides its webview for as
+   *  long as this is true and reveals it once at the final settled rect, the
+   *  same way it already does for `nativeOverlayBlockers`. */
+  tileDragActive: boolean
 
   // ---- actions ----
   showToast: (msg: string) => void
@@ -296,6 +314,7 @@ interface DevDeckState {
   removeBrowserTile: (tabId: string) => void
   pushNativeOverlayBlocker: () => void
   popNativeOverlayBlocker: () => void
+  setTileDragActive: (active: boolean) => void
   startTransfer: (transfer: Transfer) => void
   updateTransferProgress: (
     id: string,
@@ -305,7 +324,7 @@ interface DevDeckState {
   dismissTransfer: (id: string) => void
 
   // spawn worktree
-  openSpawn: (projectId: string | null, mode?: 'branch' | 'root', model?: string) => void
+  openSpawn: (projectId: string | null, mode?: 'branch' | 'root' | 'existing', model?: string) => void
   closeSpawn: () => void
   setSpawn: (patch: Partial<SpawnState>) => void
 
@@ -325,7 +344,12 @@ interface DevDeckState {
   setEdit: (patch: Partial<Pick<EditState, 'a' | 'b' | 'model'>>) => void
   askDelete: (kind: EditKind, id: string, name: string) => void
   cancelConfirm: () => void
-  askMachineAction: (action: MachineAction, id: string, name: string) => void
+  askMachineAction: (
+    action: MachineAction,
+    id: string,
+    name: string,
+    extra?: { version?: string; activeSessions?: number },
+  ) => void
   cancelMachineAction: () => void
 
   // folder browser
@@ -439,7 +463,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       desktopSettingsOpen: false,
       hubApiKey: null,
       newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '', sshConnectionId: '' },
-      spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
+      spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '', existingWtId: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
       browse: { open: false, target: 'newPath', path: [], machineId: '' },
@@ -500,6 +524,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       workspaceTileLayouts: {},
       browserTiles: {},
       nativeOverlayBlockers: 0,
+      tileDragActive: false,
 
       // Toasts are fired directly through sonner — no store field, so coalesced
       // calls can no longer drop a message.
@@ -610,6 +635,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
       pushNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers += 1)),
       popNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers = Math.max(0, s.nativeOverlayBlockers - 1))),
+      setTileDragActive: (active) => set((s) => void (s.tileDragActive = active)),
       startTransfer: (transfer) => set((s) => void s.transfers.push(transfer)),
       updateTransferProgress: (id, patch) =>
         set((s) => {
@@ -640,6 +666,7 @@ export const useDevDeckStore = create<DevDeckState>()(
             base: 'main',
             model: model ?? 'claude-sonnet-5',
             task: '',
+            existingWtId: '',
           }
           s.wsMenuOpen = false
         }),
@@ -681,7 +708,8 @@ export const useDevDeckStore = create<DevDeckState>()(
       setEdit: (patch) => set((s) => void Object.assign(s.edit, patch)),
       askDelete: (kind, id, name) => set((s) => void (s.confirmDelete = { kind, id, name })),
       cancelConfirm: () => set((s) => void (s.confirmDelete = null)),
-      askMachineAction: (action, id, name) => set((s) => void (s.confirmMachineAction = { action, id, name })),
+      askMachineAction: (action, id, name, extra) =>
+        set((s) => void (s.confirmMachineAction = { action, id, name, ...extra })),
       cancelMachineAction: () => set((s) => void (s.confirmMachineAction = null)),
 
       openBrowse: (target, initialPath, machineId) =>

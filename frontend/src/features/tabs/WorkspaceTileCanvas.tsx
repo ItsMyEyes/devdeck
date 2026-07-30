@@ -5,6 +5,7 @@ import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
 import { Cable, ChevronLeft, ChevronRight, Globe, LayoutGrid, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
 
@@ -188,6 +189,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
     null,
   )
   const [liveSizes, setLiveSizes] = useState<number[] | null>(null)
+  const setTileDragActive = useDevDeckStore((s) => s.setTileDragActive)
 
   const isRow = node.direction === 'row'
   const sizes = liveSizes ?? node.sizes
@@ -209,6 +211,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
   function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragRef.current) return
     dragRef.current = null
+    setTileDragActive(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -235,6 +238,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
                 if (!container) return
                 event.preventDefault()
                 event.currentTarget.setPointerCapture(event.pointerId)
+                setTileDragActive(true)
                 const rect = container.getBoundingClientRect()
                 dragRef.current = {
                   index: i - 1,
@@ -245,6 +249,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
               }}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
             />
           ) : null}
           <div

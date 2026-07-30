@@ -132,6 +132,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const selectBrowserDoc = useDevDeckStore((s) => s.selectBrowserDoc)
   const setBrowserTileFullscreen = useDevDeckStore((s) => s.setBrowserTileFullscreen)
   const nativeOverlayBlockers = useDevDeckStore((s) => s.nativeOverlayBlockers)
+  const tileDragActive = useDevDeckStore((s) => s.tileDragActive)
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
   const bookmarks = useBookmarks().data ?? []
@@ -224,7 +225,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
-    if (nativeOverlayBlockers > 0) {
+    if (nativeOverlayBlockers > 0 || tileDragActive) {
       void hideBrowserTile(tabId, docId)
       return
     }
@@ -232,7 +233,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     if (!el) return
     const rect = el.getBoundingClientRect()
     void showBrowserTile(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
-  }, [nativeOverlayBlockers, tabId, doc?.id, doc?.url])
+  }, [nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
 
   // Sync the address bar/title from real in-page navigation inside the native webview.
   useEffect(() => {
