@@ -17,6 +17,8 @@ import type { CreateSSHConnectionBody, UpdateSSHConnectionBody } from '@/lib/api
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { buildJumpHostRequest, defaultJumpHostDraft, isJumpHostDraftValid } from './jumpHostDraft'
 import { SSHAuthFields } from './SSHAuthFields'
+import { parseSSHCommand } from './sshCommand'
+import { deriveSSHQuickAddName, findExistingConnection } from './sshQuickAdd'
 
 const HUB_DECIDES = ''
 const DIRECT = ''
@@ -34,9 +36,17 @@ export function SSHConnectionDialog() {
   const connections = useSSHConnections().data ?? []
   const [addingJump, setAddingJump] = useState(false)
   const [jumpDraft, setJumpDraft] = useState(defaultJumpHostDraft())
+  const [pasteRaw, setPasteRaw] = useState('')
+  const [extraHops, setExtraHops] = useState(0)
+  const [nameTouched, setNameTouched] = useState(false)
 
   useEffect(() => {
-    if (!dialog.open) setAddingJump(false)
+    if (!dialog.open) {
+      setAddingJump(false)
+      setPasteRaw('')
+      setExtraHops(0)
+      setNameTouched(false)
+    }
   }, [dialog.open])
 
   const groupOptions = useMemo(
@@ -75,6 +85,60 @@ export function SSHConnectionDialog() {
     { value: ADD_NEW_JUMP, label: '+ Add new jump host…' },
     ...connections.filter((c) => c.id !== dialog.editingId).map((c) => ({ value: c.id, label: c.name })),
   ]
+
+  /** Fills the form from a pasted `ssh …` command. Everything it writes stays
+   *  visible and editable — this is a shortcut for typing, not a replacement
+   *  for the form. */
+  function handlePasteChange(raw: string) {
+    const parsed = parseSSHCommand(raw)
+    setPasteRaw(raw)
+    if (!parsed) {
+      setExtraHops(0)
+      return
+    }
+
+    const patch: Parameters<typeof setDialog>[0] = {
+      host: parsed.target.host,
+      port: String(parsed.target.port),
+      username: parsed.target.user,
+    }
+    if (!nameTouched) patch.name = deriveSSHQuickAddName(parsed)
+    if (parsed.identityFile) {
+      patch.authType = 'privatekey'
+      patch.privateKey = ''
+      patch.privateKeyPath = parsed.identityFile
+    }
+
+    const nearest = parsed.jumps[0]
+    setExtraHops(Math.max(parsed.jumps.length - 1, 0))
+    if (nearest) {
+      const match = findExistingConnection(nearest, connections)
+      if (match) {
+        patch.jumpConnectionId = match.id
+        setAddingJump(false)
+      } else {
+        // Prefill the mini-form that already exists rather than inventing a
+        // second path to create a hop — only the secret is left to type.
+        setJumpDraft({
+          ...defaultJumpHostDraft(),
+          host: nearest.host,
+          username: nearest.user,
+          port: String(nearest.port),
+        })
+        setAddingJump(true)
+        patch.jumpConnectionId = ''
+      }
+    } else {
+      // Jump state is derived from the *current* command, so deleting the -J
+      // clause has to retract it. Without this branch, editing
+      // "ssh a@b -J c@d" down to "ssh a@b" would leave the prefilled jump
+      // mini-form open (or a stale jumpConnectionId selected) with nothing in
+      // the command asking for it.
+      setAddingJump(false)
+      patch.jumpConnectionId = ''
+    }
+    setDialog(patch)
+  }
 
   function handleJumpChange(value: string) {
     if (value === ADD_NEW_JUMP) {
@@ -171,11 +235,41 @@ export function SSHConnectionDialog() {
 
       {/* body */}
       <div className="flex-1 overflow-auto p-[18px]">
+        {!isEdit ? (
+          <div className="mb-4 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
+            <Label>Paste ssh command</Label>
+            <Input
+              value={pasteRaw}
+              disabled={busy}
+              onChange={(e) => handlePasteChange(e.target.value)}
+              placeholder="ssh root@10.1.1.1 -J root@bastion"
+              className="font-mono"
+              aria-label="Paste ssh command"
+            />
+            {pasteRaw.trim() && !parseSSHCommand(pasteRaw) ? (
+              <p className="mt-1.5 font-mono text-[11px] text-devdeck-red-soft">Can't read that ssh command.</p>
+            ) : (
+              <p className="mt-1.5 font-mono text-[11px] leading-snug text-devdeck-dim">
+                Fills Host, Port, Username, Name — plus the key path from -i and the jump host from -J.
+              </p>
+            )}
+            {extraHops > 0 ? (
+              <p className="mt-1.5 font-mono text-[11px] text-devdeck-fg-2">
+                Only the nearest jump host was filled in. Create the {extraHops} outer hop
+                {extraHops > 1 ? 's' : ''} first, then chain them here.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <Label>Name</Label>
         <Input
           value={dialog.name}
           disabled={busy}
-          onChange={(e) => setDialog({ name: e.target.value })}
+          onChange={(e) => {
+            setNameTouched(true)
+            setDialog({ name: e.target.value })
+          }}
           placeholder="prod-web"
           className="mb-3 font-mono"
         />
