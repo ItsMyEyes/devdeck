@@ -47,7 +47,7 @@ export type TodoFilter = 'all' | 'active' | 'done'
 export const ALL_SSH_GROUPS = '__all__'
 export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
-export type NewTabKind = 'browser' | 'shell'
+export type NewTabKind = 'browser' | 'shell' | 'ssh'
 
 interface NewTabState {
   open: boolean
@@ -57,6 +57,10 @@ interface NewTabState {
   /** Empty until the user (or the dialog's own default-to-first-machine
    *  effect) picks one — both kinds require this before Create is enabled. */
   machineId: string
+  /** SSH kind only: the saved connection to open, or `NEW_SSH_HOST` for the
+   *  inline "create from an ssh command" form. Empty until the dialog's own
+   *  default-selection effect picks one. */
+  sshConnectionId: string
 }
 interface SpawnState {
   open: boolean
@@ -278,7 +282,7 @@ interface DevDeckState {
   // new tab chooser (tab strip "+")
   openNewTab: (wsId: string, leafId: string) => void
   closeNewTab: () => void
-  setNewTab: (patch: Partial<Pick<NewTabState, 'kind' | 'machineId'>>) => void
+  setNewTab: (patch: Partial<Pick<NewTabState, 'kind' | 'machineId' | 'sshConnectionId'>>) => void
 
   // browser tile (Tauri only)
   openBrowserTab: (wsId: string, machineId?: string) => void
@@ -434,7 +438,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       wsMenuOpen: false,
       desktopSettingsOpen: false,
       hubApiKey: null,
-      newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '' },
+      newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '', sshConnectionId: '' },
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
@@ -545,7 +549,10 @@ export const useDevDeckStore = create<DevDeckState>()(
         }),
 
       openNewTab: (wsId, leafId) =>
-        set((s) => void (s.newTab = { open: true, wsId, leafId, kind: 'browser', machineId: '' })),
+        set(
+          (s) =>
+            void (s.newTab = { open: true, wsId, leafId, kind: 'browser', machineId: '', sshConnectionId: '' }),
+        ),
       closeNewTab: () => set((s) => void (s.newTab.open = false)),
       setNewTab: (patch) => set((s) => void Object.assign(s.newTab, patch)),
 

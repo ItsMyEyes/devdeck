@@ -40,6 +40,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const openNewTab = useDevDeckStore((s) => s.openNewTab)
   const openBrowserTab = useDevDeckStore((s) => s.openBrowserTab)
+  const openSSHShellTab = useDevDeckStore((s) => s.openSSHShellTab)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
   const sshConnections = useSSHConnections().data ?? []
@@ -66,6 +67,11 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   function handleCreateBrowser(machineId: string) {
     openBrowserTab(wsId, machineId)
     navigate({ to: '/w/$wsId/browser', params: { wsId } })
+  }
+
+  function handleCreateSSH(connectionId: string) {
+    openSSHShellTab(wsId, connectionId)
+    navigate({ to: '/w/$wsId', params: { wsId } })
   }
 
   // Drop tabs for worktrees deleted while the app was closed (or by another tab).
@@ -282,6 +288,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         currentProjectId={currentProjectId}
         onCreateBrowser={handleCreateBrowser}
         onCreateShell={(projectId) => openSpawn(projectId, 'root')}
+        onCreateSSH={handleCreateSSH}
       />
     </>
   )
