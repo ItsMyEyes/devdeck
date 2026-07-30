@@ -31,3 +31,14 @@ func KillWorktreeSessions(worktreeID string) error {
 	activeRegistry.killByWorktree(worktreeID)
 	return nil
 }
+
+// ActiveSessionCount reports how many PTY sessions this process is currently
+// running, so the UI can warn how many terminals a restart will disconnect.
+// A process that never started a terminal server (a pure --role hub) has a nil
+// registry and reports 0, matching how KillSession guards the same var.
+func ActiveSessionCount() int {
+	if activeRegistry == nil {
+		return 0
+	}
+	return activeRegistry.count()
+}

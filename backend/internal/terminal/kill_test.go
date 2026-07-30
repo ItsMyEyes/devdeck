@@ -59,3 +59,29 @@ func TestKillSessionNoopWhenNotRunning(t *testing.T) {
 		t.Fatalf("KillSession on a session with no running process should be a no-op, got error: %v", err)
 	}
 }
+
+func TestActiveSessionCountIsZeroWithoutARegistry(t *testing.T) {
+	orig := activeRegistry
+	t.Cleanup(func() { activeRegistry = orig })
+
+	activeRegistry = nil
+	if got := ActiveSessionCount(); got != 0 {
+		t.Errorf("ActiveSessionCount() = %d, want 0 on a process with no terminal server", got)
+	}
+}
+
+func TestActiveSessionCountTracksRegisteredSessions(t *testing.T) {
+	orig := activeRegistry
+	t.Cleanup(func() { activeRegistry = orig })
+
+	activeRegistry = newRegistry()
+	if got := ActiveSessionCount(); got != 0 {
+		t.Errorf("ActiveSessionCount() = %d, want 0 for an empty registry", got)
+	}
+
+	activeRegistry.sessions["wt-1"] = &ptySession{}
+	activeRegistry.sessions["wt-1::term-2"] = &ptySession{}
+	if got := ActiveSessionCount(); got != 2 {
+		t.Errorf("ActiveSessionCount() = %d, want 2", got)
+	}
+}

@@ -36,10 +36,43 @@ const (
 	// connWriteTimeout caps a single WebSocket write. A connection that
 	// can't accept a frame within this window is dead or hopelessly backed
 	// up; it gets closed so the client reconnects and replays history.
-	connWriteTimeout          = 15 * time.Second
+	connWriteTimeout = 15 * time.Second
+	// replayChunkBytes caps how much goes into any one WebSocket message, so
+	// connWriteTimeout always covers a bounded payload. Writing a whole
+	// reattach replay at once put the entire ring buffer — up to
+	// ringBufferMaxBytes — under a single deadline, which made the throughput
+	// a client needed just to stay attached a function of how much history
+	// happened to be buffered (~68 KB/s for a full 1 MiB buffer). Below that
+	// the write timed out, the pump closed the connection, and the client
+	// reconnected into the byte-for-byte identical replay: a livelock that
+	// saturated the link and never recovered. Per-chunk deadlines drop the
+	// floor to ~2 KB/s and make partial delivery count as progress, because a
+	// client that accepted one chunk has demonstrated it can take the next.
+	replayChunkBytes          = 32 * 1024
 	terminalExitedFrame       = `{"t":"x"}`
 	terminalExitedCloseReason = "terminal exited"
 )
+
+// writeChunked sends p as a sequence of WebSocket messages no larger than
+// replayChunkBytes, each under its own connWriteTimeout, stopping at the first
+// failure. Terminal output is a byte stream, so splitting it across messages is
+// transparent to the client; what it buys is that a slow link is judged on
+// whether it can carry one chunk rather than the whole backlog at once. Small
+// payloads — the interactive path, where pending is well under the cap — take
+// exactly one write, unchanged.
+func writeChunked(conn *websocket.Conn, p []byte) error {
+	for len(p) > 0 {
+		n := min(len(p), replayChunkBytes)
+		ctx, cancel := context.WithTimeout(context.Background(), connWriteTimeout)
+		err := conn.Write(ctx, websocket.MessageBinary, p[:n])
+		cancel()
+		if err != nil {
+			return err
+		}
+		p = p[n:]
+	}
+	return nil
+}
 
 // ringBuffer is a byte-capped rolling buffer of recent PTY output.
 type ringBuffer struct {
@@ -191,6 +224,13 @@ func (r *registry) get(id string) *ptySession {
 	return r.sessions[id]
 }
 
+// count reports how many sessions are currently registered.
+func (r *registry) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.sessions)
+}
+
 // spawn starts a new PTY session for cmd (not yet started) and registers it.
 func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySession, error) {
 	ptmx, err := crosspty.New()
@@ -289,15 +329,16 @@ func (r *registry) pump(sess *ptySession) {
 		sess.mu.Unlock()
 
 		if conn != nil && (len(replay) > 0 || len(pending) > 0) {
-			ctx, cancel := context.WithTimeout(context.Background(), connWriteTimeout)
+			// Each payload gets its own per-chunk deadline budget: a large
+			// replay must not consume the window the live output needs, and
+			// neither may be written as one unbounded frame.
 			err := error(nil)
 			if len(replay) > 0 {
-				err = conn.Write(ctx, websocket.MessageBinary, replay)
+				err = writeChunked(conn, replay)
 			}
 			if err == nil && len(pending) > 0 {
-				err = conn.Write(ctx, websocket.MessageBinary, pending)
+				err = writeChunked(conn, pending)
 			}
-			cancel()
 			if err != nil {
 				// Dead or hopelessly backed-up connection: close it so the
 				// client reconnects and replays from the ring buffer instead
