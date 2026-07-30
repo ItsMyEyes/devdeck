@@ -143,8 +143,9 @@ export type QuickAddStep =
   | { kind: 'create'; body: CreateSSHConnectionBody }
 
 export interface QuickAddPlan {
-  /** Farthest hop first, so each step's `jumpConnectionId` is the id of the
-   *  step before it. The last entry is always the target host. */
+  /** Same order as `ParsedSSHCommand.jumps` (nearest-hub hop first — ssh(1)'s
+   *  own dial order), so each step's `jumpConnectionId` is the id of the step
+   *  before it. The last entry is always the target host. */
   steps: QuickAddStep[]
 }
 
@@ -248,7 +249,7 @@ a hostless string.
 
 `sshQuickAdd`: name derivation; identity-file application; validity gates
 (missing user, bad port, missing secret, missing jump secret when overridden);
-plan ordering farthest-hop-first; existing-host reuse by host/port/user with
+plan ordering nearest-hub-hop-first; existing-host reuse by host/port/user with
 case-insensitive host; executor and name landing only on the target body.
 
 Then `npm run typecheck` and `npm run build`.
