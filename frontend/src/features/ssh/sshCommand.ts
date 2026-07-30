@@ -116,6 +116,12 @@ export function parseSSHCommand(raw: string): ParsedSSHCommand | null {
     }
 
     const letter = token[1]
+    if (letter === undefined) {
+      // A bare "-" token (no flag letter at all) — record it verbatim rather
+      // than interpolating `undefined` into the ignored-flag string below.
+      ignoredFlags.push(token)
+      continue
+    }
     const attached = token.slice(2)
     let value = attached
     if (VALUE_FLAGS.has(letter) && !attached) {

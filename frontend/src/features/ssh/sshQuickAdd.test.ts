@@ -159,11 +159,17 @@ check('an empty executor selection becomes null, not an empty string', () => {
   assertEqual(step.body.executorMachineId, null, 'hub decides')
 })
 
-check('buildSSHQuickAddPlan orders a multi-hop chain farthest hop first', () => {
+check('buildSSHQuickAddPlan orders a multi-hop chain nearest-hub hop first', () => {
+  // Regression: this order must match ssh(1)'s own dial order (and
+  // sshmgr.Dialer's semantics — see backend/internal/sshmgr/dialer_test.go's
+  // TestDialThroughJumpConnectionChainOfTwo), so the caller (NewTabDialog's
+  // runPlan) can thread each created row's id into the next step's
+  // `jumpConnectionId` and end up with the hub dialing `near` directly, then
+  // `far` via `near`, then `target` via `far` — not the reverse.
   const raw = 'ssh root@target -J root@near,root@far'
   const plan = buildSSHQuickAddPlan(parse(raw), draftFor(raw), [])
   const hosts = plan.steps.map((s) => (s.kind === 'create' ? s.body.host : `existing:${s.id}`))
-  assertEqual(hosts, ['far', 'near', 'target'], 'farthest, nearest, target')
+  assertEqual(hosts, ['near', 'far', 'target'], 'nearest, farthest, target — matching ssh(1) dial order')
 })
 
 check('hop bodies are ungrouped, executor-less, and auto-named', () => {

@@ -153,11 +153,24 @@ export function NewTabDialog({
         return
       }
       if (!parsed) return
+      // The create chain below has a real `await` before it touches
+      // `onCreateSSH`/`closeNewTab` — every other path in this function
+      // finishes synchronously. If the user navigates to a different
+      // workspace while it's in flight, `wsId` keeps pointing at the
+      // workspace open when Create was clicked (WorkspaceTileArea is never
+      // remounted on a route change), so blindly firing `onCreateSSH` after
+      // the await would yank the user back to that stale workspace and
+      // `closeNewTab()` would dismiss whatever dialog they've since opened
+      // elsewhere. Re-check the *current* store state right before doing
+      // either — the connection itself stays saved regardless.
+      const submittedWsId = wsId
       try {
         const connectionId = await runPlan(buildSSHQuickAddPlan(parsed, draft, connections))
-        closeNewTab()
         showToast(`Added SSH connection "${draft.name.trim()}"`)
-        onCreateSSH(connectionId)
+        if (useDevDeckStore.getState().newTab.wsId === submittedWsId) {
+          closeNewTab()
+          onCreateSSH(connectionId)
+        }
       } catch (err) {
         // Hops created before the failure stay saved on purpose — a retry
         // reuse-matches them instead of duplicating them.

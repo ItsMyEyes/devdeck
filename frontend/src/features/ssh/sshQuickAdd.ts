@@ -29,8 +29,9 @@ export type QuickAddStep =
   | { kind: 'create'; body: CreateSSHConnectionBody }
 
 export interface QuickAddPlan {
-  /** Farthest hop first, target last, so each step's `jumpConnectionId` is
-   *  the id produced by the step before it. */
+  /** Nearest-hub hop first, target last — the same order `ssh(1)` itself
+   *  dials the chain in — so each step's `jumpConnectionId` is the id
+   *  produced by the step before it. */
   steps: QuickAddStep[]
 }
 
@@ -121,9 +122,13 @@ export function buildSSHQuickAddPlan(
   const hopAuth = draft.jumpAuthOverride ? draft.jumpAuth : draft.auth
   const steps: QuickAddStep[] = []
 
-  // `jumps` is nearest-first; the rows must be created farthest-first so each
-  // one can point at the row before it.
-  for (const hop of [...parsed.jumps].reverse()) {
+  // `jumps` is nearest-hub-first, which is also ssh(1)'s own dial order: the
+  // first hop is reached directly from the hub (sshmgr.Dialer dials a row
+  // with no JumpConnectionID straight from the hub), and every later hop is
+  // reached through the one immediately before it. Creating the rows in that
+  // same order lets each one point its `jumpConnectionId` at the row created
+  // just before it — reversing this would wire the chain backwards.
+  for (const hop of parsed.jumps) {
     const match = findExistingConnection(hop, existing)
     if (match) {
       steps.push({ kind: 'existing', id: match.id })

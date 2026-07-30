@@ -104,4 +104,10 @@ check('returns null when there is no destination', () => {
   assertEqual(parseSSHCommand('   '), null, 'blank')
 })
 
+check('a bare "-" token is recorded verbatim, not as "-undefined"', () => {
+  const parsed = parseSSHCommand('ssh - root@host')
+  assertEqual(parsed?.target, { user: 'root', host: 'host', port: 22 }, 'destination still parses')
+  assertEqual(parsed?.ignoredFlags, ['-'], 'bare dash recorded as itself')
+})
+
 console.log(`\n${passed} tests passed`)
