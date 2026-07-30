@@ -407,13 +407,12 @@ git commit -m "feat(ssh): parse an ssh command line into connection fields"
 - Consumes (Task 1): `parseSSHCommand`, `type ParsedSSHCommand`, `type ParsedSSHHop` from `./sshCommand`.
 - Consumes (existing code, do not modify): `type CreateSSHConnectionBody` from `@/lib/api`; `type SSHConnection` from `@/store/types`; `type SSHAuthFieldsValue` from `./SSHAuthFields`.
 - Produces:
-  - `interface SSHQuickAddDraft { raw: string; name: string; executorMachineId: string; auth: SSHAuthFieldsValue; jumpAuthOverride: boolean; jumpAuth: SSHAuthFieldsValue }`
+  - `interface SSHQuickAddDraft { raw: string; name: string; nameTouched: boolean; executorMachineId: string; auth: SSHAuthFieldsValue; jumpAuthOverride: boolean; jumpAuth: SSHAuthFieldsValue }`
   - `type QuickAddStep = { kind: 'existing'; id: string } | { kind: 'create'; body: CreateSSHConnectionBody }`
   - `interface QuickAddPlan { steps: QuickAddStep[] }`
   - `function defaultSSHAuthDraft(): SSHAuthFieldsValue`
   - `function defaultSSHQuickAddDraft(): SSHQuickAddDraft`
   - `function deriveSSHQuickAddName(parsed: ParsedSSHCommand): string`
-  - `function isDerivedName(name: string, previousRaw: string): boolean`
   - `function applyIdentityFile(draft: SSHQuickAddDraft, parsed: ParsedSSHCommand): SSHQuickAddDraft`
   - `function findExistingConnection(hop: ParsedSSHHop, existing: SSHConnection[]): SSHConnection | undefined`
   - `function isSSHQuickAddValid(parsed: ParsedSSHCommand | null, draft: SSHQuickAddDraft, existing: SSHConnection[]): boolean`
@@ -425,6 +424,7 @@ git commit -m "feat(ssh): parse an ssh command line into connection fields"
 - Hop bodies always get `group: ''`, `executorMachineId: null`, `jumpConnectionId: null` (the caller overwrites it) and `name` = `user@host`. `sshmgr.Dialer` runs every hop from the hub regardless of executor — same reasoning as `buildJumpHostRequest` in `jumpHostDraft.ts:42-45`.
 - The **target is always a `create` step**, never reused, even if a saved connection matches: the user explicitly chose "new host" and typed a name and credentials for it. Only *hops* are reuse-matched, which is also what makes a retry after a mid-chain failure idempotent.
 - Secret fields are emitted exactly like `buildJumpHostRequest`: password auth sends only `password`; private-key auth prefers a pasted `privateKey` over `privateKeyPath`, and sends `passphrase` only when non-empty. Never send a field as an empty string.
+- **`nameTouched` is an explicit flag, not something inferred by re-parsing.** The obvious alternative — "the name is auto-derived if it equals what the *previous* raw string derived" — breaks while the user is still typing: `parseSSHCommand('ssh')` returns `null` (a lone `ssh` token with no destination), so as soon as the raw string passes through `"ssh"` and `"ssh "` the comparison has no previous parse to match against and the name freezes at whatever prefix it had. A boolean set by the Name field's own `onChange` has no such hole.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -446,7 +446,6 @@ import {
   defaultSSHQuickAddDraft,
   deriveSSHQuickAddName,
   findExistingConnection,
-  isDerivedName,
   isSSHQuickAddValid,
   type SSHQuickAddDraft,
 } from './sshQuickAdd'
@@ -503,11 +502,13 @@ check('deriveSSHQuickAddName uses user@host, or the bare host with no user', () 
   assertEqual(deriveSSHQuickAddName(parse('ssh myhost')), 'myhost', 'without user')
 })
 
-check('isDerivedName is true for an empty name or one matching the previous raw', () => {
-  assertEqual(isDerivedName('', 'ssh root@a'), true, 'empty name')
-  assertEqual(isDerivedName('root@a', 'ssh root@a'), true, 'still derived')
-  assertEqual(isDerivedName('prod-web', 'ssh root@a'), false, 'hand-edited')
-  assertEqual(isDerivedName('root@a', ''), false, 'no previous parse means treat as hand-typed')
+check('a fresh draft is untouched, unnamed, hub-decides, and password-auth', () => {
+  const fresh = defaultSSHQuickAddDraft()
+  assertEqual(fresh.name, '', 'no name')
+  assertEqual(fresh.nameTouched, false, 'name not hand-edited yet')
+  assertEqual(fresh.executorMachineId, '', 'hub decides')
+  assertEqual(fresh.jumpAuthOverride, false, 'hops reuse the target credentials')
+  assertEqual(fresh.auth.authType, 'password', 'password auth by default')
 })
 
 check('applyIdentityFile switches to private-key auth and clears a pasted key', () => {
@@ -676,12 +677,14 @@ cd frontend && npx tsx src/features/ssh/sshQuickAdd.test.ts
 
 Expected: FAIL — `Cannot find module './sshQuickAdd'`.
 
-> If `npx tsx` cannot resolve the `@/store/types` alias, run it as
-> `npx tsx --tsconfig tsconfig.app.json src/features/ssh/sshQuickAdd.test.ts`.
-> If that still fails, change the two `@/` imports in the **test file only** to
-> relative paths (`../../store/types`, `../../lib/api`) and note it in the commit
-> message — the module under test keeps its `@/` imports either way, since the
-> app builds through Vite.
+> This is the first test file in the repo to import through the `@/*` alias
+> (`jumpHostDraft.test.ts` only imports relatively). `frontend/tsconfig.json` is a
+> single non-split config that declares the `@/*` path mapping, so plain
+> `npx tsx <file>` should resolve it. If it does not, change the `@/` imports in
+> the **test file only** to relative paths (`../../store/types`) and note that in
+> the commit message — the module under test keeps its `@/` imports either way,
+> since the app builds through Vite. Do **not** invent a `tsconfig.app.json`;
+> no such file exists here.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -697,12 +700,15 @@ Create `frontend/src/features/ssh/sshQuickAdd.ts`:
 import type { CreateSSHConnectionBody } from '@/lib/api'
 import type { SSHConnection } from '@/store/types'
 import type { SSHAuthFieldsValue } from './SSHAuthFields'
-import { parseSSHCommand, type ParsedSSHCommand, type ParsedSSHHop } from './sshCommand'
+import type { ParsedSSHCommand, ParsedSSHHop } from './sshCommand'
 
 export interface SSHQuickAddDraft {
   /** The raw ssh command as typed. */
   raw: string
   name: string
+  /** Set once the user edits the Name field themselves; until then every
+   *  keystroke in the command re-derives the name. */
+  nameTouched: boolean
   /** '' means "hub decides" — sent as null. */
   executorMachineId: string
   auth: SSHAuthFieldsValue
@@ -729,6 +735,7 @@ export function defaultSSHQuickAddDraft(): SSHQuickAddDraft {
   return {
     raw: '',
     name: '',
+    nameTouched: false,
     executorMachineId: '',
     auth: defaultSSHAuthDraft(),
     jumpAuthOverride: false,
@@ -742,15 +749,6 @@ function hopName(hop: ParsedSSHHop): string {
 
 export function deriveSSHQuickAddName(parsed: ParsedSSHCommand): string {
   return hopName(parsed.target)
-}
-
-/** True when `name` is still whatever the previous raw string derived (or is
- *  blank) — i.e. the user has not typed their own, so re-deriving it on the
- *  next keystroke is safe. */
-export function isDerivedName(name: string, previousRaw: string): boolean {
-  if (name.trim() === '') return true
-  const previous = parseSSHCommand(previousRaw)
-  return previous !== null && name === deriveSSHQuickAddName(previous)
 }
 
 /** Maps `-i path` onto the private-key auth fields. A path and a pasted key
@@ -887,13 +885,13 @@ git commit -m "feat(ssh): build the create-connection chain for a pasted ssh com
 ### Task 3: SSH kind in the New tab dialog
 
 **Files:**
-- Modify: `frontend/src/store/useDevDeckStore.ts` (line 50 `NewTabKind`; lines 52-60 `NewTabState`; line 284 `setNewTab` signature; line 551 `openNewTab` initial value)
+- Modify: `frontend/src/store/useDevDeckStore.ts` — **four** sites: line 50 `NewTabKind`; lines 52-60 `NewTabState`; line 284 `setNewTab` signature; **line 437 the store's own initial `newTab` literal**; line 551 `openNewTab`'s reassignment. There are **two** full `NewTabState` object literals in this file — missing either one is a `tsc` error.
 - Modify: `frontend/src/features/tabs/NewTabDialog.tsx` (whole file)
 - Modify: `frontend/src/features/tabs/WorkspaceTileArea.tsx` (lines 66-69 and the `<NewTabDialog …/>` at 279-285)
 
 **Interfaces:**
 - Consumes (Task 1): `parseSSHCommand` from `@/features/ssh/sshCommand`.
-- Consumes (Task 2): `buildSSHQuickAddPlan`, `defaultSSHQuickAddDraft`, `deriveSSHQuickAddName`, `applyIdentityFile`, `findExistingConnection`, `isDerivedName`, `isSSHQuickAddValid`, `type QuickAddPlan`, `type SSHQuickAddDraft` from `@/features/ssh/sshQuickAdd`.
+- Consumes (Task 2): `buildSSHQuickAddPlan`, `defaultSSHQuickAddDraft`, `deriveSSHQuickAddName`, `applyIdentityFile`, `findExistingConnection`, `isSSHQuickAddValid`, `type QuickAddPlan` from `@/features/ssh/sshQuickAdd`.
 - Consumes (existing): `SSHAuthFields` from `@/features/ssh/SSHAuthFields`; `useSSHConnections`, `useCreateSSHConnection`, `useMachines`, `useMachinesHealth` from `@/features/data/queries`; `openSSHShellTab` from the store.
 - Produces: `NewTabDialogProps` gains `onCreateSSH: (connectionId: string) => void`.
 
@@ -934,13 +932,23 @@ Lines 550-551 — reset it on open:
         ),
 ```
 
-- [ ] **Step 2: Verify the store change compiles and shows the expected call-site error**
+**And the second literal — easy to miss.** The store's own initial state (inside
+`create<DevDeckState>()(…)`, around line 437 before these edits) builds a full
+`NewTabState` too. `sshConnectionId` is a required field, so leaving this one
+alone is a hard `tsc` error (`TS2345: Property 'sshConnectionId' is missing …`):
+
+```ts
+      newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '', sshConnectionId: '' },
+```
+
+- [ ] **Step 2: Verify the store change compiles**
 
 ```bash
 cd frontend && npm run typecheck
 ```
 
-Expected: PASS. (`sshConnectionId` is only additive; nothing reads it yet.)
+Expected: PASS. If it fails with `TS2345: Property 'sshConnectionId' is missing in type
+'{ open: false; wsId: null; … }'`, the initial-state literal above was missed.
 
 - [ ] **Step 3: Rewrite `NewTabDialog.tsx`**
 
@@ -964,7 +972,6 @@ import {
   defaultSSHQuickAddDraft,
   deriveSSHQuickAddName,
   findExistingConnection,
-  isDerivedName,
   isSSHQuickAddValid,
   type QuickAddPlan,
 } from '@/features/ssh/sshQuickAdd'
@@ -1006,7 +1013,8 @@ export function NewTabDialog({
   const showToast = useDevDeckStore((s) => s.showToast)
   const machines = useMachines().data ?? []
   const machineHealth = useMachinesHealth(machines)
-  const connections = useSSHConnections().data ?? []
+  const connectionsQuery = useSSHConnections()
+  const connections = connectionsQuery.data ?? []
   const createConnection = useCreateSSHConnection()
   const [draft, setDraft] = useState(defaultSSHQuickAddDraft())
   const open = newTab.open && newTab.wsId === wsId
@@ -1017,12 +1025,16 @@ export function NewTabDialog({
     }
   }, [open, newTab.machineId, machines, setNewTab])
 
-  // Default the host picker once the connection list has loaded: the first
-  // saved host, or the quick-add form when there are none to pick.
+  // Default the host picker once the connection list has actually loaded: the
+  // first saved host, or the quick-add form when there are none. The
+  // `isLoading` guard matters — `.data ?? []` is an empty array while the query
+  // is still in flight, and committing `NEW_SSH_HOST` from that would stick:
+  // the `newTab.sshConnectionId` truthiness guard stops this effect from ever
+  // re-running once it has written something.
   useEffect(() => {
-    if (!open || newTab.kind !== 'ssh' || newTab.sshConnectionId) return
+    if (!open || newTab.kind !== 'ssh' || newTab.sshConnectionId || connectionsQuery.isLoading) return
     setNewTab({ sshConnectionId: connections[0]?.id ?? NEW_SSH_HOST })
-  }, [open, newTab.kind, newTab.sshConnectionId, connections, setNewTab])
+  }, [open, newTab.kind, newTab.sshConnectionId, connections, connectionsQuery.isLoading, setNewTab])
 
   // A fresh dialog starts with a fresh quick-add draft — credentials must not
   // survive a close/reopen.
@@ -1051,11 +1063,15 @@ export function NewTabDialog({
   // created — an already-saved bastion brings its own.
   const createsHop = (parsed?.jumps ?? []).some((hop) => !findExistingConnection(hop, connections))
 
+  // `busy` gates every branch, not just the SSH one: an in-flight create chain
+  // must not be overtaken by a second Create in another kind.
   const canCreate =
-    newTab.kind === 'ssh'
-      ? !busy &&
-        (addingSSHHost ? isSSHQuickAddValid(parsed, draft, connections) : Boolean(newTab.sshConnectionId))
-      : !!newTab.machineId && (newTab.kind === 'browser' || !!shellProject)
+    !busy &&
+    (newTab.kind === 'ssh'
+      ? addingSSHHost
+        ? isSSHQuickAddValid(parsed, draft, connections)
+        : Boolean(newTab.sshConnectionId)
+      : !!newTab.machineId && (newTab.kind === 'browser' || !!shellProject))
 
   function handleRawChange(raw: string) {
     setDraft((d) => {
@@ -1063,7 +1079,7 @@ export function NewTabDialog({
       const parsedNext = parseSSHCommand(raw)
       if (!parsedNext) return next
       // Re-derive the name only while the user hasn't typed their own.
-      const name = isDerivedName(d.name, d.raw) ? deriveSSHQuickAddName(parsedNext) : d.name
+      const name = d.nameTouched ? d.name : deriveSSHQuickAddName(parsedNext)
       return applyIdentityFile({ ...next, name }, parsedNext)
     })
   }
@@ -1117,16 +1133,19 @@ export function NewTabDialog({
       <DialogTitle>New tab</DialogTitle>
       <DialogDescription className="mb-4">Choose what to open and where to run it.</DialogDescription>
 
+      {/* Locked while a create chain is in flight — switching kind mid-chain
+          would re-enable Create for a different kind and let a second tab open
+          on top of the one the pending chain is about to produce. */}
       <div className="mb-4 flex gap-1.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-1">
-        <KindTab active={newTab.kind === 'browser'} onClick={() => setNewTab({ kind: 'browser' })}>
+        <KindTab active={newTab.kind === 'browser'} disabled={busy} onClick={() => setNewTab({ kind: 'browser' })}>
           <Globe size={13} />
           Browser
         </KindTab>
-        <KindTab active={newTab.kind === 'shell'} onClick={() => setNewTab({ kind: 'shell' })}>
+        <KindTab active={newTab.kind === 'shell'} disabled={busy} onClick={() => setNewTab({ kind: 'shell' })}>
           <TerminalSquare size={13} />
           Spawn shell
         </KindTab>
-        <KindTab active={newTab.kind === 'ssh'} onClick={() => setNewTab({ kind: 'ssh' })}>
+        <KindTab active={newTab.kind === 'ssh'} disabled={busy} onClick={() => setNewTab({ kind: 'ssh' })}>
           <Network size={13} />
           SSH
         </KindTab>
@@ -1179,7 +1198,7 @@ export function NewTabDialog({
               <Input
                 value={draft.name}
                 disabled={busy}
-                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value, nameTouched: true }))}
                 placeholder="prod-web"
                 className="mb-3 font-mono"
               />
@@ -1264,12 +1283,24 @@ export function NewTabDialog({
   )
 }
 
-function KindTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function KindTab({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         'flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-[12px] font-medium transition-colors',
+        'disabled:cursor-not-allowed disabled:opacity-50',
         active ? 'bg-primary text-primary-foreground' : 'bg-transparent text-devdeck-muted hover:text-devdeck-fg',
       )}
     >
@@ -1368,6 +1399,8 @@ Start the app (`npm run dev` from `frontend/`), open a workspace, click the tab 
 8. Create with a jump host produces **two** new rows in the SSH Connections page, the target's "Connect via" pointing at the bastion.
 9. Re-running the same command a second time reuses the bastion row (only one new row appears).
 10. Closing and reopening the dialog clears the command and the password field.
+11. With saved hosts present, opening the dialog on a cold page load (hard-refresh, then immediately press Cmd/Ctrl+T → SSH) still preselects a saved host — not `+ New host from ssh command…`.
+12. While a multi-hop create is in flight, all three kind tabs and the Create button are disabled until it finishes.
 
 - [ ] **Step 7: Commit**
 
@@ -1381,18 +1414,18 @@ git commit -m "feat(tabs): open an SSH shell from New tab, with inline host crea
 ### Task 4: Paste-to-fill in the Add SSH connection drawer
 
 **Files:**
-- Modify: `frontend/src/features/ssh/SSHConnectionDialog.tsx` (imports at lines 1-19; local state near line 35; the effect at 38-40; the body's first field at line 174)
+- Modify: `frontend/src/features/ssh/SSHConnectionDialog.tsx` (imports at lines 1-19; local state near line 35; the reset effect at 38-40; the Name input's `onChange` at line 178; the body's first field at line 174)
 
 **Interfaces:**
 - Consumes (Task 1): `parseSSHCommand` from `./sshCommand`.
-- Consumes (Task 2): `deriveSSHQuickAddName`, `findExistingConnection`, `isDerivedName` from `./sshQuickAdd`.
+- Consumes (Task 2): `deriveSSHQuickAddName`, `findExistingConnection` from `./sshQuickAdd`.
 - Consumes (existing, unchanged): `defaultJumpHostDraft`, `isJumpHostDraftValid`, `buildJumpHostRequest` from `./jumpHostDraft`; `setDialog` (`setSSHDialog`) from the store.
 - Produces: nothing consumed by other tasks.
 
 **Design notes:**
 - The field renders only when `!isEdit`. An edit already has a host; silently rewriting it on paste would be a trap.
 - The raw string is local component state (`pasteRaw`), not store state — it is scratch input, like `jumpDraft` already is.
-- Name is only overwritten while `isDerivedName(dialog.name, pasteRaw)` holds, so a hand-typed name survives further edits to the command.
+- Name is only overwritten while the user hasn't typed one themselves, tracked by a local `nameTouched` flag set from the Name field's own `onChange` — same reason as Task 2's note: inferring it by re-parsing the previous raw string breaks the moment the string passes through `"ssh"`, which parses to `null`.
 - Only the **nearest** hop is prefilled. The inline jump mini-form hard-codes `jumpConnectionId: null` (`jumpHostDraft.ts:46-56`) and can only produce one hop; chains belong to the New-tab quick-add path.
 
 - [ ] **Step 1: Add the imports and local state**
@@ -1401,7 +1434,7 @@ Add to the existing import block (keep `./jumpHostDraft` and `./SSHAuthFields` a
 
 ```tsx
 import { parseSSHCommand } from './sshCommand'
-import { deriveSSHQuickAddName, findExistingConnection, isDerivedName } from './sshQuickAdd'
+import { deriveSSHQuickAddName, findExistingConnection } from './sshQuickAdd'
 ```
 
 Next to `const [jumpDraft, setJumpDraft] = useState(defaultJumpHostDraft())` (line 36), add:
@@ -1409,6 +1442,7 @@ Next to `const [jumpDraft, setJumpDraft] = useState(defaultJumpHostDraft())` (li
 ```tsx
   const [pasteRaw, setPasteRaw] = useState('')
   const [extraHops, setExtraHops] = useState(0)
+  const [nameTouched, setNameTouched] = useState(false)
 ```
 
 Extend the reset effect (lines 38-40) so scratch input never survives a close:
@@ -1419,8 +1453,19 @@ Extend the reset effect (lines 38-40) so scratch input never survives a close:
       setAddingJump(false)
       setPasteRaw('')
       setExtraHops(0)
+      setNameTouched(false)
     }
   }, [dialog.open])
+```
+
+Mark the Name field as hand-edited. Change its existing `onChange` (line 178) from
+`onChange={(e) => setDialog({ name: e.target.value })}` to:
+
+```tsx
+          onChange={(e) => {
+            setNameTouched(true)
+            setDialog({ name: e.target.value })
+          }}
 ```
 
 - [ ] **Step 2: Add the paste handler**
@@ -1433,7 +1478,6 @@ Add above `handleJumpChange` (line 79):
    *  for the form. */
   function handlePasteChange(raw: string) {
     const parsed = parseSSHCommand(raw)
-    const nameWasDerived = isDerivedName(dialog.name, pasteRaw)
     setPasteRaw(raw)
     if (!parsed) {
       setExtraHops(0)
@@ -1445,7 +1489,7 @@ Add above `handleJumpChange` (line 79):
       port: String(parsed.target.port),
       username: parsed.target.user,
     }
-    if (nameWasDerived) patch.name = deriveSSHQuickAddName(parsed)
+    if (!nameTouched) patch.name = deriveSSHQuickAddName(parsed)
     if (parsed.identityFile) {
       patch.authType = 'privatekey'
       patch.privateKey = ''
@@ -1471,6 +1515,14 @@ Add above `handleJumpChange` (line 79):
         setAddingJump(true)
         patch.jumpConnectionId = ''
       }
+    } else {
+      // Jump state is derived from the *current* command, so deleting the -J
+      // clause has to retract it. Without this branch, editing
+      // "ssh a@b -J c@d" down to "ssh a@b" would leave the prefilled jump
+      // mini-form open (or a stale jumpConnectionId selected) with nothing in
+      // the command asking for it.
+      setAddingJump(false)
+      patch.jumpConnectionId = ''
     }
     setDialog(patch)
   }
@@ -1528,7 +1580,8 @@ Open SSH Connections → **Add**, and confirm:
 5. `-J` naming an already-saved host sets "Connect via" to that host.
 6. `-J` naming an unknown host opens the inline jump mini-form with Host/Username/Port prefilled, so only the secret is missing.
 7. A two-hop `-J a@x,b@y` shows the "Only the nearest jump host was filled in. Create the 1 outer hop first…" note.
-8. Submitting still works end-to-end and the new host appears in the list.
+8. Deleting the ` -J …` clause back out of the command closes the inline jump mini-form and resets "Connect via" to Direct connection.
+9. Submitting still works end-to-end and the new host appears in the list.
 
 - [ ] **Step 6: Commit**
 
@@ -1587,5 +1640,8 @@ Expected: clean, or only intentional leftovers. If the working tree is clean, no
 
 Record these in the final report so the reviewer isn't surprised:
 
+- **No `SSHAuthDraft` interface.** The spec declared one; `sshQuickAdd.ts` reuses the existing exported `SSHAuthFieldsValue` (`SSHAuthFields.tsx:74`) instead, which has exactly that shape. Drafts then spread straight into `<SSHAuthFields …/>` with no duplicate type to keep in sync.
+- **`isSSHQuickAddValid` takes a third parameter.** The spec wrote `(parsed, draft)`. It is `(parsed, draft, existing: SSHConnection[])` here, because the spec's own rule — demand jump credentials "only when a hop will actually be created" — cannot be evaluated without the saved-connection list to reuse-match against.
+- **"Has the user typed their own name?" is an explicit flag, not inferred.** The spec's wording ("name only while it is still empty or still equal to the previously derived one") describes re-parsing the previous raw string. That fails while typing, because `parseSSHCommand('ssh')` is `null` — see the note in Task 2. Both surfaces use a `nameTouched` boolean set by the Name field instead.
 - **No bespoke "collapsed auth summary" for `-i`.** The spec described the auth block shrinking to a `Using key ~/.ssh/id_rsa` line. Instead, `SSHAuthFields` is rendered with `authType: 'privatekey'` and `privateKeyPath` prefilled — the user sees the real, editable path in the field that already exists. Same outcome (nothing left to type), no new widget.
 - **The SSH executor lives in local draft state, not `newTab.machineId`.** See the rationale in Task 3; the store still only gains `sshConnectionId`.
