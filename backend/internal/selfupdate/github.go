@@ -24,8 +24,9 @@ type Asset struct {
 	ID   int64  `json:"id"`
 }
 
-// Client talks to the GitHub REST API for one owner/repo, authenticating
-// with a bearer token (required since the target repo is private).
+// Client talks to the GitHub REST API for one owner/repo. Token is optional —
+// the release repo is public, so unauthenticated requests work; set it only
+// to raise the unauthenticated API's 60 requests/hour rate limit.
 type Client struct {
 	HTTPClient *http.Client
 	// BaseURL overrides the GitHub API host; empty means the real API

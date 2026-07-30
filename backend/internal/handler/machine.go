@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
@@ -186,6 +188,44 @@ func (h *MachineHandler) PostMachineStop(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
+}
+
+// GetMachineVersion handles GET /api/machines/{id}/version, forwarding the
+// target machine's own build info. Cheap and network-free on the target, so
+// the Machines page calls it for every row.
+func (h *MachineHandler) GetMachineVersion(w http.ResponseWriter, r *http.Request) {
+	h.proxySelf(w, r, machineclient.Version)
+}
+
+// GetMachineUpdateCheck handles GET /api/machines/{id}/update-check. The
+// target reaches GitHub, so this is operator-initiated only — never polled.
+func (h *MachineHandler) GetMachineUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	h.proxySelf(w, r, machineclient.UpdateCheck)
+}
+
+// PostMachineUpdate handles POST /api/machines/{id}/update: the target
+// downloads, verifies, and installs the latest release. It does not restart —
+// the frontend issues a separate restart so a failed install never triggers
+// one.
+func (h *MachineHandler) PostMachineUpdate(w http.ResponseWriter, r *http.Request) {
+	h.proxySelf(w, r, machineclient.Update)
+}
+
+// proxySelf looks a machine up and forwards its /api/self/* response body
+// verbatim, so the runtime stays the single source of truth for these
+// schemas. A failure is a 502 carrying the target's own message, matching
+// PostMachineRestart.
+func (h *MachineHandler) proxySelf(w http.ResponseWriter, r *http.Request, call func(context.Context, domain.Machine) (json.RawMessage, error)) {
+	m, err := h.st.MachineByID(r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	body, err := call(r.Context(), m)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func healthResponse(s machineclient.HealthStatus) map[string]any {

@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { StatusDot } from '@/components/ui/status-dot'
 import { changeHub, openLogFile } from '@/features/desktop/desktopBridge'
-import { useTailscaleStatus } from '@/features/data/queries'
+import { useMachines, useTailscaleStatus } from '@/features/data/queries'
 import type { TailscaleHubStatus } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { VersionSection } from './VersionSection'
 
 const MASKED_KEY = '••••••••••••••••'
 
@@ -25,6 +26,8 @@ export function DesktopSettingsDialog() {
   const showToast = useDevDeckStore((s) => s.showToast)
   const hubApiKey = useDevDeckStore((s) => s.hubApiKey)
   const tailscaleStatus = useTailscaleStatus(open)
+  const machines = useMachines()
+  const localMachineId = machines.data?.find((m) => m.isLocal)?.id
   const [confirmingSwitch, setConfirmingSwitch] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [keyRevealed, setKeyRevealed] = useState(false)
@@ -59,6 +62,8 @@ export function DesktopSettingsDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && !switching && closeDialog()} width={440}>
       <DialogTitle>Desktop settings</DialogTitle>
       <DialogDescription className="mb-5">This device is hosting the hub locally.</DialogDescription>
+
+      <VersionSection machineId={localMachineId} />
 
       <div className="mb-5">
         <div className="mb-1.5 text-[12.5px] font-semibold text-devdeck-fg-2">Hub mode</div>

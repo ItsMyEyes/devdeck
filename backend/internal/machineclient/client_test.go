@@ -146,3 +146,71 @@ func TestStopSurfacesTheTargetsErrorMessage(t *testing.T) {
 		t.Errorf("error = %q, want it to surface the target's own error message", err.Error())
 	}
 }
+
+func TestVersionReturnsTheRuntimesRawJSON(t *testing.T) {
+	var gotPath, gotMethod, gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod, gotAuth = r.URL.Path, r.Method, r.Header.Get("Authorization")
+		w.Write([]byte(`{"version":"v1.4.2","sha256":"abc"}`))
+	}))
+	defer server.Close()
+
+	body, err := Version(context.Background(), domain.Machine{ID: "m1", URL: server.URL, Key: "k"})
+	if err != nil {
+		t.Fatalf("Version() error = %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/self/version" || gotAuth != "Bearer k" {
+		t.Errorf("got method=%s path=%s auth=%s, want GET /api/self/version with Bearer k", gotMethod, gotPath, gotAuth)
+	}
+	if !strings.Contains(string(body), `"v1.4.2"`) {
+		t.Errorf("body = %s, want the runtime's JSON forwarded verbatim", body)
+	}
+}
+
+func TestUpdateCheckPostsToTheRightPath(t *testing.T) {
+	var gotPath, gotMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.Write([]byte(`{"updateAvailable":false}`))
+	}))
+	defer server.Close()
+
+	if _, err := UpdateCheck(context.Background(), domain.Machine{ID: "m1", URL: server.URL, Key: "k"}); err != nil {
+		t.Fatalf("UpdateCheck() error = %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/self/update-check" {
+		t.Errorf("got method=%s path=%s, want GET /api/self/update-check", gotMethod, gotPath)
+	}
+}
+
+func TestUpdatePostsToTheRightPath(t *testing.T) {
+	var gotPath, gotMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.Write([]byte(`{"status":"updated","version":"v1.5.0"}`))
+	}))
+	defer server.Close()
+
+	if _, err := Update(context.Background(), domain.Machine{ID: "m1", URL: server.URL, Key: "k"}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/self/update" {
+		t.Errorf("got method=%s path=%s, want POST /api/self/update", gotMethod, gotPath)
+	}
+}
+
+func TestUpdateUnwrapsTheRuntimesErrorEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"this runtime is supervised by its desktop app"}`))
+	}))
+	defer server.Close()
+
+	_, err := Update(context.Background(), domain.Machine{ID: "m1", URL: server.URL, Key: "k"})
+	if err == nil {
+		t.Fatal("Update() error = nil, want non-nil for a 409")
+	}
+	if !strings.Contains(err.Error(), "supervised by its desktop app") {
+		t.Errorf("error = %v, want the runtime's own reason", err)
+	}
+}

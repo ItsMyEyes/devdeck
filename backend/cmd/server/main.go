@@ -84,8 +84,8 @@ func main() {
 	// Every flag below resolves flag > env > devdeck.yaml > built-in default.
 	// config.Pick / config.PickBool supply the YAML layer; passing them as the
 	// flag's default is what makes an explicit flag outrank the file for free.
-	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server (requires -github-token / DEVDECK_GITHUB_TOKEN)")
-	githubToken := flag.String("github-token", envOr("DEVDECK_GITHUB_TOKEN", config.Pick(cfg.Updates.GitHubToken, "")), "GitHub token used to check for and download updates from the private release repo (devdeck.yaml: updates.github_token)")
+	updates := flag.Bool("updates", false, "check for and install the latest release, then exit; does not restart the server")
+	githubToken := flag.String("github-token", envOr("DEVDECK_GITHUB_TOKEN", config.Pick(cfg.Updates.GitHubToken, "")), "GitHub token for update checks and downloads; only needed if the release repo is private or the unauthenticated API rate limit is a problem (devdeck.yaml: updates.github_token)")
 	envFile := flag.String("env", envOr("DEVDECK_ENV_FILE", ".env"), "path to a .env file to load (e.g. LLM API keys for the Tools module); missing file is not an error")
 	addr := flag.String("addr", envOr("DEVDECK_ADDR", config.Pick(cfg.Addr, "127.0.0.1:8989")), "listen address (devdeck.yaml: addr)")
 	dbPath := flag.String("db", envOr("DEVDECK_DB", config.Pick(cfg.DB, defaultDBPath())), "sqlite database path (devdeck.yaml: db)")
@@ -121,9 +121,6 @@ func main() {
 	}
 
 	if *updates {
-		if *githubToken == "" {
-			log.Fatalf("--updates requires --github-token or DEVDECK_GITHUB_TOKEN")
-		}
 		execPath, err := os.Executable()
 		if err != nil {
 			log.Fatalf("--updates: resolve current executable path: %v", err)
@@ -133,11 +130,18 @@ func main() {
 			Repo:  selfupdate.Repo,
 			Token: *githubToken,
 		}
-		if err := selfupdate.Run(context.Background(), client, selfupdate.Options{
+		res, err := selfupdate.Run(context.Background(), client, selfupdate.Options{
 			CurrentVersion: version.Version,
 			ExecPath:       execPath,
-		}); err != nil {
+		})
+		if err != nil {
 			log.Fatalf("--updates: %v", err)
+		}
+		if res.Warning != "" {
+			log.Printf("warning: %s", res.Warning)
+		}
+		if !res.Updated {
+			log.Printf("already on latest version %s", version.Version)
 		}
 		return
 	}
@@ -289,7 +293,12 @@ func main() {
 	}
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
-	selfH := handler.NewSelfHandler(managed)
+	updater := &selfupdate.Updater{Client: &selfupdate.Client{
+		Owner: selfupdate.Owner,
+		Repo:  selfupdate.Repo,
+		Token: *githubToken,
+	}}
+	selfH := handler.NewSelfHandler(managed, version.Version, *githubToken != "", updater)
 	hubKeyH := handler.NewHubKeyHandler(*apiKey)
 	wsH := handler.NewWorkspaceHandler(wsSvc)
 	pH := handler.NewProjectHandler(pSvc)
@@ -385,6 +394,9 @@ func main() {
 	mux.HandleFunc("GET /api/tailscale-status", tailscaleStatusH.ServeHTTP)
 	mux.HandleFunc("POST /api/self/restart", selfH.PostRestart)
 	mux.HandleFunc("POST /api/self/stop", selfH.PostStop)
+	mux.HandleFunc("GET /api/self/version", selfH.GetVersion)
+	mux.HandleFunc("GET /api/self/update-check", selfH.GetUpdateCheck)
+	mux.HandleFunc("POST /api/self/update", selfH.PostUpdate)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
@@ -419,6 +431,9 @@ func main() {
 	mux.HandleFunc("GET /api/worktrees/{id}/file", fileH.Read)
 	mux.HandleFunc("PUT /api/worktrees/{id}/file", fileH.Write)
 	mux.HandleFunc("DELETE /api/worktrees/{id}/file", fileH.Delete)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/mkdir", fileH.Mkdir)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/move", fileH.Move)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/copy", fileH.Copy)
 
 	mux.HandleFunc("GET /api/worktrees/{id}/git/status", gitH.Status)
 	mux.HandleFunc("GET /api/worktrees/{id}/git/diff", gitH.Diff)
@@ -516,6 +531,9 @@ func main() {
 		mux.HandleFunc("POST /api/machines/{id}/token", machineH.PostToken)
 		mux.HandleFunc("POST /api/machines/{id}/restart", machineH.PostMachineRestart)
 		mux.HandleFunc("POST /api/machines/{id}/stop", machineH.PostMachineStop)
+		mux.HandleFunc("GET /api/machines/{id}/version", machineH.GetMachineVersion)
+		mux.HandleFunc("GET /api/machines/{id}/update-check", machineH.GetMachineUpdateCheck)
+		mux.HandleFunc("POST /api/machines/{id}/update", machineH.PostMachineUpdate)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
 
 		mux.HandleFunc("GET /api/bookmarks", bookmarkH.GetBookmarks)
@@ -559,6 +577,9 @@ func main() {
 		mux.HandleFunc("GET /api/ssh/connections/{id}/file", sshFileH.Read)
 		mux.HandleFunc("PUT /api/ssh/connections/{id}/file", sshFileH.Write)
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}/file", sshFileH.Delete)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/mkdir", sshFileH.Mkdir)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/move", sshFileH.Move)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/copy", sshFileH.Copy)
 
 		// Database connection registry — hub-scoped like the SSH registry.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)

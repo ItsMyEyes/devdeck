@@ -64,12 +64,15 @@ import {
   fetchHubKey,
   fetchIssueEvents,
   fetchMachineHealth,
+  fetchMachineUpdateCheck,
   fetchMachines,
+  fetchMachineVersion,
   fetchSettings,
   fetchSSHConnections,
   fetchTailscaleStatus,
   fetchWhoami,
   fetchWorkspaces,
+  installMachineUpdate,
   markAllNewsRead,
   mintHandoverToken,
   restartMachine,
@@ -169,6 +172,9 @@ import {
   installAgentSkill,
   installWorktreeRipgrep,
   killTerminalSession,
+  mkdirWorktreeFolder,
+  moveWorktreeFile,
+  copyWorktreeFile,
   removeAgentEnvProfile,
   removeAgentMCPServer,
   removeAgentSkill,
@@ -195,6 +201,9 @@ import {
   fetchSSHFiles,
   grepSSHFiles,
   installSSHRipgrep,
+  mkdirSSHFolder,
+  moveSSHFile,
+  copySSHFile,
   searchSSHFiles,
   writeSSHFile,
 } from '@/lib/sshFileApi'
@@ -296,6 +305,41 @@ export function useMachineHealth(id: string | undefined) {
     enabled: !!id,
     staleTime: 5_000,
     refetchInterval: 15_000,
+  })
+}
+
+/** A machine's build info. Network-free on the runtime and immutable until it
+ *  restarts, so this is cached hard rather than polled. */
+export function useMachineVersion(id: string | undefined) {
+  return useQuery({
+    queryKey: qk.machineVersion(id ?? ''),
+    queryFn: () => fetchMachineVersion(id!),
+    enabled: !!id,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** An update check against GitHub. Deliberately never automatic: the
+ *  unauthenticated GitHub API allows 60 requests/hour, which polling per
+ *  machine would exhaust in minutes. Call `refetch()` from a button. */
+export function useMachineUpdateCheck(id: string | undefined) {
+  return useQuery({
+    queryKey: qk.machineUpdateCheck(id ?? ''),
+    queryFn: () => fetchMachineUpdateCheck(id!),
+    enabled: false,
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
+export function useInstallMachineUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => installMachineUpdate(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: qk.machineVersion(id) })
+      queryClient.invalidateQueries({ queryKey: qk.machineUpdateCheck(id) })
+    },
   })
 }
 
@@ -1597,5 +1641,47 @@ export function useDeletePathsTarget(target: FilesTarget) {
       for (const path of paths) queryClient.removeQueries({ queryKey: qk.worktreeFile(target.machine.id, target.worktreeId, path) })
       return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(target.machine.id, target.worktreeId) })
     },
+  })
+}
+
+function invalidateFilesRoot(queryClient: ReturnType<typeof useQueryClient>, target: FilesTarget) {
+  return queryClient.invalidateQueries({
+    queryKey: target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId),
+  })
+}
+
+/** Backs the file tree's "New Folder" (inline create, mirrors
+ *  useWriteFileTarget's "New File"). */
+export function useMkdirTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (path: string) =>
+      target.kind === 'ssh' ? mkdirSSHFolder(target.connectionId, path) : mkdirWorktreeFolder(target.machine, target.worktreeId, path),
+    onSuccess: () => invalidateFilesRoot(queryClient, target),
+  })
+}
+
+/** Backs both "Rename" (same parent, new name) and "Cut" + "Paste" (new
+ *  parent) — a single move primitive, same shape as the backend's Move. */
+export function useMoveFileTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ from, to }: { from: string; to: string }) =>
+      target.kind === 'ssh' ? moveSSHFile(target.connectionId, from, to) : moveWorktreeFile(target.machine, target.worktreeId, from, to),
+    onSuccess: (_result, { from }) => {
+      if (target.kind === 'ssh') queryClient.removeQueries({ queryKey: qk.sshFile(target.connectionId, from) })
+      else queryClient.removeQueries({ queryKey: qk.worktreeFile(target.machine.id, target.worktreeId, from) })
+      return invalidateFilesRoot(queryClient, target)
+    },
+  })
+}
+
+/** Backs "Copy" + "Paste" (duplicate into a new path, source untouched). */
+export function useCopyFileTarget(target: FilesTarget) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ from, to }: { from: string; to: string }) =>
+      target.kind === 'ssh' ? copySSHFile(target.connectionId, from, to) : copyWorktreeFile(target.machine, target.worktreeId, from, to),
+    onSuccess: () => invalidateFilesRoot(queryClient, target),
   })
 }

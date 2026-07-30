@@ -648,6 +648,31 @@ export interface MachineHealth {
   latencyMs?: number
 }
 
+export interface MachineVersion {
+  version: string
+  sha256: string
+}
+
+/** Result of a manual update check. `error` is non-empty when the check itself
+ *  failed — the request still succeeds with 200 so one broken machine doesn't
+ *  blank the page. */
+export interface MachineUpdateCheck {
+  current: string
+  latest: string
+  updateAvailable: boolean
+  checksumVerified: 'match' | 'mismatch' | 'unknown'
+  tokenConfigured: boolean
+  activeSessions: number
+  managed: boolean
+  error: string
+}
+
+export interface MachineUpdateResult {
+  status: 'updated' | 'up-to-date'
+  version: string
+  warning: string
+}
+
 export function fetchMachines(): Promise<Machine[]> {
   return request<Machine[]>('GET', '/machines')
 }
@@ -674,6 +699,20 @@ export function stopMachine(id: string): Promise<void> {
 
 export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
+}
+
+export function fetchMachineVersion(id: string): Promise<MachineVersion> {
+  return request<MachineVersion>('GET', `/machines/${id}/version`)
+}
+
+export function fetchMachineUpdateCheck(id: string): Promise<MachineUpdateCheck> {
+  return request<MachineUpdateCheck>('GET', `/machines/${id}/update-check`)
+}
+
+/** Installs the latest release on a machine. Named to avoid colliding with
+ *  `updateMachine`, which PATCHes a machine's name/url/key. */
+export function installMachineUpdate(id: string): Promise<MachineUpdateResult> {
+  return request<MachineUpdateResult>('POST', `/machines/${id}/update`)
 }
 
 /** Mints a 60-second hub-signed handover token scoped to one machine — see internal/handovertoken. */

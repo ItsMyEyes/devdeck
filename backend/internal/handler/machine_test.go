@@ -372,3 +372,109 @@ func TestPostTokenMintsAHandoverTokenForTheAuthenticatedUser(t *testing.T) {
 		t.Errorf("status for unknown machine = %d, want 404", rec2.Code)
 	}
 }
+
+func TestGetMachineVersionForwardsTheRuntimesAnswer(t *testing.T) {
+	var gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Write([]byte(`{"version":"v1.4.2","sha256":"abc123"}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/version", h.GetMachineVersion)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/version", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/self/version" {
+		t.Errorf("backend received path %q, want /api/self/version", gotPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"v1.4.2"`) {
+		t.Errorf("body = %s, want the runtime's JSON forwarded verbatim", rec.Body.String())
+	}
+}
+
+func TestGetMachineUpdateCheckHitsTheRuntimesCheck(t *testing.T) {
+	var gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Write([]byte(`{"updateAvailable":true,"latest":"v1.5.0"}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/update-check", h.GetMachineUpdateCheck)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/update-check", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/self/update-check" {
+		t.Errorf("backend received path %q, want /api/self/update-check", gotPath)
+	}
+}
+
+func TestPostMachineUpdateHitsTheRuntimesUpdate(t *testing.T) {
+	var gotPath, gotMethod string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.Write([]byte(`{"status":"updated","version":"v1.5.0"}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/update", h.PostMachineUpdate)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/update", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/self/update" {
+		t.Errorf("backend received %s %s, want POST /api/self/update", gotMethod, gotPath)
+	}
+}
+
+func TestPostMachineUpdateSurfacesTheRuntimesRefusal(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"this runtime is supervised by its desktop app"}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("local", backend.URL, "k", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/machines/{id}/update", h.PostMachineUpdate)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/machines/"+m.ID+"/update", nil))
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "supervised by its desktop app") {
+		t.Errorf("body = %s, want the runtime's own reason", rec.Body.String())
+	}
+}

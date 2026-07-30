@@ -48,6 +48,8 @@ export const qk = {
   whoami: ['whoami'] as const,
   machines: ['machines'] as const,
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
+  machineVersion: (id: string) => ['machines', id, 'version'] as const,
+  machineUpdateCheck: (id: string) => ['machines', id, 'updateCheck'] as const,
   tailscaleStatus: ['tailscaleStatus'] as const,
   hubKey: ['hubKey'] as const,
   bookmarks: ['bookmarks'] as const,

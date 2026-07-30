@@ -19,6 +19,14 @@ import (
 
 const requestTimeout = 3 * time.Second
 
+// updateCheckTimeout covers a round trip to the GitHub API, which the 3s
+// requestTimeout for machine-local calls is far too tight for.
+const updateCheckTimeout = 30 * time.Second
+
+// updateTimeout covers downloading a release binary (tens of MB) over
+// whatever link the runtime has.
+const updateTimeout = 10 * time.Minute
+
 // FetchWorktrees lists a project's worktrees directly from the machine that
 // owns it. Any failure (unreachable machine, non-200, bad JSON) is returned
 // as an error — callers decide how to degrade (see service/workspace.go,
@@ -150,6 +158,55 @@ func postSelf(ctx context.Context, m domain.Machine, action string) error {
 		return fmt.Errorf("machine %s: %s", m.ID, msg)
 	}
 	return nil
+}
+
+// Version reads a machine's own build info from its /api/self/version.
+func Version(ctx context.Context, m domain.Machine) (json.RawMessage, error) {
+	return selfJSON(ctx, m, http.MethodGet, "version", requestTimeout)
+}
+
+// UpdateCheck asks a machine to check GitHub for a newer release. The machine
+// answers 200 with an "error" field when the check itself failed, so a
+// non-error return here does not mean the check succeeded.
+func UpdateCheck(ctx context.Context, m domain.Machine) (json.RawMessage, error) {
+	return selfJSON(ctx, m, http.MethodGet, "update-check", updateCheckTimeout)
+}
+
+// Update tells a machine to download and install the latest release. It does
+// not restart the machine — callers do that separately, so a failed install
+// never triggers a restart.
+func Update(ctx context.Context, m domain.Machine) (json.RawMessage, error) {
+	return selfJSON(ctx, m, http.MethodPost, "update", updateTimeout)
+}
+
+// selfJSON calls one of a machine's /api/self/* endpoints and returns its
+// response body untouched, so the hub can forward a runtime's answer verbatim
+// instead of re-declaring its schema here.
+func selfJSON(ctx context.Context, m domain.Machine, method, action string, timeout time.Duration) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	url := strings.TrimRight(m.URL, "/") + "/api/self/" + action
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.Key)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("machine %s unreachable: %w", m.ID, err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("machine %s: %s", m.ID, extractErrorMessage(body, resp.StatusCode))
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("machine %s: read response: %w", m.ID, readErr)
+	}
+	return json.RawMessage(body), nil
 }
 
 // extractErrorMessage unwraps the {"error":"..."} envelope every DevDeck

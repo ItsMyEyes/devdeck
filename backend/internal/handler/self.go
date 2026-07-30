@@ -1,29 +1,52 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
+
+	"devdeck/backend/internal/selfupdate"
+	"devdeck/backend/internal/terminal"
+	"devdeck/backend/internal/version"
 )
 
-// SelfHandler exposes this process's own restart/stop lifecycle over HTTP,
-// so the hub's Runtimes page can control a registered machine's process
-// directly instead of the operator doing it by hand on that machine. See
-// docs/superpowers/specs/2026-07-21-runtime-restart-stop-design.md.
+// UpdateService is the subset of selfupdate.Updater this handler needs, so
+// tests can substitute a fake instead of reaching GitHub and overwriting the
+// test binary.
+type UpdateService interface {
+	Check(ctx context.Context, currentVersion, selfSHA256 string) (*selfupdate.CheckResult, error)
+	Install(ctx context.Context, currentVersion, execPath string) (*selfupdate.RunResult, error)
+}
+
+// SelfHandler exposes this process's own version, update, restart, and stop
+// lifecycle over HTTP, so the hub's Machines page can inspect and control a
+// registered machine's process directly instead of the operator doing it by
+// hand on that machine. See
+// docs/superpowers/specs/2026-07-21-runtime-restart-stop-design.md and
+// docs/superpowers/specs/2026-07-30-version-sha256-update-ui-design.md.
 type SelfHandler struct {
 	// managed is true when an external supervisor (the Tauri desktop's
 	// sidecar respawn loop) already owns this process's respawn lifecycle
 	// — set via --managed/DEVDECK_MANAGED. A managed process must never
 	// spawn its own replacement (the supervisor would end up spawning a
-	// second one too), and must refuse to stop (the supervisor would just
-	// silently relaunch it, which is worse than a clear error).
+	// second one too), must refuse to stop (the supervisor would just
+	// silently relaunch it, which is worse than a clear error), and must
+	// refuse to update (it is a binary bundled inside a signed desktop
+	// app; overwriting it invalidates that bundle).
 	managed bool
+	// ver is this build's embedded version string (version.Version).
+	ver string
+	// tokenConfigured records whether a GitHub token was supplied to this
+	// process. Only the boolean crosses the API boundary — never the token.
+	tokenConfigured bool
+	updater         UpdateService
 }
 
 // NewSelfHandler creates a self-management handler.
-func NewSelfHandler(managed bool) *SelfHandler {
-	return &SelfHandler{managed: managed}
+func NewSelfHandler(managed bool, ver string, tokenConfigured bool, updater UpdateService) *SelfHandler {
+	return &SelfHandler{managed: managed, ver: ver, tokenConfigured: tokenConfigured, updater: updater}
 }
 
 // spawnReplacement and exitProcess are swappable package-level vars so
@@ -85,4 +108,65 @@ func (h *SelfHandler) PostStop(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 	go exitProcess()
+}
+
+// GetVersion handles GET /api/self/version. It touches no network, so the
+// Machines page can call it for every row. An unreadable executable yields an
+// empty sha256 rather than an error — the version is still worth reporting.
+func (h *SelfHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	sum, _ := version.SelfSHA256()
+	writeJSON(w, http.StatusOK, map[string]any{"version": h.ver, "sha256": sum})
+}
+
+// GetUpdateCheck handles GET /api/self/update-check. It answers 200 even when
+// the check itself failed, reporting the reason in the body: the hub fans this
+// out across every machine, and one unreachable GitHub must not blank the page.
+func (h *SelfHandler) GetUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	sum, _ := version.SelfSHA256()
+	body := map[string]any{
+		"current":          h.ver,
+		"latest":           "",
+		"updateAvailable":  false,
+		"checksumVerified": selfupdate.ChecksumVerifiedUnknown,
+		"tokenConfigured":  h.tokenConfigured,
+		"activeSessions":   terminal.ActiveSessionCount(),
+		"managed":          h.managed,
+		"error":            "",
+	}
+
+	res, err := h.updater.Check(r.Context(), h.ver, sum)
+	if err != nil {
+		body["error"] = err.Error()
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+	body["latest"] = res.Latest
+	body["updateAvailable"] = res.UpdateAvailable
+	body["checksumVerified"] = res.ChecksumVerified
+	writeJSON(w, http.StatusOK, body)
+}
+
+// PostUpdate handles POST /api/self/update: download the latest release,
+// verify it, and swap this binary. It never restarts — the caller decides
+// when, since a restart drops every live terminal on this machine.
+func (h *SelfHandler) PostUpdate(w http.ResponseWriter, r *http.Request) {
+	if h.managed {
+		writeErr(w, http.StatusConflict, "this runtime is supervised by its desktop app — update it by installing a new desktop release")
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "resolve current executable path: "+err.Error())
+		return
+	}
+	res, err := h.updater.Install(r.Context(), h.ver, exe)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	status := "updated"
+	if !res.Updated {
+		status = "up-to-date"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": status, "version": res.Version, "warning": res.Warning})
 }
