@@ -1,5 +1,6 @@
-import { PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
+import { KeyRound, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useWhoami } from '@/features/data/queries'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
@@ -26,11 +27,18 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   const railExpanded = useDevDeckStore((s) => s.railExpanded)
   const toggleRailExpanded = useDevDeckStore((s) => s.toggleRailExpanded)
   const openDesktopSettings = useDevDeckStore((s) => s.openDesktopSettings)
+  const openRuntimePin = useDevDeckStore((s) => s.openRuntimePin)
+  const whoami = useWhoami()
   const { view } = useScope()
   const canExpandPanel = view === 'agents' || view === 'ssh'
   const hasSidebarPanel = canExpandPanel && railExpanded
   const isLoopbackHub = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
   const showDesktopSettings = useIsTauri() && isLoopbackHub
+  // A runtime's own web UI has no hub settings to show, but it does own the
+  // one thing an operator needs to change there: the PIN that got them in.
+  // On the hub this is absent — a runtime's PIN is set from the Runtimes page,
+  // against that runtime, not this process.
+  const isRuntimeUI = whoami.data?.role === 'runtime'
   const isDesktopWidth = useIsDesktop()
   // Below `md`, this becomes a fixed overlay drawer (see `mobileDrawer` prop
   // doc) that must appear above a Browser tile's native webview — see
@@ -40,6 +48,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
 
   const railControlClass =
     'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-devdeck-muted transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+  const railDivider = <div aria-hidden className="my-1.5 h-px w-6 flex-none bg-devdeck-border" />
 
   const toggleButton = canExpandPanel ? (
     <button
@@ -83,8 +92,22 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
             </div>
           ) : null}
           <WorkspaceSwitcher compact />
+          {railDivider}
           <SidebarNav compact />
           <div className="flex-1" />
+          {isRuntimeUI || showDesktopSettings ? railDivider : null}
+          {isRuntimeUI ? (
+            <Tooltip label="Sign-in PIN" side="right">
+              <button
+                type="button"
+                onClick={() => openRuntimePin(null, whoami.data?.machineName ?? 'this runtime')}
+                aria-label="Sign-in PIN"
+                className={railControlClass}
+              >
+                <KeyRound size={16} />
+              </button>
+            </Tooltip>
+          ) : null}
           {showDesktopSettings ? (
             <Tooltip label="Desktop settings" side="right">
               <button
