@@ -14,3 +14,5 @@ copy-this.md
 *.db-shm
 *.db-wal
 temp
+# superpowers brainstorming companion
+.superpowers/

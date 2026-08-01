@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
 import { Cable, ChevronLeft, ChevronRight, Globe, LayoutGrid, Plus, X } from 'lucide-react'
+import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
@@ -738,6 +739,11 @@ export function WorkspaceTileCanvas({
   className,
 }: WorkspaceTileCanvasProps) {
   const [dragTab, setDragTab] = useState<TileTab | null>(null)
+  // A dragged tab's ghost preview (DragOverlay below) is a DOM portal, and a
+  // native Browser-tile webview always paints above the DOM — without this,
+  // dragging any tab (including a Browser tab itself) renders its ghost
+  // underneath an open Browser tile instead of following the pointer over it.
+  useNativeOverlayBlocker(dragTab !== null)
   const [hoverZone, setHoverZone] = useState<{ leafId: string; zone: TileDropZone } | null>(null)
   const [chromeRects, setChromeRects] = useState<Record<string, ChromeRect>>({})
   const rootRef = useRef<HTMLDivElement>(null)
