@@ -112,12 +112,22 @@ function TabPill({
       </span>
       <span
         role="button"
+        tabIndex={0}
         aria-label={`Close ${doc.title}`}
         onClick={(event) => {
           event.stopPropagation()
           onClose()
         }}
-        className="flex h-5 w-5 flex-none items-center justify-center rounded-full opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          event.stopPropagation()
+          onClose()
+        }}
+        className={cn(
+          'flex h-5 w-5 flex-none items-center justify-center rounded-full opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100',
+          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
+        )}
       >
         <X size={11} />
       </span>

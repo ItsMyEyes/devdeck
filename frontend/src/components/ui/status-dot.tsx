@@ -17,7 +17,12 @@ export function StatusDot({ color, size = 8, className, style }: StatusDotProps)
         width: size,
         height: size,
         background: color,
-        boxShadow: `0 0 0 2px ${color}1f`,
+        // `color-mix` (not string-suffix concatenation) so this tolerates any
+        // valid CSS <color> input — a hex literal or a `var(--devdeck-*)`
+        // reference. `${color}1f` only produced a valid color when `color`
+        // was already a hex literal; appended straight after a var() call it
+        // tokenizes as a stray dimension and the whole box-shadow drops.
+        boxShadow: `0 0 0 2px color-mix(in srgb, ${color} 12%, transparent)`,
         ...style,
       }}
     />

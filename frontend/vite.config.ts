@@ -64,6 +64,7 @@ export default defineConfig({
       'src/features/tabs/tileTree.ssh.test.ts',
       'src/lib/fuzzyHighlight.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
+      'src/features/browser/BrowserTabStrip.test.tsx',
       'src/components/ui/progress-line.test.tsx',
       'src/features/terminal/lspTransport.test.ts',
       'src/features/terminal/lspSession.test.ts',
