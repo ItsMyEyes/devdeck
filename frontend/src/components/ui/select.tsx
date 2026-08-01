@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Select as BaseSelect } from '@base-ui/react/select'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -18,17 +18,37 @@ interface SelectProps {
   className?: string
   triggerClassName?: string
   disabled?: boolean
+  /** Replaces the default `<BaseSelect.Value />` when the trigger needs more
+   *  than a text label — e.g. the browser omnibox's machine chip, which pairs
+   *  a `StatusDot` with a truncated name. Receives the currently selected
+   *  option, or `undefined` when `value` matches nothing. */
+  renderValue?: (option: SelectOption | undefined) => ReactNode
+  /** Default 13. Compact triggers need a smaller chevron. */
+  chevronSize?: number
   'aria-label'?: string
 }
 
 /** Thin wrapper over Base UI Select with the devdeck menu styling. */
-export function Select({ value, onValueChange, options, className, triggerClassName, disabled, ...rest }: SelectProps) {
+export function Select({
+  value,
+  onValueChange,
+  options,
+  className,
+  triggerClassName,
+  disabled,
+  renderValue,
+  chevronSize = 13,
+  ...rest
+}: SelectProps) {
   const [open, setOpen] = useState(false)
   // A Browser tile's native webview always stacks above this popup (see
   // useNativeOverlayBlocker's doc comment) — most visibly for this
   // component, since it's the machine picker inside BrowserTile's own
   // toolbar, sitting right on top of the surface it needs to appear above.
-  useNativeOverlayBlocker(open)
+  // Scoped to this popup's own rect (not 'viewport'): opening the machine
+  // picker in one Browser tile must not blank every other open tile.
+  const popupRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open, popupRef)
 
   return (
     <BaseSelect.Root
@@ -53,9 +73,9 @@ export function Select({ value, onValueChange, options, className, triggerClassN
         {/* The trigger is a fixed-height row, so a long value (e.g. a machine
             hostname in a narrow browser toolbar) has to truncate — left to wrap
             it doubles the trigger's height and pushes its own toolbar out. */}
-        <BaseSelect.Value className="truncate" />
+        {renderValue ? renderValue(options.find((o) => o.value === value)) : <BaseSelect.Value className="truncate" />}
         <BaseSelect.Icon className="flex-none text-devdeck-dim">
-          <ChevronDown size={13} />
+          <ChevronDown size={chevronSize} />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
@@ -67,6 +87,7 @@ export function Select({ value, onValueChange, options, className, triggerClassN
           className="outline-none"
         >
           <BaseSelect.Popup
+            ref={popupRef}
             className={cn(
               'min-w-[var(--anchor-width)] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
               'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
