@@ -88,11 +88,11 @@ primitives from §7.
 ### 3.1 Three fixed zones, `h-9`, never shifting
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ ‹  ›  ↻    ╭──── omnibox ─────────────────╮    + ⌂ ⌕ ⤡    │
-│            │ ◆ www.youtube.com · ● home-l │               │
-│            ╰──────────────────────────────╯               │
-└════════════════════════════════════════════════════════════┘
+┌──────────────────────────────────────────────────────────────┐
+│ ‹  ›  ↻    ╭──── omnibox ────────────────────╮    + ⌂ ⌕ ⤡   │
+│            │ ◆ www.youtube.com · ● home-l ☆ │               │
+│            ╰─────────────────────────────────╯              │
+└══════════════════════════════════════════════════════════════┘
    left: nav       center: flex-1 max-w-[640px]     right: 4 icons
 ```
 
@@ -103,8 +103,8 @@ primitives from §7.
   centered in the remaining space.
 - **Right cluster.** `+` (new tab), Home, Find, Fullscreen — four uniform
   28px icon buttons (`pointer-coarse:h-9 w-9`, per the existing
-  `toolbarButtonClass`). The machine `Select` leaves this cluster entirely
-  (§3.3).
+  `toolbarButtonClass`). Both the machine `Select` and the bookmark `Star`
+  leave this cluster for the omnibox (§3.3).
 - Below `@sm/tile` the right cluster still collapses into the existing
   `TabStripPopoverMenu`. Its contents change by exactly one item: the machine
   `Select` is **no longer** in the popover (it now lives in the omnibox, §3.3),
@@ -135,15 +135,19 @@ hover/focus-within → `border-devdeck-border-strong`. Contents, left to right:
    `text-devdeck-dim`. This is what makes an 11px URL scannable, and it
    matches the security-relevant emphasis every mainstream browser uses.
    Backed by `splitUrlForDisplay()` (§7.2).
-3. A `·` separator, then the **machine chip** at the right inner edge:
+3. A `·` separator, then the **machine chip**:
    `StatusDot` driven by `machineHealth.get(machineId)?.status`, plus the
    machine name truncated to `max-w-[72px]`. Clicking the chip opens the
    existing `Select` dropdown with the same `options`/`onValueChange`
    contract — only the trigger's presentation changes.
+4. The **bookmark `Star`** at the right inner edge, `disabled` without a URL.
+   It belongs to the address, not to the window, which is where every
+   mainstream browser puts it — and keeping it here leaves the right cluster
+   at four uniform icons.
 
-Clicking anywhere on the omnibox **other than the machine chip** calls the
-existing `onEditActiveUrl` → opens `BrowserUrlCard`. `BrowserUrlCard` itself
-is untouched.
+Clicking the omnibox **anywhere other than the machine chip or the star**
+calls the existing `onEditActiveUrl` → opens `BrowserUrlCard`.
+`BrowserUrlCard` itself is untouched.
 
 The omnibox is a `<div>` containing a `<button>` (URL area) and the Select
 trigger as siblings — never nested interactive elements.
