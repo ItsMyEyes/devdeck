@@ -64,6 +64,7 @@ export default defineConfig({
       'src/features/tabs/tileTree.ssh.test.ts',
       'src/lib/fuzzyHighlight.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
+      'src/components/ui/progress-line.test.tsx',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.

@@ -186,6 +186,8 @@
 
   --animate-blink: agblink 1.1s step-end infinite;
   --animate-slide-in: agslidein 0.18s ease;
+  --animate-progress-slide: agprogress 1.1s ease-in-out infinite;
+  --animate-dot-pulse: agdotpulse 1.4s ease-in-out infinite;
 }
 
 @keyframes agblink {
@@ -206,6 +208,38 @@
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+
+/* The segment is 30% of the track, so travelling from fully off-left to
+   fully off-right is -100% → 333% of its *own* width. */
+@keyframes agprogress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(333%);
+  }
+}
+@keyframes agdotpulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-slide {
+    width: 100%;
+    opacity: 0.4;
+    transform: none;
+    animation: none;
+  }
+  .animate-dot-pulse {
+    animation: none;
   }
 }
 
