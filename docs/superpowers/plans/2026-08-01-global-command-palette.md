@@ -55,7 +55,8 @@ TDD is impossible without a runner, so Task 1 installs Vitest and mechanically m
 | `frontend/src/features/palette/providers/commands.ts` | verb registry + arbitration |
 | `frontend/src/features/palette/providers/commands.test.ts` | verb rules |
 | `frontend/src/features/palette/providers/createActions.ts` | the three Create rows |
-| `frontend/src/features/palette/useCommandPalette.ts` | page-stack state machine |
+| `frontend/src/features/palette/useCommandPalette.ts` | page-stack state machine + pure item assembly |
+| `frontend/src/features/palette/useCommandPalette.test.ts` | empty-query group invariant (Decision 5) |
 | `frontend/src/features/palette/CommandPalette.tsx` | overlay, input, ghost, list, keys |
 | `frontend/src/features/palette/CommandPalette.test.tsx` | keyboard contract |
 | `frontend/src/features/ssh/SSHQuickAddDialog.tsx` | narrowed SSH quick-add form |
@@ -222,7 +223,7 @@ git commit -m "test: add Vitest harness and migrate the hand-rolled test files"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `export type HighlightRange = [number, number]` and `export function computeHighlight(text: string, pattern: string): HighlightRange[] | null` — returns `null` when `pattern` does not match, and `[]` for an empty pattern.
+- Produces: `export type HighlightRange = [number, number]` and `export function computeHighlight(text: string, pattern: string): HighlightRange[]` — returns `[]` (never `null`) for both an empty pattern and a genuine non-match; the caller cannot use the return value to distinguish "matched, nothing to emphasise" from "did not match" (confirmed against the real, unchanged algorithm in `fileMatchHighlight.ts` — see Task 3's `scoreOne`, which computes match/no-match independently instead of relying on this return value).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -237,8 +238,8 @@ describe('computeHighlight', () => {
     expect(computeHighlight('prod-db', '')).toEqual([])
   })
 
-  it('returns null when the pattern does not match', () => {
-    expect(computeHighlight('prod-db', 'zzz')).toBeNull()
+  it('returns an empty range list when the pattern does not match', () => {
+    expect(computeHighlight('prod-db', 'zzz')).toEqual([])
   })
 
   it('matches a contiguous prefix as one range', () => {
@@ -266,7 +267,7 @@ Expected: FAIL — cannot resolve `@/lib/fuzzyHighlight`.
 git mv frontend/src/features/terminal/fileMatchHighlight.ts frontend/src/lib/fuzzyHighlight.ts
 ```
 
-Read the moved file. It already exports `HighlightRange` and `computeHighlight`. Adjust only if its current contract differs from the test above — specifically confirm the empty-pattern and no-match return values, and align the tests to the real behaviour if the module is the authority. Do not rewrite the algorithm.
+Read the moved file. It already exports `HighlightRange` and `computeHighlight`. Its real contract is confirmed to be `(text: string, query: string): HighlightRange[]` — it never returns `null`; an empty pattern and a genuine non-match both fall through to `mergeRanges([])`, i.e. `[]`. The test above already reflects this. Do not rewrite the algorithm, and do not add a `null` return to "fix" it — Task 3's ranker is written to determine match/no-match on its own, without relying on this function's return value (see Task 3 Step 4).
 
 - [ ] **Step 4: Update the one existing importer**
 
@@ -308,7 +309,7 @@ git commit -m "refactor: move fileMatchHighlight to lib/fuzzyHighlight for reuse
   - `PaletteItem` (fields below)
   - `RankedItem = PaletteItem & { score: number; ranges: HighlightRange[] }`
   - `RankedGroup = { group: PaletteGroup; label: string; items: RankedItem[]; truncated: number }`
-  - `rankPaletteItems(items: PaletteItem[], query: string, frecency: (id: string) => number): RankedGroup[]`
+  - `rankPaletteItems(items: PaletteItem[], query: string, frecency: (id: string) => number, isOpen?: (id: string) => boolean): RankedGroup[]` — `isOpen` defaults to `() => false` so every existing call site (including the tests below) is unaffected; it lets a Results row for an entity that is *also* currently open in another leaf outrank a merely-frecent one, per spec ranking rule 4 ("exact-prefix match > currently-open > frecency > fuzzy score").
   - `flattenRanked(groups: RankedGroup[]): RankedItem[]`
   - `MAX_ROWS_PER_GROUP = 8`, `MAX_ROWS_TOTAL = 50`
 
@@ -383,6 +384,16 @@ describe('rankPaletteItems', () => {
       (id) => (id === 'hot' ? 100 : 0),
     )
     expect(flattenRanked(groups).map((i) => i.id)).toEqual(['hot', 'cold'])
+  })
+
+  it('ranks an open-but-cold entity above a closed-but-hot one', () => {
+    const groups = rankPaletteItems(
+      [item({ id: 'open-cold', title: 'alpha', group: 'results' }), item({ id: 'closed-hot', title: 'alpha', group: 'results' })],
+      'alpha',
+      (id) => (id === 'closed-hot' ? 100 : 0),
+      (id) => id === 'open-cold',
+    )
+    expect(flattenRanked(groups).map((i) => i.id)).toEqual(['open-cold', 'closed-hot'])
   })
 
   it('matches against keywords as well as the title', () => {
@@ -513,33 +524,64 @@ const GROUP_LABEL: Record<PaletteGroup, string> = {
 /** Exact-prefix beats subsequence by a margin no frecency score can close,
  *  so typing the start of a name always surfaces that name first. */
 const PREFIX_BONUS = 10_000
+/** Beats any realistic frecency score but never an exact-prefix match — an
+ *  entity that is currently open in another leaf outranks a merely-frecent
+ *  one, per spec ranking rule 4. Distinct from `OPEN_BONUS` below: that one
+ *  rewards the `open` *group* (the "Open tabs" bucket, which the fixed group
+ *  order already renders above Results), this one rewards an *entity id*
+ *  that also happens to be open, wherever it's currently being scored. */
+const ALREADY_OPEN_BONUS = 5_000
 const OPEN_BONUS = 1_000
 
-function scoreOne(item: PaletteItem, query: string, frecency: (id: string) => number) {
-  const haystacks = [item.title, ...(item.keywords ?? [])]
-  let ranges = null as ReturnType<typeof computeHighlight>
-  let matched = false
-  for (const hay of haystacks) {
-    const result = computeHighlight(hay, query)
-    if (result === null) continue
-    matched = true
-    // Highlight ranges only make sense against the title, which is what the
-    // row renders — a keyword match highlights nothing.
-    if (hay === item.title) ranges = result
-    break
+/**
+ * `computeHighlight` (see `@/lib/fuzzyHighlight`) never returns `null` — an
+ * empty pattern and a genuine non-match both resolve to `[]`, because its
+ * job is purely to pick which characters of an *already-matched* string to
+ * emphasise, not to decide whether something matched. So match/no-match is
+ * decided here, independently, with the same substring-then-subsequence
+ * strategy; `computeHighlight` is then called only to derive display ranges
+ * for a haystack that already passed this check.
+ */
+function fuzzyMatches(haystack: string, query: string): boolean {
+  const trimmed = query.trim()
+  if (trimmed === '') return true
+  const lowerHay = haystack.toLowerCase()
+  const lowerQuery = trimmed.toLowerCase()
+  if (lowerHay.includes(lowerQuery)) return true
+  let cursor = 0
+  for (const ch of lowerQuery) {
+    const idx = lowerHay.indexOf(ch, cursor)
+    if (idx < 0) return false
+    cursor = idx + 1
   }
-  if (!matched) return null
+  return true
+}
+
+function scoreOne(
+  item: PaletteItem,
+  query: string,
+  frecency: (id: string) => number,
+  isOpen: (id: string) => boolean,
+) {
+  const haystacks = [item.title, ...(item.keywords ?? [])]
+  if (!haystacks.some((hay) => fuzzyMatches(hay, query))) return null
+
+  // Highlight ranges only make sense against the title, which is what the
+  // row renders — a keyword-only match highlights nothing, and this is `[]`
+  // whenever the title itself didn't match, since computeHighlight agrees.
+  const ranges = computeHighlight(item.title, query)
 
   const lowerTitle = item.title.toLowerCase()
   const lowerQuery = query.toLowerCase()
   let score = 0
   if (lowerQuery && lowerTitle.startsWith(lowerQuery)) score += PREFIX_BONUS
+  if (isOpen(item.id)) score += ALREADY_OPEN_BONUS
   if (item.group === 'open') score += OPEN_BONUS
   score += frecency(item.id)
   // Shorter titles win ties: "prod" should beat "prod-db-replica-2".
   score += Math.max(0, 100 - item.title.length)
 
-  return { ...item, score, ranges: ranges ?? [] } satisfies RankedItem
+  return { ...item, score, ranges } satisfies RankedItem
 }
 
 /**
@@ -554,6 +596,7 @@ export function rankPaletteItems(
   items: PaletteItem[],
   query: string,
   frecency: (id: string) => number,
+  isOpen: (id: string) => boolean = () => false,
 ): RankedGroup[] {
   const buckets = new Map<PaletteGroup, RankedItem[]>()
 
@@ -562,7 +605,7 @@ export function rankPaletteItems(
     if (item.group === 'create') {
       ranked = { ...item, score: 0, ranges: [] }
     } else {
-      ranked = scoreOne(item, query, frecency)
+      ranked = scoreOne(item, query, frecency, isOpen)
     }
     if (!ranked) continue
     const bucket = buckets.get(item.group)
@@ -600,7 +643,7 @@ export function flattenRanked(groups: RankedGroup[]): RankedItem[] {
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `cd frontend && npm test -- paletteRank`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1126,7 +1169,11 @@ git commit -m "feat(palette): add open-tabs provider"
   - `entityItems(sources: EntitySources, actions: EntityActions): PaletteItem[]`
   - `APP_PAGES` — the route list.
 
-Read `frontend/src/store/types.ts` for the exact `Worktree`, `Project`, `Machine` and `SSHConnection` shapes before writing this; the fields used below (`id`, `name`, `machineId`, `branch`, `projectId`, `host`, `user`) must match it exactly.
+Read `frontend/src/store/types.ts` before writing this. `EntitySources` below is **not** a literal subset of the real domain types — it's a small adapted shape, and two of its fields do not exist verbatim on the domain objects:
+- The real `Worktree` (`types.ts:16`) has no `name` and no `projectId` — a worktree only carries `branch` etc.; its project association exists solely via nesting inside `Project.worktrees`. Task 12, which builds `EntitySources` from live data, derives both: `projects.flatMap(p => p.worktrees.map(w => ({ id: w.id, projectId: p.id, branch: w.branch, name: w.branch })))`.
+- The real `SSHConnection` (`types.ts:173`) names its field `username`, not `user`. Task 12 derives it: `sshConnections.map(c => ({ ...c, user: c.username }))`.
+
+`Project` and `Machine` are used as-is — `id`, `name`, `machineId` on `Project` and `id`, `name` on `Machine` all exist verbatim.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1223,7 +1270,7 @@ Expected: FAIL — cannot resolve the module.
 Create `frontend/src/features/palette/providers/entities.ts`:
 
 ```ts
-import { Boxes, Database, FolderGit2, GitBranch, Globe, ListTodo, Network, Server, Settings, Wrench } from 'lucide-react'
+import { Boxes, Database, FolderGit2, GitBranch, Globe, ListTodo, Network, Newspaper, Receipt, Server, Settings, Wrench } from 'lucide-react'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
 /** Structural subsets of the domain types — only the fields this provider
@@ -1245,7 +1292,16 @@ export interface EntityActions {
   openPage: (path: string) => void
 }
 
-/** The workspace-scoped routes that exist under `w.$wsId.*`. */
+/**
+ * The workspace-scoped routes that exist under `w.$wsId.*` — every one of
+ * the spec's page list (Agents, Machines, Database, SSH, Browser, Tools,
+ * Issues, Todos, Invoices, News, Management) except **Issues**, which is
+ * intentionally excluded: `w.$wsId.p.$projectId.issues.tsx` is nested under
+ * a project id, unlike every other entry here, which is a bare `w.$wsId.*`
+ * route with no further required params. A project-scoped "jump to Issues"
+ * entry would need its own drill-down (pick a project first) and is left
+ * for a future pass rather than bolted on here.
+ */
 export const APP_PAGES = [
   { path: '', label: 'Agents', icon: Boxes },
   { path: 'machines', label: 'Machines', icon: Server },
@@ -1254,6 +1310,8 @@ export const APP_PAGES = [
   { path: 'browser', label: 'Browser', icon: Globe },
   { path: 'tools', label: 'Tools', icon: Wrench },
   { path: 'todos', label: 'Todos', icon: ListTodo },
+  { path: 'invoices', label: 'Invoices', icon: Receipt },
+  { path: 'news', label: 'News', icon: Newspaper },
   { path: 'management', label: 'Management', icon: Settings },
 ] as const
 
@@ -1728,7 +1786,7 @@ git commit -m "feat(palette): add command verb registry"
 
 **Interfaces:**
 - Consumes: `PaletteItem`, `PalettePage` from `@/features/palette/paletteTypes`.
-- Produces: `createActionItems(deps: CreateActionDeps): PaletteItem[]` where
+- Produces: `createActionItems(deps: CreateActionDeps): PaletteItem[]` where — like `EntitySources` in Task 7, `sshConnections` here is an adapted shape, not a literal `SSHConnection`: the real type's field is `username`, not `user`. Task 12 derives it the same way it does for Task 7: `sshConnections.map(c => ({ ...c, user: c.username }))`.
 
 ```ts
 interface CreateActionDeps {
@@ -1884,7 +1942,7 @@ git commit -m "feat(palette): add create-actions provider with drill-down pages"
 **This task edits `store/useDevDeckStore.ts`. Per `CLAUDE.md` it MUST run alone — never in parallel with another task.**
 
 **Files:**
-- Modify: `frontend/src/store/useDevDeckStore.ts:52` (the `NewTabState` interface), `:210`, `:303`, `:465`, `:579-582`
+- Modify: `frontend/src/store/useDevDeckStore.ts:52` (the `NewTabState` interface), `:178-185`, `:210`, `:303`, `:306`, `:465`, `:579-582`, `:584-590`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -1895,6 +1953,7 @@ git commit -m "feat(palette): add create-actions provider with drill-down pages"
   - `closePalette: () => void`
   - `openSSHQuickAdd: (wsId: string, leafId: string, prefillRaw: string) => void`
   - `closeSSHQuickAdd: () => void`
+  - `openBrowserTab: (wsId: string, machineId?: string, url?: string) => void` — widened from its current `(wsId, machineId?)`. The palette's `browser`/`open` verb (Task 9) and bookmark rows (Task 8) both need to open a Browser tile already navigated to a resolved URL, and the existing action has no way to do that: it is `void`-returning (no way to learn the new tab/doc id to patch afterward) and takes no URL. The extra `url` param threads straight into `createBrowserDoc`/`createBrowserTileState` instead.
 
 Neither slice is added to `partialize` (`useDevDeckStore.ts:873`) — transient dialog state must not persist, matching how `newTab` behaves today.
 
@@ -1960,18 +2019,53 @@ At `:579-582`, replace `openNewTab` / `closeNewTab` / `setNewTab` with:
       closeSSHQuickAdd: () => set((s) => void (s.sshQuickAdd.open = false)),
 ```
 
-- [ ] **Step 5: Verify the typecheck fails loudly at every old call site**
+- [ ] **Step 5: Thread an optional URL through `openBrowserTab`**
+
+At `:178-185`, give the two doc/tile constructors an optional initial `url` (default `null`, same as today):
+
+```ts
+function createBrowserDoc(id: string, machineId: string | null = null, url: string | null = null): BrowserDocState {
+  return { id, machineId, proxy: null, url, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
+}
+
+function createBrowserTileState(machineId: string | null = null, url: string | null = null): BrowserTileState {
+  const docId = generateDocId()
+  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId, machineId, url)] }
+}
+```
+
+At `:306`, widen the action signature:
+
+```ts
+  openBrowserTab: (wsId: string, machineId?: string, url?: string) => void
+```
+
+At `:584-590`, thread it through the implementation:
+
+```ts
+      openBrowserTab: (wsId, machineId, url) =>
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          const tab = createBrowserTab()
+          s.workspaceTileLayouts[wsId] = openTileTab(layout, tab)
+          s.browserTiles[tab.id] = createBrowserTileState(machineId ?? null, url ?? null)
+        }),
+```
+
+The one existing caller (`WorkspaceTileArea.tsx`'s `handleCreateBrowser`) keeps compiling unchanged — `url` is optional and it never passes a third argument.
+
+- [ ] **Step 6: Verify the typecheck fails loudly at every old call site**
 
 Run: `cd frontend && npm run typecheck`
 Expected: FAIL, listing errors in `features/tabs/NewTabDialog.tsx` and `features/tabs/WorkspaceTileArea.tsx`. This is the intended signal — those are fixed in Tasks 14 and 15. Record the exact error list; it is the checklist for those tasks.
 
-- [ ] **Step 6: Commit the store change on its own**
+- [ ] **Step 7: Commit the store change on its own**
 
 The tree does not typecheck at this commit. That is deliberate: the store change is isolated so a reviewer can read it without the call-site churn mixed in, and Tasks 14–15 restore green.
 
 ```bash
 git add frontend/src/store/useDevDeckStore.ts
-git commit -m "refactor(store): replace newTab state with palette and sshQuickAdd slices"
+git commit -m "refactor(store): replace newTab state with palette/sshQuickAdd slices and thread a URL through openBrowserTab"
 ```
 
 ---
@@ -1979,11 +2073,13 @@ git commit -m "refactor(store): replace newTab state with palette and sshQuickAd
 ### Task 12: The palette hook
 
 **Files:**
-- Create: `frontend/src/features/palette/useCommandPalette.ts`
+- Create: `frontend/src/features/palette/useCommandPalette.ts`, `frontend/src/features/palette/useCommandPalette.test.ts`
 
 **Interfaces:**
 - Consumes: everything from Tasks 3–10, plus `useDevDeckStore`.
-- Produces: `useCommandPalette(args: { wsId: string; leafId: string; open: boolean }): CommandPaletteModel` where
+- Produces:
+  - `PaletteItemSources` (fields below) and `assemblePaletteItems(sources: PaletteItemSources): PaletteItem[]` — pure, exported specifically so the empty-query invariant (spec Decision 5) is unit-testable without mounting the hook.
+  - `useCommandPalette(args: { wsId: string; leafId: string; open: boolean }): CommandPaletteModel` where
 
 ```ts
 interface CommandPaletteModel {
@@ -2005,42 +2101,127 @@ interface CommandPaletteModel {
 }
 ```
 
-This module wires already-tested pieces together; its behaviour is exercised through the component test in Task 13.
+The hook itself wires already-tested pieces together and its behaviour is exercised through the component test in Task 13, but `assemblePaletteItems` is small and pure enough to earn its own failing-test-first step, same as Tasks 2–9.
 
-- [ ] **Step 1: Write the implementation**
+- [ ] **Step 1: Write the failing test**
+
+Create `frontend/src/features/palette/useCommandPalette.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { assemblePaletteItems } from '@/features/palette/useCommandPalette'
+import { rankPaletteItems } from '@/features/palette/paletteRank'
+import type { PaletteItem } from '@/features/palette/paletteTypes'
+
+function item(partial: Partial<PaletteItem> & Pick<PaletteItem, 'id' | 'title' | 'group'>): PaletteItem {
+  return { kind: 'worktree', ...partial }
+}
+
+describe('assemblePaletteItems', () => {
+  it('shows only open tabs, recent and create for an empty query', () => {
+    const items = assemblePaletteItems({
+      query: '',
+      openTabs: [item({ id: 'open:leaf-a:agents', title: 'agents', group: 'open', kind: 'open-tab' })],
+      entities: [item({ id: 'worktree:wt1', title: 'feat/palette', group: 'results' })],
+      bookmarks: [item({ id: 'bookmark:b1', title: 'API repo', group: 'results', kind: 'bookmark' })],
+      verbHints: [item({ id: 'verb:ssh', title: 'ssh <host>', group: 'results', kind: 'command' })],
+      createActions: [item({ id: 'create:ssh', title: 'New SSH…', group: 'create', kind: 'create' })],
+      recent: [item({ id: 'worktree:wt2', title: 'main', group: 'recent' })],
+    })
+    const groups = rankPaletteItems(items, '', () => 0).map((g) => g.group)
+    expect(groups).toEqual(['open', 'recent', 'create'])
+  })
+
+  it('includes entities, bookmarks and verb hints once the query is non-empty', () => {
+    const items = assemblePaletteItems({
+      query: 'feat',
+      openTabs: [],
+      entities: [item({ id: 'worktree:wt1', title: 'feat/palette', group: 'results' })],
+      bookmarks: [],
+      verbHints: [],
+      createActions: [item({ id: 'create:ssh', title: 'New SSH…', group: 'create', kind: 'create' })],
+      recent: [],
+    })
+    const groups = rankPaletteItems(items, 'feat', () => 0).map((g) => g.group)
+    expect(groups).toEqual(['results', 'create'])
+  })
+})
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd frontend && npm test -- useCommandPalette`
+Expected: FAIL — cannot resolve `assemblePaletteItems` from `@/features/palette/useCommandPalette`.
+
+- [ ] **Step 3: Write the implementation**
 
 Create `frontend/src/features/palette/useCommandPalette.ts`. It must:
 
-1. Hold `const [pages, setPages] = useState<PalettePage[]>([])` — the drill-down stack. The root page is implicit (empty stack).
-2. Hold `query` and derive `deferredQuery` with `useDeferredValue`, matching `FileQuickOpen`.
-3. Build items with `useMemo` keyed on `[deferredQuery, pages, ...sources]`:
+1. Export the pure item-assembly function first, independently of the hook:
+
+```ts
+export interface PaletteItemSources {
+  query: string
+  openTabs: PaletteItem[]
+  entities: PaletteItem[]
+  bookmarks: PaletteItem[]
+  verbHints: PaletteItem[]
+  createActions: PaletteItem[]
+  recent: PaletteItem[]
+}
+
+/**
+ * Combines every provider's rows into the flat list `rankPaletteItems`
+ * groups and filters. On an **empty** query, `entities`, `bookmarks` and
+ * `verbHints` are omitted entirely (not merely out-scored) — per spec
+ * Decision 5, an empty query shows only Open tabs → Recent → Create;
+ * feeding every worktree/project/host/machine/page in unconditionally
+ * would flood the Results group the instant the palette opens.
+ */
+export function assemblePaletteItems(sources: PaletteItemSources): PaletteItem[] {
+  const { query, openTabs, entities, bookmarks, verbHints, createActions, recent } = sources
+  if (query.trim() === '') return [...openTabs, ...recent, ...createActions]
+  return [...openTabs, ...recent, ...entities, ...bookmarks, ...verbHints, ...createActions]
+}
+```
+
+2. Hold `const [pages, setPages] = useState<PalettePage[]>([])` — the drill-down stack. The root page is implicit (empty stack).
+3. Hold `query` and derive `deferredQuery` with `useDeferredValue`, matching `FileQuickOpen`.
+4. Adapt live data into the shapes the providers expect before building items — `EntitySources`/`CreateActionDeps` are **not** literal domain-type subsets (see Task 7 and Task 10): `sshConnections.map(c => ({ ...c, user: c.username }))`, and `projects.flatMap(p => p.worktrees.map(w => ({ id: w.id, projectId: p.id, branch: w.branch, name: w.branch })))` for worktrees.
+5. Build the `EntityActions` passed to `entityItems(...)` so that `openWorktree(projectId, wtId)` calls the store's `openWorktreeTab(wsId, projectId, wtId)` and `openSSH(connectionId)` calls `openSSHShellTab(wsId, connectionId)` directly — **do not** add separate "is this already open, focus it instead" logic here. Both store actions already delegate to `tileTree.ts`'s `openTileTab`, whose documented behaviour is: if the tab already exists anywhere in the layout, focus its leaf and make it active there instead of duplicating it. That is exactly the spec's "Duplicate open" edge case, already satisfied for worktrees and SSH shells with no extra code. Build `openBrowser(machineId)` (used by the Create ▸ New Browser tab picker, Task 10) to call the Task-11-extended `openBrowserTab(wsId, machineId)` with no `url`; build the bookmark/raw-URL `openUrl` callback (Task 8) and the `browser`/`open` verb (point 7 below) to call `openBrowserTab(wsId, defaultMachineId, url)` with the resolved URL instead.
+6. Build items with `useMemo` keyed on `[deferredQuery, pages, ...sources]`:
    - When `pages.length > 0`, use `pages[pages.length - 1].items(deferredQuery, ctx)`.
-   - Otherwise concatenate `openTabItems(...)`, `entityItems(...)`, `bookmarkItems(...)`, `verbHintItems(deferredQuery)`, `createActionItems(...)`, plus recent items built by mapping frecency ids back onto entity items with `group: 'recent'` (only for ids not already in the `open` group).
-4. When `matchVerb(deferredQuery)` returns non-null, **replace** the item list with that verb's rows:
+   - Otherwise compute `openTabItems(...)`, `entityItems(...)`, `bookmarkItems(...)`, `verbHintItems(deferredQuery)`, `createActionItems(...)`, and recent items (built by mapping frecency ids back onto entity items with `group: 'recent'`, only for ids not already in the `open` group), then combine them with `assemblePaletteItems` from point 1 — not a flat concatenation, so the empty-query invariant holds.
+7. When `matchVerb(deferredQuery)` returns non-null, **replace** the item list with that verb's rows:
    - `ssh` → one row titled `Connect & save "<derived name>"` whose `run` executes `buildSSHQuickAddPlan` (mirroring `NewTabDialog.runPlan`); set `sshPreview` from `sshCommandPreview(arg)`. If `isSSHQuickAddValid` is false, the row's `run` calls `openSSHQuickAdd(wsId, leafId, arg)` instead.
    - `agent-new` → the project list filtered by `arg`, each running `openSpawn(project.id)`.
-   - `browser` → one row running `openBrowser` with the default machine and `normalizeUrl(arg)`.
-5. Call `rankPaletteItems(items, deferredQuery, (id) => frecencyScore(frecencyRef.current, id, Date.now()))` and expose `groups` plus `rows = flattenRanked(groups)`.
-6. Reset `selectedIndex` to `0` whenever `deferredQuery` or `pages` changes, and clamp it to `rows.length - 1`.
-7. Compute `ghost = computeCompletion(query, rows[selectedIndex]?.completion ?? rows[selectedIndex]?.title)`.
-8. `moveSelection(delta)` wraps around `rows.length`.
-9. `acceptCompletion()` returns `false` when `ghost` is empty; otherwise appends `ghost` to `query` and returns `true`.
-10. `drillIn()` returns `false` unless the selected row has `drillInto`; otherwise pushes the page, clears `query`, returns `true`.
-11. `drillOut()` returns `false` when `pages` is empty; otherwise pops and returns `true`.
-12. `run({ forceForm })` refuses a `disabled` row by calling `showToast(row.disabled.reason)`; otherwise records frecency (`recordUse` + `saveFrecency`), calls `row.run(ctx)`, and closes the palette. `forceForm` routes an `ssh` row to `openSSHQuickAdd` regardless of validity.
-13. On open, prune frecency against the live id set and persist the result.
+   - `browser` → one row running `openBrowserTab(wsId, defaultMachineId, normalizeUrl(arg))` (the Task-11-extended action) with the default machine — the first registered machine, same default `NewTabDialog` uses today.
+8. Build `isOpen(id)` by walking the current layout once: for every `worktree` tab add `worktree:${tab.wtId}`, for every `ssh-shell` tab add `ssh:${tab.connectionId}` to a `Set<string>` (these are exactly the ids `entityItems` assigns), then `isOpen = (id) => openEntityIds.has(id)`. Call `rankPaletteItems(items, deferredQuery, (id) => frecencyScore(frecencyRef.current, id, Date.now()), isOpen)` and expose `groups` plus `rows = flattenRanked(groups)`.
+9. Reset `selectedIndex` to `0` whenever `deferredQuery` or `pages` changes, and clamp it to `rows.length - 1`.
+10. Compute `ghost = computeCompletion(query, rows[selectedIndex]?.completion ?? rows[selectedIndex]?.title)`.
+11. `moveSelection(delta)` wraps around `rows.length`.
+12. `acceptCompletion()` returns `false` when `ghost` is empty; otherwise appends `ghost` to `query` and returns `true`.
+13. `drillIn()` returns `false` unless the selected row has `drillInto`; otherwise pushes the page, clears `query`, returns `true`.
+14. `drillOut()` returns `false` when `pages` is empty; otherwise pops and returns `true`.
+15. `run({ forceForm })` refuses a `disabled` row by calling `showToast(row.disabled.reason)`; otherwise records frecency (`recordUse` + `saveFrecency`), calls `row.run(ctx)`, and closes the palette. `forceForm` routes an `ssh` row to `openSSHQuickAdd` regardless of validity.
+16. On open, prune frecency against the live id set and persist the result.
 
 **Critical:** the stale-`wsId` guard from `NewTabDialog.tsx:166-173` must be reproduced around the awaited SSH create chain. Before calling the open callback or closing, re-read `useDevDeckStore.getState().palette.wsId` and compare it against the `wsId` captured when `run` was invoked. If they differ, keep the created connection but do not navigate or close. Copy the existing explanatory comment across.
 
-- [ ] **Step 2: Verify it typechecks**
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cd frontend && npm test -- useCommandPalette`
+Expected: PASS, 2 tests.
+
+- [ ] **Step 5: Verify it typechecks**
 
 Run: `cd frontend && npm run typecheck`
 Expected: still FAIL, but only with the Task 11 call-site errors in `NewTabDialog.tsx` and `WorkspaceTileArea.tsx`. No new errors inside `features/palette/`.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/features/palette/useCommandPalette.ts
+git add frontend/src/features/palette/useCommandPalette.ts frontend/src/features/palette/useCommandPalette.test.ts
 git commit -m "feat(palette): add the page-stack hook"
 ```
 
