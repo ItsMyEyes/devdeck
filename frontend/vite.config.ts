@@ -52,7 +52,19 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // Only files that have actually been migrated to Vitest. This repo still
+    // has 20 hand-rolled `check()`-harness test files across the database,
+    // machines, terminal and lib features that predate any runner and have no
+    // `it()` blocks — a blanket `src/**/*.test.{ts,tsx}` makes `npm test` fail
+    // on all of them. They are tracked as explicit debt in COMMANDS.md; add
+    // each one here as it gets migrated.
+    include: [
+      'src/features/palette/**/*.test.{ts,tsx}',
+      'src/features/ssh/{sshCommand,sshQuickAdd,jumpHostDraft}.test.ts',
+      'src/features/tabs/tileTree.ssh.test.ts',
+      'src/lib/fuzzyHighlight.test.ts',
+      'src/features/browser/splitUrlForDisplay.test.ts',
+    ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
     exclude: ['node_modules/**', 'dist/**', 'src-tauri/**'],
