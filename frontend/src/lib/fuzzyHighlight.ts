@@ -1,13 +1,14 @@
 /**
- * Match-highlighting for the FileQuickOpen results list. Pure, presentational
- * logic — it does NOT reproduce the backend's ranking (backend/internal/
- * service/worktree_file.go `Search` decides which paths match and in what
- * order); it only decides which characters of an already-matched path to
- * emphasise, VS Code quick-open style. A purely-fuzzy match this simpler
- * matcher can't line up just renders without highlight, which is fine.
+ * Match-highlighting shared by FileQuickOpen and the command palette. Pure,
+ * presentational logic — it does NOT reproduce the backend's ranking
+ * (backend/internal/service/worktree_file.go `Search` decides which paths
+ * match and in what order); it only decides which characters of an
+ * already-matched string to emphasise, VS Code quick-open style. A
+ * purely-fuzzy match this simpler matcher can't line up just renders without
+ * highlight, which is fine.
  *
- * No React here on purpose: the sibling fileMatchHighlight.test.ts runs under
- * `npx tsx` (this project has no Vitest/Jest — see fileTreeSelection.test.ts).
+ * No React here on purpose: the sibling fuzzyHighlight.test.ts runs under
+ * Vitest — see vitest.setup.ts.
  */
 
 /** A `[start, endExclusive)` slice of a string to emphasise. */

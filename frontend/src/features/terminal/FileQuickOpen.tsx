@@ -5,7 +5,7 @@ import { useFileSearchTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { MaterialFileIcon } from './MaterialFileIcon'
-import { computeHighlight, type HighlightRange } from './fileMatchHighlight'
+import { computeHighlight, type HighlightRange } from '@/lib/fuzzyHighlight'
 import type { FilesTarget } from './filesTarget'
 
 interface FileQuickOpenProps {
