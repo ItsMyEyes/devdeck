@@ -36,10 +36,11 @@ whole design:
 
 1. **`Transport` is a clean four-method interface** (`send`, `onMessage`, `onClose`, `onError`, `close`), so the
    package can ride DevDeck's existing authenticated socket instead of opening its own.
-2. **Server→client requests are never answered.** `JSONRPCClient`'s message handler routes anything containing a
-   `method` to notification handlers; a request carrying an `id` gets no response. gopls blocks on
-   `workspace/configuration` during initialisation. Today's `respondToServer` handles this and its behaviour must
-   be preserved.
+2. **Server→client requests get a blanket `null` reply.** `LanguageServerClient`'s notification hook answers any
+   message with `data.method && data.id` by sending `{ result: null }`. Two problems: `workspace/configuration` —
+   which gopls issues during initialisation — is specified to return an *array* with one entry per requested item,
+   not `null`; and the truthiness check skips request `id: 0`, which would go unanswered entirely. Today's
+   `respondToServer` returns the correct shapes, and that behaviour must be preserved.
 3. **Cross-file navigation is computed then discarded.** `LanguageServerPlugin.requestLocation` returns
    `{ uri, range }` for any file but only dispatches a selection when `uri === this.documentUri`; the exported
    `jumpToDefinition` command ignores the return value. DevDeck's tab-opening navigation must stay custom.
@@ -80,11 +81,13 @@ workspace-edit module as pure functions, and the extensions against a real `Edit
 - **Queues `send()` until the socket is open.** `JSONRPCClient` only awaits the `open` event when the transport is
   `instanceof WebSocketTransport`; for a custom transport its internal `ready` promise resolves immediately, so
   unqueued writes would throw `InvalidStateError`.
-- **Answers server→client requests.** Requests are recognised by having both `method` and an `id`. Replies match
-  today's `respondToServer`: `workspace/configuration` → one `null` per requested item, `workspace/applyEdit` →
+- **Answers server→client requests correctly.** Requests are recognised by having a `method` and an `id` that is
+  neither `undefined` nor `null` (so `id: 0` counts). Replies match today's `respondToServer`:
+  `workspace/configuration` → one `null` per requested item, `workspace/applyEdit` →
   `{ applied: false, failureReason: 'Workspace edits are not supported' }`, everything else (including
-  `client/registerCapability` and `window/workDoneProgress/create`) → `null`. These are answered locally and not
-  forwarded.
+  `client/registerCapability` and `window/workDoneProgress/create`) → `null`. Because the transport answers these
+  locally and does **not** forward them, the package's own blanket-`null` reply never fires, so there is no
+  double response.
 
 Server *notifications* (no `id`) pass through untouched so the package's `publishDiagnostics` handling works.
 
