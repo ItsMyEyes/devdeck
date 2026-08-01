@@ -65,6 +65,9 @@ export default defineConfig({
       'src/lib/fuzzyHighlight.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
       'src/components/ui/progress-line.test.tsx',
+      'src/features/terminal/lspTransport.test.ts',
+      'src/features/terminal/lspSession.test.ts',
+      'src/features/terminal/lspWorkspaceEdit.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
