@@ -1,18 +1,25 @@
-import type { FormEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Globe, Home, Maximize2, Minimize2, Plus, RefreshCw, Star, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
+import { X } from 'lucide-react'
+import { toast } from 'sonner'
+import { ProgressLine } from '@/components/ui/progress-line'
 import { useBookmarks, useCreateBookmark, useDeleteBookmark, useMachines, useMachinesHealth } from '@/features/data/queries'
 import { takeLegacyBrowserTileBookmarks } from '@/lib/browserTileBookmarks'
 import { startProxy } from '@/lib/machineApi'
-import { cn } from '@/lib/utils'
 import type { Bookmark, Machine } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { BookmarkDialog } from './BookmarkDialog'
+import { BrowserFaviconChip } from './BrowserFaviconChip'
+import { BrowserFindBar } from './BrowserFindBar'
+import { BrowserOmnibox } from './BrowserOmnibox'
+import { BrowserTabStrip } from './BrowserTabStrip'
+import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserUrlCard } from './BrowserUrlCard'
+import { tileShouldBeHidden } from './browserTileOcclusion'
+import { DEFAULT_ZOOM, zoomStep } from './browserZoom'
 import {
+  clearBrowserTileFind,
   closeBrowserTile as closeNativeBrowserTile,
+  findInBrowserTile,
   hideBrowserTile,
   navigateBrowserTile,
   onBrowserTilePageLoad,
@@ -20,11 +27,19 @@ import {
   openBrowserTile,
   reloadBrowserTile,
   setBrowserTileBounds,
+  setZoomBrowserTile,
   showBrowserTile,
 } from './browserTilesBridge'
 
 interface BrowserTileProps {
   tabId: string
+  /** Whether this tile's own leaf owns the keyboard — scopes Cmd/Ctrl+L (URL
+   *  card), Cmd/Ctrl+F (find), and the zoom chords to the one focused
+   *  Browser tile, mirroring `SSHShellPane`'s existing `isFocused` prop (see
+   *  `WorkspaceTileArea.tsx`). Defaults to false so an un-migrated caller
+   *  degrades to "no tile owns these keys" rather than every tile owning
+   *  them at once. */
+  isFocused?: boolean
 }
 
 /** True exactly once across this page load, regardless of how many
@@ -62,43 +77,6 @@ function groupBookmarksByMachine(bookmarks: Bookmark[], machines: Machine[]): [s
     })
 }
 
-/** First letter of the bookmark's title on a color picked from its id, shown
- *  whenever FaviconService couldn't resolve a real icon (page has none, or
- *  the owning machine was unreachable at save time). */
-const CHIP_COLORS = [
-  'bg-devdeck-accent-tint text-devdeck-accent-soft',
-  'bg-devdeck-green-tint text-devdeck-green-soft',
-  'bg-devdeck-yellow/20 text-devdeck-yellow',
-  'bg-devdeck-red-tint text-devdeck-red-soft',
-]
-
-function chipColorFor(seed: string): string {
-  let hash = 0
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
-  return CHIP_COLORS[hash % CHIP_COLORS.length]
-}
-
-function BookmarkIcon({ bookmark }: { bookmark: Bookmark }) {
-  if (bookmark.iconDataUrl) {
-    return <img src={bookmark.iconDataUrl} alt="" className="h-5 w-5 flex-none rounded-[3px]" />
-  }
-  return (
-    <div
-      className={cn(
-        'flex h-5 w-5 flex-none items-center justify-center rounded-[3px] text-[10px] font-semibold',
-        chipColorFor(bookmark.id),
-      )}
-    >
-      {(bookmark.title.trim()[0] ?? '?').toUpperCase()}
-    </div>
-  )
-}
-
-/** The 28px toolbar buttons are fine under a mouse but far too small to hit
- *  reliably with a thumb, so they grow to 36px on touch pointers only — the
- *  toolbar wraps, so the extra width costs nothing. */
-const toolbarButtonClass = 'pointer-coarse:h-9 pointer-coarse:w-9'
-
 function normalizeAddress(value: string): string {
   const raw = value.trim()
   if (!raw) return ''
@@ -123,7 +101,7 @@ function titleFor(url: string): string {
   }
 }
 
-export function BrowserTile({ tabId }: BrowserTileProps) {
+export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   const tile = useDevDeckStore((s) => s.browserTiles[tabId])
   const ensureBrowserTile = useDevDeckStore((s) => s.ensureBrowserTile)
   const setBrowserDocState = useDevDeckStore((s) => s.setBrowserDocState)
@@ -141,7 +119,13 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   const bookmarksByMachine = useMemo(() => groupBookmarksByMachine(bookmarks, machines), [bookmarks, machines])
   const [draft, setDraft] = useState('')
   const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false)
+  const [urlCardOpen, setUrlCardOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findResult, setFindResult] = useState<{ active: number; total: number }>({ active: 0, total: 0 })
   const bodyRef = useRef<HTMLDivElement>(null)
+  const zoomLevelRef = useRef(DEFAULT_ZOOM)
+  const scheduledShowRef = useRef<number | null>(null)
 
   useEffect(() => {
     ensureBrowserTile(tabId)
@@ -168,6 +152,10 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
   useEffect(() => {
     setDraft(doc?.url ?? '')
   }, [doc?.id, doc?.url])
+
+  useEffect(() => {
+    zoomLevelRef.current = DEFAULT_ZOOM
+  }, [doc?.id])
 
   // Creates the native webview (once per doc, sized correctly from the
   // start) and keeps it glued to the placeholder's on-screen rect on every
@@ -215,31 +203,60 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, doc?.id, doc?.url])
 
-  // Native webviews are separate OS surfaces the window manager always
-  // stacks above the app's DOM — no CSS z-index can put a dialog/command
-  // palette in front of one (see `nativeOverlayBlockers`'s doc comment).
-  // Hide the webview for as long as any such overlay is open, then restore
-  // it once the last one closes — mirrors the machine-switch path above,
-  // since the ResizeObserver won't fire on its own (the placeholder's
-  // on-screen size hasn't actually changed).
+  function cancelScheduledShow() {
+    if (scheduledShowRef.current !== null) {
+      cancelAnimationFrame(scheduledShowRef.current)
+      scheduledShowRef.current = null
+    }
+  }
+
+  function scheduleShow(tId: string, dId: string, measure: () => DOMRect | undefined) {
+    cancelScheduledShow()
+    scheduledShowRef.current = requestAnimationFrame(() => {
+      scheduledShowRef.current = null
+      const rect = measure()
+      if (!rect) return
+      // Freshly read at the moment this frame actually runs, not the
+      // closed-over values from when the show was scheduled (design spec
+      // §5.6) — a blocker can push/pop again in the time between scheduling
+      // and this callback firing.
+      const state = useDevDeckStore.getState()
+      if (tileShouldBeHidden(rect, state.nativeOverlayBlockers, state.tileDragActive)) return
+      void showBrowserTile(tId, dId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+    })
+  }
+
+  // Occlusion-aware visibility (design spec §5.4/§5.6), replacing the
+  // Slice-1 placeholder's blunt "any open blocker anywhere" check: a
+  // Browser tile now only hides for a blocker whose own reported region
+  // actually intersects this tile's rect (or `tileDragActive`/a
+  // `'viewport'`-scoped blocker, which still hide unconditionally). Hide is
+  // always immediate; show is coalesced behind one rAF so a same-frame
+  // hide-then-show never round-trips an extra IPC call to Rust.
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
-    if (nativeOverlayBlockers > 0 || tileDragActive) {
-      void hideBrowserTile(tabId, docId)
-      return
-    }
     const el = bodyRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    void showBrowserTile(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+    if (tileShouldBeHidden(rect, nativeOverlayBlockers, tileDragActive)) {
+      cancelScheduledShow()
+      void hideBrowserTile(tabId, docId)
+      return
+    }
+    scheduleShow(tabId, docId, () => bodyRef.current?.getBoundingClientRect())
+    return cancelScheduledShow
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
 
-  // Sync the address bar/title from real in-page navigation inside the native webview.
+  // Sync the address bar/title from real in-page navigation inside the
+  // native webview. `loading` now comes straight from the fixed
+  // `on_page_load` payload (Slice 1 Task 7) instead of being hardcoded
+  // false, so the toolbar's Reload<->Stop icon actually swaps.
   useEffect(() => {
     let unlisten: (() => void) | undefined
-    void onBrowserTilePageLoad(({ tabId: t, docId: d, url }) => {
-      if (t === tabId) setBrowserDocState(t, d, { url, loading: false })
+    void onBrowserTilePageLoad(({ tabId: t, docId: d, url, loading }) => {
+      if (t === tabId) setBrowserDocState(t, d, { url, loading })
     }).then((fn) => {
       unlisten = fn
     })
@@ -260,6 +277,46 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     return () => unlisten?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
+
+  // Cmd/Ctrl+L (URL card), Cmd/Ctrl+F (find), and the zoom chords — scoped
+  // to this tile only while its leaf is focused (see the `isFocused` prop
+  // doc comment), so a Browser tile in a background split never steals
+  // these from whichever tile the operator is actually looking at.
+  // Deliberately does not touch Cmd/Ctrl+K or Cmd/Ctrl+P — those stay the
+  // global command palette's and file-quick-open's own bindings (see
+  // `WorkspaceTileArea.tsx`'s own keydown handler and
+  // `paletteKeyMatches` in the command-palette implementation), and
+  // Cmd/Ctrl+N/P inside an *open* palette are that palette's own internal
+  // selection-move bindings, unrelated to this tile.
+  useEffect(() => {
+    if (!isFocused || !doc) return
+    function handleKeydown(event: KeyboardEvent) {
+      const primary = event.metaKey || event.ctrlKey
+      if (!primary || event.altKey || !doc) return
+      const key = event.key
+      if (!event.shiftKey && key.toLowerCase() === 'l') {
+        event.preventDefault()
+        setUrlCardOpen(true)
+        return
+      }
+      if (!event.shiftKey && key.toLowerCase() === 'f') {
+        event.preventDefault()
+        setFindOpen(true)
+        return
+      }
+      if (key === '=' || key === '+' || key === '-' || key === '_' || key === '0') {
+        event.preventDefault()
+        zoomLevelRef.current =
+          key === '0' ? DEFAULT_ZOOM : zoomStep(zoomLevelRef.current, key === '-' || key === '_' ? -1 : 1)
+        if (doc.url) void setZoomBrowserTile(tabId, doc.id, zoomLevelRef.current)
+        // Stable `id` (design spec §3.6): a repeated zoom keypress replaces
+        // the existing toast and resets its timer instead of stacking one.
+        toast(`${Math.round(zoomLevelRef.current * 100)}%`, { id: 'browser-zoom', duration: 1500 })
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [isFocused, tabId, doc])
 
   if (!tile || !doc) return null
 
@@ -301,17 +358,12 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
     setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, history, historyIndex: history.length - 1 })
     // First navigation for this doc (doc.url was still null): the mount
-    // effect below creates the native webview once the placeholder <div>
+    // effect above creates the native webview once the placeholder <div>
     // exists, sized correctly from the start — see that effect's comment
     // for why opening doesn't happen here.
     if (doc.url) {
       await navigateBrowserTile(tabId, doc.id, url)
     }
-  }
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    void navigate(draft)
   }
 
   const goHistory = async (delta: -1 | 1) => {
@@ -334,6 +386,14 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     if (!doc.url) return
     setBrowserDocState(tabId, doc.id, { loading: true })
     await reloadBrowserTile(tabId, doc.id)
+  }
+
+  const stop = () => {
+    // No native "cancel navigation" primitive exists on this Tauri/wry
+    // version (design spec §6 only adds set_zoom and find this round) —
+    // this clears the local loading flag so the icon swaps back, even
+    // though the in-flight request itself isn't actually aborted.
+    setBrowserDocState(tabId, doc.id, { loading: false })
   }
 
   // Opening the dialog is the whole action — BookmarkDialog itself owns the
@@ -371,6 +431,28 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     closeBrowserDoc(tabId, docId)
   }
 
+  const submitUrlCard = (value: string) => {
+    setUrlCardOpen(false)
+    void navigate(value)
+  }
+
+  const closeUrlCard = () => {
+    setDraft(doc.url ?? '')
+    setUrlCardOpen(false)
+  }
+
+  const runFind = (direction: 'next' | 'prev') => {
+    if (!doc.url || !findQuery.trim()) return
+    void findInBrowserTile(tabId, doc.id, findQuery, direction).then(setFindResult)
+  }
+
+  const closeFind = () => {
+    setFindOpen(false)
+    setFindQuery('')
+    setFindResult({ active: 0, total: 0 })
+    if (doc.url) void clearBrowserTileFind(tabId, doc.id)
+  }
+
   const canGoBack = doc.historyIndex > 0
   const canGoForward = doc.historyIndex < doc.history.length - 1
 
@@ -379,101 +461,61 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
     // the viewport's: a browser tile split three ways on a desktop is just as
     // narrow as a full-width one on a phone, and needs the same layout.
     <div className="@container/tile flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-bg">
-      {tile.fullscreen && (
-        <div className="flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-devdeck-border bg-devdeck-surface px-2">
-          {tile.docs.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => selectBrowserDoc(tabId, d.id)}
-              className={cn(
-                'group flex h-6 max-w-[160px] flex-none items-center gap-1.5 rounded-md px-2 font-mono text-[11px]',
-                d.id === tile.activeDocId ? 'bg-devdeck-elevated text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
-              )}
-            >
-              <Globe size={11} />
-              <span className="truncate">{d.title}</span>
-              {tile.docs.length > 1 && (
-                <X
-                  size={10}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void closeInternalTab(d.id)
-                  }}
-                  // Touch devices never fire hover, so the reveal-on-hover close
-                  // affordance leaves internal tabs impossible to close there.
-                  className="flex-none opacity-0 group-hover:opacity-100 pointer-coarse:h-3.5 pointer-coarse:w-3.5 pointer-coarse:opacity-100"
-                />
-              )}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => addBrowserDoc(tabId)}
-            aria-label="New tab"
-            className="ml-1 flex h-6 w-6 flex-none items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-hover-wash"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-      )}
-
-      {/* Wraps rather than scrolls: every control here is fixed-width, so the
-          old `overflow-x-auto` row had nothing to give but the address bar,
-          which collapsed to a few unreadable pixels long before the row ever
-          became scrollable. Below 32rem the address bar drops to its own
-          full-width line instead (`order-last` + `w-full`). */}
-      <div className="flex min-w-0 flex-none flex-wrap items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-2 py-1.5">
-        <Globe size={13} className="hidden flex-none text-devdeck-dim @lg/tile:block" />
-        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHistory(-1)} disabled={!canGoBack} aria-label="Back">
-          <ArrowLeft size={12} />
-        </Button>
-        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHistory(1)} disabled={!canGoForward} aria-label="Forward">
-          <ArrowRight size={12} />
-        </Button>
-        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void goHome()} aria-label="Home">
-          <Home size={12} />
-        </Button>
-        <form onSubmit={submit} className="order-last flex w-full min-w-0 items-center gap-1.5 @lg/tile:order-none @lg/tile:w-auto @lg/tile:flex-1">
-          <Input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={doc.machineId ? 'Search or enter URL' : 'Choose a machine first'}
-            disabled={!doc.machineId}
-            /* 16px on touch: anything smaller makes mobile Safari zoom the
-               whole page in on focus, which drags the native webview off-screen. */
-            className="h-7 min-w-0 flex-1 font-mono text-[11.5px] pointer-coarse:h-9 pointer-coarse:text-[16px]"
+      {/* `relative` so ProgressLine can pin itself to the chrome's bottom seam
+          — it spans the tile's full width, reading as "this tile is loading"
+          rather than decorating any one control. */}
+      <div className="relative flex-none">
+        {tile.docs.length > 1 ? (
+          <BrowserTabStrip
+            docs={tile.docs}
+            activeDocId={tile.activeDocId}
+            onSelect={(docId) => selectBrowserDoc(tabId, docId)}
+            onClose={(docId) => void closeInternalTab(docId)}
           />
-        </form>
-        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => void reload()} disabled={!doc.url} aria-label="Reload">
-          <RefreshCw size={12} />
-        </Button>
-        <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={openBookmarkDialog} disabled={!doc.url} aria-label="Bookmark this page">
-          <Star size={12} />
-        </Button>
-        <Select
-          value={doc.machineId ?? ''}
-          onValueChange={(machineId) => void selectMachine(machineId)}
-          options={machines.map((m) => ({
-            value: m.id,
-            label: m.name,
-            disabled: machineHealth.get(m.id)?.status === 'offline',
-          }))}
-          triggerClassName="h-7 min-w-24 max-w-40 flex-1 pointer-coarse:h-9 @lg/tile:w-32 @lg/tile:max-w-none @lg/tile:flex-none"
-          aria-label="Machine"
-        />
-        <Button
-          size="icon-sm"
-          variant="secondary"
-          className={cn(toolbarButtonClass, 'ml-auto @lg/tile:ml-0')}
-          onClick={() => setBrowserTileFullscreen(tabId, !tile.fullscreen)}
-          aria-label={tile.fullscreen ? 'Exit full screen' : 'Full screen'}
+        ) : null}
+        <BrowserToolbar
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          onBack={() => void goHistory(-1)}
+          onForward={() => void goHistory(1)}
+          loading={doc.loading}
+          hasUrl={!!doc.url}
+          onReload={() => void reload()}
+          onStop={stop}
+          onHome={() => void goHome()}
+          onOpenFind={() => setFindOpen((v) => !v)}
+          onNewTab={() => addBrowserDoc(tabId)}
+          fullscreen={tile.fullscreen}
+          onToggleFullscreen={() => setBrowserTileFullscreen(tabId, !tile.fullscreen)}
         >
-          {tile.fullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-        </Button>
+          <BrowserOmnibox
+            docId={doc.id}
+            url={doc.url ?? ''}
+            title={doc.title}
+            machineId={doc.machineId ?? ''}
+            machines={machines}
+            machineHealth={machineHealth}
+            onSelectMachine={(machineId) => void selectMachine(machineId)}
+            onEdit={() => setUrlCardOpen(true)}
+            onBookmark={openBookmarkDialog}
+          />
+        </BrowserToolbar>
+        <ProgressLine active={doc.loading} />
       </div>
 
-      <div className="relative min-h-0 min-w-0 flex-1">
+      <BrowserFindBar
+        open={findOpen}
+        query={findQuery}
+        onQueryChange={setFindQuery}
+        active={findResult.active}
+        total={findResult.total}
+        onNext={() => runFind('next')}
+        onPrev={() => runFind('prev')}
+        onClose={closeFind}
+      />
+
+      <div className="relative min-h-0 min-w-0 flex-1 rounded-b-lg border border-devdeck-border-card">
+        <BrowserUrlCard open={urlCardOpen} draft={draft} onDraftChange={setDraft} onSubmit={submitUrlCard} onClose={closeUrlCard} />
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-5 overflow-auto p-4 @sm/tile:p-6">
             {bookmarksByMachine.length === 0 ? (
@@ -502,7 +544,7 @@ export function BrowserTile({ tabId }: BrowserTileProps) {
                                 onClick={() => void openBookmark(bookmark)}
                                 className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-3 text-left"
                               >
-                                <BookmarkIcon bookmark={bookmark} />
+                                <BrowserFaviconChip seed={bookmark.id} title={bookmark.title} iconDataUrl={bookmark.iconDataUrl} />
                                 <span className="min-w-0 flex-1 truncate text-[12px] text-devdeck-fg-2">{bookmark.title}</span>
                               </button>
                               <button
