@@ -1,111 +1,98 @@
-/**
- * Plain assertion-based tests, matching ripgrepInstallPrefs.test.ts's
- * convention (no Vitest/Jest configured in this project). Run manually with:
- *
- *   npx tsx src/features/ssh/jumpHostDraft.test.ts
- */
-
+import { describe, expect, it } from 'vitest'
 import { buildJumpHostRequest, defaultJumpHostDraft, isJumpHostDraftValid, type JumpHostDraft } from './jumpHostDraft'
-
-let passed = 0
-
-function check(name: string, fn: () => void) {
-  fn()
-  passed += 1
-  console.log(`ok - ${name}`)
-}
-
-function assertEqual<T>(actual: T, expected: T, message: string) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`assertion failed: ${message} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`)
-  }
-}
 
 function passwordDraft(overrides: Partial<JumpHostDraft> = {}): JumpHostDraft {
   return { ...defaultJumpHostDraft(), host: 'bastion.example.com', username: 'deploy', password: 'hunter2', ...overrides }
 }
 
-check('defaultJumpHostDraft starts on port 22, password auth, everything else blank', () => {
-  assertEqual(
-    defaultJumpHostDraft(),
-    { host: '', port: '22', username: '', authType: 'password', password: '', privateKey: '', privateKeyPath: '', passphrase: '' },
-    'default draft shape',
-  )
-})
+describe('jumpHostDraft', () => {
+  it('defaultJumpHostDraft starts on port 22, password auth, everything else blank', () => {
+    expect(defaultJumpHostDraft()).toEqual({
+      host: '',
+      port: '22',
+      username: '',
+      authType: 'password',
+      password: '',
+      privateKey: '',
+      privateKeyPath: '',
+      passphrase: '',
+    })
+  })
 
-check('a fully filled-in password draft is valid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft()), true, 'valid password draft')
-})
+  it('a fully filled-in password draft is valid', () => {
+    expect(isJumpHostDraftValid(passwordDraft())).toBe(true)
+  })
 
-check('blank host is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ host: '  ' })), false, 'blank host')
-})
+  it('blank host is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ host: '  ' }))).toBe(false)
+  })
 
-check('blank username is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ username: '' })), false, 'blank username')
-})
+  it('blank username is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ username: '' }))).toBe(false)
+  })
 
-check('port 0 is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ port: '0' })), false, 'port too low')
-})
+  it('port 0 is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ port: '0' }))).toBe(false)
+  })
 
-check('port 65536 is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ port: '65536' })), false, 'port too high')
-})
+  it('port 65536 is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ port: '65536' }))).toBe(false)
+  })
 
-check('non-numeric port is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ port: 'abc' })), false, 'non-numeric port')
-})
+  it('non-numeric port is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ port: 'abc' }))).toBe(false)
+  })
 
-check('password auth with an empty password is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ password: '' })), false, 'empty password')
-})
+  it('password auth with an empty password is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ password: '' }))).toBe(false)
+  })
 
-check('privatekey auth with neither key nor path is invalid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '' })), false, 'no key material')
-})
+  it('privatekey auth with neither key nor path is invalid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '' }))).toBe(false)
+  })
 
-check('privatekey auth with a pasted key is valid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '', privateKey: '-----BEGIN...' })), true, 'pasted key')
-})
+  it('privatekey auth with a pasted key is valid', () => {
+    expect(isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '', privateKey: '-----BEGIN...' }))).toBe(true)
+  })
 
-check('privatekey auth with only a path is valid', () => {
-  assertEqual(isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '', privateKeyPath: '~/.ssh/id_ed25519' })), true, 'key path')
-})
+  it('privatekey auth with only a path is valid', () => {
+    expect(
+      isJumpHostDraftValid(passwordDraft({ authType: 'privatekey', password: '', privateKeyPath: '~/.ssh/id_ed25519' })),
+    ).toBe(true)
+  })
 
-check('buildJumpHostRequest names the connection after the trimmed host, ungrouped, single hop', () => {
-  const body = buildJumpHostRequest(passwordDraft({ host: '  bastion.example.com  ', port: '2222' }))
-  assertEqual(body.name, 'bastion.example.com', 'name mirrors trimmed host')
-  assertEqual(body.host, 'bastion.example.com', 'host trimmed')
-  assertEqual(body.group, '', 'ungrouped')
-  assertEqual(body.port, 2222, 'port parsed to a number')
-  assertEqual(body.executorMachineId, null, 'no executor')
-  assertEqual(body.jumpConnectionId, null, 'no chained jump of its own')
-})
+  it('buildJumpHostRequest names the connection after the trimmed host, ungrouped, single hop', () => {
+    const body = buildJumpHostRequest(passwordDraft({ host: '  bastion.example.com  ', port: '2222' }))
+    expect(body.name).toBe('bastion.example.com')
+    expect(body.host).toBe('bastion.example.com')
+    expect(body.group).toBe('')
+    expect(body.port).toBe(2222)
+    expect(body.executorMachineId).toBe(null)
+    expect(body.jumpConnectionId).toBe(null)
+  })
 
-check('buildJumpHostRequest for password auth carries the password, not key fields', () => {
-  const body = buildJumpHostRequest(passwordDraft({ password: 'hunter2' }))
-  assertEqual(body.password, 'hunter2', 'password carried')
-  assertEqual(body.privateKey, undefined, 'no privateKey field')
-  assertEqual(body.privateKeyPath, undefined, 'no privateKeyPath field')
-  assertEqual(body.passphrase, undefined, 'no passphrase field')
-})
+  it('buildJumpHostRequest for password auth carries the password, not key fields', () => {
+    const body = buildJumpHostRequest(passwordDraft({ password: 'hunter2' }))
+    expect(body.password).toBe('hunter2')
+    expect(body.privateKey).toBeUndefined()
+    expect(body.privateKeyPath).toBeUndefined()
+    expect(body.passphrase).toBeUndefined()
+  })
 
-check('buildJumpHostRequest for privatekey auth carries the key and passphrase, not password', () => {
-  const body = buildJumpHostRequest(
-    passwordDraft({ authType: 'privatekey', password: '', privateKey: 'PEMDATA', passphrase: 'shh' }),
-  )
-  assertEqual(body.privateKey, 'PEMDATA', 'privateKey carried')
-  assertEqual(body.passphrase, 'shh', 'passphrase carried')
-  assertEqual(body.password, undefined, 'no password field')
-})
+  it('buildJumpHostRequest for privatekey auth carries the key and passphrase, not password', () => {
+    const body = buildJumpHostRequest(
+      passwordDraft({ authType: 'privatekey', password: '', privateKey: 'PEMDATA', passphrase: 'shh' }),
+    )
+    expect(body.privateKey).toBe('PEMDATA')
+    expect(body.passphrase).toBe('shh')
+    expect(body.password).toBeUndefined()
+  })
 
-check('buildJumpHostRequest prefers a pasted privateKey over privateKeyPath when both are set', () => {
-  const body = buildJumpHostRequest(
-    passwordDraft({ authType: 'privatekey', password: '', privateKey: 'PEMDATA', privateKeyPath: '~/.ssh/id_ed25519' }),
-  )
-  assertEqual(body.privateKey, 'PEMDATA', 'pasted key wins')
-  assertEqual(body.privateKeyPath, undefined, 'path omitted when key present')
+  it('buildJumpHostRequest prefers a pasted privateKey over privateKeyPath when both are set', () => {
+    const body = buildJumpHostRequest(
+      passwordDraft({ authType: 'privatekey', password: '', privateKey: 'PEMDATA', privateKeyPath: '~/.ssh/id_ed25519' }),
+    )
+    expect(body.privateKey).toBe('PEMDATA')
+    expect(body.privateKeyPath).toBeUndefined()
+  })
 })
-
-console.log(`\n${passed} tests passed`)

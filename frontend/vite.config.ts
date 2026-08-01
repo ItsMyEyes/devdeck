@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
@@ -46,5 +47,14 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    // The route tree is generated at build time; excluding it keeps a cold
+    // `npm test` from depending on `pretypecheck` having been run.
+    exclude: ['node_modules/**', 'dist/**', 'src-tauri/**'],
   },
 })

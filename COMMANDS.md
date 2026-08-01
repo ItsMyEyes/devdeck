@@ -372,7 +372,8 @@ git config core.hooksPath .githooks
   (`internal/service/tools_test.go`, `internal/handler/tools_test.go`) shell
   out to the real markitdown/pandoc/mmdc binaries and skip themselves if a
   binary isn't on `PATH`.
-- Frontend: no test suite yet; Vitest is the anticipated choice (Vite-native).
+- Frontend: `cd frontend && npm test` (Vitest, jsdom). Watch mode: `npm run test:watch`.
+  `make test` runs both the Go and frontend suites.
 
 ## Code generation
 

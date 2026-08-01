@@ -182,6 +182,7 @@ lint: typecheck vet
 
 test:
 	cd backend && go test ./...
+	cd frontend && npm test
 
 # ── Dependencies ─────────────────────────────────────────────
 install:
