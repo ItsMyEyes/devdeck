@@ -103,17 +103,21 @@ function sameChromeRects(a: Record<string, ChromeRect>, b: Record<string, Chrome
  *  visible but it doesn't own the keyboard), inert grey otherwise. Worktree
  *  tabs deliberately no longer show their agent's run-state colour here — one
  *  dot per pill, and it answers "which tab am I looking at". */
-function TabDot({ active, focused }: { active: boolean; focused: boolean }) {
+function TabDot({ active, focused, loading = false }: { active: boolean; focused: boolean; loading?: boolean }) {
   return (
     <span
       aria-hidden
       className={cn(
         'size-1.5 flex-none rounded-full transition-[background-color,box-shadow] duration-150',
-        active
-          ? focused
-            ? 'bg-devdeck-green shadow-[0_0_0_2px_rgba(86,213,138,0.14),0_0_7px_rgba(86,213,138,0.22)]'
-            : 'bg-devdeck-green/40'
-          : 'bg-devdeck-dim-3',
+        // Loading outranks active/focused: a background tile that is fetching
+        // is the one thing the strip can tell you that nothing else can.
+        loading
+          ? 'animate-dot-pulse bg-devdeck-accent shadow-[0_0_0_2px_rgba(57,198,189,0.16)]'
+          : active
+            ? focused
+              ? 'bg-devdeck-green shadow-[0_0_0_2px_rgba(86,213,138,0.14),0_0_7px_rgba(86,213,138,0.22)]'
+              : 'bg-devdeck-green/40'
+            : 'bg-devdeck-dim-3',
       )}
     />
   )
@@ -190,7 +194,17 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
     null,
   )
   const [liveSizes, setLiveSizes] = useState<number[] | null>(null)
+  const [dragging, setDragging] = useState(false)
   const setTileDragActive = useDevDeckStore((s) => s.setTileDragActive)
+  // A second, independent signal alongside `tileDragActive` (still the
+  // zero-latency, whole-app-immediate hide `tileShouldBeHidden` short-
+  // circuits on): scoped to this split's own container rect, so only the
+  // panes actually being resized report a blocker, and — because it goes
+  // through the same push/pop-on-effect-cleanup path every other
+  // `useNativeOverlayBlocker` caller gets for free — its entry can never
+  // outlive this component the way a raw pointer-handler-set boolean can
+  // (see the design spec §5.5's leak-proofing point 1).
+  useNativeOverlayBlocker(dragging, containerRef)
 
   const isRow = node.direction === 'row'
   const sizes = liveSizes ?? node.sizes
@@ -213,6 +227,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
     if (!dragRef.current) return
     dragRef.current = null
     setTileDragActive(false)
+    setDragging(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -240,6 +255,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
                 event.preventDefault()
                 event.currentTarget.setPointerCapture(event.pointerId)
                 setTileDragActive(true)
+                setDragging(true)
                 const rect = container.getBoundingClientRect()
                 dragRef.current = {
                   index: i - 1,
@@ -251,6 +267,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
+              onLostPointerCapture={handlePointerUp}
             />
           ) : null}
           <div
@@ -295,6 +312,16 @@ function TileTabButton({
   onSelect: () => void
   onClose?: () => void
 }) {
+  // Subscribed, not read via getState(): `resolveBrowserTab` takes a snapshot
+  // during render, so a loading flag routed through it would never re-render
+  // this dot. Called unconditionally — the selector short-circuits for tabs
+  // that aren't browsers.
+  const browserLoading = useDevDeckStore((s) => {
+    if (tab.kind !== 'browser') return false
+    const tile = s.browserTiles[tab.id]
+    return tile?.docs.find((d) => d.id === tile.activeDocId)?.loading ?? false
+  })
+
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: tab.id,
     data: { tabId: tab.id, sourceLeafId: leafId },
@@ -308,18 +335,21 @@ function TileTabButton({
 
   const wrapperClass = (dragging: boolean) =>
     cn(
-      'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-[9px] border font-mono',
-      'transition-[background-color,border-color,color,box-shadow,opacity] duration-150 active:cursor-grabbing',
+      'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-[9px] border',
+      'transition-[background-color,border-color,color,opacity] duration-150 active:cursor-grabbing',
       // Wider than the old label-only pills: a worktree tab now carries a
       // "<project>/<machine> · " origin prefix ahead of its session name.
       compact
         ? 'h-6 max-w-[200px] rounded-[7px] pl-2 pr-1 text-[11px]'
-        : 'h-8 max-w-[270px] pl-2.5 pr-1.5 text-[11.5px]',
+        : 'h-8 max-w-[270px] pl-2.5 pr-1.5 text-[12px]',
+      // Two affordances for "active", not five: fill plus the dot. The border
+      // and the two shadows this used to stack read as a *button*, not a tab —
+      // and the hover border cost a 1px reflow on every pointer pass.
       active && focused
-        ? 'border-devdeck-border-strong bg-devdeck-elevated text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_1px_3px_rgba(0,0,0,0.24)]'
+        ? 'border-transparent bg-devdeck-elevated text-devdeck-fg'
         : active
-          ? 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]'
-          : 'border-transparent bg-transparent text-devdeck-muted hover:border-devdeck-border-card hover:bg-devdeck-surface-2 hover:text-devdeck-fg-2',
+          ? 'border-transparent bg-devdeck-surface-2 text-devdeck-fg-2'
+          : 'border-transparent bg-transparent text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
       dragging && 'opacity-40',
     )
 
@@ -354,7 +384,7 @@ function TileTabButton({
           className={cn(
             'flex h-[17px] flex-none items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
             'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity',
-            active ? 'opacity-75' : 'opacity-35 group-hover:opacity-65',
+            active ? 'opacity-75' : 'opacity-0 group-hover:opacity-60',
           )}
         >
           {shortcut}
@@ -368,7 +398,7 @@ function TileTabButton({
           className={cn(
             'flex h-[17px] items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
             'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
-            active ? 'opacity-75' : 'opacity-35',
+            active ? 'opacity-75' : 'opacity-0 group-hover:opacity-60',
           )}
         >
           {shortcut}
@@ -442,7 +472,7 @@ function TileTabButton({
         className={wrapperClass(isDragging)}
       >
         <button type="button" onClick={onSelect} className={selectButtonClass}>
-          <TabDot active={active} focused={focused} />
+          <TabDot active={active} focused={focused} loading={browserLoading} />
           <Globe size={12} className="flex-none" />
           <span className="truncate">{info.label}</span>
         </button>
@@ -739,11 +769,17 @@ export function WorkspaceTileCanvas({
   className,
 }: WorkspaceTileCanvasProps) {
   const [dragTab, setDragTab] = useState<TileTab | null>(null)
+  const dragGhostRef = useRef<HTMLDivElement>(null)
   // A dragged tab's ghost preview (DragOverlay below) is a DOM portal, and a
   // native Browser-tile webview always paints above the DOM — without this,
   // dragging any tab (including a Browser tab itself) renders its ghost
-  // underneath an open Browser tile instead of following the pointer over it.
-  useNativeOverlayBlocker(dragTab !== null)
+  // underneath an open Browser tile instead of following the pointer over
+  // it. Scoped to the ghost element's own rect rather than 'viewport', so
+  // dragging a tab far from an open Browser tile doesn't blank it. `live`
+  // because DragOverlay repositions the ghost with a CSS transform as the
+  // pointer moves, which fires neither ResizeObserver nor a scroll/resize
+  // event — the rect has to be re-measured every frame to keep up with it.
+  useNativeOverlayBlocker(dragTab !== null, dragGhostRef, true)
   const [hoverZone, setHoverZone] = useState<{ leafId: string; zone: TileDropZone } | null>(null)
   const [chromeRects, setChromeRects] = useState<Record<string, ChromeRect>>({})
   const rootRef = useRef<HTMLDivElement>(null)
@@ -875,7 +911,10 @@ export function WorkspaceTileCanvas({
       </div>
       <DragOverlay>
         {dragTab ? (
-          <div className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-[9px] border border-devdeck-border-strong bg-devdeck-elevated px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]">
+          <div
+            ref={dragGhostRef}
+            className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-[9px] border border-devdeck-border-strong bg-devdeck-elevated px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]"
+          >
             <TabDot active focused />
             {dragTab.kind === 'agents' ? (
               <LayoutGrid size={12} className="flex-none" />
