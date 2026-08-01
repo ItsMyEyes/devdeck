@@ -18,7 +18,8 @@
 - Icons: `lucide-react` only. Toasts: `toast()` from `sonner` (this is what `CodeFileEditor.tsx` and `FileEditor.tsx` already use). Class merging: `cn()` from `@/lib/utils`.
 - Design is dark-only; use the existing `devdeck-*` CSS custom properties and the `devdeckCodeTheme` tokens.
 - `frontend/src/store/useDevDeckStore.ts`, `frontend/src/store/types.ts`, and `backend/*` are NOT touched by any task in this plan.
-- Verification gates for every task: `npm run typecheck` and `npm test`, both run from `frontend/`. The one exception is Task 3, which knowingly leaves `CodeFileEditor.tsx` broken until Task 7; that step says so explicitly. No other task may leave the tree red.
+- Verification gates for every task: `npm run typecheck` and `npm test`, both run from `frontend/`.
+- **`.githooks/pre-commit` runs `npm run typecheck` with `set -e`, so a commit is impossible while the tree has type errors.** Every task must therefore leave the tree green. This is why the new session module is added alongside the old `lspClient.ts` rather than replacing it in place: the old file stays valid and in use until Task 7 switches `CodeFileEditor.tsx` over and deletes it. Never use `--no-verify` to get around this.
 - Package version is pinned exactly: `codemirror-languageserver@1.22.0`. Do not use `^`.
 - No backend changes. `backend/internal/lsp/server.go` already provides everything needed.
 - Every new `.test.ts` file MUST be added to the `test.include` array in `frontend/vite.config.ts`, or it will never run.
@@ -42,8 +43,8 @@ Additional constraint discovered while planning: `JSONRPCClient` only waits for 
 |---|---|
 | `frontend/src/features/terminal/lspTransport.ts` | `Transport` over `/ws/lsp`: control-frame demux, send queue, server-request replies, status events |
 | `frontend/src/features/terminal/lspTransport.test.ts` | Transport tests against a fake socket |
-| `frontend/src/features/terminal/lspClient.ts` | Rewritten: `LspSession`, uri↔path mapping, ref-counted pool |
-| `frontend/src/features/terminal/lspClient.test.ts` | Rewritten: pool refcounting, uri↔path round-trip |
+| `frontend/src/features/terminal/lspSession.ts` | `LspSession`, uri↔path mapping, ref-counted pool — replaces `lspClient.ts` |
+| `frontend/src/features/terminal/lspSession.test.ts` | Pool refcounting, uri↔path round-trip |
 | `frontend/src/features/terminal/lspWorkspaceEdit.ts` | Pure `WorkspaceEdit` splitting and text-edit application |
 | `frontend/src/features/terminal/lspWorkspaceEdit.test.ts` | Pure-function tests |
 | `frontend/src/features/terminal/lspExtensions.ts` | CodeMirror extension assembly + DevDeck overrides |
@@ -88,7 +89,9 @@ Expected: `1.22.0` (no `^`, no `~`)
 
 - [ ] **Step 3: Delete the obsolete hand-rolled harness**
 
-`frontend/src/features/terminal/lspClient.test.ts` is a `check()`-style harness with no `it()` blocks. It is not in the current `test.include` list, so Vitest ignores it today — but the next step adds a glob that would match it, and Vitest fails a file containing no test suite. Task 3 writes its replacement.
+`frontend/src/features/terminal/lspClient.test.ts` is a `check()`-style harness with no `it()` blocks, and it tests the `LspClient` class that Task 7 deletes. Vitest fails any file containing no test suite, so it cannot simply be left in place. Task 3 writes the real replacement, `lspSession.test.ts`.
+
+Note that `lspClient.ts` itself stays for now — `CodeFileEditor.tsx` still imports it and the pre-commit typecheck hook would reject a commit that broke that.
 
 ```bash
 rm frontend/src/features/terminal/lspClient.test.ts
@@ -100,7 +103,7 @@ In `frontend/vite.config.ts`, inside `test.include`, add these three entries aft
 
 ```ts
       'src/features/terminal/lspTransport.test.ts',
-      'src/features/terminal/lspClient.test.ts',
+      'src/features/terminal/lspSession.test.ts',
       'src/features/terminal/lspWorkspaceEdit.test.ts',
 ```
 
@@ -539,8 +542,8 @@ git commit -m "feat(lsp): transport bridging codemirror-languageserver to /ws/ls
 ### Task 3: Session and pool
 
 **Files:**
-- Rewrite: `frontend/src/features/terminal/lspClient.ts`
-- Test: `frontend/src/features/terminal/lspClient.test.ts` (create; the old harness was deleted in Task 1)
+- Create: `frontend/src/features/terminal/lspSession.ts`
+- Test: `frontend/src/features/terminal/lspSession.test.ts`
 
 **Interfaces:**
 - Consumes: `DevDeckLspTransport`, `openLspTransport`, `LspStatus` from `./lspTransport`.
@@ -551,15 +554,15 @@ git commit -m "feat(lsp): transport bridging codemirror-languageserver to /ws/ls
   - `function acquireLspSession(machine, worktreeId, languageId): Promise<{ session: LspSession; release: () => void }>`
   - `function uriHelpers(rootUri: string): { documentUri, pathFromUri }`
 
-Note for the implementer: the old `LspClient` class, `acquireLspClient`, and every `Lsp*` interface in the old file are deleted. `languageIdForPath` and the private `serverLanguage` helper are the only logic carried over verbatim.
+Note for the implementer: **do not touch `lspClient.ts` in this task.** `CodeFileEditor.tsx` still imports from it, and the pre-commit typecheck hook would block your commit if you broke it. `lspSession.ts` is a new file that lives alongside the old one; Task 7 switches the editor over and deletes `lspClient.ts` in the same commit. `languageIdForPath`, `serverLanguage`, `documentUri` and `pathFromUri` are copied out of the old file verbatim — copied, not moved.
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `frontend/src/features/terminal/lspClient.test.ts`:
+Create `frontend/src/features/terminal/lspSession.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest'
-import { createLspSessionPool, languageIdForPath, uriHelpers } from './lspClient'
+import { createLspSessionPool, languageIdForPath, uriHelpers } from './lspSession'
 
 describe('languageIdForPath', () => {
   it('maps known extensions and rejects the rest', () => {
@@ -598,7 +601,7 @@ describe('createLspSessionPool', () => {
   let next = 0
   function fakeSession() {
     next += 1
-    return { id: `session-${next}`, dispose: vi.fn() } as unknown as import('./lspClient').LspSession
+    return { id: `session-${next}`, dispose: vi.fn() } as unknown as import('./lspSession').LspSession
   }
 
   it('shares one session between holders and disposes only on the last release', async () => {
@@ -647,7 +650,7 @@ describe('createLspSessionPool', () => {
 
   it('does not cache a failed session', async () => {
     const create = vi
-      .fn<() => Promise<import('./lspClient').LspSession>>()
+      .fn<() => Promise<import('./lspSession').LspSession>>()
       .mockRejectedValueOnce(new Error('gopls is not installed'))
       .mockImplementation(async () => fakeSession())
     const pool = createLspSessionPool()
@@ -663,12 +666,12 @@ describe('createLspSessionPool', () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd frontend && npx vitest run src/features/terminal/lspClient.test.ts`
-Expected: FAIL — `createLspSessionPool` / `uriHelpers` are not exported by the current `lspClient.ts`.
+Run: `cd frontend && npx vitest run src/features/terminal/lspSession.test.ts`
+Expected: FAIL — `Failed to resolve import "./lspSession"` (the module does not exist yet).
 
 - [ ] **Step 3: Rewrite the module**
 
-Replace the entire contents of `frontend/src/features/terminal/lspClient.ts` with:
+Create `frontend/src/features/terminal/lspSession.ts`:
 
 ```ts
 import { LanguageServerClient } from 'codemirror-languageserver'
@@ -884,18 +887,18 @@ export function acquireLspSession(machine: Machine, worktreeId: string, language
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd frontend && npx vitest run src/features/terminal/lspClient.test.ts`
+Run: `cd frontend && npx vitest run src/features/terminal/lspSession.test.ts`
 Expected: PASS, 8 tests.
 
-- [ ] **Step 5: Confirm the old exports are gone**
+- [ ] **Step 5: Typecheck**
 
-Run: `cd frontend && grep -rn "acquireLspClient\|LspClient\b" src/ || echo "no references"`
-Expected: only `src/features/terminal/CodeFileEditor.tsx` still references them — Task 7 fixes that. `npm run typecheck` therefore fails at this step; that is expected and is not a reason to change `lspClient.ts`.
+Run: `cd frontend && npm run typecheck`
+Expected: no errors. `lspClient.ts` is untouched and still serving `CodeFileEditor.tsx`, so the tree stays green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/features/terminal/lspClient.ts frontend/src/features/terminal/lspClient.test.ts
+git add frontend/src/features/terminal/lspSession.ts frontend/src/features/terminal/lspSession.test.ts
 git commit -m "feat(lsp): session pool over LanguageServerClient"
 ```
 
@@ -1225,7 +1228,7 @@ git commit -m "feat(lsp): pure WorkspaceEdit splitting and text-edit application
 - Create: `frontend/src/features/terminal/lspExtensions.ts`
 
 **Interfaces:**
-- Consumes: `LspSession` from `./lspClient`; `LspRange` from `./lspWorkspaceEdit`.
+- Consumes: `LspSession` from `./lspSession`; `LspRange` from `./lspWorkspaceEdit`.
 - Produces:
   - `interface DefinitionTarget { symbol?: string; range?: LspRange }` — **moved here** from `CodeFileEditor.tsx`, because Task 7 makes `CodeFileEditor` import from this module and a back-import would be circular. `CodeFileEditor.tsx` must re-export it so `FileEditor.tsx` and `ExpandedTerminal.tsx` keep compiling unchanged.
   - `interface DefinitionReveal extends DefinitionTarget { requestId: number }` — moved here for the same reason.
@@ -1255,7 +1258,7 @@ import {
 } from 'codemirror-languageserver'
 import { CompletionTriggerKind } from 'vscode-languageserver-protocol'
 import { toast } from 'sonner'
-import type { LspSession } from './lspClient'
+import type { LspSession } from './lspSession'
 import type { LspPosition, LspRange } from './lspWorkspaceEdit'
 
 export interface DefinitionTarget {
@@ -1452,10 +1455,10 @@ export function lspExtensions(options: LspExtensionOptions): Extension[] {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles in isolation**
+- [ ] **Step 2: Typecheck**
 
-Run: `cd frontend && npx tsc --noEmit -p tsconfig.json 2>&1 | grep -v "CodeFileEditor" || echo "clean apart from CodeFileEditor"`
-Expected: no errors originating in `lspExtensions.ts`. Errors in `CodeFileEditor.tsx` are expected until Task 7.
+Run: `cd frontend && npm run typecheck`
+Expected: no errors. Nothing imports this module yet, so it only has to compile on its own.
 
 - [ ] **Step 3: Commit**
 
@@ -1473,7 +1476,7 @@ git commit -m "feat(lsp): assemble CodeMirror extensions with DevDeck overrides"
 - Create: `frontend/src/features/terminal/RenameSymbolDialog.tsx`
 
 **Interfaces:**
-- Consumes: `LspSession` from `./lspClient`; `splitWorkspaceEdit`, `applyTextEdits`, `FileEdits`, `LspTextEdit` from `./lspWorkspaceEdit`; `positionToOffset`, `offsetToPosition` from `./lspExtensions`; `fetchWorktreeFile`, `writeWorktreeFile` from `@/lib/machineApi`; `qk` from `@/features/data/keys`.
+- Consumes: `LspSession` from `./lspSession`; `splitWorkspaceEdit`, `applyTextEdits`, `FileEdits`, `LspTextEdit` from `./lspWorkspaceEdit`; `positionToOffset`, `offsetToPosition` from `./lspExtensions`; `fetchWorktreeFile`, `writeWorktreeFile` from `@/lib/machineApi`; `qk` from `@/features/data/keys`.
 - Produces:
   - `interface RenameSubject { symbol: string; position: LspPosition }`
   - `interface RenamePlan { newName: string; currentEdits: LspTextEdit[]; otherFiles: FileEdits[] }`
@@ -1492,7 +1495,7 @@ import type { EditorView } from '@codemirror/view'
 import { qk } from '@/features/data/keys'
 import { fetchWorktreeFile, writeWorktreeFile } from '@/lib/machineApi'
 import type { Machine } from '@/store/types'
-import type { LspSession } from './lspClient'
+import type { LspSession } from './lspSession'
 import { offsetToPosition, positionToOffset } from './lspExtensions'
 import {
   applyTextEdits,
@@ -1761,10 +1764,10 @@ export function RenameSymbolDialog({
 }
 ```
 
-- [ ] **Step 3: Verify both files compile**
+- [ ] **Step 3: Typecheck**
 
-Run: `cd frontend && npx tsc --noEmit -p tsconfig.json 2>&1 | grep -E "lspRename|RenameSymbolDialog" || echo "clean"`
-Expected: `clean`. Errors in `CodeFileEditor.tsx` remain expected until Task 7.
+Run: `cd frontend && npm run typecheck`
+Expected: no errors.
 
 - [ ] **Step 4: Check the Button and Input props actually match**
 
@@ -1786,6 +1789,7 @@ git commit -m "feat(lsp): cross-file rename planning, application and dialog"
 - Modify: `frontend/src/features/terminal/CodeFileEditor.tsx`
 - Modify: `frontend/src/features/terminal/FileEditor.tsx`
 - Modify: `frontend/src/features/terminal/ExpandedTerminal.tsx`
+- Delete: `frontend/src/features/terminal/lspClient.ts` (its last consumer goes away in this task)
 
 **Interfaces:**
 - Consumes: everything produced by Tasks 3–6.
@@ -1847,7 +1851,7 @@ import {
   languageIdForPath,
   type LspSession,
   type LspStatus,
-} from './lspClient'
+} from './lspSession'
 import {
   lspExtensions,
   revealRange,
@@ -2146,25 +2150,33 @@ Keep the existing doc comment on `ready` — the reveal effect depends on the be
   )
 ```
 
-- [ ] **Step 4: Typecheck**
+- [ ] **Step 4: Delete the superseded module**
+
+Nothing imports `lspClient.ts` any more.
+
+```bash
+rm frontend/src/features/terminal/lspClient.ts
+```
+
+- [ ] **Step 5: Typecheck**
 
 Run: `cd frontend && npm run typecheck`
-Expected: no errors. If `useCallback`/`useRef`/`EditorView`/`autocompletion`/`completeAnyWord` are reported as missing, add them to the existing imports at the top of the file.
+Expected: no errors. If `useCallback`/`useRef`/`EditorView`/`autocompletion`/`completeAnyWord` are reported as missing, add them to the existing imports at the top of the file. If anything still resolves `./lspClient`, that import was missed — fix the importer, do not restore the file.
 
-- [ ] **Step 5: Run the full suite**
+- [ ] **Step 6: Run the full suite**
 
 Run: `cd frontend && npm test`
 Expected: PASS.
 
-- [ ] **Step 6: Build**
+- [ ] **Step 7: Build**
 
 Run: `cd frontend && npm run build`
 Expected: succeeds.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/src/features/terminal/CodeFileEditor.tsx frontend/src/features/terminal/FileEditor.tsx frontend/src/features/terminal/ExpandedTerminal.tsx
+git add frontend/src/features/terminal/CodeFileEditor.tsx frontend/src/features/terminal/FileEditor.tsx frontend/src/features/terminal/ExpandedTerminal.tsx frontend/src/features/terminal/lspClient.ts
 git commit -m "feat(lsp): drive CodeFileEditor through codemirror-languageserver"
 ```
 
@@ -2191,8 +2203,8 @@ If the surrounding paragraph states a count of hand-rolled files, decrement it.
 
 - [ ] **Step 2: Confirm no stale references to the old API remain**
 
-Run: `cd frontend && grep -rn "acquireLspClient\|new LspClient\|LspCompletionItem\|codeMirrorDiagnostics" src/ || echo "clean"`
-Expected: `clean`.
+Run: `cd frontend && grep -rn "acquireLspClient\|LspCompletionItem\|codeMirrorDiagnostics\|from './lspClient'" src/ || echo "clean"`
+Expected: `clean`. Also confirm the file itself is gone: `ls frontend/src/features/terminal/lspClient.ts` should report no such file.
 
 - [ ] **Step 3: Run every gate**
 
@@ -2236,4 +2248,4 @@ Checked against the spec:
 - Spec §Extension composition → Task 5 (aggregate + three `Prec.high` overrides), with `syntaxDiagnostics` suppression in Task 7 Step 3.
 - Spec §Rename, all six numbered steps → Task 6 (`buildRenamePlan` covers refusals 3a–3c; `applyRenamePlan` covers 5 and 6) and Task 7 (dialog wiring, step 4).
 - Spec §Error handling table → Task 7 Step 3 status effect, plus the no-session fallback branch.
-- Spec §Testing → Tasks 2–4 unit tests; Task 8 Step 4 covers the manual list. `lspExtensions.test.ts` from the spec's list is deliberately **not** written — see the note in Task 5; the spec's proposed assertions ("completion falls back", "handler returns true") require either a live server or a mock so heavy it would only assert the mock. This is a knowing deviation, and the manual checks 2, 3 and 5 cover the same ground.
+- Spec §Testing → Tasks 2–4 unit tests (`lspSession.test.ts` replaces the spec's `lspClient.test.ts` name after the module rename); Task 8 Step 4 covers the manual list. `lspExtensions.test.ts` from the spec's list is deliberately **not** written — see the note in Task 5; the spec's proposed assertions ("completion falls back", "handler returns true") require either a live server or a mock so heavy it would only assert the mock. This is a knowing deviation, and the manual checks 2, 3 and 5 cover the same ground.
