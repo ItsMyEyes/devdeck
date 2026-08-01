@@ -1,9 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  autocompletion,
-  completeAnyWord,
-  type CompletionSource,
-} from '@codemirror/autocomplete'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { autocompletion, completeAnyWord } from '@codemirror/autocomplete'
 import {
   LanguageDescription,
   syntaxTree,
@@ -11,40 +7,34 @@ import {
 } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { redo, undo } from '@codemirror/commands'
-import {
-  forceLinting,
-  linter,
-  lintGutter,
-  type Diagnostic,
-} from '@codemirror/lint'
-import { Prec, type Text } from '@codemirror/state'
+import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
+import { Prec } from '@codemirror/state'
 import { oneDark } from '@codemirror/theme-one-dark'
 import CodeMirror, {
   EditorView,
   keymap,
   type ReactCodeMirrorRef,
 } from '@uiw/react-codemirror'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { searchWorktreeFiles } from '@/lib/machineApi'
 import type { Machine } from '@/store/types'
 import {
-  acquireLspClient,
+  acquireLspSession,
   languageIdForPath,
-  type LspClient,
-  type LspCompletionItem,
-  type LspDiagnostic,
-  type LspPosition,
-  type LspRange,
+  type LspSession,
   type LspStatus,
-} from './lspClient'
+} from './lspSession'
+import {
+  lspExtensions,
+  revealRange,
+  type DefinitionReveal,
+  type DefinitionTarget,
+} from './lspExtensions'
+import { applyRenamePlan, buildRenamePlan, prepareRename, type RenamePlan, type RenameSubject } from './lspRename'
+import { RenameSymbolDialog } from './RenameSymbolDialog'
 
-export interface DefinitionReveal {
-  symbol?: string
-  range?: LspRange
-  requestId: number
-}
-
-export type DefinitionTarget = Omit<DefinitionReveal, 'requestId'>
+export type { DefinitionReveal, DefinitionTarget }
 
 interface DefinitionRange {
   from: number
@@ -176,6 +166,20 @@ export const devdeckCodeTheme = EditorView.theme(
     },
     '.cm-diagnostic-error': {
       borderLeftColor: '#e36d6d',
+    },
+    '.cm-lsp-highlight-text': {
+      backgroundColor: 'rgba(216, 216, 212, 0.10)',
+    },
+    '.cm-lsp-highlight-read': {
+      backgroundColor: 'rgba(98, 216, 232, 0.14)',
+    },
+    '.cm-lsp-highlight-write': {
+      backgroundColor: 'rgba(226, 183, 80, 0.18)',
+    },
+    '.cm-lsp-rename-panel': {
+      padding: '4px 8px',
+      borderBottom: '1px solid #292b30',
+      backgroundColor: '#0d0e10',
     },
     '.cm-lintRange-error': {
       backgroundImage:
@@ -356,116 +360,6 @@ function revealDefinition(view: EditorView, source: string, symbol: string) {
   return true
 }
 
-function offsetToPosition(document: Text, offset: number): LspPosition {
-  const line = document.lineAt(offset)
-  return { line: line.number - 1, character: offset - line.from }
-}
-
-function positionToOffset(document: Text, position: LspPosition) {
-  const lineNumber = Math.min(document.lines, Math.max(1, position.line + 1))
-  const line = document.line(lineNumber)
-  return Math.min(line.to, line.from + Math.max(0, position.character))
-}
-
-function revealRange(view: EditorView, range: LspRange) {
-  const anchor = positionToOffset(view.state.doc, range.start)
-  const head = positionToOffset(view.state.doc, range.end)
-  view.dispatch({
-    selection: { anchor, head },
-    scrollIntoView: true,
-  })
-  view.focus()
-}
-
-function completionType(kind?: number) {
-  const types: Record<number, string> = {
-    2: 'method',
-    3: 'function',
-    4: 'function',
-    5: 'variable',
-    6: 'variable',
-    7: 'class',
-    8: 'interface',
-    9: 'module',
-    10: 'property',
-    12: 'constant',
-    13: 'constant',
-    14: 'keyword',
-    18: 'text',
-    20: 'variable',
-    21: 'constant',
-    22: 'type',
-    23: 'type',
-  }
-  return kind ? types[kind] : undefined
-}
-
-function completionDocumentation(item: LspCompletionItem) {
-  if (typeof item.documentation === 'string') return item.documentation
-  return item.documentation?.value
-}
-
-function plainCompletionText(item: LspCompletionItem) {
-  const value = item.textEdit?.newText ?? item.insertText ?? item.label
-  if (item.insertTextFormat !== 2) return value
-  return value
-    .replace(/\$\{\d+:([^}]*)\}/g, '$1')
-    .replace(/\$\{\d+\}/g, '')
-    .replace(/\$\d+/g, '')
-}
-
-function lspCompletionSource(
-  client: LspClient,
-  path: string,
-): CompletionSource {
-  return async (context) => {
-    const word = context.matchBefore(/[A-Za-z_$][\w$]*$/)
-    if (!context.explicit && (!word || word.from === word.to)) return null
-
-    try {
-      const items = await client.completion(
-        path,
-        offsetToPosition(context.state.doc, context.pos),
-      )
-      return {
-        from: word?.from ?? context.pos,
-        options: items.map((item) => ({
-          label: item.label,
-          apply: plainCompletionText(item),
-          type: completionType(item.kind),
-          detail: item.detail,
-          info: completionDocumentation(item),
-        })),
-        validFor: /^[\w$]*$/,
-      }
-    } catch {
-      return null
-    }
-  }
-}
-
-function diagnosticSeverity(severity?: number): Diagnostic['severity'] {
-  if (severity === 1) return 'error'
-  if (severity === 2) return 'warning'
-  if (severity === 4) return 'hint'
-  return 'info'
-}
-
-function codeMirrorDiagnostics(document: Text, diagnostics: LspDiagnostic[]) {
-  return diagnostics.map(
-    (diagnostic): Diagnostic => ({
-      from: positionToOffset(document, diagnostic.range.start),
-      to: Math.max(
-        positionToOffset(document, diagnostic.range.start),
-        positionToOffset(document, diagnostic.range.end),
-      ),
-      severity: diagnosticSeverity(diagnostic.severity),
-      message: diagnostic.message,
-      source: diagnostic.source,
-    }),
-  )
-}
-
 export function useFileLanguage(path: string) {
   const [language, setLanguage] = useState<LanguageSupport | null>(null)
 
@@ -498,36 +392,58 @@ export function CodeFileEditor({
   machine,
   path,
   value,
+  ready,
   onChange,
   onOpenDefinition,
+  isPathDirty,
   reveal,
 }: {
   worktreeId: string
   machine: Machine
   path: string
   value: string
+  /** True once `value` is the file's real, loaded content (vs. the empty
+   *  placeholder the caller renders while its fetch is in flight) — see the
+   *  reveal effect below for why this must gate on load-completion rather
+   *  than on `value` itself. */
+  ready: boolean
   onChange: (value: string) => void
   onOpenDefinition: (path: string, target: DefinitionTarget) => void
+  /** Reports whether an open tab for `path` has unsaved changes. A cross-file
+   *  rename refuses rather than overwrite one. */
+  isPathDirty: (path: string) => boolean
   reveal?: DefinitionReveal
 }) {
   const editorRef = useRef<ReactCodeMirrorRef>(null)
   const language = useFileLanguage(path)
   const languageId = languageIdForPath(path)
-  const [lspClient, setLspClient] = useState<LspClient | null>(null)
+  // `@uiw/react-codemirror` creates its EditorView across two render passes
+  // (mount → measure its container → create the view), so on a freshly
+  // mounted tab `editorRef.current?.view` can still be undefined by the time
+  // the reveal effect below runs, even once `reveal`/`ready` are already
+  // set — there's no later `ready` change to give it a second chance.
+  // `onCreateEditor` fires exactly once the view actually exists; bumping
+  // `viewReady` re-runs the reveal effect at that point instead of relying
+  // on incidental extra renders.
+  const [viewReady, setViewReady] = useState(false)
+
+  const [session, setSession] = useState<LspSession | null>(null)
 
   useEffect(() => {
-    setLspClient(null)
+    setSession(null)
     if (!languageId) return
     let cancelled = false
     let releaseFn: (() => void) | null = null
-    void acquireLspClient(machine, worktreeId, languageId).then((acquired) => {
-      if (cancelled) {
-        acquired.release()
-        return
-      }
-      releaseFn = acquired.release
-      setLspClient(acquired.client)
-    })
+    void acquireLspSession(machine, worktreeId, languageId)
+      .then((acquired) => {
+        if (cancelled) {
+          acquired.release()
+          return
+        }
+        releaseFn = acquired.release
+        setSession(acquired.session)
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
       releaseFn?.()
@@ -535,25 +451,7 @@ export function CodeFileEditor({
   }, [languageId, worktreeId, machine])
 
   useEffect(() => {
-    if (!lspClient || !languageId) return
-    lspClient.openDocument(path, languageId, value)
-    return () => lspClient.closeDocument(path)
-  }, [languageId, lspClient, path])
-
-  useEffect(() => {
-    lspClient?.changeDocument(path, value)
-  }, [lspClient, path, value])
-
-  useEffect(() => {
-    if (!lspClient) return
-    return lspClient.subscribeDiagnostics(path, () => {
-      const view = editorRef.current?.view
-      if (view) forceLinting(view)
-    })
-  }, [lspClient, path])
-
-  useEffect(() => {
-    if (!lspClient || !languageId) return
+    if (!session || !languageId) return
     const toastId = `lsp-status-${worktreeId}-${languageId}`
     let sawInstalling = false
     const handleStatus = (status: LspStatus, message?: string) => {
@@ -566,167 +464,208 @@ export function CodeFileEditor({
         toast.error(message ?? 'Language server unavailable', { id: toastId })
       }
     }
-    handleStatus(lspClient.getStatus(), lspClient.getStatusMessage())
-    return lspClient.subscribeStatus(handleStatus)
-  }, [lspClient, languageId, worktreeId])
+    handleStatus(session.getStatus(), session.getStatusMessage())
+    return session.subscribeStatus(handleStatus)
+  }, [session, languageId, worktreeId])
 
-  const completionExtension = useMemo(
-    () =>
-      autocompletion({
-        override: lspClient
-          ? [lspCompletionSource(lspClient, path), completeAnyWord]
-          : [completeAnyWord],
-      }),
-    [lspClient, path],
-  )
-  const lspDiagnostics = useMemo(
-    () =>
-      lspClient
-        ? linter(
-            (view) =>
-              codeMirrorDiagnostics(
-                view.state.doc,
-                lspClient.getDiagnostics(path),
-              ),
-            { delay: 150 },
-          )
-        : null,
-    [lspClient, path],
-  )
+  const fallbackDefinition = useCallback(
+    (view: EditorView, position: number) => {
+      const source = view.state.doc.toString()
+      const quotedPath = quotedPathAt(source, position)
+      const word = view.state.wordAt(position)
+      const symbol = word ? source.slice(word.from, word.to) : ''
+      const namespace = word
+        ? source.slice(Math.max(0, word.from - 80), word.from).match(/([A-Za-z_$][\w$]*)\.\s*$/)?.[1]
+        : undefined
+      const imported = findImportedSource(source, namespace ?? symbol)
 
-  const definitionNavigation = useMemo(
-    () =>
-      EditorView.domEventHandlers({
-        mousedown(event, view) {
-          if (event.button !== 0 || (!event.ctrlKey && !event.metaKey))
-            return false
-          const position = view.posAtCoords({
-            x: event.clientX,
-            y: event.clientY,
-          })
-          if (position === null) return false
+      if (!quotedPath && !imported && symbol && revealDefinition(view, source, symbol)) return
 
-          const source = view.state.doc.toString()
-          const quotedPath = quotedPathAt(source, position)
-          const word = view.state.wordAt(position)
-          const symbol = word ? source.slice(word.from, word.to) : ''
-          const namespace = word
-            ? source
-                .slice(Math.max(0, word.from - 80), word.from)
-                .match(/([A-Za-z_$][\w$]*)\.\s*$/)?.[1]
-            : undefined
-          const imported = findImportedSource(source, namespace ?? symbol)
+      const targetSource = quotedPath ?? imported?.source
+      if (!targetSource) {
+        if (symbol) toast.error(`Definition for ${symbol} was not found`)
+        return
+      }
 
-          const openFallback = () => {
-            if (
-              !quotedPath &&
-              !imported &&
-              symbol &&
-              revealDefinition(view, source, symbol)
-            ) {
-              return
-            }
-
-            const targetSource = quotedPath ?? imported?.source
-            if (!targetSource) {
-              if (symbol) toast.error(`Definition for ${symbol} was not found`)
-              return
-            }
-
-            void resolveImportFile(machine, worktreeId, path, targetSource)
-              .then((targetPath) => {
-                if (!targetPath) {
-                  toast.error(`Local file ${targetSource} was not found`)
-                  return
-                }
-                onOpenDefinition(targetPath, {
-                  symbol: imported?.revealSymbol ?? symbol,
-                })
-              })
-              .catch(() => toast.error(`Could not resolve ${targetSource}`))
+      void resolveImportFile(machine, worktreeId, path, targetSource)
+        .then((targetPath) => {
+          if (!targetPath) {
+            toast.error(`Local file ${targetSource} was not found`)
+            return
           }
+          onOpenDefinition(targetPath, { symbol: imported?.revealSymbol ?? symbol })
+        })
+        .catch(() => toast.error(`Could not resolve ${targetSource}`))
+    },
+    [machine, onOpenDefinition, path, worktreeId],
+  )
 
-          if (lspClient) {
+  const queryClient = useQueryClient()
+  const renameViewRef = useRef<EditorView | null>(null)
+  const [renameSubject, setRenameSubject] = useState<RenameSubject | null>(null)
+  const [renamePlan, setRenamePlan] = useState<RenamePlan | null>(null)
+  const [renamePending, setRenamePending] = useState(false)
+
+  const closeRename = useCallback(() => {
+    setRenameSubject(null)
+    setRenamePlan(null)
+    setRenamePending(false)
+    renameViewRef.current = null
+  }, [])
+
+  const startRename = useCallback(
+    async (view: EditorView, pos: number) => {
+      if (!session) return
+      const subject = await prepareRename(view, session, path, pos)
+      if (!subject) {
+        toast.error('There is nothing to rename here')
+        return
+      }
+      setRenamePlan(null)
+      setRenameSubject(subject)
+    },
+    [session, path],
+  )
+
+  const submitRenameName = useCallback(
+    (newName: string) => {
+      if (!session || !renameSubject) return
+      setRenamePending(true)
+      void buildRenamePlan({ session, path, subject: renameSubject, newName, isPathDirty })
+        .then((result) => {
+          if (!result.ok) {
+            toast.error(result.reason)
+            closeRename()
+            return
+          }
+          setRenamePlan(result.plan)
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : 'Rename failed')
+          closeRename()
+        })
+        .finally(() => setRenamePending(false))
+    },
+    [session, path, renameSubject, isPathDirty, closeRename],
+  )
+
+  const confirmRename = useCallback(() => {
+    const view = renameViewRef.current
+    if (!view || !renamePlan) return
+    setRenamePending(true)
+    void applyRenamePlan({ view, plan: renamePlan, machine, worktreeId, queryClient })
+      .then(() => {
+        const total = renamePlan.otherFiles.length + (renamePlan.currentEdits.length > 0 ? 1 : 0)
+        toast.success(`Renamed across ${total} file${total === 1 ? '' : 's'}`)
+        closeRename()
+      })
+      .catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : 'Rename failed')
+        setRenamePending(false)
+      })
+  }, [renamePlan, machine, worktreeId, queryClient, closeRename])
+
+  const languageExtensions = useMemo(() => {
+    if (!session) {
+      return [
+        autocompletion({ override: [completeAnyWord] }),
+        syntaxDiagnostics,
+        // Without a language server the only definitions available are the
+        // regex/import heuristics, so this handler is the whole feature.
+        EditorView.domEventHandlers({
+          mousedown(event, view) {
+            if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false
+            const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
+            if (position === null) return false
             event.preventDefault()
-            void lspClient
-              .definition(path, offsetToPosition(view.state.doc, position))
-              .then((definitions) => {
-                const definition =
-                  definitions.find((candidate) => candidate.path !== null) ??
-                  definitions[0]
-                if (!definition) {
-                  openFallback()
-                  return
-                }
-                if (!definition.path) {
-                  toast.error('Definition is outside this worktree')
-                  return
-                }
-                if (definition.path === path) {
-                  revealRange(view, definition.range)
-                  return
-                }
-                onOpenDefinition(definition.path, {
-                  symbol,
-                  range: definition.range,
-                })
-              })
-              .catch(openFallback)
+            view.focus()
+            fallbackDefinition(view, position)
             return true
-          }
+          },
+        }),
+      ]
+    }
+    return lspExtensions({
+      session,
+      path,
+      onOpenDefinition,
+      onFallbackDefinition: fallbackDefinition,
+      onRequestRename: (view, pos) => {
+        renameViewRef.current = view
+        void startRename(view, pos)
+      },
+    })
+  }, [session, path, onOpenDefinition, fallbackDefinition, startRename])
 
-          event.preventDefault()
-          openFallback()
-          return true
-        },
-      }),
-    [lspClient, onOpenDefinition, path, worktreeId, machine],
-  )
-
+  // Deps are `[reveal, ready]`, NOT `[reveal, value]`: `ready` flips
+  // false→true exactly once (when the file's real content finishes
+  // loading) and then never changes again for the life of this tab, whereas
+  // `value` changes on every keystroke once the file is open. Depending on
+  // `value` here would re-run this effect — re-selecting `reveal`'s range
+  // and re-focusing — after every single edit, since `reveal` itself is
+  // never cleared once a search/definition jump has fired (it's only
+  // removed when the tab closes). That snapped the cursor/selection back to
+  // the original searched location on every keystroke, making it look like
+  // only that location could be edited. Gating on `ready` instead still
+  // retries the reveal once real content has loaded (fixing the case where
+  // it first fired against the still-empty placeholder) without re-firing
+  // on later edits. Reads `view.state.doc.toString()` rather than the
+  // `value` prop for the same reason — `value` isn't a dependency anymore,
+  // so it may be stale by the time this runs.
   useEffect(() => {
     const view = editorRef.current?.view
-    if (!view || !reveal) return
+    if (!view || !reveal || !ready) return
     if (reveal.range) {
       revealRange(view, reveal.range)
     } else if (reveal.symbol) {
-      revealDefinition(view, value, reveal.symbol)
+      revealDefinition(view, view.state.doc.toString(), reveal.symbol)
     }
-  }, [reveal, value])
+  }, [reveal, ready, viewReady])
 
   return (
-    <CodeMirror
-      ref={editorRef}
-      value={value}
-      height="100%"
-      width="100%"
-      aria-label={`Edit ${path}`}
-      title="Ctrl/Cmd-click a symbol or import to go to its definition"
-      theme="dark"
-      basicSetup={{
-        lineNumbers: true,
-        highlightActiveLineGutter: true,
-        foldGutter: false,
-        highlightActiveLine: true,
-        highlightSelectionMatches: true,
-        bracketMatching: true,
-        closeBrackets: true,
-        autocompletion: false,
-        lintKeymap: true,
-        tabSize: 2,
-      }}
-      extensions={[
-        oneDark,
-        devdeckCodeTheme,
-        explicitHistoryKeymap,
-        completionExtension,
-        syntaxDiagnostics,
-        ...(lspDiagnostics ? [lspDiagnostics] : []),
-        lintGutter(),
-        definitionNavigation,
-        ...(language ? [language] : []),
-      ]}
-      onChange={onChange}
-      className="h-full min-h-0 flex-1 overflow-hidden"
-    />
+    <>
+      <CodeMirror
+        ref={editorRef}
+        value={value}
+        height="100%"
+        width="100%"
+        aria-label={`Edit ${path}`}
+        title="Ctrl/Cmd-click a symbol or import to go to its definition · F2 to rename · Shift-Alt-F to format"
+        theme="dark"
+        basicSetup={{
+          lineNumbers: true,
+          highlightActiveLineGutter: true,
+          foldGutter: false,
+          highlightActiveLine: true,
+          highlightSelectionMatches: true,
+          bracketMatching: true,
+          closeBrackets: true,
+          autocompletion: false,
+          lintKeymap: true,
+          tabSize: 2,
+        }}
+        extensions={[
+          oneDark,
+          devdeckCodeTheme,
+          explicitHistoryKeymap,
+          lintGutter(),
+          ...languageExtensions,
+          ...(language ? [language] : []),
+        ]}
+        onChange={onChange}
+        onCreateEditor={() => setViewReady(true)}
+        className="h-full min-h-0 flex-1 overflow-hidden"
+      />
+      <RenameSymbolDialog
+        open={renameSubject !== null}
+        symbol={renameSubject?.symbol ?? ''}
+        plan={renamePlan}
+        pending={renamePending}
+        currentPath={path}
+        onCancel={closeRename}
+        onSubmitName={submitRenameName}
+        onConfirmPlan={confirmRename}
+      />
+    </>
   )
 }

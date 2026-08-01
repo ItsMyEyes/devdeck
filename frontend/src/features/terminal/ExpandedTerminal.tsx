@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
-import { Check, FilePlus, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
+import { Check, FilePlus, FilePlus2, FileText, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Machine, Worktree } from '@/store/types'
@@ -10,6 +10,7 @@ import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
+import type { FileEditorHandle } from './FileEditor'
 import { FileQuickOpen } from './FileQuickOpen'
 import { GitPanel } from './GitPanel'
 import { MaterialFileIcon } from './MaterialFileIcon'
@@ -20,10 +21,12 @@ import {
   addContentToLeaf,
   allocateTerminalContent,
   closeTab,
+  countUntitledContents,
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
   createGitContent,
+  createUntitledContent,
   deserializeLayout,
   findContent,
   findLeafForContent,
@@ -34,9 +37,11 @@ import {
   selectTabInTree,
   splitLeaf,
 } from './paneTree'
-import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
+import type { DropZone, FileContent, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
 import { Terminal, type TerminalHandle } from './Terminal'
 import { TerminalExplorer } from './TerminalExplorer'
+import { UnsavedChangesDialog } from './UnsavedChangesDialog'
+import { UntitledFileEditor } from './UntitledFileEditor'
 
 interface Props {
   worktree: Worktree
@@ -154,6 +159,7 @@ function TerminalWorkspace({
   onPrimaryExit?: () => void
 }) {
   const termHandles = useRef(new Map<string, TerminalHandle>())
+  const fileHandles = useRef(new Map<string, FileEditorHandle>())
   const definitionRequest = useRef(0)
   // `WorkspaceTileCanvas`'s `TileLeafView` keeps every open worktree tab mounted
   // (CSS `hidden`, not unmounted) so switching tabs doesn't lose PTY/editor state —
@@ -166,7 +172,18 @@ function TerminalWorkspace({
   const [quickOpen, setQuickOpen] = useState(false)
   const [contentSearch, setContentSearch] = useState(false)
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(() => new Set())
+  const dirtyFilesRef = useRef(dirtyFiles)
+  useEffect(() => {
+    dirtyFilesRef.current = dirtyFiles
+  }, [dirtyFiles])
+  const isPathDirty = useCallback((path: string) => dirtyFilesRef.current.has(path), [])
   const [definitionReveals, setDefinitionReveals] = useState<Record<string, DefinitionReveal>>({})
+  // Pending "close a dirty file/pane?" confirmation — contentId is null for a
+  // whole-pane close (Save saves every dirty tab in the pane at once).
+  const [closeConfirm, setCloseConfirm] = useState<{ paneId: string; contentId: string | null; paths: string[] } | null>(
+    null,
+  )
+  const [closeConfirmSaving, setCloseConfirmSaving] = useState(false)
   const isDesktop = useIsDesktop()
 
   const openEdit = useDevDeckStore((s) => s.openEdit)
@@ -314,6 +331,26 @@ function TerminalWorkspace({
 
   const handleFileDeleted = useCallback((path: string) => handleFilesDeleted([path]), [handleFilesDeleted])
 
+  /** UntitledFileEditor's Save As completion — swaps the Untitled tab for a
+   *  normal path-backed file tab in the same leaf it was opened in (falling
+   *  back to wherever closeTab's own collapse logic refocused, on the rare
+   *  chance the Untitled tab was that leaf's only tab). */
+  const handleUntitledSaved = useCallback(
+    (id: string, path: string) => {
+      const leaf = findLeafForContent(layout.root, id)
+      if (!leaf) return
+      cleanupFileBookkeeping(id)
+      const afterClose = closeTab(layout, leaf.id, id)
+      const targetPaneId = findPane(afterClose.root, leaf.id) ? leaf.id : afterClose.focusedPaneId
+      setWorktreeLayout(worktree.id, {
+        ...afterClose,
+        root: addContentToLeaf(afterClose.root, targetPaneId, createFileContent(path)),
+        focusedPaneId: targetPaneId,
+      })
+    },
+    [layout, worktree.id, setWorktreeLayout, cleanupFileBookkeeping],
+  )
+
   function handleFocusPane(paneId: string) {
     commitLayout(focusPane(layout, paneId))
   }
@@ -324,10 +361,16 @@ function TerminalWorkspace({
 
   function handleCloseTab(paneId: string, contentId: string) {
     const content = findContent(layout.root, contentId)
-    if (content?.kind === 'file') {
-      if (dirtyFiles.has(content.path) && !window.confirm(`Close ${basename(content.path)} without saving?`)) return
-      cleanupFileBookkeeping(content.path)
+    if (content?.kind === 'file' && dirtyFiles.has(content.path)) {
+      setCloseConfirm({ paneId, contentId, paths: [content.path] })
+      return
     }
+    finishCloseTab(paneId, contentId)
+  }
+
+  function finishCloseTab(paneId: string, contentId: string) {
+    const content = findContent(layout.root, contentId)
+    if (content?.kind === 'file') cleanupFileBookkeeping(content.path)
     if (content) killIfSpawnedTerminal(content)
     commitLayout(closeTab(layout, paneId, contentId))
   }
@@ -347,12 +390,17 @@ function TerminalWorkspace({
   function handleClosePane(paneId: string) {
     const pane = findPane(layout.root, paneId)
     if (!pane || pane.type !== 'leaf') return
-    const dirtyTabs = pane.tabs.filter((t) => t.kind === 'file' && dirtyFiles.has(t.path))
-    if (
-      dirtyTabs.length > 0 &&
-      !window.confirm(`Close this pane? ${dirtyTabs.length} file${dirtyTabs.length === 1 ? '' : 's'} unsaved.`)
-    )
+    const dirtyTabs = pane.tabs.filter((t): t is FileContent => t.kind === 'file' && dirtyFiles.has(t.path))
+    if (dirtyTabs.length > 0) {
+      setCloseConfirm({ paneId, contentId: null, paths: dirtyTabs.map((t) => t.path) })
       return
+    }
+    finishClosePane(paneId)
+  }
+
+  function finishClosePane(paneId: string) {
+    const pane = findPane(layout.root, paneId)
+    if (!pane || pane.type !== 'leaf') return
     let next = layout
     for (const tab of pane.tabs) {
       next = closeTab(next, paneId, tab.id)
@@ -360,6 +408,38 @@ function TerminalWorkspace({
       killIfSpawnedTerminal(tab)
     }
     commitLayout(next)
+  }
+
+  /** UnsavedChangesDialog's "Save" (or "Save All" for a pane) — saves every
+   *  dirty path this close would affect, keeping the dialog open (so the
+   *  operator can retry or cancel) if any write fails. */
+  async function handleCloseConfirmSave() {
+    if (!closeConfirm) return
+    setCloseConfirmSaving(true)
+    try {
+      await Promise.all(closeConfirm.paths.map((path) => fileHandles.current.get(path)?.save()))
+    } catch {
+      setCloseConfirmSaving(false)
+      return
+    }
+    setCloseConfirmSaving(false)
+    const { paneId, contentId } = closeConfirm
+    setCloseConfirm(null)
+    if (contentId) finishCloseTab(paneId, contentId)
+    else finishClosePane(paneId)
+  }
+
+  function handleCloseConfirmDiscard() {
+    if (!closeConfirm) return
+    const { paneId, contentId } = closeConfirm
+    setCloseConfirm(null)
+    if (contentId) finishCloseTab(paneId, contentId)
+    else finishClosePane(paneId)
+  }
+
+  function handleCloseConfirmCancel() {
+    setCloseConfirmSaving(false)
+    setCloseConfirm(null)
   }
 
   function handleSplitPane(paneId: string, direction: SplitDirection) {
@@ -446,6 +526,19 @@ function TerminalWorkspace({
     setQuickOpen(true)
   }
 
+  /** "+" new-tab button's "New File" action — opens a blank Untitled buffer
+   *  immediately, no path required until the user actually saves it (VS
+   *  Code's Cmd+N), unlike "Open File..." above which picks an existing path
+   *  up front. */
+  function handleNewUntitledTab(paneId: string) {
+    const content = createUntitledContent(`Untitled-${countUntitledContents(layout.root) + 1}`)
+    commitLayout({
+      ...layout,
+      root: addContentToLeaf(layout.root, paneId, content),
+      focusedPaneId: paneId,
+    })
+  }
+
   function approve(ok: boolean) {
     updateWorktree.mutate({
       machine,
@@ -523,11 +616,14 @@ function TerminalWorkspace({
     if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
     if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
     if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
+    if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-dim" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />
   }
 
   function isTabDirty(content: PaneContent) {
-    return content.kind === 'file' && dirtyFiles.has(content.path)
+    if (content.kind === 'file') return dirtyFiles.has(content.path)
+    if (content.kind === 'untitled') return dirtyFiles.has(content.id)
+    return false
   }
 
 
@@ -569,6 +665,10 @@ function TerminalWorkspace({
           <TerminalSquare size={13} />
           New Terminal
         </OverflowItem>
+        <OverflowItem onClick={() => handleNewUntitledTab(pane.id)}>
+          <FilePlus2 size={13} />
+          New File
+        </OverflowItem>
         <OverflowItem onClick={() => handleNewFileTab(pane.id)}>
           <FilePlus size={13} />
           Open File…
@@ -603,6 +703,10 @@ function TerminalWorkspace({
       if (content.kind !== 'file') return null
       return (
         <FileEditor
+          ref={(handle) => {
+            if (handle) fileHandles.current.set(content.path, handle)
+            else fileHandles.current.delete(content.path)
+          }}
           worktreeId={worktree.id}
           machine={machine}
           path={content.path}
@@ -610,6 +714,7 @@ function TerminalWorkspace({
           onDirtyChange={handleDirtyChange}
           onDeleted={handleFileDeleted}
           onOpenDefinition={openDefinition}
+          isPathDirty={isPathDirty}
           reveal={definitionReveals[content.path]}
         />
       )
@@ -624,6 +729,19 @@ function TerminalWorkspace({
         onRequestContentSearch={() => setContentSearch(true)}
       />
     ),
+    untitled: ({ content, isActive }) => {
+      if (content.kind !== 'untitled') return null
+      return (
+        <UntitledFileEditor
+          target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
+          contentId={content.id}
+          label={content.label}
+          active={isActive}
+          onDirtyChange={handleDirtyChange}
+          onSaved={handleUntitledSaved}
+        />
+      )
+    },
   }
 
   return (
@@ -661,6 +779,15 @@ function TerminalWorkspace({
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         onClose={() => setContentSearch(false)}
         onOpenMatch={openAtLine}
+      />
+
+      <UnsavedChangesDialog
+        open={closeConfirm !== null}
+        names={closeConfirm ? closeConfirm.paths.map(basename) : []}
+        saving={closeConfirmSaving}
+        onSave={() => void handleCloseConfirmSave()}
+        onDiscard={handleCloseConfirmDiscard}
+        onCancel={handleCloseConfirmCancel}
       />
     </div>
   )

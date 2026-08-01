@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useState } from 'react'
 import { FileWarning, Loader2, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
@@ -9,17 +9,23 @@ import {
   useWorktreeFile,
   useWriteWorktreeFile,
 } from '@/features/data/queries'
-import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type {
   DefinitionReveal,
   DefinitionTarget,
 } from './CodeFileEditor'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import type { LineReveal } from './PlainCodeEditor'
 
 const CodeFileEditor = lazy(() =>
   import('./CodeFileEditor').then((module) => ({
     default: module.CodeFileEditor,
+  })),
+)
+
+const MarkdownFileEditor = lazy(() =>
+  import('./MarkdownFileEditor').then((module) => ({
+    default: module.MarkdownFileEditor,
   })),
 )
 
@@ -31,7 +37,15 @@ interface FileEditorProps {
   onDirtyChange: (path: string, dirty: boolean) => void
   onDeleted: (path: string) => void
   onOpenDefinition: (path: string, target: DefinitionTarget) => void
+  isPathDirty: (path: string) => boolean
   reveal?: DefinitionReveal
+}
+
+export interface FileEditorHandle {
+  /** Writes the current draft, resolving once saved or rejecting if the write
+   *  fails — used by the close-tab "Save" action, which needs to know
+   *  whether it's safe to actually close. No-ops if there's nothing dirty. */
+  save: () => Promise<void>
 }
 
 function basename(path: string) {
@@ -42,16 +56,36 @@ function isMarkdownPath(path: string) {
   return /\.(md|markdown)$/i.test(path)
 }
 
-export function FileEditor({
-  worktreeId,
-  machine,
-  path,
-  active,
-  onDirtyChange,
-  onDeleted,
-  onOpenDefinition,
-  reveal,
-}: FileEditorProps) {
+/** MarkdownFileEditor has no LSP, so it takes a plain line/column reveal
+ *  (like the SSH side) rather than CodeFileEditor's LSP-shaped
+ *  DefinitionReveal — content search is the only source of a `reveal` that
+ *  ever reaches a markdown file (go-to-definition doesn't apply to prose),
+ *  and that always sets `range`, never `symbol`. */
+function toLineReveal(reveal: DefinitionReveal | undefined): LineReveal | undefined {
+  if (!reveal?.range) return undefined
+  const { start, end } = reveal.range
+  return {
+    line: start.line + 1,
+    column: start.character + 1,
+    length: Math.max(0, end.character - start.character),
+    requestId: reveal.requestId,
+  }
+}
+
+export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function FileEditor(
+  {
+    worktreeId,
+    machine,
+    path,
+    active,
+    onDirtyChange,
+    onDeleted,
+    onOpenDefinition,
+    isPathDirty,
+    reveal,
+  },
+  ref,
+) {
   const [draft, setDraft] = useState('')
   const [initialized, setInitialized] = useState(false)
   const file = useWorktreeFile(machine, worktreeId, path)
@@ -69,13 +103,18 @@ export function FileEditor({
     onDirtyChange(path, dirty)
   }, [dirty, onDirtyChange, path])
 
+  async function saveNow() {
+    if (!initialized || !dirty) return
+    await writeFile.mutateAsync({ path, content: draft })
+    toast.success(`Saved ${basename(path)}`)
+  }
+
   function save() {
     if (!initialized || writeFile.isPending) return
-    writeFile.mutate(
-      { path, content: draft },
-      { onSuccess: () => toast.success(`Saved ${basename(path)}`) },
-    )
+    void saveNow().catch(() => undefined)
   }
+
+  useImperativeHandle(ref, () => ({ save: saveNow }))
 
   useEffect(() => {
     if (!active) return
@@ -176,15 +215,15 @@ export function FileEditor({
           </button>
         </div>
       ) : isMarkdownPath(path) ? (
-        <div className="min-h-0 flex-1 overflow-auto bg-[#090a0c]">
-          <div className="w-full px-6 py-8 md:px-10">
-            <MarkdownEditor
-              value={draft}
-              onChange={setDraft}
-              placeholder="Empty markdown file. Click to edit."
-            />
-          </div>
-        </div>
+        <Suspense
+          fallback={
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+              <DataLoading compact label="loading editor…" />
+            </div>
+          }
+        >
+          <MarkdownFileEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={toLineReveal(reveal)} />
+        </Suspense>
       ) : (
         <Suspense
           fallback={
@@ -198,12 +237,14 @@ export function FileEditor({
             machine={machine}
             path={path}
             value={draft}
+            ready={initialized}
             onChange={setDraft}
             onOpenDefinition={onOpenDefinition}
+            isPathDirty={isPathDirty}
             reveal={reveal}
           />
         </Suspense>
       )}
     </div>
   )
-}
+})
