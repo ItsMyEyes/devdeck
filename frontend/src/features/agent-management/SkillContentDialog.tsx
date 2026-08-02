@@ -1,10 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { LanguageDescription, type LanguageSupport } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
-import { EditorState } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView } from '@codemirror/view'
-import CodeMirror from '@uiw/react-codemirror'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, FilePenLine, Link2, Loader2, RotateCcw, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -13,33 +7,9 @@ import {
   useAgentSkillContent,
   useUpdateAgentSkillContent,
 } from '@/features/data/queries'
+import { MonacoEditor } from '@/features/editor/MonacoEditor'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
-
-function useSkillLanguage() {
-  const [language, setLanguage] = useState<LanguageSupport | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const description = LanguageDescription.matchFilename(languages, 'SKILL.md')
-    if (!description) return
-
-    void description
-      .load()
-      .then((support) => {
-        if (!cancelled) setLanguage(support)
-      })
-      .catch(() => {
-        if (!cancelled) setLanguage(null)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return language
-}
 
 export function SkillContentDialog({
   open,
@@ -58,7 +28,7 @@ export function SkillContentDialog({
 }) {
   const contentQuery = useAgentSkillContent(machine, agentId, skillName, open)
   const updateContent = useUpdateAgentSkillContent()
-  const language = useSkillLanguage()
+  const skillPath = `${skillName}/SKILL.md`
   const [draft, setDraft] = useState('')
   const [baseline, setBaseline] = useState('')
   const [initialized, setInitialized] = useState(false)
@@ -95,16 +65,6 @@ export function SkillContentDialog({
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [handleSave, open])
-
-  const extensions = useMemo(() => {
-    const base = [
-      oneDark,
-      EditorView.lineWrapping,
-      EditorView.editable.of(!readOnly),
-      EditorState.readOnly.of(readOnly),
-    ]
-    return language ? [...base, language] : base
-  }, [language, readOnly])
 
   function requestOpenChange(nextOpen: boolean) {
     if (!nextOpen && dirty && !window.confirm('Discard unsaved SKILL.md changes?')) return
@@ -176,26 +136,16 @@ export function SkillContentDialog({
             </Button>
           </div>
         ) : (
-          <CodeMirror
+          <MonacoEditor
+            path={skillPath}
+            modelKey={`skill-content:${machine.id}:${agentId}:${skillName}`}
             value={draft}
             onChange={setDraft}
-            height="100%"
-            width="100%"
-            aria-label={`Edit ${skillName} SKILL.md for ${agentName}`}
-            theme="dark"
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: true,
-              highlightActiveLine: true,
-              highlightActiveLineGutter: true,
-              highlightSelectionMatches: true,
-              bracketMatching: true,
-              closeBrackets: true,
-              autocompletion: false,
-              tabSize: 2,
-            }}
-            extensions={extensions}
-            className="h-full min-h-0 overflow-hidden text-[12.5px]"
+            ready={initialized}
+            readOnly={readOnly}
+            ariaLabel={`Edit ${skillName} SKILL.md for ${agentName}`}
+            options={{ wordWrap: 'on' }}
+            className="h-full min-h-0 flex-1"
           />
         )}
       </div>

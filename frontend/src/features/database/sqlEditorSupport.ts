@@ -45,8 +45,9 @@ export function parseExecutedAt(executedAt: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-/** A CodeMirror `SQLNamespace`, narrowed to the two shapes we build: a table
- *  is a list of column names, a schema is a map of tables. */
+/** The autocomplete schema handed to `sqlCompletionItems`, narrowed to the two
+ *  shapes we build: a table is a list of column names, a schema is a map of
+ *  tables. */
 export type SQLSchemaMap = Record<string, string[] | Record<string, string[]>>
 
 /** One `[queryKey, data]` pair as react-query's `getQueriesData` returns it.

@@ -1,10 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { EditorView } from '@codemirror/view'
+import type { WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { qk } from '@/features/data/keys'
 import { fetchWorktreeFile, writeWorktreeFile } from '@/lib/machineApi'
 import type { Machine } from '@/store/types'
 import type { LspSession } from './lspSession'
-import { offsetToPosition, positionToOffset } from '../lspExtensions'
 import {
   applyTextEdits,
   splitWorkspaceEdit,
@@ -27,33 +26,31 @@ export interface RenamePlan {
 /** Asks the server what may be renamed at `pos`, falling back to the word under
  *  the cursor when the server has no prepareRename provider. */
 export async function prepareRename(
-  view: EditorView,
   session: LspSession,
   path: string,
-  pos: number,
+  model: {
+    getWordAtPosition(position: { lineNumber: number; column: number }):
+      | { word: string; startColumn: number; endColumn: number }
+      | null
+  },
+  position: { lineNumber: number; column: number },
 ): Promise<RenameSubject | null> {
-  const position = offsetToPosition(view.state.doc, pos)
-  const word = view.state.wordAt(pos)
-  const fallback = word ? view.state.doc.sliceString(word.from, word.to) : ''
-
+  const word = model.getWordAtPosition(position)
+  if (!word) return null
+  // `textDocument/prepareRename` is optional; a server that does not implement
+  // it errors, and the word under the cursor is a good enough subject.
   try {
-    const result = await session.client.textDocumentPrepareRename({
+    await session.transport.request('textDocument/prepareRename', {
       textDocument: { uri: session.documentUri(path) },
-      position,
+      position: { line: position.lineNumber - 1, character: position.column - 1 },
     })
-    if (result && 'placeholder' in result && result.placeholder) {
-      return { symbol: result.placeholder, position }
-    }
-    if (result && 'start' in result) {
-      const from = positionToOffset(view.state.doc, result.start)
-      const to = positionToOffset(view.state.doc, result.end)
-      return { symbol: view.state.doc.sliceString(from, to), position }
-    }
   } catch {
-    // Server has no prepareRename support, or refused. Fall through.
+    // fall through to the word-based subject
   }
-
-  return fallback ? { symbol: fallback, position } : null
+  return {
+    symbol: word.word,
+    position: { line: position.lineNumber - 1, character: position.column - 1 },
+  }
 }
 
 export async function buildRenamePlan(args: {
@@ -66,9 +63,9 @@ export async function buildRenamePlan(args: {
 }): Promise<{ ok: true; plan: RenamePlan } | { ok: false; reason: string }> {
   const { session, path, subject, newName, isPathDirty } = args
 
-  let edit
+  let edit: WorkspaceEdit | null
   try {
-    edit = await session.client.textDocumentRename({
+    edit = await session.transport.request<WorkspaceEdit | null>('textDocument/rename', {
       textDocument: { uri: session.documentUri(path) },
       position: subject.position,
       newName,
@@ -102,6 +99,25 @@ export async function buildRenamePlan(args: {
   return { ok: true, plan: { newName, currentEdits: split.currentEdits, otherFiles: split.otherFiles } }
 }
 
+/** Structural subset of Monaco's `ITextModel` this module needs, kept local so
+ *  the module — and its tests — stay free of monaco, which needs a real
+ *  browser. */
+interface EditableModel {
+  pushEditOperations(
+    beforeCursorState: null,
+    editOperations: Array<{
+      range: {
+        startLineNumber: number
+        startColumn: number
+        endLineNumber: number
+        endColumn: number
+      }
+      text: string
+    }>,
+    cursorStateComputer: () => null,
+  ): unknown
+}
+
 /**
  * Applies the plan: the open document through the editor (so it stays unsaved
  * and undoable), every other file straight to disk. A failed write stops the
@@ -109,23 +125,29 @@ export async function buildRenamePlan(args: {
  * was atomic.
  */
 export async function applyRenamePlan(args: {
-  view: EditorView
+  model: EditableModel
   plan: RenamePlan
   machine: Machine
   worktreeId: string
   queryClient: QueryClient
 }): Promise<void> {
-  const { view, plan, machine, worktreeId, queryClient } = args
+  const { model, plan, machine, worktreeId, queryClient } = args
 
   if (plan.currentEdits.length > 0) {
-    const changes = plan.currentEdits
-      .map((edit) => ({
-        from: positionToOffset(view.state.doc, edit.range.start),
-        to: positionToOffset(view.state.doc, edit.range.end),
-        insert: edit.newText,
-      }))
-      .sort((a, b) => a.from - b.from)
-    view.dispatch({ changes })
+    // Monaco coalesces these into one undo stop, so a rename is a single Ctrl-Z.
+    model.pushEditOperations(
+      null,
+      plan.currentEdits.map((edit) => ({
+        range: {
+          startLineNumber: edit.range.start.line + 1,
+          startColumn: edit.range.start.character + 1,
+          endLineNumber: edit.range.end.line + 1,
+          endColumn: edit.range.end.character + 1,
+        },
+        text: edit.newText,
+      })),
+      () => null,
+    )
   }
 
   const written: string[] = []
