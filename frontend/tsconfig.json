@@ -26,8 +26,18 @@
     /* Paths */
     "baseUrl": "./",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // Mirrors the Vite alias in vite.config.ts. Vite's own resolver (used by
+      // vitest and the build) honours that alias already; `tsc --noEmit` does
+      // not go through Vite at all, so it needs this `paths` entry to resolve
+      // the same file for type-checking. See monacoLspClient.guard.test.ts.
+      "monaco-lsp-client": [
+        "./node_modules/monaco-editor/esm/external/monaco-lsp-client/out/index.d.ts"
+      ]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  // `vitest.setup.ts` is what pulls in `@testing-library/jest-dom`'s matcher
+  // type augmentation — without it in the program, `toBeInTheDocument` and
+  // friends exist at runtime but not to `tsc`.
+  "include": ["src", "vite.config.ts", "vitest.setup.ts"]
 }

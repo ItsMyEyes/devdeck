@@ -19,6 +19,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // monaco exports MonacoLspClient only from its root entry, which also
+      // eagerly registers the 12 MB TypeScript language feature. Reach the
+      // client by path instead — see monacoLspClient.guard.test.ts, which
+      // pins this path against a monaco upgrade moving it.
+      'monaco-lsp-client': fileURLToPath(
+        new URL(
+          './node_modules/monaco-editor/esm/external/monaco-lsp-client/out/index.js',
+          import.meta.url,
+        ),
+      ),
     },
   },
   server: {
@@ -73,6 +83,7 @@ export default defineConfig({
       'src/features/browser/useNativeOverlayBlocker.test.tsx',
       'src/features/browser/visibleTileRect.test.ts',
       'src/features/browser/browserHistory.test.ts',
+      'src/features/editor/monacoLspClient.guard.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
