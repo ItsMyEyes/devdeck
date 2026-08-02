@@ -3,7 +3,7 @@ import { FileWarning, Loader2, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import type { RenamePlan } from './lspRename'
+import type { RenamePlan } from './lsp/lspRename'
 
 export interface RenameSymbolDialogProps {
   open: boolean

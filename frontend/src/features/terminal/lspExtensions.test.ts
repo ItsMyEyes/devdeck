@@ -3,7 +3,7 @@ import { autocompletion, completeAnyWord } from '@codemirror/autocomplete'
 import { EditorState } from '@codemirror/state'
 import { languageServerWithTransport, SynchronizationMethod } from 'codemirror-languageserver'
 import { BUNDLED_AUTOCOMPLETION_INDEX, lspExtensions } from './lspExtensions'
-import type { LspSession } from './lspSession'
+import type { LspSession } from './lsp/lspSession'
 
 const ROOT = 'file:///work/repo'
 

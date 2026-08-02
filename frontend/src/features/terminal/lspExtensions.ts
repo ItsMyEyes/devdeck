@@ -11,8 +11,8 @@ import {
 } from 'codemirror-languageserver'
 import { CompletionTriggerKind } from 'vscode-languageserver-protocol'
 import { toast } from 'sonner'
-import type { LspSession } from './lspSession'
-import type { LspPosition, LspRange } from './lspWorkspaceEdit'
+import type { LspSession } from './lsp/lspSession'
+import type { LspPosition, LspRange } from './lsp/lspWorkspaceEdit'
 
 export interface DefinitionTarget {
   symbol?: string

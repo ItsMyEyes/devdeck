@@ -24,14 +24,14 @@ import {
   languageIdForPath,
   type LspSession,
   type LspStatus,
-} from './lspSession'
+} from './lsp/lspSession'
 import {
   lspExtensions,
   revealRange,
   type DefinitionReveal,
   type DefinitionTarget,
 } from './lspExtensions'
-import { applyRenamePlan, buildRenamePlan, prepareRename, type RenamePlan, type RenameSubject } from './lspRename'
+import { applyRenamePlan, buildRenamePlan, prepareRename, type RenamePlan, type RenameSubject } from './lsp/lspRename'
 import { RenameSymbolDialog } from './RenameSymbolDialog'
 
 export type { DefinitionReveal, DefinitionTarget }
