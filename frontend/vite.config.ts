@@ -84,6 +84,8 @@ export default defineConfig({
       'src/features/browser/visibleTileRect.test.ts',
       'src/features/browser/browserHistory.test.ts',
       'src/features/editor/monacoLspClient.guard.test.ts',
+      'src/features/editor/editorOptions.test.ts',
+      'src/features/editor/useVsCodeMode.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
