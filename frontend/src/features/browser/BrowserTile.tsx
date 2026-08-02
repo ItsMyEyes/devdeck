@@ -14,6 +14,7 @@ import { BrowserOmnibox } from './BrowserOmnibox'
 import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserUrlCard } from './BrowserUrlCard'
+import { recordPageLoad } from './browserHistory'
 import { visibleTileRect } from './visibleTileRect'
 import { DEFAULT_ZOOM, zoomStep } from './browserZoom'
 import {
@@ -123,6 +124,10 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   /** Bumped to pull the caret back into the omnibox's inline address input
    *  (Cmd/Ctrl+L on a tab that has no URL yet). */
   const [addressFocusSignal, setAddressFocusSignal] = useState(0)
+  /** True while a load DevDeck itself asked for is in flight, so the page-load
+   *  listener confirms the entry already written instead of appending a second
+   *  one. Consumed by the next committed load. */
+  const initiatedLoadRef = useRef(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findResult, setFindResult] = useState<{ active: number; total: number }>({ active: 0, total: 0 })
@@ -269,14 +274,32 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
 
-  // Sync the address bar/title from real in-page navigation inside the
-  // native webview. `loading` now comes straight from the fixed
-  // `on_page_load` payload (Slice 1 Task 7) instead of being hardcoded
-  // false, so the toolbar's Reload<->Stop icon actually swaps.
+  // Sync the address bar/title/history from real navigation inside the native
+  // webview. `loading` comes straight from the `on_page_load` payload, so the
+  // toolbar's Reload<->Stop icon swaps correctly.
+  //
+  // History is folded in on the *committed* load only (`loading === false`).
+  // Recording on the Started event instead would enter URLs that then fail,
+  // redirect away, or get cancelled. This is what makes back/forward work
+  // after a link click: the event used to update `url` alone, leaving
+  // `historyIndex` at 0 forever, so `canGoBack` never became true.
   useEffect(() => {
     let unlisten: (() => void) | undefined
     void onBrowserTilePageLoad(({ tabId: t, docId: d, url, loading }) => {
-      if (t === tabId) setBrowserDocState(t, d, { url, loading })
+      if (t !== tabId) return
+      setBrowserDocState(t, d, { url, loading })
+      if (loading) return
+
+      const initiated = initiatedLoadRef.current
+      initiatedLoadRef.current = false
+      // Read through the store rather than the captured `doc`: this listener is
+      // registered once per tab and would otherwise fold every load into the
+      // history snapshot taken when it was created.
+      const current = useDevDeckStore.getState().browserTiles[t]?.docs.find((candidate) => candidate.id === d)
+      if (!current) return
+      const next = recordPageLoad({ history: current.history, historyIndex: current.historyIndex }, url, initiated)
+      if (next.history === current.history && next.historyIndex === current.historyIndex) return
+      setBrowserDocState(t, d, next)
     }).then((fn) => {
       unlisten = fn
     })
@@ -379,6 +402,7 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     if (!proxy && doc.machineId) proxy = await ensureProxyForMachine(doc.machineId)
     if (!proxy) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
+    initiatedLoadRef.current = true
     setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, history, historyIndex: history.length - 1 })
     // First navigation for this doc (doc.url was still null): the mount
     // effect above creates the native webview once the placeholder <div>
@@ -393,6 +417,7 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     const nextIndex = doc.historyIndex + delta
     const url = doc.history[nextIndex]
     if (!url) return
+    initiatedLoadRef.current = true
     setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), historyIndex: nextIndex, loading: true })
     await navigateBrowserTile(tabId, doc.id, url)
   }
@@ -440,6 +465,7 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     const url = normalizeAddress(bookmark.url)
     if (!url) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
+    initiatedLoadRef.current = true
     setBrowserDocState(tabId, doc.id, { url, title: bookmark.title, loading: true, history, historyIndex: history.length - 1 })
   }
 

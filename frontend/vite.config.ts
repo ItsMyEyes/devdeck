@@ -72,6 +72,7 @@ export default defineConfig({
       'src/features/terminal/lspExtensions.test.ts',
       'src/features/browser/useNativeOverlayBlocker.test.tsx',
       'src/features/browser/visibleTileRect.test.ts',
+      'src/features/browser/browserHistory.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
