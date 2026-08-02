@@ -1,4 +1,5 @@
-import { Star } from 'lucide-react'
+import { useEffect, useRef, type FormEvent } from 'react'
+import { Search, Star } from 'lucide-react'
 import { Select } from '@/components/ui/select'
 import { StatusDot } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
@@ -17,11 +18,22 @@ export interface BrowserOmniboxProps {
   machineHealth: Map<string, MachineHealth | undefined>
   onSelectMachine: (machineId: string) => void
   /** Opens `BrowserUrlCard`. Fires from the URL area only, never from the
-   *  machine chip or the star. */
+   *  machine chip or the star. Unused while `url` is empty — that case edits
+   *  in place instead. */
   onEdit: () => void
   /** Opens `BookmarkDialog`. The star lives here rather than in the toolbar's
    *  right cluster because it acts on the *address*, not the window. */
   onBookmark: () => void
+  /** Draft address, shared with `BrowserUrlCard` and reset per doc. */
+  draft: string
+  onDraftChange: (value: string) => void
+  onSubmit: (value: string) => void
+  /** Put the caret in the inline input. Only the focused tile may pass true,
+   *  or a background tile would steal the caret the moment it mounts. */
+  autoFocus?: boolean
+  /** Changing this value re-focuses the inline input — how Cmd/Ctrl+L reaches
+   *  it without the parent holding a ref into this component. */
+  focusSignal?: number
 }
 
 function dotColor(status: MachineHealth['status'] | undefined): string {
@@ -43,8 +55,33 @@ export function BrowserOmnibox({
   onSelectMachine,
   onEdit,
   onBookmark,
+  draft,
+  onDraftChange,
+  onSubmit,
+  autoFocus = false,
+  focusSignal = 0,
 }: BrowserOmniboxProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  // A tab with no URL has no page to name, so the two-tier URL button has
+  // nothing to render and used to fall back to the literal string "New Tab" at
+  // full contrast — indistinguishable from a real domain, which left new users
+  // with no visible way in. Editing in place is safe *only* here: the
+  // click-to-open `BrowserUrlCard` exists because an overlay must hide the
+  // native webview underneath it, and an empty tab has no webview yet.
+  const editingInline = !url
   const { prefix, domain, rest } = splitUrlForDisplay(url)
+
+  useEffect(() => {
+    // `select()` rather than `focus()` so a draft carried over from a failed
+    // navigation is replaced by the next keystroke, matching `BrowserUrlCard`.
+    if (editingInline && autoFocus) inputRef.current?.select()
+  }, [editingInline, autoFocus, docId, focusSignal])
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const value = draft.trim()
+    if (value) onSubmit(value)
+  }
   const options = machines.map((m) => ({
     value: m.id,
     label: m.name,
@@ -61,19 +98,47 @@ export function BrowserOmnibox({
         'max-w-[640px] pointer-coarse:h-9',
       )}
     >
-      <BrowserFaviconChip seed={docId} title={title} size={14} />
-      {/* Sibling of the Select trigger, never its ancestor — nesting two
-          interactive elements is invalid HTML and overlaps their hit areas. */}
-      <button
-        type="button"
-        onClick={onEdit}
-        aria-label="Edit address"
-        className="flex min-w-0 flex-1 items-center text-left text-[11px] focus-visible:outline-none pointer-coarse:text-[13px]"
-      >
-        <span className="flex-none text-devdeck-dim">{prefix}</span>
-        <span className="flex-none font-medium text-devdeck-fg">{domain}</span>
-        <span className="min-w-0 truncate text-devdeck-dim">{rest}</span>
-      </button>
+      {editingInline ? (
+        <>
+          <Search size={12} className="flex-none text-devdeck-dim" />
+          <form onSubmit={handleSubmit} className="flex min-w-0 flex-1">
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              placeholder="Search or enter address"
+              aria-label="Address"
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              // 16px on coarse pointers: anything smaller makes iOS Safari zoom
+              // the whole tile on focus.
+              className={cn(
+                'min-w-0 flex-1 bg-transparent text-[11px] text-devdeck-fg',
+                'placeholder:text-devdeck-dim focus:outline-none pointer-coarse:text-[16px]',
+              )}
+            />
+          </form>
+        </>
+      ) : (
+        <>
+          <BrowserFaviconChip seed={docId} title={title} size={14} />
+          {/* Sibling of the Select trigger, never its ancestor — nesting two
+              interactive elements is invalid HTML and overlaps their hit areas. */}
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label="Edit address"
+            className="flex min-w-0 flex-1 items-center text-left text-[11px] focus-visible:outline-none pointer-coarse:text-[13px]"
+          >
+            <span className="flex-none text-devdeck-dim">{prefix}</span>
+            <span className="flex-none font-medium text-devdeck-fg">{domain}</span>
+            <span className="min-w-0 truncate text-devdeck-dim">{rest}</span>
+          </button>
+        </>
+      )}
       <span aria-hidden className="h-3 w-px flex-none bg-devdeck-border" />
       <Select
         value={machineId}

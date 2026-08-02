@@ -120,6 +120,9 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   const [draft, setDraft] = useState('')
   const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false)
   const [urlCardOpen, setUrlCardOpen] = useState(false)
+  /** Bumped to pull the caret back into the omnibox's inline address input
+   *  (Cmd/Ctrl+L on a tab that has no URL yet). */
+  const [addressFocusSignal, setAddressFocusSignal] = useState(0)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findResult, setFindResult] = useState<{ active: number; total: number }>({ active: 0, total: 0 })
@@ -296,7 +299,10 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
       const key = event.key
       if (!event.shiftKey && key.toLowerCase() === 'l') {
         event.preventDefault()
-        setUrlCardOpen(true)
+        // A tab with no URL already edits its address inline in the omnibox,
+        // so opening the card would stack a second input for the same job.
+        if (doc.url) setUrlCardOpen(true)
+        else setAddressFocusSignal((signal) => signal + 1)
         return
       }
       if (!event.shiftKey && key.toLowerCase() === 'f') {
@@ -498,6 +504,11 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
             onSelectMachine={(machineId) => void selectMachine(machineId)}
             onEdit={() => setUrlCardOpen(true)}
             onBookmark={openBookmarkDialog}
+            draft={draft}
+            onDraftChange={setDraft}
+            onSubmit={submitUrlCard}
+            autoFocus={isFocused}
+            focusSignal={addressFocusSignal}
           />
         </BrowserToolbar>
         <ProgressLine active={doc.loading} />
@@ -519,7 +530,7 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-5 overflow-auto p-4 @sm/tile:p-6">
             {bookmarksByMachine.length === 0 ? (
-              <div className="mt-16 text-[12px] text-devdeck-muted">No bookmarks yet — enter a URL above to start browsing.</div>
+              <div className="mt-16 text-[12px] text-devdeck-muted">No bookmarks yet.</div>
             ) : (
               bookmarksByMachine.map(([machineLabel, groups]) => (
                 <div key={machineLabel} className="w-full max-w-[520px]">
