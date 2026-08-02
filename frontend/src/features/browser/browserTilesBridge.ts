@@ -36,6 +36,18 @@ export function reloadBrowserTile(tabId: string, docId: string): Promise<void> {
   return invoke('browser_tile_reload', { tabId, docId })
 }
 
+/** Steps the webview's own session history, so the engine restores scroll
+ *  position and form state. Re-navigating to a remembered URL — what the
+ *  toolbar used to do — reloads the page from scratch and pushes a fresh
+ *  entry instead. */
+export function goBackBrowserTile(tabId: string, docId: string): Promise<void> {
+  return invoke('browser_tile_back', { tabId, docId })
+}
+
+export function goForwardBrowserTile(tabId: string, docId: string): Promise<void> {
+  return invoke('browser_tile_forward', { tabId, docId })
+}
+
 /** Bounds in flight to Rust, and the latest bounds superseding it, keyed by
  *  webview label. `BrowserTile`'s `ResizeObserver` calls this on every tick
  *  of an interactive panel drag — dozens of unawaited invokes in quick

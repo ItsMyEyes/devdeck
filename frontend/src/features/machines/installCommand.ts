@@ -11,9 +11,6 @@ export interface InstallCommandInput {
   hubKey: string
   /** Display name for the machine; '' renders a placeholder. */
   machineName: string
-  /** Operator-supplied GitHub token. Never sent to the server — it exists only
-   *  to compose this string. '' renders a placeholder. */
-  githubToken: string
 }
 
 /** Where deploy-docs.yml publishes the installer scripts. Matches scripts/README.md. */
@@ -40,14 +37,12 @@ function orPlaceholder(value: string, placeholder: string): string {
  *  Missing values render as angle-bracket placeholders rather than producing
  *  a command that looks complete but silently misbehaves. */
 export function buildInstallCommand(input: InstallCommandInput): string {
-  const token = orPlaceholder(input.githubToken, '<github-token>')
   const hubUrl = orPlaceholder(input.hubUrl, '<hub-url>')
   const hubKey = orPlaceholder(input.hubKey, '<your-hub-key>')
   const name = orPlaceholder(input.machineName, '<name>')
 
   if (input.target === 'powershell') {
     return [
-      `$env:GITHUB_TOKEN=${powershellQuote(token)}`,
       `$env:DEVDECK_HUB_URL=${powershellQuote(hubUrl)}`,
       `$env:DEVDECK_HUB_KEY=${powershellQuote(hubKey)}`,
       `$env:DEVDECK_MACHINE_NAME=${powershellQuote(name)}`,
@@ -62,7 +57,6 @@ export function buildInstallCommand(input: InstallCommandInput): string {
 
   return [
     `${fetcher} | \\`,
-    `  GITHUB_TOKEN=${posixQuote(token)} \\`,
     `  DEVDECK_HUB_URL=${posixQuote(hubUrl)} \\`,
     `  DEVDECK_HUB_KEY=${posixQuote(hubKey)} \\`,
     `  DEVDECK_MACHINE_NAME=${posixQuote(name)} sh`,

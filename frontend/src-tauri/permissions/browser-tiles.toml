@@ -12,6 +12,8 @@ commands.allow = [
     "browser_tile_open",
     "browser_tile_navigate",
     "browser_tile_reload",
+    "browser_tile_back",
+    "browser_tile_forward",
     "browser_tile_set_bounds",
     "browser_tile_hide",
     "browser_tile_show",

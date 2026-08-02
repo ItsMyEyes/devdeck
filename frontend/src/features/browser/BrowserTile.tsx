@@ -21,6 +21,8 @@ import {
   clearBrowserTileFind,
   closeBrowserTile as closeNativeBrowserTile,
   findInBrowserTile,
+  goBackBrowserTile,
+  goForwardBrowserTile,
   hideBrowserTile,
   navigateBrowserTile,
   onBrowserTilePageLoad,
@@ -413,13 +415,21 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     }
   }
 
+  // Steps the webview's own session history rather than re-navigating to the
+  // remembered URL. Re-navigating refetched the page, so back landed you at the
+  // top of a search results page instead of where you left it, and pushed a
+  // fresh native entry each time — the toolbar and a trackpad swipe then
+  // disagreed about where "back" went.
+  //
+  // Deliberately does NOT set `initiatedLoadRef` or move the index here: the
+  // resulting load arrives on an adjacent entry, which `recordPageLoad` already
+  // follows the same way it follows a swipe gesture. Moving the index here as
+  // well would double-count the step.
   const goHistory = async (delta: -1 | 1) => {
     const nextIndex = doc.historyIndex + delta
-    const url = doc.history[nextIndex]
-    if (!url) return
-    initiatedLoadRef.current = true
-    setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), historyIndex: nextIndex, loading: true })
-    await navigateBrowserTile(tabId, doc.id, url)
+    if (nextIndex < 0 || nextIndex >= doc.history.length) return
+    setBrowserDocState(tabId, doc.id, { loading: true })
+    await (delta === -1 ? goBackBrowserTile(tabId, doc.id) : goForwardBrowserTile(tabId, doc.id))
   }
 
   const goHome = async () => {

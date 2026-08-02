@@ -1,7 +1,6 @@
 import { Copy } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useHubKey } from '@/features/data/queries'
 import { buildInstallCommand } from '@/features/machines/installCommand'
@@ -29,7 +28,6 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
   const [target, setTarget] = useState<InstallTarget>('curl')
   // Held in component state only — never sent to the server, never persisted,
   // and dropped when the dialog unmounts.
-  const [githubToken, setGithubToken] = useState('')
   const hubKey = useHubKey(true)
 
   if (hubKey.isLoading) {
@@ -56,7 +54,6 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
     hubUrl,
     hubKey: hubKey.data?.key ?? '',
     machineName,
-    githubToken,
   })
 
   function copyCommand() {
@@ -84,19 +81,6 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
           </button>
         ))}
       </div>
-
-      <Label>GitHub token (optional)</Label>
-      <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
-        The release repo is private, so the installer needs one. Used only to build the command below — it is never
-        sent to this server or saved.
-      </p>
-      <Input
-        value={githubToken}
-        type="password"
-        onChange={(e) => setGithubToken(e.target.value)}
-        placeholder="ghp_…"
-        className="mb-3 font-mono"
-      />
 
       <Label>Install command</Label>
       <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">

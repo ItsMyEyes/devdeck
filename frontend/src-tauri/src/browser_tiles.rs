@@ -137,6 +137,38 @@ pub fn browser_tile_reload(state: tauri::State<'_, BrowserTiles>, tab_id: String
     webview.reload().map_err(|e| e.to_string())
 }
 
+/// Steps the webview's *own* session history. Tauri exposes no `go_back` on
+/// `Webview`, so this drives the page's History API directly — which is what
+/// makes back behave like a browser instead of like a fresh request: the
+/// engine restores scroll position and form state, serves from the
+/// back/forward cache where it can, and does not push a new entry the way
+/// `browser_tile_navigate` does.
+///
+/// A step past either end of the history is a no-op inside the webview, so the
+/// frontend's own bounds check is an enable/disable affordance, not a
+/// correctness requirement.
+fn eval_history_step(
+    state: &tauri::State<'_, BrowserTiles>,
+    tab_id: &str,
+    doc_id: &str,
+    js: &str,
+) -> Result<(), String> {
+    let label = webview_label(tab_id, doc_id);
+    let map = state.0.lock().unwrap();
+    let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
+    webview.eval(js).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn browser_tile_back(state: tauri::State<'_, BrowserTiles>, tab_id: String, doc_id: String) -> Result<(), String> {
+    eval_history_step(&state, &tab_id, &doc_id, "history.back()")
+}
+
+#[tauri::command]
+pub fn browser_tile_forward(state: tauri::State<'_, BrowserTiles>, tab_id: String, doc_id: String) -> Result<(), String> {
+    eval_history_step(&state, &tab_id, &doc_id, "history.forward()")
+}
+
 /// Keeps the native surface glued to the placeholder div's on-screen rect —
 /// called from the frontend's `ResizeObserver` on every resize/drag/
 /// fullscreen-toggle of the tile.

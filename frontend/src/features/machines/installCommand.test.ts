@@ -34,13 +34,11 @@ const full = {
   hubUrl: 'https://hub.tail-x.ts.net',
   hubKey: 'a1b2c3',
   machineName: 'builder',
-  githubToken: 'ghp_xxx',
 }
 
 check('curl command has the expected shape', () => {
   const cmd = buildInstallCommand({ ...full, target: 'curl' })
   assertContains(cmd, 'curl -fsSL https://kiyora.is-a.dev/devdeck/install.sh |', 'curl fetcher')
-  assertContains(cmd, "GITHUB_TOKEN='ghp_xxx'", 'token env')
   assertContains(cmd, "DEVDECK_HUB_URL='https://hub.tail-x.ts.net'", 'hub url env')
   assertContains(cmd, "DEVDECK_HUB_KEY='a1b2c3'", 'hub key env')
   assertContains(cmd, "DEVDECK_MACHINE_NAME='builder' sh", 'name env and shell')
@@ -55,7 +53,6 @@ check('wget command swaps only the fetcher', () => {
 
 check('powershell command uses $env: assignments and irm | iex', () => {
   const cmd = buildInstallCommand({ ...full, target: 'powershell' })
-  assertContains(cmd, "$env:GITHUB_TOKEN='ghp_xxx'", 'token env')
   assertContains(cmd, "$env:DEVDECK_HUB_URL='https://hub.tail-x.ts.net'", 'hub url env')
   assertContains(cmd, "$env:DEVDECK_HUB_KEY='a1b2c3'", 'hub key env')
   assertContains(cmd, "$env:DEVDECK_MACHINE_NAME='builder'", 'name env')
@@ -69,9 +66,7 @@ check('empty values fall back to placeholders', () => {
     hubUrl: '',
     hubKey: '',
     machineName: '',
-    githubToken: '',
   })
-  assertContains(cmd, "GITHUB_TOKEN='<github-token>'", 'token placeholder')
   assertContains(cmd, "DEVDECK_HUB_URL='<hub-url>'", 'hub url placeholder')
   assertContains(cmd, "DEVDECK_HUB_KEY='<your-hub-key>'", 'hub key placeholder')
   assertContains(cmd, "DEVDECK_MACHINE_NAME='<name>'", 'name placeholder')

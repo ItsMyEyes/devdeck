@@ -88,6 +88,8 @@ pub fn run() {
             browser_tiles::browser_tile_open,
             browser_tiles::browser_tile_navigate,
             browser_tiles::browser_tile_reload,
+            browser_tiles::browser_tile_back,
+            browser_tiles::browser_tile_forward,
             browser_tiles::browser_tile_set_bounds,
             browser_tiles::browser_tile_hide,
             browser_tiles::browser_tile_show,
