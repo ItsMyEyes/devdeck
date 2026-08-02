@@ -24,14 +24,46 @@ the `codemirror-languageserver` package that forced four documented workarounds.
 | # | Decision | Rationale |
 |---|---|---|
 | 1 | Migrate all six surfaces; remove CodeMirror packages | The stated goal is package removal, which is all-or-nothing — one remaining consumer keeps ~13 MB of `@codemirror`/`@lezer` in the tree |
-| 2 | Thin LSP bridge, not `monaco-languageclient` | Avoids 33.5 MB of `@codingame/monaco-vscode-api`, a version-locked monaco↔mlc↔codingame triple, and a VS Code service layer that would fight DevDeck's Tailwind theming and its own tab/pane system |
+| 2 | Monaco's **native** `lsp` client, not `monaco-languageclient` | Avoids 33.5 MB of `@codingame/monaco-vscode-api`, a version-locked monaco↔mlc↔codingame triple, and a VS Code service layer that would fight DevDeck's Tailwind theming and its own tab/pane system. Monaco 0.56 ships `MonacoLspClient` (144 KB) registering 21 providers |
 | 3 | VS Code mode is one global localStorage pref | Matches the existing client-pref pattern (`paletteFrecency`, `ripgrepInstallPrefs`, `browserTileBookmarks`); server `Settings` is for server-side state |
 | 4 | No Monaco built-in language workers | All intelligence comes from the runtime LSP. Shipping Monaco's TS worker alongside `typescript-language-server` would produce competing completions and duplicate diagnostics on the same buffer |
+| 5 | Reach `MonacoLspClient` through a Vite alias | `lsp` is exported only from monaco's root entry, which eagerly registers the TypeScript language feature; that feature lazily pulls **12 MB** the moment a `.ts` model is created. The tree-shaken entries are therefore mandatory, and the client is imported by path |
+
+### Monaco 0.56 findings
+
+Verified against the installed `monaco-editor@0.56.0`. These drive the architecture:
+
+1. **Monaco 0.55 added a native `lsp` namespace; 0.56 exposes typed client and transport APIs.**
+   `MonacoLspClient`'s constructor takes a plain `IMessageTransport` (`send`, `setListener`, `state`) —
+   the same shape of adaptation `DevDeckLspTransport` already performs for CodeMirror's `Transport`.
+2. **`createFeatures()` registers 21 providers**: completion, hover, signature help, definition,
+   declaration, type definition, implementation, references, document highlight, document symbol,
+   rename, code action, code lens, document link, formatting, range formatting, on-type formatting,
+   folding range, selection range, inlay hints, semantic tokens, diagnostics.
+3. **It sends `rootUri: null`** and no `workspaceFolders`. gopls degrades to single-file mode without a
+   root, so the outbound `initialize` must be rewritten in transit.
+4. **It applies workspace edits only to loaded models**, so cross-file rename would silently drop edits
+   to files that are not open — the same defect the superseded design documented.
+5. **0.56 reorganised ESM into tree-shakeable entry points** (`monaco-editor/editor`,
+   `features/register.all`, `languages/definitions/register.all`, `languages/features/register.all`).
+   Language *definitions* are 1.4 MB of monarch tokenizers with no workers; language *features* are the
+   workers, of which TypeScript alone is 12 MB behind a dynamic `import('./tsMode.js')` triggered by
+   `languages.onLanguage('typescript')`.
+6. **`monaco.editor.registerEditorOpener(opener: ICodeEditorOpener)` is public API** — the supported hook
+   for opening a definition that resolves to a different file.
+
+Findings 3 and 4 are both absorbed by the transport, which DevDeck owns. Finding 6 covers cross-file
+navigation. Nothing requires patching monaco.
 
 ### Rejected
 
 **`@monaco-editor/react` with the CDN loader.** DevDeck ships as a Tauri desktop app and runs on private
 tunnels and offline machines. Monaco must be self-hosted and bundled by Vite.
+
+**Importing monaco's root entry to get `lsp` legitimately.** It registers the TypeScript language
+feature, which pulls 12 MB on the first `.ts` file opened — unacceptable over a tunnel.
+
+**Hand-writing the provider bridge.** ~600 lines for ~6 providers, versus 144 KB for 21.
 
 ## Current state
 
@@ -77,7 +109,7 @@ new layout separates the shared kit from the LSP-aware surface.
 
 | File | Responsibility |
 |---|---|
-| `monacoSetup.ts` | One-time init: Vite `?worker` wiring, `devdeck-dark` theme registration, built-in TS/JSON/CSS/HTML language services disabled |
+| `monacoSetup.ts` | One-time init. Imports `monaco-editor/editor` + `features/register.all` + `languages/definitions/register.all` and **never** `languages/features/*`; wires `MonacoEnvironment.getWorker` to the single default editor worker; registers the `devdeck-dark` theme. Exports the `monaco` namespace so no other module imports it directly |
 | `MonacoEditor.tsx` | The single React wrapper — `value` / `onChange` / `path` / `reveal` / `readOnly` / model lifecycle |
 | `editorTheme.ts` | `devdeck-dark` Monaco theme built from the `globals.css` tokens, replacing `oneDark` + `devdeckCodeTheme` |
 | `editorOptions.ts` | Pure `(vscodeMode: boolean, overrides) => IStandaloneEditorConstructionOptions` |
@@ -90,13 +122,32 @@ new layout separates the shared kit from the LSP-aware surface.
 
 | File | Fate | Notes |
 |---|---|---|
-| `lspTransport.ts` | **Ported** | Only `implements Transport` drops. The `devdeckLsp` envelope handling, the send queue, the `workspace/configuration` array reply and the `id: 0` guard all stay exactly as written |
-| `lspSession.ts` | **Ported** | `uriHelpers`, `languageIdForPath`, `serverLanguage` and `createLspSessionPool` unchanged; only `LanguageServerClient` swaps for the new client |
-| `lspClient.ts` | **New** | `vscode-jsonrpc` `MessageConnection` over the transport: `initialize`, `didOpen`/`didChange`/`didClose`, typed request helpers, `publishDiagnostics` fan-out |
-| `monacoProviders.ts` | **New** | Registers completion, hover, definition, rename and formatting providers; diagnostics via `setModelMarkers` |
+| `lspTransport.ts` | **Ported + extended** | Reshaped from CodeMirror's `Transport` to monaco's `IMessageTransport`. The `devdeckLsp` envelope handling, the send queue, the `workspace/configuration` array reply and the `id: 0` guard all stay. Gains three responsibilities: `initialize` rewriting, a `request()` channel, and a `state` value |
+| `lspSession.ts` | **Ported** | `uriHelpers`, `languageIdForPath`, `serverLanguage` and `createLspSessionPool` unchanged; `LanguageServerClient` swaps for `MonacoLspClient` |
 | `lspWorkspaceEdit.ts` | **Ported verbatim** | Already pure |
-| `lspRename.ts` | **Ported** | Plan-building is pure and unchanged; only the apply step retargets to Monaco models |
-| `lspExtensions.ts` | **Deleted** | Its content is CodeMirror extension assembly; the DevDeck-specific behaviour moves into `monacoProviders.ts` |
+| `lspRename.ts` | **Ported** | Plan-building is pure and unchanged; the apply step retargets to Monaco models + `writeWorktreeFile` |
+| `definitionFallback.ts` | **New (extracted)** | `findDefinition`, `findImportedSource`, `quotedPathAt`, `resolveImportBase`, `resolveImportFile` lifted out of `CodeFileEditor.tsx` unchanged — they operate on strings, not editor state |
+| `editorOpener.ts` | **New** | `monaco.editor.registerEditorOpener` → DevDeck tab open, replacing the discarded cross-file navigation |
+| `lspExtensions.ts` | **Deleted** | CodeMirror extension assembly, wholly replaced by `MonacoLspClient` |
+| `lspClient.ts`, `monacoProviders.ts` | **Not needed** | `MonacoLspClient` supplies both |
+
+### `DevDeckLspTransport` responsibilities
+
+The transport is where every DevDeck-specific deviation lives, which keeps `MonacoLspClient` unpatched
+and keeps all of it unit-testable without mounting an editor:
+
+1. Consume `devdeckLsp` control frames → status events *(existing)*
+2. Answer `workspace/configuration` with a correctly shaped array, and `workspace/applyEdit` with
+   `{applied:false}`; guard `id: 0` *(existing)*
+3. Queue sends until `socket.readyState === OPEN` *(existing)*
+4. Rewrite the outbound `initialize` request, injecting `rootUri` and `workspaceFolders` from the
+   backend's `ready` frame *(new — works around finding 3)*
+5. Expose `request(method, params)` on a private id range so DevDeck's rename and definition flows can
+   talk to the server alongside `MonacoLspClient` on the same socket *(new — works around finding 4)*
+6. Expose `state: IValueWithChangeEvent<ConnectionState>` as monaco's interface requires *(new)*
+
+Private request ids are strings prefixed `devdeck-`, so they cannot collide with the numeric ids
+`MonacoLspClient` allocates; responses carrying such an id are resolved locally and never forwarded.
 
 ### The model registry is load-bearing
 
@@ -121,40 +172,42 @@ Registry contract:
 CodeFileEditor
   └─ acquireLspSession(machine, worktreeId, languageId)      [ported, ref-counted pool]
        └─ openLspTransport → machineWsUrl('/lsp', {worktree, language})
-            └─ DevDeckLspTransport(socket)                    [ported]
+            └─ DevDeckLspTransport(socket)  implements monaco.lsp.IMessageTransport
                  ├─ consumes devdeckLsp control frames → status events
+                 ├─ rewrites outbound `initialize` → injects rootUri + workspaceFolders
                  ├─ answers workspace/configuration + workspace/applyEdit itself
+                 ├─ resolves `devdeck-*` ids locally, forwards everything else
                  └─ queues sends until socket.readyState === OPEN
-       └─ createLspClient(transport)                          [new]
-            └─ vscode-jsonrpc MessageConnection
-                 ├─ initialize / initialized
-                 ├─ didOpen / didChange (incremental) / didClose
-                 └─ publishDiagnostics → setModelMarkers
-       └─ registerProviders(session, monaco)                  [new]
-            ├─ CompletionItemProvider    → textDocument/completion
-            ├─ HoverProvider             → textDocument/hover
-            ├─ DefinitionProvider        → textDocument/definition
-            ├─ RenameProvider            → prepareRename + buildRenamePlan
-            └─ DocumentFormattingProvider→ textDocument/formatting
+       └─ new MonacoLspClient(transport)
+            └─ registers 21 providers + textDocument sync, globally per language id
+       └─ registerEditorOpener(...)        → cross-file definition opens a DevDeck tab
+       └─ editor.addAction('devdeck.rename', F2)
+            └─ transport.request('textDocument/rename') → buildRenamePlan
+                 → RenameSymbolDialog → applyRenamePlan
 ```
 
-Providers are registered **per language id, once per session**, and dispose with the session. Registering
-per editor instance would fan out duplicate completions across split panes.
+`MonacoLspClient` registers providers **globally, once per session** — monaco's provider registry is
+keyed by language, not by editor. Constructing one client per editor instance would fan out duplicate
+completions across split panes, so construction is owned by the ref-counted session pool, which already
+guarantees one session per `machine:worktree:language`.
 
 ### Behaviour that must survive
 
 These are DevDeck-specific and not provided by any package:
 
-1. **Cross-file go-to-definition.** A definition resolving to another file opens a tab via
-   `onOpenDefinition` rather than being discarded. Monaco's default `DefinitionProvider` only navigates
-   within the current model, so the `editor.gotoLocation` action is intercepted.
+1. **Cross-file go-to-definition.** A definition resolving to another file opens a tab rather than being
+   discarded. `monaco.editor.registerEditorOpener` is the supported hook: monaco calls `openCodeEditor`
+   with the target `Uri` and range, DevDeck maps the uri back to a worktree path via the session's
+   `pathFromUri`, opens the tab, and returns `true` to claim the navigation.
 2. **Regex/import fallback.** With no language server, `findDefinition`, `findImportedSource`,
-   `quotedPathAt` and `resolveImportFile` remain the whole go-to-definition feature. Ported as-is —
-   they operate on strings, not on CodeMirror state.
+   `quotedPathAt` and `resolveImportFile` remain the whole go-to-definition feature. Extracted to
+   `definitionFallback.ts` unchanged — they operate on strings, not on editor state.
 3. **Cross-file rename.** `buildRenamePlan` splits a `WorkspaceEdit` into current-file and other-file
    edits, refuses when a target file has unsaved changes (`isPathDirty`), and renders
-   `RenameSymbolDialog` for confirmation. Monaco's `RenameProvider` returns only a `WorkspaceEdit`, so
-   the dialog flow stays custom and the provider is a thin entry point into it.
+   `RenameSymbolDialog` for confirmation. `MonacoLspClient`'s own rename feature applies edits only to
+   loaded models, so DevDeck registers an `editor.addAction` bound to F2 whose keybinding takes
+   precedence over the built-in `editor.action.rename`, and drives the existing plan/dialog/apply
+   pipeline through `transport.request`.
 4. **LSP status toasts.** `installing` → loading toast, `ready` after installing → success, `error` →
    error toast, keyed `lsp-status-<worktreeId>-<languageId>`.
 5. **Reveal-on-open.** Search results and definition jumps scroll to and select a range. The existing
@@ -246,15 +299,19 @@ repo's convention, since ~20 legacy `check()`-harness files would otherwise brea
 | `lspTransport.test.ts` | **Exists — must stay green.** Control frames, send queue, `id: 0`, `workspace/configuration` shape |
 | `lspSession.test.ts` | **Exists — must stay green.** Pool ref-counting, URI helpers |
 | `lspWorkspaceEdit.test.ts` | **Exists — must stay green.** Already pure |
-| `lspClient.test.ts` | New: initialize handshake, didChange versioning, diagnostics fan-out, request rejection |
-| `monacoProviders.test.ts` | New: LSP↔Monaco type translation (completion kinds, ranges, markers) against a fake session |
+| `lspTransport.initialize.test.ts` | New: outbound `initialize` gains `rootUri` + `workspaceFolders`; other messages pass through untouched |
+| `lspTransport.request.test.ts` | New: `devdeck-*` ids resolve locally and are never forwarded to the client listener; foreign responses are forwarded; pending requests reject on close |
+| `monacoLspClient.guard.test.ts` | New: asserts the `monaco-lsp-client` alias resolves and exports `MonacoLspClient` — fails loudly if a monaco upgrade moves the file |
+| `editorOpener.test.ts` | New: uri → worktree path mapping, returns `true` only for in-worktree uris |
 | `definitionFallback.test.ts` | Ported heuristics: `findDefinition`, `findImportedSource`, `quotedPathAt`, `resolveImportBase` |
 | `sqlCompletion.test.ts` | `SQLSchemaMap` → Monaco completion items |
 | `sqlEditorSupport.test.ts` | **Exists — must stay green, unchanged** |
 | `lspExtensions.test.ts` | **Deleted** with the module it pins |
 
-`monacoProviders` and `lspClient` are tested against a fake session/transport rather than a live socket,
-following the existing `lspExtensions.test.ts` `fakeSession` pattern.
+Transport tests run against a fake `WebSocket` rather than a live socket, following the existing
+`lspTransport.test.ts` pattern. No test mounts a Monaco editor: monaco needs `matchMedia`,
+`ResizeObserver` and real layout that jsdom does not provide, so every unit under test is either pure or
+takes monaco's namespace as an injected argument.
 
 Verification gates: `npm run typecheck`, `npm test`, `npm run build`, `go vet ./...`.
 
@@ -269,9 +326,22 @@ Removed from `frontend/package.json`:
 @uiw/react-codemirror      codemirror-languageserver
 ```
 
-`vscode-languageserver-protocol` **stays** — it supplies the LSP types the bridge uses.
+`vscode-languageserver-protocol` **stays** — it supplies the LSP types the transport and rename flow use.
 
-Added: `monaco-editor`, `vscode-jsonrpc`.
+Added: `monaco-editor@^0.56.0` only. `vscode-jsonrpc` is **not** needed — `MonacoLspClient` brings its own
+JSON-RPC layer, and the transport speaks raw JSON-RPC objects.
+
+`vite.config.ts` gains one alias:
+
+```ts
+'monaco-lsp-client': fileURLToPath(
+  new URL('./node_modules/monaco-editor/esm/external/monaco-lsp-client/out/index.js', import.meta.url),
+)
+```
+
+Monaco is pinned to `^0.56.0`. The alias reaches past the package's `exports` map, which stops at
+`esm/vs/*`; `monacoLspClient.guard.test.ts` pins it so an upgrade that relocates the file fails a test
+rather than a user's editor.
 
 Deleted files: `lspExtensions.ts`, `lspExtensions.test.ts`.
 
@@ -286,7 +356,9 @@ lists none of the above, and `npm run build` succeeds.
 
 | Risk | Mitigation |
 |---|---|
-| Bundle grows over a tunnel deployment | Decision 4 drops the TS worker, the single largest asset. `MonacoEditor` stays behind the existing `lazy()` boundaries in `FileEditor.tsx` / `SSHFileEditor.tsx`. Measure `npm run build` before and after; report the delta |
+| Bundle grows over a tunnel deployment | Decisions 4 and 5 keep out the 12 MB TypeScript feature, by far the largest asset. `MonacoEditor` stays behind the existing `lazy()` boundaries in `FileEditor.tsx` / `SSHFileEditor.tsx`. Baseline before the migration is **5.4 MB JS across 241 chunks**; measure again after and report the delta |
+| A monaco upgrade relocates the aliased LSP client | Pinned to `^0.56.0` and covered by `monacoLspClient.guard.test.ts`, which fails in CI rather than at runtime |
+| `MonacoLspClient` is opaque — no public hook to disable individual features | Every deviation is handled in the transport or by overriding a keybinding, so the client is never patched or subclassed. If a future need cannot be met that way, the fallback is the hand-written bridge, which this design deliberately keeps possible by keeping all LSP types in `vscode-languageserver-protocol` |
 | Monaco instances are heavier than CodeMirror per pane | Model registry shares models across remounts; only the instance is recreated |
 | Losing a behaviour documented only in a code comment | The five items under "Behaviour that must survive" and the reveal-latch section are pinned by tests before their modules are touched |
 | Scope: six surfaces plus a bridge is a large change | Sequenced so the tree typechecks at every step; CodeMirror is removed only at the end |
