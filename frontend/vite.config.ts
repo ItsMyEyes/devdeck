@@ -86,6 +86,8 @@ export default defineConfig({
       'src/features/editor/monacoLspClient.guard.test.ts',
       'src/features/editor/editorOptions.test.ts',
       'src/features/editor/useVsCodeMode.test.ts',
+      'src/features/editor/languageForPath.test.ts',
+      'src/features/editor/modelRegistry.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
