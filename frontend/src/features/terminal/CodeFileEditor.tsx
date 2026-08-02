@@ -565,6 +565,38 @@ export function CodeFileEditor({
       })
   }, [renamePlan, machine, worktreeId, queryClient, closeRename])
 
+  // `onOpenDefinition`, `fallbackDefinition` and `startRename` all change
+  // identity on unrelated pane churn — `ExpandedTerminal`'s `openDefinition`
+  // closes over `layout`, which zustand replaces on any tab open/close, split
+  // or focus change, and every mounted tab re-renders when it does. Letting
+  // `languageExtensions` depend on them directly would rebuild the extension
+  // array on that churn, and since `languageServerPlugin.of()` returns a fresh
+  // spec object per call while CodeMirror diffs plugin specs by reference
+  // (`EditorView.updatePlugins`), the live LanguageServerPlugin would be
+  // destroyed and reconstructed — resending `textDocument/didOpen` with the
+  // version counter reset to 0 and never sending a matching `didClose`, which
+  // desyncs diagnostics and can make the server reject later `didChange`
+  // versions. Routing them through a ref keeps the array tied to `session` and
+  // `path` alone, which is what actually decides its contents.
+  const handlersRef = useRef({ onOpenDefinition, fallbackDefinition, startRename })
+  useEffect(() => {
+    handlersRef.current = { onOpenDefinition, fallbackDefinition, startRename }
+  })
+
+  const stableOpenDefinition = useCallback(
+    (targetPath: string, target: DefinitionTarget) =>
+      handlersRef.current.onOpenDefinition(targetPath, target),
+    [],
+  )
+  const stableFallbackDefinition = useCallback(
+    (view: EditorView, position: number) => handlersRef.current.fallbackDefinition(view, position),
+    [],
+  )
+  const stableRequestRename = useCallback((view: EditorView, position: number) => {
+    renameViewRef.current = view
+    void handlersRef.current.startRename(view, position)
+  }, [])
+
   const languageExtensions = useMemo(() => {
     if (!session) {
       return [
@@ -579,7 +611,7 @@ export function CodeFileEditor({
             if (position === null) return false
             event.preventDefault()
             view.focus()
-            fallbackDefinition(view, position)
+            stableFallbackDefinition(view, position)
             return true
           },
         }),
@@ -588,14 +620,11 @@ export function CodeFileEditor({
     return lspExtensions({
       session,
       path,
-      onOpenDefinition,
-      onFallbackDefinition: fallbackDefinition,
-      onRequestRename: (view, pos) => {
-        renameViewRef.current = view
-        void startRename(view, pos)
-      },
+      onOpenDefinition: stableOpenDefinition,
+      onFallbackDefinition: stableFallbackDefinition,
+      onRequestRename: stableRequestRename,
     })
-  }, [session, path, onOpenDefinition, fallbackDefinition, startRename])
+  }, [session, path, stableOpenDefinition, stableFallbackDefinition, stableRequestRename])
 
   // Deps are `[reveal, ready]`, NOT `[reveal, value]`: `ready` flips
   // false→true exactly once (when the file's real content finishes

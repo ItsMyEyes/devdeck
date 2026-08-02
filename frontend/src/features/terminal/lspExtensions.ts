@@ -135,27 +135,54 @@ async function goToDefinition(view: EditorView, pos: number, options: LspExtensi
   options.onOpenDefinition(target, { symbol, range: location.range })
 }
 
+// `languageServerWithTransport` (codemirror-languageserver@1.22.0,
+// dist/index.js ~line 1189) always returns this fixed 7-element array:
+// [languageServerPlugin.of(...), hoverTooltip(), autocompletion(),
+// documentHighlight(), renameExtension(), keymap.of(jumpToDefinitionKeymap),
+// mouseHandler()]. Index 2 is its own `autocompletion({override: [lspSource]})`
+// — a *second*, independently configured `autocompletion()` call below would
+// register a second `completionConfig` facet input with a different `override`
+// array. `@codemirror/state`'s `combineConfig` has no merge function for
+// `override` (only defaultKeymap/closeOnBlur/icons/tooltipClass/optionClass/
+// addToOptions/filterStrict do), so it throws "Config merge conflict for field
+// override" synchronously out of `EditorState.create` the moment both are
+// present — crashing every LSP-attached file's editor on mount. The package
+// doesn't export its internal `autocompletion()`/`hoverTooltip()`/
+// `documentHighlight()` helpers, so hover and document highlight can only be
+// kept by reusing this aggregate and dropping the one element that installs
+// its own completion config. If codemirror-languageserver is ever upgraded
+// past 1.22.0, re-verify this index against dist/index.js before trusting it.
+// `lspExtensions.test.ts` pins this: it asserts that dropping this index (and
+// only this index) lets an EditorState build, so a package upgrade that moves
+// the element fails the suite instead of crashing every editor at runtime.
+export const BUNDLED_AUTOCOMPLETION_INDEX = 2
+
 export function lspExtensions(options: LspExtensionOptions): Extension[] {
   const { session, path } = options
   const documentUri = session.documentUri(path)
 
-  return [
-    languageServerWithTransport({
-      client: session.client,
-      // `transport`, `rootUri` and `workspaceFolders` are required by the option
-      // type but unused when `client` is supplied — the package only reads them
-      // when it has to construct a client itself.
-      transport: session.transport,
-      rootUri: session.rootUri,
-      workspaceFolders: [{ uri: session.rootUri, name: 'worktree' }],
-      documentUri,
-      languageId: session.languageId,
-      allowHTMLContent: false,
-      synchronizationMethod: SynchronizationMethod.Incremental,
-    }),
+  const bundled = languageServerWithTransport({
+    client: session.client,
+    // `transport`, `rootUri` and `workspaceFolders` are required by the option
+    // type but unused when `client` is supplied — the package only reads them
+    // when it has to construct a client itself.
+    transport: session.transport,
+    rootUri: session.rootUri,
+    workspaceFolders: [{ uri: session.rootUri, name: 'worktree' }],
+    documentUri,
+    languageId: session.languageId,
+    allowHTMLContent: false,
+    synchronizationMethod: SynchronizationMethod.Incremental,
+  }).filter((_, index) => index !== BUNDLED_AUTOCOMPLETION_INDEX)
 
-    // Registered above the package's own autocompletion so `completeAnyWord`
-    // survives as a fallback when the server returns nothing.
+  return [
+    bundled,
+
+    // The only autocompletion() extension in the tree — registered above
+    // everything else so `completeAnyWord` survives as a fallback when the
+    // server returns nothing. Prec.high is harmless-but-unnecessary here now
+    // that the bundled autocompletion() above is filtered out; kept for
+    // clarity alongside the other Prec.high overrides in this file.
     Prec.high(
       autocompletion({
         override: [lspCompletionSource(), completeAnyWord],
