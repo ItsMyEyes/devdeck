@@ -60,15 +60,15 @@ function isMarkdownPath(path: string) {
  *  (like the SSH side) rather than CodeFileEditor's LSP-shaped
  *  DefinitionReveal — content search is the only source of a `reveal` that
  *  ever reaches a markdown file (go-to-definition doesn't apply to prose),
- *  and that always sets `range`, never `symbol`. */
+ *  and that always sets `range`, never `symbol`. `LineReveal` (Monaco's
+ *  shape, from `features/editor/reveal.ts`) is just `{ line, column? }` — no
+ *  `length`/`requestId`, unlike the pre-migration CodeMirror-era type. */
 function toLineReveal(reveal: DefinitionReveal | undefined): LineReveal | undefined {
   if (!reveal?.range) return undefined
-  const { start, end } = reveal.range
+  const { start } = reveal.range
   return {
     line: start.line + 1,
     column: start.character + 1,
-    length: Math.max(0, end.character - start.character),
-    requestId: reveal.requestId,
   }
 }
 

@@ -1,7 +1,8 @@
-import { LanguageServerClient } from 'codemirror-languageserver'
+import { MonacoLspClient } from 'monaco-lsp-client'
 import type { Machine } from '@/store/types'
 import {
   openLspTransport,
+  serverLanguage,
   type DevDeckLspTransport,
   type LspStatus,
   type LspStatusListener,
@@ -10,7 +11,7 @@ import {
 export type { LspStatus }
 
 export interface LspSession {
-  readonly client: LanguageServerClient
+  readonly client: MonacoLspClient
   readonly transport: DevDeckLspTransport
   readonly rootUri: string
   readonly languageId: string
@@ -47,19 +48,6 @@ export function languageIdForPath(path: string): string | null {
     default:
       return null
   }
-}
-
-/** Several language ids share one server process, so the pool keys on this. */
-function serverLanguage(languageId: string) {
-  if (
-    languageId === 'typescript' ||
-    languageId === 'typescriptreact' ||
-    languageId === 'javascript' ||
-    languageId === 'javascriptreact'
-  ) {
-    return 'typescript'
-  }
-  return languageId
 }
 
 /** Worktree-relative path ↔ `file://` uri, both anchored at the root the
@@ -110,18 +98,12 @@ export async function createLspSession(
   }
   const unsubscribe = transport.onStatus(emit)
 
-  const client = new LanguageServerClient({
-    transport,
-    rootUri,
-    workspaceFolders: [{ uri: rootUri, name: 'worktree' }],
-    // Required by the option type but unused for a shared client — each editor
-    // supplies its own documentUri through languageServerPlugin.
-    documentUri: rootUri,
-    languageId,
-    autoClose: false,
-    onError: (error) => emit('error', error.message),
-    onClose: () => emit('error', 'Language server connection closed'),
-  })
+  // Constructing the client immediately sends `initialize`; the transport
+  // rewrites it in transit to carry the real rootUri. One client per session,
+  // and the pool guarantees one session per machine:worktree:language — monaco's
+  // provider registry is keyed by language, not by editor, so a client per
+  // editor instance would fan out duplicate completions across split panes.
+  const client = new MonacoLspClient(transport)
 
   let disposed = false
   return {
@@ -144,7 +126,6 @@ export async function createLspSession(
       disposed = true
       unsubscribe()
       listeners.clear()
-      client.close()
       transport.close()
     },
   }

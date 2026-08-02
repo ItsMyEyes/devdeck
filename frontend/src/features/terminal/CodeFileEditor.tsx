@@ -1,390 +1,67 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { autocompletion, completeAnyWord } from '@codemirror/autocomplete'
-import {
-  LanguageDescription,
-  syntaxTree,
-  type LanguageSupport,
-} from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
-import { redo, undo } from '@codemirror/commands'
-import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
-import { Prec } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
-import CodeMirror, {
-  EditorView,
-  keymap,
-  type ReactCodeMirrorRef,
-} from '@uiw/react-codemirror'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { searchWorktreeFiles } from '@/lib/machineApi'
 import type { Machine } from '@/store/types'
+import type { editor } from 'monaco-editor/editor'
+import { monaco } from '@/features/editor/monacoSetup'
+import { MonacoEditor } from '@/features/editor/MonacoEditor'
+import type { EditorReveal } from '@/features/editor/reveal'
 import {
   acquireLspSession,
   languageIdForPath,
   type LspSession,
   type LspStatus,
 } from './lsp/lspSession'
+import type { LspRange } from './lsp/lspWorkspaceEdit'
 import {
-  lspExtensions,
-  revealRange,
-  type DefinitionReveal,
-  type DefinitionTarget,
-} from './lspExtensions'
-import { applyRenamePlan, buildRenamePlan, prepareRename, type RenamePlan, type RenameSubject } from './lsp/lspRename'
+  applyRenamePlan,
+  buildRenamePlan,
+  prepareRename,
+  type RenamePlan,
+  type RenameSubject,
+} from './lsp/lspRename'
+import { createEditorOpener } from './lsp/editorOpener'
+import {
+  findDefinition,
+  findImportedSource,
+  offsetToLineColumn,
+  quotedPathAt,
+  resolveImportFile,
+} from './lsp/definitionFallback'
 import { RenameSymbolDialog } from './RenameSymbolDialog'
 
-export type { DefinitionReveal, DefinitionTarget }
-
-interface DefinitionRange {
-  from: number
-  to: number
+export interface DefinitionTarget {
+  symbol?: string
+  range?: LspRange
 }
 
-const candidateExtensions = [
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
-  'json',
-  'go',
-  'py',
-  'rs',
-  'java',
-  'c',
-  'cc',
-  'cpp',
-  'h',
-  'hpp',
-  'css',
-  'scss',
-  'sass',
-  'less',
-  'html',
-  'vue',
-  'svelte',
-  'yaml',
-  'yml',
-  'toml',
-  'sql',
-]
-
-export const devdeckCodeTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      backgroundColor: '#090a0c',
-      color: '#d8d8d4',
-      fontSize: '12.5px',
-    },
-    '.cm-scroller': {
-      fontFamily:
-        '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-      lineHeight: '1.65',
-      overflow: 'auto',
-    },
-    '.cm-content': {
-      minHeight: '100%',
-      order: '2',
-      padding: '10px 0',
-      caretColor: '#62d8e8',
-    },
-    '.cm-line': {
-      padding: '0 16px',
-    },
-    '.cm-gutters': {
-      position: 'sticky',
-      right: 'auto',
-      left: '0',
-      zIndex: '2',
-      order: '1',
-      border: 'none',
-      borderRight: '1px solid #22252a',
-      backgroundColor: '#07080a',
-      color: '#626771',
-    },
-    '.cm-lineNumbers .cm-gutterElement': {
-      minWidth: '44px',
-      padding: '0 12px 0 10px',
-      textAlign: 'right',
-    },
-    '.cm-foldGutter': {
-      display: 'none',
-    },
-    '.cm-activeLine': {
-      backgroundColor: 'rgba(255, 255, 255, 0.025)',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: 'rgba(98, 216, 232, 0.08)',
-      color: '#9fe6ef',
-    },
-    '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: '#62d8e8',
-    },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection':
-      {
-        backgroundColor: 'rgba(47, 143, 157, 0.34)',
-      },
-    '.cm-searchMatch': {
-      backgroundColor: 'rgba(226, 183, 80, 0.22)',
-      outline: '1px solid rgba(226, 183, 80, 0.45)',
-    },
-    '.cm-searchMatch.cm-searchMatch-selected': {
-      backgroundColor: 'rgba(98, 216, 232, 0.25)',
-    },
-    '.cm-panels': {
-      borderColor: '#292b30',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-    '.cm-textfield': {
-      border: '1px solid #363940',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-    '.cm-button': {
-      border: '1px solid #363940',
-      backgroundImage: 'none',
-      backgroundColor: '#1d1f23',
-      color: '#d8d8d4',
-    },
-    '.cm-tooltip': {
-      border: '1px solid #292b30',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-    '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-      backgroundColor: 'rgba(98, 216, 232, 0.12)',
-      color: '#eeeeeb',
-    },
-    '.cm-diagnostic': {
-      borderLeftColor: '#d78c45',
-      backgroundColor: '#111214',
-      color: '#d8d8d4',
-    },
-    '.cm-diagnostic-error': {
-      borderLeftColor: '#e36d6d',
-    },
-    '.cm-lsp-highlight-text': {
-      backgroundColor: 'rgba(216, 216, 212, 0.10)',
-    },
-    '.cm-lsp-highlight-read': {
-      backgroundColor: 'rgba(98, 216, 232, 0.14)',
-    },
-    '.cm-lsp-highlight-write': {
-      backgroundColor: 'rgba(226, 183, 80, 0.18)',
-    },
-    '.cm-lsp-rename-panel': {
-      padding: '4px 8px',
-      borderBottom: '1px solid #292b30',
-      backgroundColor: '#0d0e10',
-    },
-    '.cm-lintRange-error': {
-      backgroundImage:
-        'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%276%27 height=%273%27%3E%3Cpath d=%27M0 2.5L1.5 1l1.5 1.5L4.5 1 6 2.5%27 fill=%27none%27 stroke=%27%23e36d6d%27 stroke-width=%271%27/%3E%3C/svg%3E")',
-    },
-  },
-  { dark: true },
-)
-
-export const syntaxDiagnostics = linter(
-  (view) => {
-    const diagnostics: Diagnostic[] = []
-    const documentLength = view.state.doc.length
-
-    syntaxTree(view.state).iterate({
-      enter(node) {
-        if (!node.type.isError || diagnostics.length >= 100) return
-        diagnostics.push({
-          from: node.from,
-          to: Math.min(documentLength, Math.max(node.from + 1, node.to)),
-          severity: 'error',
-          message: 'Syntax error',
-        })
-      },
-    })
-
-    return diagnostics
-  },
-  { delay: 350 },
-)
-
-// CodeMirror's default history keymap binds undo/redo to Cmd on macOS
-// (Mod-z) and rebinds redo to Cmd-Shift-Z there, leaving no Mac binding for
-// the literal Ctrl+Z / Ctrl+Y combo users expect from other editors.
-export const explicitHistoryKeymap = Prec.highest(
-  keymap.of([
-    { key: 'Ctrl-z', run: undo, preventDefault: true },
-    { key: 'Ctrl-y', run: redo, preventDefault: true },
-    { key: 'Ctrl-Shift-z', run: redo, preventDefault: true },
-  ]),
-)
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+export interface DefinitionReveal extends DefinitionTarget {
+  requestId: number
 }
 
-function identifierRegex(symbol: string) {
-  return new RegExp(`\\b${escapeRegex(symbol)}\\b`)
-}
-
-function normalizeWorkspacePath(value: string) {
-  const normalized: string[] = []
-  for (const part of value.replaceAll('\\', '/').split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') {
-      if (normalized.length === 0) return null
-      normalized.pop()
-    } else {
-      normalized.push(part)
-    }
-  }
-  return normalized.join('/')
-}
-
-function resolveImportBase(currentPath: string, source: string) {
-  const cleanSource = source.replace(/[?#].*$/, '')
-  if (cleanSource.startsWith('@/'))
-    return normalizeWorkspacePath(`src/${cleanSource.slice(2)}`)
-  if (cleanSource.startsWith('/'))
-    return normalizeWorkspacePath(cleanSource.slice(1))
-  if (!cleanSource.startsWith('.')) return null
-  const currentFolder = currentPath.includes('/')
-    ? currentPath.slice(0, currentPath.lastIndexOf('/'))
-    : ''
-  return normalizeWorkspacePath(`${currentFolder}/${cleanSource}`)
-}
-
-async function resolveImportFile(
-  machine: Machine,
-  worktreeId: string,
-  currentPath: string,
-  source: string,
-) {
-  const base = resolveImportBase(currentPath, source)
-  if (!base) return null
-
-  const lastSegment = base.split('/').pop() ?? base
-  const hasExtension = /\.[A-Za-z0-9]+$/.test(lastSegment)
-  const candidates = hasExtension
-    ? [base]
-    : [
-        base,
-        ...candidateExtensions.map((extension) => `${base}.${extension}`),
-        ...candidateExtensions.map((extension) => `${base}/index.${extension}`),
-      ]
-  const pattern = `^(?:${candidates.map(escapeRegex).join('|')})$`
-  const matches = await searchWorktreeFiles(machine, worktreeId, pattern)
-  return (
-    candidates.find((candidate) => matches.includes(candidate)) ??
-    matches[0] ??
-    null
-  )
-}
-
-function findDefinition(
+/** Same-file jump for the regex/import heuristics: selects and scrolls to the
+ *  symbol's range directly on the Monaco instance. Kept local (rather than in
+ *  `definitionFallback.ts`) because it mutates editor state — that module
+ *  stays pure so it's unit-testable without a browser. */
+function revealSymbolRange(
+  instance: editor.ICodeEditor,
   source: string,
   symbol: string,
-): DefinitionRange | null {
-  if (!/^[A-Za-z_$][\w$]*$/.test(symbol)) return null
-  const escaped = escapeRegex(symbol)
-  const patterns = [
-    new RegExp(`\\b(?:async\\s+)?function\\s+${escaped}\\b`),
-    new RegExp(`\\bfunc\\s+(?:\\([^\\n)]*\\)\\s*)?${escaped}\\b`),
-    new RegExp(`\\bdef\\s+${escaped}\\b`),
-    new RegExp(`\\bfn\\s+${escaped}\\b`),
-    new RegExp(
-      `\\b(?:class|interface|type|enum|struct|trait)\\s+${escaped}\\b`,
-    ),
-    new RegExp(`\\b(?:const|let|var)\\s+${escaped}\\b`),
-    new RegExp(
-      `(?:^|\\n)\\s*(?:public\\s+|private\\s+|protected\\s+|static\\s+)*${escaped}\\s*\\(`,
-    ),
-  ]
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(source)
-    if (!match) continue
-    const symbolOffset = match[0].lastIndexOf(symbol)
-    const from = match.index + Math.max(0, symbolOffset)
-    return { from, to: from + symbol.length }
-  }
-  return null
-}
-
-function quotedPathAt(source: string, position: number) {
-  const lineStart = source.lastIndexOf('\n', position - 1) + 1
-  const lineEndMatch = source.indexOf('\n', position)
-  const lineEnd = lineEndMatch < 0 ? source.length : lineEndMatch
-  const line = source.slice(lineStart, lineEnd)
-  const strings = /(['"`])([^'"`\n]+)\1/g
-
-  for (const match of line.matchAll(strings)) {
-    const start = lineStart + (match.index ?? 0)
-    const end = start + match[0].length
-    if (position > start && position < end) return match[2]
-  }
-  return null
-}
-
-function findImportedSource(source: string, symbol: string) {
-  const symbolPattern = identifierRegex(symbol)
-  const importPatterns = [
-    /import\s+([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/g,
-    /export\s+([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/g,
-    /(?:const|let|var)\s+([^=\n]+)=\s*require\(\s*['"]([^'"]+)['"]\s*\)/g,
-  ]
-
-  for (const pattern of importPatterns) {
-    for (const match of source.matchAll(pattern)) {
-      if (!symbolPattern.test(match[1])) continue
-      const alias = new RegExp(
-        `\\b([A-Za-z_$][\\w$]*)\\s+as\\s+${escapeRegex(symbol)}\\b`,
-      ).exec(match[1])
-      return { source: match[2], revealSymbol: alias?.[1] ?? symbol }
-    }
-  }
-  return null
-}
-
-function revealDefinition(view: EditorView, source: string, symbol: string) {
+) {
   const definition = findDefinition(source, symbol)
   if (!definition) return false
-  view.dispatch({
-    selection: { anchor: definition.from, head: definition.to },
-    scrollIntoView: true,
-  })
-  view.focus()
+  const start = offsetToLineColumn(source, definition.from)
+  const end = offsetToLineColumn(source, definition.to)
+  const range = {
+    startLineNumber: start.line,
+    startColumn: start.column,
+    endLineNumber: end.line,
+    endColumn: end.column,
+  }
+  instance.setSelection(range)
+  instance.revealRangeInCenter(range)
+  instance.focus()
   return true
-}
-
-export function useFileLanguage(path: string) {
-  const [language, setLanguage] = useState<LanguageSupport | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLanguage(null)
-
-    const description = LanguageDescription.matchFilename(languages, path)
-    if (!description) return
-
-    void description
-      .load()
-      .then((support) => {
-        if (!cancelled) setLanguage(support)
-      })
-      .catch(() => {
-        if (!cancelled) setLanguage(null)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [path])
-
-  return language
 }
 
 export function CodeFileEditor({
@@ -414,72 +91,31 @@ export function CodeFileEditor({
   isPathDirty: (path: string) => boolean
   reveal?: DefinitionReveal
 }) {
-  const editorRef = useRef<ReactCodeMirrorRef>(null)
-  const language = useFileLanguage(path)
   const languageId = languageIdForPath(path)
-  // `@uiw/react-codemirror` creates its EditorView across two render passes
-  // (mount → measure its container → create the view), so on a freshly
-  // mounted tab `editorRef.current?.view` can still be undefined by the time
-  // the reveal effect below runs, even once `reveal`/`ready` are already
-  // set — there's no later `ready` change to give it a second chance.
-  // `onCreateEditor` fires exactly once the view actually exists; bumping
-  // `viewReady` re-runs the reveal effect at that point instead of relying
-  // on incidental extra renders.
-  const [viewReady, setViewReady] = useState(false)
-
   const [session, setSession] = useState<LspSession | null>(null)
 
-  useEffect(() => {
-    setSession(null)
-    if (!languageId) return
-    let cancelled = false
-    let releaseFn: (() => void) | null = null
-    void acquireLspSession(machine, worktreeId, languageId)
-      .then((acquired) => {
-        if (cancelled) {
-          acquired.release()
-          return
-        }
-        releaseFn = acquired.release
-        setSession(acquired.session)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-      releaseFn?.()
-    }
-  }, [languageId, worktreeId, machine])
-
-  useEffect(() => {
-    if (!session || !languageId) return
-    const toastId = `lsp-status-${worktreeId}-${languageId}`
-    let sawInstalling = false
-    const handleStatus = (status: LspStatus, message?: string) => {
-      if (status === 'installing') {
-        sawInstalling = true
-        toast.loading(message ?? `Installing ${languageId} language server…`, { id: toastId })
-      } else if (status === 'ready' && sawInstalling) {
-        toast.success('Language server ready', { id: toastId })
-      } else if (status === 'error') {
-        toast.error(message ?? 'Language server unavailable', { id: toastId })
-      }
-    }
-    handleStatus(session.getStatus(), session.getStatusMessage())
-    return session.subscribeStatus(handleStatus)
-  }, [session, languageId, worktreeId])
-
   const fallbackDefinition = useCallback(
-    (view: EditorView, position: number) => {
-      const source = view.state.doc.toString()
-      const quotedPath = quotedPathAt(source, position)
-      const word = view.state.wordAt(position)
-      const symbol = word ? source.slice(word.from, word.to) : ''
+    (instance: editor.ICodeEditor, position: { lineNumber: number; column: number }) => {
+      const model = instance.getModel()
+      if (!model) return
+      const source = model.getValue()
+      const offset = model.getOffsetAt(position)
+      const quotedPath = quotedPathAt(source, offset)
+      const word = model.getWordAtPosition(position)
+      const symbol = word?.word ?? ''
       const namespace = word
-        ? source.slice(Math.max(0, word.from - 80), word.from).match(/([A-Za-z_$][\w$]*)\.\s*$/)?.[1]
+        ? model
+            .getValueInRange({
+              startLineNumber: position.lineNumber,
+              startColumn: Math.max(1, word.startColumn - 80),
+              endLineNumber: position.lineNumber,
+              endColumn: word.startColumn,
+            })
+            .match(/([A-Za-z_$][\w$]*)\.\s*$/)?.[1]
         : undefined
       const imported = findImportedSource(source, namespace ?? symbol)
 
-      if (!quotedPath && !imported && symbol && revealDefinition(view, source, symbol)) return
+      if (!quotedPath && !imported && symbol && revealSymbolRange(instance, source, symbol)) return
 
       const targetSource = quotedPath ?? imported?.source
       if (!targetSource) {
@@ -501,7 +137,7 @@ export function CodeFileEditor({
   )
 
   const queryClient = useQueryClient()
-  const renameViewRef = useRef<EditorView | null>(null)
+  const renameModelRef = useRef<editor.ITextModel | null>(null)
   const [renameSubject, setRenameSubject] = useState<RenameSubject | null>(null)
   const [renamePlan, setRenamePlan] = useState<RenamePlan | null>(null)
   const [renamePending, setRenamePending] = useState(false)
@@ -510,17 +146,20 @@ export function CodeFileEditor({
     setRenameSubject(null)
     setRenamePlan(null)
     setRenamePending(false)
-    renameViewRef.current = null
+    renameModelRef.current = null
   }, [])
 
   const startRename = useCallback(
-    async (view: EditorView, pos: number) => {
+    async (instance: editor.ICodeEditor, position: { lineNumber: number; column: number }) => {
       if (!session) return
-      const subject = await prepareRename(view, session, path, pos)
+      const model = instance.getModel()
+      if (!model) return
+      const subject = await prepareRename(session, path, model, position)
       if (!subject) {
         toast.error('There is nothing to rename here')
         return
       }
+      renameModelRef.current = model
       setRenamePlan(null)
       setRenameSubject(subject)
     },
@@ -550,10 +189,10 @@ export function CodeFileEditor({
   )
 
   const confirmRename = useCallback(() => {
-    const view = renameViewRef.current
-    if (!view || !renamePlan) return
+    const model = renameModelRef.current
+    if (!model || !renamePlan) return
     setRenamePending(true)
-    void applyRenamePlan({ view, plan: renamePlan, machine, worktreeId, queryClient })
+    void applyRenamePlan({ model, plan: renamePlan, machine, worktreeId, queryClient })
       .then(() => {
         const total = renamePlan.otherFiles.length + (renamePlan.currentEdits.length > 0 ? 1 : 0)
         toast.success(`Renamed across ${total} file${total === 1 ? '' : 's'}`)
@@ -568,122 +207,172 @@ export function CodeFileEditor({
   // `onOpenDefinition`, `fallbackDefinition` and `startRename` all change
   // identity on unrelated pane churn — `ExpandedTerminal`'s `openDefinition`
   // closes over `layout`, which zustand replaces on any tab open/close, split
-  // or focus change, and every mounted tab re-renders when it does. Letting
-  // `languageExtensions` depend on them directly would rebuild the extension
-  // array on that churn, and since `languageServerPlugin.of()` returns a fresh
-  // spec object per call while CodeMirror diffs plugin specs by reference
-  // (`EditorView.updatePlugins`), the live LanguageServerPlugin would be
-  // destroyed and reconstructed — resending `textDocument/didOpen` with the
-  // version counter reset to 0 and never sending a matching `didClose`, which
-  // desyncs diagnostics and can make the server reject later `didChange`
-  // versions. Routing them through a ref keeps the array tied to `session` and
-  // `path` alone, which is what actually decides its contents.
-  const handlersRef = useRef({ onOpenDefinition, fallbackDefinition, startRename })
+  // or focus change, and every mounted tab re-renders when it does.
+  // `handleMount` below runs exactly once per model (its deps are `[]`), so
+  // its long-lived `addAction` callbacks must reach the latest handlers
+  // through this ref rather than closing over the props directly.
+  const handlersRef = useRef({
+    onOpenDefinition,
+    fallbackDefinition,
+    startRename,
+    hasSession: session !== null,
+  })
   useEffect(() => {
-    handlersRef.current = { onOpenDefinition, fallbackDefinition, startRename }
+    handlersRef.current = { onOpenDefinition, fallbackDefinition, startRename, hasSession: session !== null }
   })
 
-  const stableOpenDefinition = useCallback(
-    (targetPath: string, target: DefinitionTarget) =>
-      handlersRef.current.onOpenDefinition(targetPath, target),
-    [],
-  )
-  const stableFallbackDefinition = useCallback(
-    (view: EditorView, position: number) => handlersRef.current.fallbackDefinition(view, position),
-    [],
-  )
-  const stableRequestRename = useCallback((view: EditorView, position: number) => {
-    renameViewRef.current = view
-    void handlersRef.current.startRename(view, position)
+  useEffect(() => {
+    setSession(null)
+    if (!languageId) return
+    let cancelled = false
+    let releaseFn: (() => void) | null = null
+    let openerDisposable: { dispose(): void } | null = null
+    void acquireLspSession(machine, worktreeId, languageId)
+      .then((acquired) => {
+        if (cancelled) {
+          acquired.release()
+          return
+        }
+        releaseFn = acquired.release
+        setSession(acquired.session)
+
+        // Cross-file go-to-definition: monaco calls this when a definition
+        // (or a link) resolves to a uri other than the current model's.
+        const opener = createEditorOpener({
+          pathFromUri: acquired.session.pathFromUri,
+          openPath: (targetPath, targetReveal) =>
+            handlersRef.current.onOpenDefinition(targetPath, {
+              range: targetReveal
+                ? {
+                    start: { line: targetReveal.startLine - 1, character: targetReveal.startColumn - 1 },
+                    end: { line: targetReveal.endLine - 1, character: targetReveal.endColumn - 1 },
+                  }
+                : undefined,
+            }),
+        })
+        openerDisposable = monaco.editor.registerEditorOpener({
+          openCodeEditor: (_source, resource, selectionOrPosition) =>
+            opener(resource.toString(), selectionOrPosition as never),
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      releaseFn?.()
+      openerDisposable?.dispose()
+    }
+  }, [languageId, worktreeId, machine])
+
+  useEffect(() => {
+    if (!session || !languageId) return
+    const toastId = `lsp-status-${worktreeId}-${languageId}`
+    let sawInstalling = false
+    const handleStatus = (status: LspStatus, message?: string) => {
+      if (status === 'installing') {
+        sawInstalling = true
+        toast.loading(message ?? `Installing ${languageId} language server…`, { id: toastId })
+      } else if (status === 'ready' && sawInstalling) {
+        toast.success('Language server ready', { id: toastId })
+      } else if (status === 'error') {
+        toast.error(message ?? 'Language server unavailable', { id: toastId })
+      }
+    }
+    handleStatus(session.getStatus(), session.getStatusMessage())
+    return session.subscribeStatus(handleStatus)
+  }, [session, languageId, worktreeId])
+
+  const handleMount = useCallback((instance: editor.IStandaloneCodeEditor) => {
+    const disposables: Array<{ dispose(): void }> = []
+
+    // F2 overrides monaco's built-in `editor.action.rename`. The built-in
+    // applies its WorkspaceEdit only to models that are already loaded, so a
+    // rename would silently skip every file that is not open — see
+    // lspWorkspaceEdit.ts. DevDeck's dialog shows the full blast radius and
+    // writes the other files through the machine API instead.
+    disposables.push(
+      instance.addAction({
+        id: 'devdeck.rename',
+        label: 'Rename Symbol (DevDeck)',
+        keybindings: [monaco.KeyCode.F2],
+        run: (ed) => {
+          const position = ed.getPosition()
+          if (position) void handlersRef.current.startRename(ed, position)
+        },
+      }),
+    )
+
+    // Ctrl/Cmd-click and F12 reach the LSP definition provider that
+    // MonacoLspClient registered. When there is no session there is no
+    // provider, so the regex/import heuristics are the whole feature. The
+    // action is always registered and checks for a session at call time —
+    // `handleMount` must not depend on `session`, or every session transition
+    // would remount the editor and lose undo history.
+    disposables.push(
+      instance.addAction({
+        id: 'devdeck.fallbackDefinition',
+        label: 'Go to Definition (heuristic)',
+        keybindings: [monaco.KeyCode.F12],
+        run: (ed) => {
+          if (handlersRef.current.hasSession) return
+          const position = ed.getPosition()
+          if (position) handlersRef.current.fallbackDefinition(ed, position)
+        },
+      }),
+    )
+
+    return () => {
+      for (const disposable of disposables) disposable.dispose()
+    }
   }, [])
 
-  const languageExtensions = useMemo(() => {
-    if (!session) {
-      return [
-        autocompletion({ override: [completeAnyWord] }),
-        syntaxDiagnostics,
-        // Without a language server the only definitions available are the
-        // regex/import heuristics, so this handler is the whole feature.
-        EditorView.domEventHandlers({
-          mousedown(event, view) {
-            if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false
-            const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
-            if (position === null) return false
-            event.preventDefault()
-            view.focus()
-            stableFallbackDefinition(view, position)
-            return true
-          },
-        }),
-      ]
-    }
-    return lspExtensions({
-      session,
-      path,
-      onOpenDefinition: stableOpenDefinition,
-      onFallbackDefinition: stableFallbackDefinition,
-      onRequestRename: stableRequestRename,
-    })
-  }, [session, path, stableOpenDefinition, stableFallbackDefinition, stableRequestRename])
-
-  // Deps are `[reveal, ready]`, NOT `[reveal, value]`: `ready` flips
-  // false→true exactly once (when the file's real content finishes
-  // loading) and then never changes again for the life of this tab, whereas
-  // `value` changes on every keystroke once the file is open. Depending on
-  // `value` here would re-run this effect — re-selecting `reveal`'s range
-  // and re-focusing — after every single edit, since `reveal` itself is
-  // never cleared once a search/definition jump has fired (it's only
-  // removed when the tab closes). That snapped the cursor/selection back to
-  // the original searched location on every keystroke, making it look like
-  // only that location could be edited. Gating on `ready` instead still
-  // retries the reveal once real content has loaded (fixing the case where
-  // it first fired against the still-empty placeholder) without re-firing
-  // on later edits. Reads `view.state.doc.toString()` rather than the
-  // `value` prop for the same reason — `value` isn't a dependency anymore,
-  // so it may be stale by the time this runs.
-  useEffect(() => {
-    const view = editorRef.current?.view
-    if (!view || !reveal || !ready) return
+  // Deps are `[reveal, ready]`, NOT `[reveal, value]` — see the identical
+  // reasoning on `MonacoEditor`'s own reveal effect. `reveal` is DevDeck's
+  // LSP-shaped `DefinitionReveal` (0-based `line`/`character`, optionally a
+  // bare `symbol`); this derives the 1-based `EditorReveal` `MonacoEditor`
+  // understands, resolving a symbol-only reveal against the source text with
+  // the same heuristic `fallbackDefinition` uses for a same-file jump.
+  const monacoReveal = useMemo<EditorReveal | undefined>(() => {
+    if (!reveal || !ready) return undefined
     if (reveal.range) {
-      revealRange(view, reveal.range)
-    } else if (reveal.symbol) {
-      revealDefinition(view, view.state.doc.toString(), reveal.symbol)
+      const { start, end } = reveal.range
+      return {
+        startLine: start.line + 1,
+        startColumn: start.character + 1,
+        endLine: end.line + 1,
+        endColumn: end.character + 1,
+      }
     }
-  }, [reveal, ready, viewReady])
+    if (reveal.symbol) {
+      const definition = findDefinition(value, reveal.symbol)
+      if (definition) {
+        const start = offsetToLineColumn(value, definition.from)
+        const end = offsetToLineColumn(value, definition.to)
+        return { startLine: start.line, startColumn: start.column, endLine: end.line, endColumn: end.column }
+      }
+    }
+    return undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal, ready])
 
   return (
     <>
-      <CodeMirror
-        ref={editorRef}
+      <MonacoEditor
+        path={path}
+        modelKey={`${machine.id}:${worktreeId}:${path}`}
+        // Once the LSP session resolves, its `documentUri` is the exact
+        // `file://` address the server was told about (and that `lspRename.ts`
+        // addresses directly). Handing the same string to `MonacoEditor` keeps
+        // the visible model's own uri in sync with it — see MonacoEditor's
+        // `uri` prop doc for why a mismatch here silently breaks completion,
+        // hover, go-to-definition and rename for this file.
+        uri={session?.documentUri(path)}
         value={value}
-        height="100%"
-        width="100%"
-        aria-label={`Edit ${path}`}
-        title="Ctrl/Cmd-click a symbol or import to go to its definition · F2 to rename · Shift-Alt-F to format"
-        theme="dark"
-        basicSetup={{
-          lineNumbers: true,
-          highlightActiveLineGutter: true,
-          foldGutter: false,
-          highlightActiveLine: true,
-          highlightSelectionMatches: true,
-          bracketMatching: true,
-          closeBrackets: true,
-          autocompletion: false,
-          lintKeymap: true,
-          tabSize: 2,
-        }}
-        extensions={[
-          oneDark,
-          devdeckCodeTheme,
-          explicitHistoryKeymap,
-          lintGutter(),
-          ...languageExtensions,
-          ...(language ? [language] : []),
-        ]}
+        ready={ready}
+        reveal={monacoReveal}
         onChange={onChange}
-        onCreateEditor={() => setViewReady(true)}
-        className="h-full min-h-0 flex-1 overflow-hidden"
+        onMount={handleMount}
+        ariaLabel={`Edit ${path}`}
+        className="h-full min-h-0 flex-1"
       />
       <RenameSymbolDialog
         open={renameSubject !== null}

@@ -32,6 +32,21 @@ export interface MonacoEditorProps {
    *  SSH surfaces pass `machine:worktree:path` so two machines can have the same
    *  relative path open at once. */
   modelKey?: string
+  /** The model's real `monaco.Uri` string (e.g. `file:///root/src/main.go`).
+   *  Omitted by every non-LSP surface, which gets a synthetic `inmemory://`
+   *  identity below. `CodeFileEditor` passes its LSP session's
+   *  `documentUri(path)` here once the session resolves — `MonacoLspClient`'s
+   *  `TextDocumentSynchronizer` (see `lsp/lspSession.ts`) auto-opens every
+   *  model it can see under whatever URI that model already has, and
+   *  DevDeck's own rename/definition requests address documents by this same
+   *  `documentUri`, so the two must match or the server ends up tracking a
+   *  document under a URI nobody ever asks it about. `documentUri` is only
+   *  known after an async round trip to the backend (it needs the worktree's
+   *  real, symlink-resolved filesystem root), so this prop legitimately
+   *  starts undefined and flips to a real value after mount — see the effect
+   *  below for how that identity change is handled without losing the
+   *  buffer's live content. */
+  uri?: string
   options?: editor.IStandaloneEditorConstructionOptions
   /** Runs once the editor instance exists. May return a cleanup function — this
    *  is where LSP wiring, custom actions and keybindings attach. */
@@ -49,6 +64,7 @@ export function MonacoEditor({
   readOnly = false,
   language,
   modelKey,
+  uri,
   options,
   onMount,
   ariaLabel,
@@ -65,6 +81,15 @@ export function MonacoEditor({
 
   const key = modelKey ?? path
   const resolvedLanguage = language ?? languageForPath(path)
+  // `uri` starts undefined and, for LSP-backed callers, later resolves to a
+  // real `file://` address (see the `uri` prop doc above). Folding it into the
+  // registry key below means that transition is handled by the exact same
+  // acquire/create-then-release/dispose machinery as an ordinary key change
+  // (e.g. switching files) — no separate "rebase this model onto a new uri"
+  // code path to get wrong. The cost is a one-time editor-instance recreation
+  // (undo history resets) the moment the LSP session resolves, which is far
+  // cheaper than the alternative of never correcting the model's identity.
+  const registryKey = uri ? `${key}::${uri}` : key
 
   // Latest-value refs: the mount effect must run exactly once per key, so it
   // cannot close over props that change on every keystroke.
@@ -77,8 +102,8 @@ export function MonacoEditor({
     const host = hostRef.current
     if (!host) return
 
-    const uri = monaco.Uri.parse(`inmemory://devdeck/${encodeURI(key)}`)
-    const model = models.acquire(key, value, resolvedLanguage, uri)
+    const modelUri = monaco.Uri.parse(uri ?? `inmemory://devdeck/${encodeURI(key)}`)
+    const model = models.acquire(registryKey, value, resolvedLanguage, modelUri)
 
     const instance = monaco.editor.create(host, {
       ...buildEditorOptions(latest.current.vscodeMode, latest.current.options),
@@ -100,10 +125,26 @@ export function MonacoEditor({
       setMounted(false)
       // Dispose the instance but NOT the model — release() decides that.
       instance.dispose()
-      models.release(key)
+      // React runs every unmounted subtree's layout-effect *cleanup* before
+      // any newly-mounted subtree's layout-effect *setup*, for the whole tree,
+      // within a single commit (commitMutationEffects fully precedes
+      // commitLayoutEffects) — see modelRegistry.ts's doc comment for why that
+      // matters. A drag-to-split/merge re-parents this editor's content into a
+      // different `LeafPaneView` in one `PaneCanvas` update (`moveTab` always
+      // allocates a fresh leaf id), which is therefore always an unmount of
+      // this instance and a mount of a new one *in the same commit* — not the
+      // "remount acquires before unmount releases" order modelRegistry.test.ts
+      // assumes. (React's Strict Mode double-invoke hits the exact same
+      // ordering on every ordinary mount in dev, which is how this surfaces
+      // immediately rather than only on a drag.) Deferring the release past
+      // this synchronous commit — but still well before the next paint, since
+      // microtasks run before the browser can paint — lets a same-commit
+      // re-acquire land first and keep the model (and its undo history, and
+      // the LSP's didOpen/didChange version counter) alive across the move.
+      queueMicrotask(() => models.release(registryKey))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, resolvedLanguage])
+  }, [registryKey, resolvedLanguage])
 
   // Controlled-value sync. Guarded on inequality so echoing our own onChange
   // back in does not reset the cursor on every keystroke.

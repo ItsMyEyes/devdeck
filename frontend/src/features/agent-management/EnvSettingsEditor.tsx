@@ -1,139 +1,55 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { json, jsonParseLinter } from '@codemirror/lang-json'
-import { LanguageDescription, type LanguageSupport } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
-import { linter, lintGutter } from '@codemirror/lint'
-import { EditorView, keymap, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import { redo, undo } from '@codemirror/commands'
-import { Prec } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
-import CodeMirror from '@uiw/react-codemirror'
+import { useCallback, useRef, useState } from 'react'
+import type { editor } from 'monaco-editor/editor'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   useAgentSettingsFile,
   useUpdateAgentSettingsFile,
 } from '@/features/data/queries'
+import { jsonParseMarker } from '@/features/editor/jsonMarkers'
+import { MonacoEditor } from '@/features/editor/MonacoEditor'
+import { monaco } from '@/features/editor/monacoSetup'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
 
-const explicitHistoryKeymap = Prec.highest(
-  keymap.of([
-    { key: 'Ctrl-z', run: undo, preventDefault: true },
-    { key: 'Ctrl-y', run: redo, preventDefault: true },
-    { key: 'Ctrl-Shift-z', run: redo, preventDefault: true },
-  ]),
-)
-
-const devdeckEditorTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      backgroundColor: '#090a0c',
-      color: '#d8d8d4',
-      fontSize: '12.5px',
-    },
-    '.cm-scroller': {
-      fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-      lineHeight: '1.6',
-      overflow: 'auto',
-    },
-    '.cm-content': {
-      minHeight: '100%',
-      padding: '12px 0',
-      caretColor: '#62d8e8',
-    },
-    '.cm-line': {
-      padding: '0 16px',
-    },
-    '.cm-gutters': {
-      border: 'none',
-      borderRight: '1px solid #22252a',
-      backgroundColor: '#07080a',
-      color: '#626771',
-    },
-    '.cm-activeLine': {
-      backgroundColor: 'rgba(255, 255, 255, 0.025)',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: 'rgba(98, 216, 232, 0.08)',
-      color: '#9fe6ef',
-    },
-    '.cm-cursor': {
-      borderLeftColor: '#62d8e8',
-    },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-      backgroundColor: 'rgba(47, 143, 157, 0.34)',
-    },
-    '.cm-panels': {
-      borderColor: '#292b30',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-    '.cm-panel.cm-search label, .cm-panel.cm-search input': {
-      color: '#d8d8d4',
-    },
-    '.cm-textfield': {
-      border: '1px solid #363940',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-    '.cm-button': {
-      border: '1px solid #363940',
-      backgroundImage: 'none',
-      backgroundColor: '#1d1f23',
-      color: '#d8d8d4',
-    },
-    '.cm-tooltip': {
-      border: '1px solid #292b30',
-      backgroundColor: '#0d0e10',
-      color: '#d8d8d4',
-    },
-  },
-  { dark: true },
-)
-
-function useFileLanguage(agentId: string) {
-  const filename = agentId === 'codex' ? 'config.toml' : 'settings.json'
-  const [language, setLanguage] = useState<LanguageSupport | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLanguage(null)
-    if (agentId !== 'codex') return // JSON is handled directly
-
-    const description = LanguageDescription.matchFilename(languages, filename)
-    if (!description) return
-
-    void description
-      .load()
-      .then((support) => {
-        if (!cancelled) setLanguage(support)
-      })
-      .catch(() => {
-        if (!cancelled) setLanguage(null)
-      })
-
-    return () => { cancelled = true }
-  }, [agentId, filename])
-
-  return language
-}
-
 export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agentId: string }) {
   const isCodex = agentId === 'codex'
-  const editorRef = useRef<ReactCodeMirrorRef>(null)
+  const filename = isCodex ? 'config.toml' : 'settings.json'
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const query = useAgentSettingsFile(machine, agentId)
   const save = useUpdateAgentSettingsFile()
-  const fileLanguage = useFileLanguage(agentId)
 
-  const value = query.data?.content ?? ''
+  // `query.data.content` is fine to bind directly to a MonacoEditor `value`
+  // ONLY as the seed for a local draft — binding it every render, with no
+  // `onChange`, means a background refetch (this query's `staleTime` is only
+  // 10s, and the app never overrides TanStack Query's default
+  // `refetchOnWindowFocus`) silently calls `instance.setValue()` on top of
+  // whatever the user is mid-typing, discarding it with no warning. `draft` +
+  // `initializedFor` mirror the load-once pattern `FileEditor.tsx` uses for
+  // worktree files: seed once per (machine, agent) identity, then never again
+  // for that identity, so later refetches of the *same* file can't clobber
+  // live edits. `EnvProfileManagement` renders one persistent
+  // `EnvSettingsEditor` and swaps which agent's file it points at without
+  // remounting it, so `identity` — not just "has data arrived yet" — is what
+  // decides whether a reset is due.
+  const identity = `${machine.id}:${agentId}`
+  const [initializedFor, setInitializedFor] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  if (identity !== initializedFor) {
+    if (query.data) {
+      // Adjusting state during render (not in an effect) so the switch to a
+      // new agent's file never paints a frame of the previous one's content.
+      setDraft(query.data.content)
+      setInitializedFor(identity)
+    } else if (draft !== '') {
+      setDraft('')
+    }
+  }
 
   async function handleSave() {
-    const view = editorRef.current?.view
-    if (!view) return
-    const content = view.state.doc.toString()
+    if (!editorRef.current) return
+    const content = draft
     // Validate JSON only for Claude
     if (!isCodex) {
       try {
@@ -151,27 +67,52 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
     }
   }
 
-  const extensions = useMemo(() => {
-    const base = [
-      oneDark,
-      devdeckEditorTheme,
-      explicitHistoryKeymap,
-      lintGutter(),
-    ]
-    if (isCodex) {
-      if (fileLanguage) {
-        return [...base, fileLanguage]
+  // Monaco's JSON language feature is not shipped (see monacoSetup.ts), so a
+  // JSON.parse-based marker stands in for the CodeMirror linter — and only for
+  // Claude's settings.json. Codex's config.toml is not JSON, so it never had a
+  // linter here either.
+  const handleMount = useCallback(
+    (instance: editor.IStandaloneCodeEditor) => {
+      editorRef.current = instance
+      if (isCodex) {
+        return () => {
+          editorRef.current = null
+        }
       }
-      // Fallback: no language extension — plain text
-      return base
-    }
-    // Claude — JSON with linting
-    return [
-      ...base,
-      json(),
-      linter(jsonParseLinter(), { delay: 300 }),
-    ]
-  }, [isCodex, fileLanguage])
+
+      const model = instance.getModel()
+      if (!model) return
+
+      const revalidate = () => {
+        const marker = jsonParseMarker(model.getValue())
+        monaco.editor.setModelMarkers(
+          model,
+          'devdeck-json',
+          marker
+            ? [
+                {
+                  severity: monaco.MarkerSeverity.Error,
+                  message: marker.message,
+                  startLineNumber: marker.line,
+                  startColumn: marker.column,
+                  endLineNumber: marker.line,
+                  endColumn: model.getLineMaxColumn(Math.min(marker.line, model.getLineCount())),
+                },
+              ]
+            : [],
+        )
+      }
+
+      revalidate()
+      const sub = model.onDidChangeContent(revalidate)
+      return () => {
+        editorRef.current = null
+        sub.dispose()
+        monaco.editor.setModelMarkers(model, 'devdeck-json', [])
+      }
+    },
+    [isCodex],
+  )
 
   return (
     <div className="flex flex-none flex-col md:min-h-0 md:flex-1">
@@ -179,7 +120,7 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
       <div className="flex flex-none items-center justify-between border-b border-devdeck-border px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-devdeck-dim">
-            ~/.{agentId}/{isCodex ? 'config.toml' : 'settings.json'}
+            ~/.{agentId}/{filename}
           </span>
           <span
             className={cn(
@@ -216,25 +157,14 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
             </button>
           </div>
         ) : (
-          <CodeMirror
-            ref={editorRef}
-            value={value}
-            height="100%"
-            width="100%"
-            aria-label={`Edit ${isCodex ? 'config.toml' : 'settings.json'} for ${agentId}`}
-            theme="dark"
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: false,
-              highlightActiveLine: true,
-              highlightActiveLineGutter: true,
-              highlightSelectionMatches: true,
-              bracketMatching: true,
-              closeBrackets: true,
-              autocompletion: false,
-              tabSize: 2,
-            }}
-            extensions={extensions}
+          <MonacoEditor
+            path={filename}
+            modelKey={`env-settings:${machine.id}:${agentId}`}
+            value={draft}
+            onChange={setDraft}
+            language={isCodex ? undefined : 'json'}
+            onMount={handleMount}
+            ariaLabel={`Edit ${filename} for ${agentId}`}
             className="h-full min-h-0 flex-1 overflow-hidden"
           />
         )}

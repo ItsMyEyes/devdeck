@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
-import { MySQL, PostgreSQL, SQLite, sql } from '@codemirror/lang-sql'
-import { oneDark } from '@codemirror/theme-one-dark'
-import { keymap } from '@codemirror/view'
-import type { EditorView } from '@codemirror/view'
-import { Prec } from '@codemirror/state'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { editor } from 'monaco-editor/editor'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { format as formatSQL } from 'sql-formatter'
 import { AlignLeft, Download, History, Play, Plus, Save, ScanSearch, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { monaco } from '@/features/editor/monacoSetup'
+import { MonacoEditor } from '@/features/editor/MonacoEditor'
 import { qk } from '@/features/data/keys'
 import {
   useClearDBQueryHistory,
@@ -26,21 +23,9 @@ import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DBEngine } from '@/store/types'
 import { resultToCSV, resultToJSON } from './exportClient'
+import { sqlCompletionItems } from './sqlCompletion'
 import { buildSQLSchema, firstSQLLine, parseExecutedAt, sqlFormatterLanguage } from './sqlEditorSupport'
-import type { CacheEntry } from './sqlEditorSupport'
-
-/** CodeMirror's dialect for an engine — separate from sql-formatter's, which
- *  names the same three things differently (see sqlFormatterLanguage). */
-function codeMirrorDialect(engine: DBEngine) {
-  switch (engine) {
-    case 'postgres':
-      return PostgreSQL
-    case 'mysql':
-      return MySQL
-    case 'sqlite':
-      return SQLite
-  }
-}
+import type { CacheEntry, SQLSchemaMap } from './sqlEditorSupport'
 
 /** Hands `text` to the browser as a download. The object URL is revoked after
  *  the synthetic click so the Blob is not pinned for the tab's lifetime — a
@@ -95,20 +80,29 @@ export function DBSqlEditor({
   )
   const clearHistory = useClearDBQueryHistory()
 
-  const viewRef = useRef<EditorView | null>(null)
+  // Multiple query tabs on the same connection can be open — and stay
+  // mounted — at once (DatabaseModule keeps every tab alive, toggling only
+  // CSS visibility). Monaco's model registry is keyed globally by path, so a
+  // literal "query.sql" for every instance would make every open query tab
+  // share one model and echo each other's edits; `useId` gives each mounted
+  // editor its own key without DatabaseModule having to hand one down.
+  const instanceId = useId()
+
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
 
   useEffect(() => {
     onDirtyChange?.(text !== baseline)
   }, [text, baseline, onDirtyChange])
 
   /** The selected text, or '' when the selection is empty. Read from the live
-   *  EditorView rather than tracked in state so the toolbar Run button and the
-   *  Mod-Enter keymap agree without a render per cursor move. */
+   *  editor instance rather than tracked in state so the toolbar Run button
+   *  and the Mod-Enter action agree without a render per cursor move. */
   const selectedText = useCallback((): string => {
-    const view = viewRef.current
-    if (!view) return ''
-    const { from, to } = view.state.selection.main
-    return from === to ? '' : view.state.sliceDoc(from, to)
+    const instance = editorRef.current
+    if (!instance) return ''
+    const selection = instance.getSelection()
+    if (!selection || selection.isEmpty()) return ''
+    return instance.getModel()?.getValueInRange(selection) ?? ''
   }, [])
 
   const runSQL = useCallback(
@@ -128,13 +122,6 @@ export function DBSqlEditor({
   const runCurrent = useCallback(() => {
     runSQL(selectedText() || text)
   }, [runSQL, selectedText, text])
-
-  // runCurrent closes over `text`, but the keymap extension must not be
-  // rebuilt on every keystroke (CodeMirror reconfigures the whole editor when
-  // the extension array's identity changes). A ref keeps the shortcut calling
-  // the latest closure with a stable extension.
-  const runCurrentRef = useRef(runCurrent)
-  runCurrentRef.current = runCurrent
 
   function explain() {
     if (!caps?.explainPrefix) return
@@ -183,29 +170,95 @@ export function DBSqlEditor({
   // degrading to plain keyword completion is correct, not a bug.
   // `schemaVersion` (bumped on focus) is the recompute trigger, since a key
   // *prefix* has no cache subscription to re-render off.
-  //
-  // Serialized rather than returned as an object so an unchanged cache yields
-  // an identical string: the extensions memo below then keeps its identity and
-  // CodeMirror is not reconfigured on every single focus.
-  const schemaJSON = useMemo(
+  const schema = useMemo<SQLSchemaMap>(
     () =>
-      JSON.stringify(
-        buildSQLSchema(
-          queryClient.getQueriesData({ queryKey: qk.dbTreeRoot(connectionId) }) as CacheEntry[],
-          queryClient.getQueriesData({ queryKey: qk.dbColumnsRoot(connectionId) }) as CacheEntry[],
-        ),
+      buildSQLSchema(
+        queryClient.getQueriesData({ queryKey: qk.dbTreeRoot(connectionId) }) as CacheEntry[],
+        queryClient.getQueriesData({ queryKey: qk.dbColumnsRoot(connectionId) }) as CacheEntry[],
       ),
     [connectionId, queryClient, schemaVersion],
   )
 
-  const extensions = useMemo(
-    () => [
-      sql({ dialect: codeMirrorDialect(engine), schema: JSON.parse(schemaJSON) }),
-      // Prec.high so Mod-Enter beats the default keymap's insertNewlineAndIndent.
-      Prec.high(keymap.of([{ key: 'Mod-Enter', run: () => { runCurrentRef.current(); return true } }])),
-    ],
-    [engine, schemaJSON],
-  )
+  // handleMount registers the completion provider and the run-query action
+  // exactly once (its deps are `[]`), so those long-lived callbacks reach the
+  // latest schema and runCurrent through refs kept current in an effect that
+  // runs on every render, rather than through handleMount's own closure.
+  const schemaRef = useRef(schema)
+  const runCurrentRef = useRef(runCurrent)
+  useEffect(() => {
+    schemaRef.current = schema
+    runCurrentRef.current = runCurrent
+  })
+
+  const handleMount = useCallback((instance: editor.IStandaloneCodeEditor) => {
+    editorRef.current = instance
+
+    const completion = monaco.languages.registerCompletionItemProvider('sql', {
+      triggerCharacters: ['.'],
+      provideCompletionItems: (model, position) => {
+        // `registerCompletionItemProvider` is global for the 'sql' language —
+        // there is no per-editor scoping in Monaco's API — and DatabaseModule
+        // keeps every open query tab on a connection mounted at once (hidden,
+        // not unmounted). Without this guard, typing in any one tab would
+        // invoke every mounted tab's provider and show every tab's completions
+        // stacked on top of each other. Each instance only ever answers for
+        // its own model.
+        if (model !== instance.getModel()) return { suggestions: [] }
+        const untilPosition = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        })
+        const qualified = /([A-Za-z_][\w$]*)\.\s*$/.exec(untilPosition)
+        const word = model.getWordUntilPosition(position)
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn,
+        }
+        return {
+          suggestions: sqlCompletionItems(schemaRef.current, qualified?.[1] ?? null).map(
+            (item) => ({
+              label: item.label,
+              detail: item.detail,
+              insertText: item.label,
+              range,
+              kind:
+                item.kind === 'column'
+                  ? monaco.languages.CompletionItemKind.Field
+                  : item.kind === 'schema'
+                    ? monaco.languages.CompletionItemKind.Module
+                    : monaco.languages.CompletionItemKind.Struct,
+            }),
+          ),
+        }
+      },
+    })
+
+    // Ctrl/Cmd-Enter runs the query — the binding the CodeMirror keymap had.
+    const run = instance.addAction({
+      id: 'devdeck.runQuery',
+      label: 'Run Query',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => {
+        runCurrentRef.current()
+      },
+    })
+
+    // The autocomplete schema has no cache subscription to re-render this
+    // component off of (a key *prefix* doesn't), so focusing the editor is
+    // the recompute trigger — the same role onFocus played with CodeMirror.
+    const focus = instance.onDidFocusEditorText(() => setSchemaVersion((v) => v + 1))
+
+    return () => {
+      editorRef.current = null
+      completion.dispose()
+      run.dispose()
+      focus.dispose()
+    }
+  }, [])
 
   return (
     <div className="flex h-full min-h-0">
@@ -338,15 +391,16 @@ export function DBSqlEditor({
           </Button>
         </div>
 
-        <div className="flex-none border-b border-devdeck-border-menu">
-          <CodeMirror
+        <div className="h-[140px] flex-none overflow-hidden border-b border-devdeck-border-menu">
+          <MonacoEditor
+            path="query.sql"
+            modelKey={`db-sql:${connectionId}:${instanceId}`}
             value={text}
-            height="140px"
-            theme={oneDark}
-            extensions={extensions}
             onChange={setText}
-            onCreateEditor={(view) => { viewRef.current = view }}
-            onFocus={() => setSchemaVersion((v) => v + 1)}
+            onMount={handleMount}
+            language="sql"
+            ariaLabel="SQL editor"
+            className="h-full min-h-0 flex-1"
           />
         </div>
 

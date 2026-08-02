@@ -79,9 +79,9 @@ export default defineConfig({
       'src/features/terminal/lsp/lspTransport.test.ts',
       'src/features/terminal/lsp/lspTransport.initialize.test.ts',
       'src/features/terminal/lsp/lspTransport.request.test.ts',
+      'src/features/terminal/lsp/lspTransport.languageFilter.test.ts',
       'src/features/terminal/lsp/lspSession.test.ts',
       'src/features/terminal/lsp/lspWorkspaceEdit.test.ts',
-      'src/features/terminal/lspExtensions.test.ts',
       'src/features/browser/useNativeOverlayBlocker.test.tsx',
       'src/features/browser/visibleTileRect.test.ts',
       'src/features/browser/browserHistory.test.ts',
@@ -91,6 +91,10 @@ export default defineConfig({
       'src/features/editor/languageForPath.test.ts',
       'src/features/editor/modelRegistry.test.ts',
       'src/features/editor/reveal.test.ts',
+      'src/features/terminal/lsp/definitionFallback.test.ts',
+      'src/features/terminal/lsp/editorOpener.test.ts',
+      'src/features/database/sqlCompletion.test.ts',
+      'src/features/editor/jsonMarkers.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.

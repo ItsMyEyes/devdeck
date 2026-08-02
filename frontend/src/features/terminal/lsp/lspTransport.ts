@@ -24,6 +24,23 @@ interface RpcMessage {
 
 const CLOSED_MESSAGE = 'Language server connection closed'
 
+/** Several Monaco language ids share one server process (typescript-language-
+ *  server speaks for all four JS/TS variants), so both the session pool and
+ *  this transport's outbound language filter (below) key on the collapsed
+ *  name rather than the raw language id. Lives here, not in `lspSession.ts`,
+ *  so `lspTransport.ts` doesn't have to import back from its own consumer. */
+export function serverLanguage(languageId: string) {
+  if (
+    languageId === 'typescript' ||
+    languageId === 'typescriptreact' ||
+    languageId === 'javascript' ||
+    languageId === 'javascriptreact'
+  ) {
+    return 'typescript'
+  }
+  return languageId
+}
+
 /** Structural copy of monaco's `lsp.IMessageTransport`. Declared locally rather
  *  than imported so this module — and its tests — stay free of monaco, which
  *  needs a real browser. `monacoLspClient.guard.test.ts` pins the alias itself;
@@ -105,6 +122,16 @@ export function rewriteInitialize(message: RpcMessage, rootUri: string): RpcMess
  * ids, alongside the numeric ids `MonacoLspClient` allocates, so DevDeck can
  * drive cross-file rename and other flows the client itself doesn't support.
  *
+ * 5. `MonacoLspClient`'s `TextDocumentSynchronizer` watches monaco's *global*
+ *    model list (`editor.getModels()` / `onDidCreateModel`), not just the
+ *    models for its own server's language — so with one `MonacoLspClient` per
+ *    language sharing the same tab, a Go client and a TypeScript client each
+ *    see every open model of every language. Outbound `textDocument/didOpen`
+ *    (and the `didChange`/`didClose` that follow it for the same uri) are
+ *    dropped here when they're for a document this transport's own language
+ *    doesn't own, so a gopls process behind this transport never hears about
+ *    a `.ts` buffer and vice versa.
+ *
  * `onMessage`/`onClose`/`onError` and the string overload of `send` are kept
  * alongside the new `setListener`/`state` members because `lspSession.ts`
  * still wraps this transport for `codemirror-languageserver`'s
@@ -116,6 +143,7 @@ export class DevDeckLspTransport implements IMessageTransport {
   readonly state = new MutableValue<ConnectionState>({ state: 'connecting' })
 
   private readonly socket: WebSocket
+  private readonly language: string | undefined
   private readonly messageListeners = new Set<(message: string) => void>()
   private readonly closeListeners = new Set<() => void>()
   private readonly errorListeners = new Set<(error: Error) => void>()
@@ -133,9 +161,18 @@ export class DevDeckLspTransport implements IMessageTransport {
     { resolve: (value: never) => void; reject: (error: Error) => void }
   >()
   private nextRequestId = 0
+  /** Uris this transport has seen a foreign-language `didOpen` for, so the
+   *  `didChange`/`didClose` that follow it (which carry no `languageId` of
+   *  their own) are dropped too, until the uri closes. */
+  private readonly foreignUris = new Set<string>()
 
-  constructor(socket: WebSocket) {
+  /** `language` is the collapsed server language this transport's socket was
+   *  opened for (see `serverLanguage`) — optional so every existing direct
+   *  construction (this file's own tests, and any future caller with no
+   *  language filtering to do) keeps working unfiltered. */
+  constructor(socket: WebSocket, language?: string) {
     this.socket = socket
+    this.language = language
     this.ready = new Promise<{ rootUri: string }>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
@@ -166,6 +203,9 @@ export class DevDeckLspTransport implements IMessageTransport {
    *  strings pass through unchanged. */
   send(message: unknown): Promise<void> {
     if (this.closed) return Promise.resolve()
+    if (typeof message !== 'string' && this.isForeignDocumentMessage(message as RpcMessage)) {
+      return Promise.resolve()
+    }
     const payload =
       typeof message === 'string'
         ? message
@@ -176,6 +216,35 @@ export class DevDeckLspTransport implements IMessageTransport {
       this.socket.send(payload)
     }
     return Promise.resolve()
+  }
+
+  /** True for a `textDocument/didOpen`, `didChange` or `didClose` that
+   *  belongs to a document outside this transport's own language — see point
+   *  5 in the class doc comment. Tracks the offending uris across the three
+   *  notification types since only `didOpen` carries a `languageId`. */
+  private isForeignDocumentMessage(message: RpcMessage): boolean {
+    if (this.language === undefined) return false
+    const params = message.params as { textDocument?: { uri?: string; languageId?: string } } | undefined
+    const uri = params?.textDocument?.uri
+
+    if (message.method === 'textDocument/didOpen') {
+      const languageId = params?.textDocument?.languageId
+      const foreign = languageId !== undefined && serverLanguage(languageId) !== this.language
+      if (uri) {
+        if (foreign) this.foreignUris.add(uri)
+        else this.foreignUris.delete(uri)
+      }
+      return foreign
+    }
+
+    if (message.method === 'textDocument/didChange' || message.method === 'textDocument/didClose') {
+      if (uri && this.foreignUris.has(uri)) {
+        if (message.method === 'textDocument/didClose') this.foreignUris.delete(uri)
+        return true
+      }
+    }
+
+    return false
   }
 
   onMessage(callback: (message: string) => void) {
@@ -355,5 +424,5 @@ export class DevDeckLspTransport implements IMessageTransport {
 
 export async function openLspTransport(machine: Machine, worktreeId: string, language: string) {
   const url = await machineWsUrl(machine, '/lsp', { worktree: worktreeId, language })
-  return new DevDeckLspTransport(new WebSocket(url))
+  return new DevDeckLspTransport(new WebSocket(url), language)
 }
