@@ -14,7 +14,7 @@ import { BrowserOmnibox } from './BrowserOmnibox'
 import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserUrlCard } from './BrowserUrlCard'
-import { tileShouldBeHidden } from './browserTileOcclusion'
+import { visibleTileRect } from './visibleTileRect'
 import { DEFAULT_ZOOM, zoomStep } from './browserZoom'
 import {
   clearBrowserTileFind,
@@ -177,7 +177,18 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
 
     function sendBounds() {
       const rect = el.getBoundingClientRect()
-      void setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+      // Re-clip against whatever is currently covering the tile. Reporting the
+      // placeholder's full rect here would put the webview straight back under
+      // an open overlay on the next resize, undoing the shrink below.
+      const state = useDevDeckStore.getState()
+      const visible = visibleTileRect(rect, state.nativeOverlayBlockers, state.tileDragActive)
+      if (!visible) return
+      void setBrowserTileBounds(tabId, docId, {
+        x: visible.left,
+        y: visible.top,
+        width: visible.right - visible.left,
+        height: visible.bottom - visible.top,
+      })
     }
 
     if (!openedDocsRef.current.has(docId)) {
@@ -224,25 +235,31 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
       // §5.6) — a blocker can push/pop again in the time between scheduling
       // and this callback firing.
       const state = useDevDeckStore.getState()
-      if (tileShouldBeHidden(rect, state.nativeOverlayBlockers, state.tileDragActive)) return
-      void showBrowserTile(tId, dId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+      const visible = visibleTileRect(rect, state.nativeOverlayBlockers, state.tileDragActive)
+      if (!visible) return
+      void showBrowserTile(tId, dId, {
+        x: visible.left,
+        y: visible.top,
+        width: visible.right - visible.left,
+        height: visible.bottom - visible.top,
+      })
     })
   }
 
-  // Occlusion-aware visibility (design spec §5.4/§5.6), replacing the
-  // Slice-1 placeholder's blunt "any open blocker anywhere" check: a
-  // Browser tile now only hides for a blocker whose own reported region
-  // actually intersects this tile's rect (or `tileDragActive`/a
-  // `'viewport'`-scoped blocker, which still hide unconditionally). Hide is
-  // always immediate; show is coalesced behind one rAF so a same-frame
-  // hide-then-show never round-trips an extra IPC call to Rust.
+  // Occlusion-aware visibility (design spec §5.4/§5.6). A blocker whose region
+  // misses this tile is ignored entirely; one that hits it now shrinks the
+  // webview to the largest uncovered rectangle rather than blanking the page,
+  // and only a `'viewport'` blocker, a tile drag, or an overlay that leaves too
+  // little of the tile behind hides it outright. Hide is always immediate; show
+  // is coalesced behind one rAF so a same-frame hide-then-show never
+  // round-trips an extra IPC call to Rust.
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
     const el = bodyRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    if (tileShouldBeHidden(rect, nativeOverlayBlockers, tileDragActive)) {
+    if (!visibleTileRect(rect, nativeOverlayBlockers, tileDragActive)) {
       cancelScheduledShow()
       void hideBrowserTile(tabId, docId)
       return
