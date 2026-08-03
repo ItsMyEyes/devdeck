@@ -11,8 +11,8 @@ describe('vscode mode pref', () => {
     localStorage.clear()
   })
 
-  it('defaults to off when nothing is stored', () => {
-    expect(readVsCodeMode()).toBe(false)
+  it('defaults to ON when nothing is stored', () => {
+    expect(readVsCodeMode()).toBe(true)
   })
 
   it('round-trips through localStorage', () => {
@@ -21,9 +21,15 @@ describe('vscode mode pref', () => {
     expect(readVsCodeMode()).toBe(true)
   })
 
-  it('treats a malformed value as off rather than throwing', () => {
-    localStorage.setItem(VSCODE_MODE_STORAGE_KEY, '{not json')
+  it('turns off only on an explicit false', () => {
+    setVsCodeMode(false)
+    expect(localStorage.getItem(VSCODE_MODE_STORAGE_KEY)).toBe('false')
     expect(readVsCodeMode()).toBe(false)
+  })
+
+  it('treats a malformed value as ON rather than throwing', () => {
+    localStorage.setItem(VSCODE_MODE_STORAGE_KEY, '{not json')
+    expect(readVsCodeMode()).toBe(true)
   })
 
   it('notifies subscribers so open editors update live', () => {

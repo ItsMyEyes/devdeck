@@ -21,6 +21,8 @@ import {
   type RenameSubject,
 } from './lsp/lspRename'
 import { createEditorOpener } from './lsp/editorOpener'
+import { crossFileTargets, normalizeDefinitionResult } from './lsp/lspDefinition'
+import { languageForPath } from '@/features/editor/languageForPath'
 import {
   findDefinition,
   findImportedSource,
@@ -221,12 +223,22 @@ export function CodeFileEditor({
     handlersRef.current = { onOpenDefinition, fallbackDefinition, startRename, hasSession: session !== null }
   })
 
+  // The session effect keys on `[languageId, worktreeId, machine]`, not on
+  // `path` — a session is shared by every file of that language in the
+  // worktree. The definition provider it registers still needs the current
+  // path to pick a Monaco language id, so it reads it through this ref.
+  const pathRef = useRef(path)
+  useEffect(() => {
+    pathRef.current = path
+  })
+
   useEffect(() => {
     setSession(null)
     if (!languageId) return
     let cancelled = false
     let releaseFn: (() => void) | null = null
     let openerDisposable: { dispose(): void } | null = null
+    let definitionDisposable: { dispose(): void } | null = null
     void acquireLspSession(machine, worktreeId, languageId)
       .then((acquired) => {
         if (cancelled) {
@@ -254,12 +266,49 @@ export function CodeFileEditor({
           openCodeEditor: (_source, resource, selectionOrPosition) =>
             opener(resource.toString(), selectionOrPosition as never),
         })
+
+        // DevDeck's own definition provider, registered alongside the one
+        // MonacoLspClient installs. The built-in provider cannot answer a
+        // cross-file definition: it maps every result through
+        // TextDocumentSynchronizer.translateBackRange, which throws when the
+        // target file has no loaded Monaco model, so the whole provider rejects
+        // and Monaco reports "No definition found" even though the server
+        // answered. See lspDefinition.ts. This one builds locations straight
+        // from the LSP response, and Monaco hands the foreign uri to the
+        // editor opener registered above.
+        definitionDisposable = monaco.languages.registerDefinitionProvider(
+          languageForPath(pathRef.current),
+          {
+            provideDefinition: async (model, position) => {
+              const raw = await acquired.session.transport
+                .request('textDocument/definition', {
+                  textDocument: { uri: model.uri.toString() },
+                  position: { line: position.lineNumber - 1, character: position.column - 1 },
+                })
+                .catch(() => null)
+
+              return crossFileTargets(
+                normalizeDefinitionResult(raw),
+                model.uri.toString(),
+              ).map((target) => ({
+                uri: monaco.Uri.parse(target.uri),
+                range: {
+                  startLineNumber: target.range.start.line + 1,
+                  startColumn: target.range.start.character + 1,
+                  endLineNumber: target.range.end.line + 1,
+                  endColumn: target.range.end.character + 1,
+                },
+              }))
+            },
+          },
+        )
       })
       .catch(() => undefined)
     return () => {
       cancelled = true
       releaseFn?.()
       openerDisposable?.dispose()
+      definitionDisposable?.dispose()
     }
   }, [languageId, worktreeId, machine])
 

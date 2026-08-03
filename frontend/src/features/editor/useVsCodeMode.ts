@@ -4,11 +4,15 @@ export const VSCODE_MODE_STORAGE_KEY = 'devdeck.editor.vscodeMode'
 
 const listeners = new Set<(next: boolean) => void>()
 
+/** Defaults to ON: the editor is Monaco, so full IDE chrome is the expected
+ *  shape. Only an explicit 'false' — the user having turned it off — opts out,
+ *  which also means a malformed value falls back to on rather than silently
+ *  stripping the minimap and breadcrumbs. */
 export function readVsCodeMode(): boolean {
   try {
-    return window.localStorage.getItem(VSCODE_MODE_STORAGE_KEY) === 'true'
+    return window.localStorage.getItem(VSCODE_MODE_STORAGE_KEY) !== 'false'
   } catch {
-    return false
+    return true
   }
 }
 

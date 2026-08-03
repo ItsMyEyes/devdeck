@@ -91,6 +91,7 @@ export default defineConfig({
       'src/features/editor/languageForPath.test.ts',
       'src/features/editor/modelRegistry.test.ts',
       'src/features/editor/reveal.test.ts',
+      'src/features/terminal/lsp/lspDefinition.test.ts',
       'src/features/terminal/lsp/definitionFallback.test.ts',
       'src/features/terminal/lsp/editorOpener.test.ts',
       'src/features/database/sqlCompletion.test.ts',
