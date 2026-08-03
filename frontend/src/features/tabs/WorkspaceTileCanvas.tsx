@@ -31,7 +31,11 @@ export interface WorkspaceTileCanvasProps {
   renderers: {
     agents: (ctx: { leafId: string }) => ReactNode
     worktree: (ctx: { leafId: string; tab: WorktreeTileTab }) => ReactNode
-    browser: (ctx: { leafId: string; tab: BrowserTileTab }) => ReactNode
+    /** `active` is this leaf's *selected* tab, not its focus: backgrounded
+     *  tabs stay mounted (only display:none'd, see `TileLeafView`), which a
+     *  native child webview ignores — a Browser tile has to be told to hide
+     *  itself, or it keeps painting over whichever tab replaced it. */
+    browser: (ctx: { leafId: string; tab: BrowserTileTab; active: boolean }) => ReactNode
     sshShell: (ctx: { leafId: string; tab: SSHShellTileTab }) => ReactNode
   }
   /** Fired for every structural change this component makes itself: drag-and-drop commits and divider-resize commits. */
@@ -733,7 +737,7 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
                 ? ctx.renderers.worktree({ leafId: leaf.id, tab })
                 : tab.kind === 'ssh-shell'
                   ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
-                  : ctx.renderers.browser({ leafId: leaf.id, tab })}
+                  : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
           </div>
         ))}
         {hoverZone ? (

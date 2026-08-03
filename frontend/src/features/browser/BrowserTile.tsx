@@ -13,7 +13,6 @@ import { BrowserFindBar } from './BrowserFindBar'
 import { BrowserOmnibox } from './BrowserOmnibox'
 import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
-import { BrowserUrlCard } from './BrowserUrlCard'
 import { recordPageLoad } from './browserHistory'
 import { visibleTileRect } from './visibleTileRect'
 import { DEFAULT_ZOOM, zoomStep } from './browserZoom'
@@ -43,6 +42,18 @@ interface BrowserTileProps {
    *  degrades to "no tile owns these keys" rather than every tile owning
    *  them at once. */
   isFocused?: boolean
+  /** Whether this tile's tab is the *selected* one in its leaf's tab strip.
+   *  Distinct from `isFocused`, which is about the leaf owning the keyboard:
+   *  switching from a Browser tab to the Agents tab in the same leaf leaves
+   *  the leaf focused but this tile no longer on screen.
+   *
+   *  A backgrounded tab is only display:none'd by `WorkspaceTileCanvas` — the
+   *  component stays mounted (so the page isn't reloaded on every tab switch),
+   *  and a native webview paints above the DOM regardless of any CSS applied
+   *  to its placeholder. Without this, switching away from a Browser tab left
+   *  the webview covering whatever tab replaced it. Defaults to true so an
+   *  un-migrated caller keeps the old always-visible behavior. */
+  isActive?: boolean
 }
 
 /** True exactly once across this page load, regardless of how many
@@ -104,7 +115,7 @@ function titleFor(url: string): string {
   }
 }
 
-export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
+export function BrowserTile({ tabId, isFocused = false, isActive = true }: BrowserTileProps) {
   const tile = useDevDeckStore((s) => s.browserTiles[tabId])
   const ensureBrowserTile = useDevDeckStore((s) => s.ensureBrowserTile)
   const setBrowserDocState = useDevDeckStore((s) => s.setBrowserDocState)
@@ -122,7 +133,9 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   const bookmarksByMachine = useMemo(() => groupBookmarksByMachine(bookmarks, machines), [bookmarks, machines])
   const [draft, setDraft] = useState('')
   const [bookmarkDialogOpen, setBookmarkDialogOpen] = useState(false)
-  const [urlCardOpen, setUrlCardOpen] = useState(false)
+  /** The address bar itself is the editor (see `BrowserOmnibox`) — there is no
+   *  floating URL card to open. */
+  const [editingAddress, setEditingAddress] = useState(false)
   /** Bumped to pull the caret back into the omnibox's inline address input
    *  (Cmd/Ctrl+L on a tab that has no URL yet). */
   const [addressFocusSignal, setAddressFocusSignal] = useState(0)
@@ -136,6 +149,15 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const zoomLevelRef = useRef(DEFAULT_ZOOM)
   const scheduledShowRef = useRef<number | null>(null)
+  /** Mirrors `isActive` for the `ResizeObserver` callback below, which outlives
+   *  the render that created it (its effect is keyed on the doc, not on tab
+   *  selection) — a stale closure there would keep re-gluing a backgrounded
+   *  tile's webview to its last on-screen rect, undoing the hide. */
+  const isActiveRef = useRef(isActive)
+
+  useEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
 
   useEffect(() => {
     ensureBrowserTile(tabId)
@@ -165,6 +187,10 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
 
   useEffect(() => {
     zoomLevelRef.current = DEFAULT_ZOOM
+    // Keyed on the doc, not on its URL: an in-page navigation landing while
+    // the operator is mid-edit must not yank the address bar out from under
+    // them, but switching internal tabs shows a different address entirely.
+    setEditingAddress(false)
   }, [doc?.id])
 
   // Creates the native webview (once per doc, sized correctly from the
@@ -183,6 +209,11 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     const proxy = doc.proxy
 
     function sendBounds() {
+      // A backgrounded tab's placeholder is display:none'd, so every rect it
+      // reports is empty anyway — but bounds are also what a *hidden* webview
+      // would snap back to on the next show, so nothing is reported at all
+      // until this tile is on screen again.
+      if (!isActiveRef.current) return
       const rect = el.getBoundingClientRect()
       // Re-clip against whatever is currently covering the tile. Reporting the
       // placeholder's full rect here would put the webview straight back under
@@ -260,13 +291,19 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
   // little of the tile behind hides it outright. Hide is always immediate; show
   // is coalesced behind one rAF so a same-frame hide-then-show never
   // round-trips an extra IPC call to Rust.
+  //
+  // `isActive` is checked ahead of any geometry rather than left to the rect
+  // measurement: a backgrounded tab is display:none'd, and while that does make
+  // the placeholder measure empty, this effect is what has to *re-run* on the
+  // switch for anything to be sent at all. Reselecting the tab re-runs it the
+  // same way and shows the webview again at its freshly measured rect.
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
     const el = bodyRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    if (!visibleTileRect(rect, nativeOverlayBlockers, tileDragActive)) {
+    if (!isActive || !visibleTileRect(rect, nativeOverlayBlockers, tileDragActive)) {
       cancelScheduledShow()
       void hideBrowserTile(tabId, docId)
       return
@@ -274,7 +311,7 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     scheduleShow(tabId, docId, () => bodyRef.current?.getBoundingClientRect())
     return cancelScheduledShow
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
+  }, [isActive, nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
 
   // Sync the address bar/title/history from real navigation inside the native
   // webview. `loading` comes straight from the `on_page_load` payload, so the
@@ -341,10 +378,11 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
       const key = event.key
       if (!event.shiftKey && key.toLowerCase() === 'l') {
         event.preventDefault()
-        // A tab with no URL already edits its address inline in the omnibox,
-        // so opening the card would stack a second input for the same job.
-        if (doc.url) setUrlCardOpen(true)
-        else setAddressFocusSignal((signal) => signal + 1)
+        // Both halves matter: `editingAddress` swaps the URL display for the
+        // input, and the signal re-selects its contents even when the bar is
+        // already in that state (a second Cmd+L re-selects, as in Chrome).
+        setEditingAddress(true)
+        setAddressFocusSignal((signal) => signal + 1)
         return
       }
       if (!event.shiftKey && key.toLowerCase() === 'f') {
@@ -490,14 +528,9 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
     closeBrowserDoc(tabId, docId)
   }
 
-  const submitUrlCard = (value: string) => {
-    setUrlCardOpen(false)
+  const submitAddress = (value: string) => {
+    setEditingAddress(false)
     void navigate(value)
-  }
-
-  const closeUrlCard = () => {
-    setDraft(doc.url ?? '')
-    setUrlCardOpen(false)
   }
 
   const runFind = (direction: 'next' | 'prev') => {
@@ -555,11 +588,12 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
             machines={machines}
             machineHealth={machineHealth}
             onSelectMachine={(machineId) => void selectMachine(machineId)}
-            onEdit={() => setUrlCardOpen(true)}
+            editing={editingAddress}
+            onEditingChange={setEditingAddress}
             onBookmark={openBookmarkDialog}
             draft={draft}
             onDraftChange={setDraft}
-            onSubmit={submitUrlCard}
+            onSubmit={submitAddress}
             autoFocus={isFocused}
             focusSignal={addressFocusSignal}
           />
@@ -579,7 +613,6 @@ export function BrowserTile({ tabId, isFocused = false }: BrowserTileProps) {
       />
 
       <div className="relative min-h-0 min-w-0 flex-1 rounded-b-lg border border-devdeck-border-card">
-        <BrowserUrlCard open={urlCardOpen} draft={draft} onDraftChange={setDraft} onSubmit={submitUrlCard} onClose={closeUrlCard} />
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-5 overflow-auto p-4 @sm/tile:p-6">
             {bookmarksByMachine.length === 0 ? (

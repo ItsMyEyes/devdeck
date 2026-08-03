@@ -37,6 +37,55 @@ const MAX_RESPAWNS: u32 = 3;
 const CHANGE_HUB_MENU_ID: &str = "change-hub";
 const RUNTIME_WARNING_MENU_ID: &str = "runtime-warning";
 
+/// Scheme the app's own bundled pages (choose/error/runtime-warning) are
+/// served and navigated on, instead of Tauri's generic `tauri://`. Tauri's
+/// built-in `tauri` protocol can't be renamed — it stays registered and still
+/// resolves — but nothing here navigates to it anymore.
+///
+/// Registering our own protocol is what makes this safe for the ACL: Tauri
+/// treats any user-registered scheme as a *local* origin
+/// (`Webview::is_local_url`), so these pages keep the `allow-hub-mode` /
+/// `allow-diagnostics` command access that `capabilities/default.json` grants
+/// local windows. A plain unregistered scheme would be classified remote and
+/// every `invoke` from those pages would be denied.
+const APP_SCHEME: &str = "devdeck";
+
+/// URL of a page bundled in `frontendDist`, on the app's own scheme:
+/// `devdeck://localhost/<page>` on macOS/Linux. Windows and Android serve
+/// custom protocols over `http://<scheme>.localhost/<page>` instead.
+fn bundled_page_url(page: &str) -> String {
+    if cfg!(windows) {
+        format!("http://{APP_SCHEME}.localhost/{page}")
+    } else {
+        format!("{APP_SCHEME}://localhost/{page}")
+    }
+}
+
+/// Serves `frontendDist` assets on [`APP_SCHEME`], mirroring what Tauri's
+/// built-in `tauri://` handler does: `asset_resolver()` is the same lookup it
+/// uses, so path normalisation, the `.html` fallback and the configured CSP
+/// header all behave identically.
+fn serve_bundled_asset<R: tauri::Runtime>(
+    ctx: tauri::UriSchemeContext<'_, R>,
+    request: tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    use tauri::http::{header::CONTENT_TYPE, Response, StatusCode};
+
+    match ctx.app_handle().asset_resolver().get(request.uri().path().to_string()) {
+        Some(asset) => {
+            let mut builder = Response::builder().status(StatusCode::OK).header(CONTENT_TYPE, &asset.mime_type);
+            if let Some(csp) = &asset.csp_header {
+                builder = builder.header("Content-Security-Policy", csp);
+            }
+            builder.body(asset.bytes).expect("static asset response")
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .expect("static not-found response"),
+    }
+}
+
 enum LaunchEnd {
     /// Process exited; respawn unless shutting down or out of attempts.
     Crashed,
@@ -70,6 +119,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .register_uri_scheme_protocol(APP_SCHEME, serve_bundled_asset)
         .manage(BrowserTiles::new())
         .on_page_load(|webview, payload| {
             // Global hook (fires for every webview in the app, including
@@ -246,10 +296,7 @@ fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, hub_url: &str) {
 /// routinely lost the race against the new page's load, leaving the page's
 /// static placeholder text on screen instead of the real values.
 fn show_runtime_warning(handle: &AppHandle) {
-    #[cfg(not(windows))]
-    let warning_url = "tauri://localhost/runtime-warning.html";
-    #[cfg(windows)]
-    let warning_url = "http://tauri.localhost/runtime-warning.html";
+    let warning_url = bundled_page_url("runtime-warning.html");
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.navigate(warning_url.parse().expect("static runtime warning url"));
         let _ = win.show();
@@ -433,10 +480,7 @@ async fn run_local_respawn_loop(handle: &AppHandle) {
 
 /// Navigates the main window to the bundled first-run choice screen.
 fn show_choose_screen(handle: &AppHandle) {
-    #[cfg(not(windows))]
-    let url = "tauri://localhost/choose.html";
-    #[cfg(windows)]
-    let url = "http://tauri.localhost/choose.html";
+    let url = bundled_page_url("choose.html");
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.navigate(url.parse().expect("static choose url"));
         let _ = win.show();
@@ -575,12 +619,7 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
 /// means: the substitution never ran).
 fn show_error(handle: &AppHandle, msg: &str) {
     *handle.state::<StartupError>().0.lock().unwrap() = Some(msg.to_string());
-    // Bundled frontendDist pages are served on the app's custom protocol:
-    // tauri://localhost on macOS/Linux, http://tauri.localhost on Windows.
-    #[cfg(not(windows))]
-    let error_url = "tauri://localhost/error.html";
-    #[cfg(windows)]
-    let error_url = "http://tauri.localhost/error.html";
+    let error_url = bundled_page_url("error.html");
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.navigate(error_url.parse().expect("static error url"));
         let _ = win.show();

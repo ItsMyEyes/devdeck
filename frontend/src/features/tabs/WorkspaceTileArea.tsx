@@ -275,7 +275,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
               />
             )
           },
-          browser: ({ leafId, tab }) => <BrowserTile tabId={tab.id} isFocused={leafId === layout.focusedLeafId} />,
+          browser: ({ leafId, tab, active }) => (
+            <BrowserTile tabId={tab.id} isFocused={leafId === layout.focusedLeafId} isActive={active} />
+          ),
           sshShell: ({ leafId, tab }) => (
             <SSHShellPane connectionId={tab.connectionId} isFocused={leafId === layout.focusedLeafId} />
           ),

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import { Download, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
@@ -43,6 +43,15 @@ export const DocumentFileTab = forwardRef<
   const deleteFile = useDeleteFileTarget(target)
   const { downloadFile, downloading } = useFileTransfers(target)
   const queryClient = useQueryClient()
+
+  // Every open file tab stays mounted (inactive ones are just `hidden`), so
+  // without this latch restoring a layout with several document tabs would
+  // download all of them at once. A one-way latch rather than plain `active`,
+  // so switching away mid-download doesn't cancel it.
+  const [seen, setSeen] = useState(active)
+  useEffect(() => {
+    if (active) setSeen(true)
+  }, [active])
 
   useImperativeHandle(ref, () => ({ save: async () => {} }))
 
@@ -137,7 +146,7 @@ export const DocumentFileTab = forwardRef<
       </div>
 
       {format ? (
-        <DocumentViewer target={target} path={path} format={format} />
+        <DocumentViewer target={target} path={path} format={format} enabled={seen} />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <span className="font-mono text-[11px] text-devdeck-dim">Unsupported document</span>

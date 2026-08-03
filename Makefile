@@ -144,12 +144,13 @@ dev-tauri:
 # frontend/package.json): with devUrl unset, `tauri dev` would otherwise spin
 # up its own built-in dev server (port 1430) for frontendDist and load the
 # window from http://localhost:1430 — but lib.rs navigates the placeholder/
-# choose/error pages via the tauri://localhost custom protocol, which that
-# dev server doesn't back, so show_choose_screen would hit "asset not found:
-# choose.html". --no-dev-server makes Tauri serve the embedded frontendDist
-# (ui/) straight from the custom protocol the Rust code targets. No frontend
-# HMR here — the sidecar serves whatever `prepare-webui` last built into
-# backend/internal/webui/dist.
+# choose/error pages via the devdeck://localhost custom protocol (APP_SCHEME
+# in lib.rs, served from the embedded frontendDist by serve_bundled_asset),
+# which that dev server doesn't back, so show_choose_screen would hit "asset
+# not found: choose.html". --no-dev-server makes Tauri serve the embedded
+# frontendDist (ui/) straight from the custom protocol the Rust code targets.
+# No frontend HMR here — the sidecar serves whatever `prepare-webui` last
+# built into backend/internal/webui/dist.
 dev-tauri-full:
 	cd frontend && npm run tauri:dev-full
 

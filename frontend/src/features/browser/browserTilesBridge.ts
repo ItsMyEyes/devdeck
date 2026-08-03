@@ -23,6 +23,23 @@ export function browserTileLabel(tabId: string, docId: string): string {
   return `browser-${tabId}-${docId}`
 }
 
+/** Rust rejects every tile command whose label is no longer in its map (see
+ *  `browser_tiles.rs`). For the three calls below that is not a failure: they
+ *  all mean "make sure this webview is not on screen", which a webview that has
+ *  already been destroyed satisfies. It happens on any ordinary tab close —
+ *  `WorkspaceTileArea.handleCloseTab` closes the native webviews first, and
+ *  `BrowserTile`'s unmount then hides the doc it was still tracking — and the
+ *  bare rejection surfaced as an "Unhandled Promise Rejection: no browser tile
+ *  webview for browser-…" in the console. Anything else still rejects, so a
+ *  real transport or serialization failure stays visible. */
+function tolerateMissingWebview(promise: Promise<void>): Promise<void> {
+  return promise.catch((error: unknown) => {
+    const message = typeof error === 'string' ? error : error instanceof Error ? error.message : ''
+    if (message.includes('no browser tile webview for')) return
+    throw error
+  })
+}
+
 export function openBrowserTile(tabId: string, docId: string, proxyUrl: string, initialUrl: string): Promise<void> {
   const key = browserTileLabel(tabId, docId)
   labelRegistry.set(key, { tabId, docId })
@@ -101,12 +118,12 @@ export function hideBrowserTile(tabId: string, docId: string): Promise<void> {
   const key = browserTileLabel(tabId, docId)
   if (hiddenLabels.has(key)) return Promise.resolve()
   hiddenLabels.add(key)
-  return invoke('browser_tile_hide', { tabId, docId })
+  return tolerateMissingWebview(invoke('browser_tile_hide', { tabId, docId }))
 }
 
 export function showBrowserTile(tabId: string, docId: string, bounds: BrowserTileBounds): Promise<void> {
   hiddenLabels.delete(browserTileLabel(tabId, docId))
-  return invoke('browser_tile_show', { tabId, docId, ...bounds })
+  return tolerateMissingWebview(invoke('browser_tile_show', { tabId, docId, ...bounds }))
 }
 
 export function closeBrowserTile(tabId: string, docId: string): Promise<void> {
@@ -116,7 +133,11 @@ export function closeBrowserTile(tabId: string, docId: string): Promise<void> {
   // see `BrowserTile`'s `selectMachine`) starts visible, so a stale hidden
   // flag here would suppress the next legitimate hide.
   hiddenLabels.delete(key)
-  return invoke('browser_tile_close', { tabId, docId })
+  // Tolerant for the same reason as `hideBrowserTile`, plus one of its own:
+  // `handleCloseTab` closes every doc's webview in a `Promise.all`, so one
+  // already-gone doc would otherwise reject the whole batch and leave the tab
+  // itself open.
+  return tolerateMissingWebview(invoke('browser_tile_close', { tabId, docId }))
 }
 
 export interface BrowserTileFindResult {

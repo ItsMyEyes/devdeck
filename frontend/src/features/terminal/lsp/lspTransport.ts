@@ -84,6 +84,36 @@ class MutableValue<T> implements IValueWithChangeEvent<T> {
   }
 }
 
+/**
+ * Recovers a document uri's real capitalisation by matching it, case
+ * insensitively, against the uris of the models currently open in the editor.
+ *
+ * `MonacoLspClient`'s `ManagedModel` lowercases every uri it puts on the wire:
+ *
+ *     const uri = _textModel.uri.toString(true).toLowerCase();
+ *     this._api.textDocumentDidOpen({ textDocument: { ..., uri } })
+ *
+ * It does that because its own reverse lookup table is keyed the same way, so
+ * inbound uris survive a case-insensitive filesystem. But the *outbound* uri is
+ * the one the language server has to place inside the workspace, and servers
+ * compare it byte for byte against the paths their build system reports. On
+ * macOS `/Users/me/Documents/app` arrives as `/users/me/documents/app`, which
+ * gopls answers with "This file is within module …, which is not included in
+ * your workspace" and then type-checks the file on its own — every symbol
+ * defined in a sibling file reads as `undefined`. Nothing else looks wrong: the
+ * file opens, the code is valid, and the server never reports an error.
+ *
+ * Returns `uri` unchanged when no open model matches (an `inmemory://` buffer,
+ * or a model already gone), which is exactly today's behaviour for those.
+ */
+export function restoreDocumentUriCase(uri: string, knownUris: Iterable<string>): string {
+  const lowered = uri.toLowerCase()
+  for (const known of knownUris) {
+    if (known.toLowerCase() === lowered) return known
+  }
+  return uri
+}
+
 /** MonacoLspClient hardcodes `rootUri: null` and sends no workspaceFolders,
  *  which drops gopls into single-file mode. The backend already told us the
  *  real root in its `ready` control frame, so patch it in transit rather than
@@ -132,6 +162,11 @@ export function rewriteInitialize(message: RpcMessage, rootUri: string): RpcMess
  *    doesn't own, so a gopls process behind this transport never hears about
  *    a `.ts` buffer and vice versa.
  *
+ * 6. `MonacoLspClient` also lowercases every outbound document uri, which stops
+ *    a server placing the file inside the workspace on any path that isn't
+ *    already lowercase. The real capitalisation is restored in transit — see
+ *    `restoreDocumentUriCase`.
+ *
  * `onMessage`/`onClose`/`onError` and the string overload of `send` are kept
  * alongside the new `setListener`/`state` members because `lspSession.ts`
  * still wraps this transport for `codemirror-languageserver`'s
@@ -144,6 +179,7 @@ export class DevDeckLspTransport implements IMessageTransport {
 
   private readonly socket: WebSocket
   private readonly language: string | undefined
+  private readonly knownDocumentUris: (() => Iterable<string>) | undefined
   private readonly messageListeners = new Set<(message: string) => void>()
   private readonly closeListeners = new Set<() => void>()
   private readonly errorListeners = new Set<(error: Error) => void>()
@@ -165,14 +201,25 @@ export class DevDeckLspTransport implements IMessageTransport {
    *  `didChange`/`didClose` that follow it (which carry no `languageId` of
    *  their own) are dropped too, until the uri closes. */
   private readonly foreignUris = new Set<string>()
+  /** Lowercased uri → the real-case uri the document was opened under. The
+   *  `didChange`/`didClose` for a document must address it exactly as its
+   *  `didOpen` did, and by `didClose` time the model is already leaving
+   *  monaco's list (`onWillDispose` fires *during* disposal), so the mapping
+   *  cannot be re-derived then — it has to be remembered from the open. */
+  private readonly openedUris = new Map<string, string>()
 
   /** `language` is the collapsed server language this transport's socket was
    *  opened for (see `serverLanguage`) — optional so every existing direct
    *  construction (this file's own tests, and any future caller with no
-   *  language filtering to do) keeps working unfiltered. */
-  constructor(socket: WebSocket, language?: string) {
+   *  language filtering to do) keeps working unfiltered. `knownDocumentUris`
+   *  lists the uris of the editor's open models, real capitalisation intact;
+   *  it is a callback rather than a value so this module stays free of monaco
+   *  (see `IMessageTransport` above), and omitting it disables the case repair
+   *  in `restoreDocumentUriCase`. */
+  constructor(socket: WebSocket, language?: string, knownDocumentUris?: () => Iterable<string>) {
     this.socket = socket
     this.language = language
+    this.knownDocumentUris = knownDocumentUris
     this.ready = new Promise<{ rootUri: string }>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
@@ -202,7 +249,13 @@ export class DevDeckLspTransport implements IMessageTransport {
    *  run through `rewriteInitialize` and are stringified before queueing;
    *  strings pass through unchanged. */
   send(message: unknown): Promise<void> {
-    if (this.closed) return Promise.resolve()
+    if (this.unusable) {
+      this.answerWithoutServer(message)
+      return Promise.resolve()
+    }
+    // Case repair runs first so the language filter below, which keys on the
+    // uri, tracks the same string the wire carries.
+    if (typeof message !== 'string') message = this.withRealDocumentUri(message as RpcMessage)
     if (typeof message !== 'string' && this.isForeignDocumentMessage(message as RpcMessage)) {
       return Promise.resolve()
     }
@@ -216,6 +269,108 @@ export class DevDeckLspTransport implements IMessageTransport {
       this.socket.send(payload)
     }
     return Promise.resolve()
+  }
+
+  /** True once the socket can no longer carry anything — whether DevDeck closed
+   *  it (`close()`) or the peer did (`readyState` 2/3 are CLOSING/CLOSED). The
+   *  peer's own close never sets `closed`, so checking that flag alone left a
+   *  server-side shutdown queueing messages into a socket that would never
+   *  drain. */
+  private get unusable(): boolean {
+    return this.closed || this.socket.readyState >= 2
+  }
+
+  /**
+   * Answers a request that can no longer reach the server, so its caller
+   * settles instead of waiting forever.
+   *
+   * `MonacoLspClient` registers ~22 monaco providers in its constructor and
+   * offers no way to take them back — `createFeatures()` collects them into a
+   * `DisposableStore` the constructor then discards — and it never looks at
+   * `IMessageTransport.state`. A client whose session has been disposed
+   * therefore keeps serving monaco for the lifetime of the page. Monaco's
+   * `getLocationLinks` awaits `Promise.all` over *every* registered provider,
+   * so a single request that never settles silently disables go-to-definition
+   * (hover, completion, references — all of them aggregate the same way), even
+   * though a healthy client is registered right next to the dead one. That is
+   * what "open a .go file, close it, open another" used to do.
+   *
+   * A null result is the graceful answer rather than an error: every provider
+   * request LSP defines accepts `null` as "nothing found", so monaco merges the
+   * live client's answer and logs nothing. Notifications carry no id, so there
+   * is nothing to answer and nobody waiting — they stay dropped.
+   *
+   * Delivery is deferred to a microtask so the caller has finished registering
+   * its pending request before the response arrives.
+   */
+  private answerWithoutServer(message: unknown) {
+    let parsed: RpcMessage | undefined
+    if (typeof message === 'string') {
+      try {
+        parsed = JSON.parse(message) as RpcMessage
+      } catch {
+        return
+      }
+    } else {
+      parsed = message as RpcMessage | undefined
+    }
+    const id = parsed?.id
+    if (!parsed || typeof parsed.method !== 'string' || id === undefined || id === null) return
+
+    const response: RpcMessage = { jsonrpc: '2.0', id, result: null }
+    queueMicrotask(() => {
+      // `devdeck-` ids belong to this transport's own `request()` channel and
+      // are resolved there; anything else is the client's and goes to its
+      // listener, exactly as a real response would (see `handleMessage`).
+      if (this.resolvePending(response)) return
+      this.listener?.(response)
+    })
+  }
+
+  /** Returns `message` with its document uri restored to the capitalisation
+   *  the model really has — see `restoreDocumentUriCase` for why the uri
+   *  arrives lowercased and what it costs. Only the three synchronisation
+   *  notifications are touched; every request DevDeck issues itself already
+   *  addresses documents by `documentUri()`, which is correct by construction.
+   *  A copy is returned rather than a mutation, matching `rewriteInitialize` —
+   *  the message object belongs to `MonacoLspClient`. */
+  private withRealDocumentUri(message: RpcMessage): RpcMessage {
+    const method = message.method
+    if (
+      method !== 'textDocument/didOpen' &&
+      method !== 'textDocument/didChange' &&
+      method !== 'textDocument/didClose'
+    ) {
+      return message
+    }
+
+    const params = message.params as
+      | { textDocument?: { uri?: string } & Record<string, unknown> }
+      | undefined
+    const uri = params?.textDocument?.uri
+    if (!uri) return message
+
+    const key = uri.toLowerCase()
+    let real: string
+    if (method === 'textDocument/didOpen') {
+      real = this.knownDocumentUris
+        ? restoreDocumentUriCase(uri, this.knownDocumentUris())
+        : uri
+      if (real !== uri) this.openedUris.set(key, real)
+      else this.openedUris.delete(key)
+    } else {
+      real = this.openedUris.get(key) ?? uri
+      if (method === 'textDocument/didClose') this.openedUris.delete(key)
+    }
+    if (real === uri) return message
+
+    return {
+      ...message,
+      params: {
+        ...params,
+        textDocument: { ...params?.textDocument, uri: real },
+      },
+    }
   }
 
   /** True for a `textDocument/didOpen`, `didChange` or `didClose` that
@@ -422,7 +577,12 @@ export class DevDeckLspTransport implements IMessageTransport {
   }
 }
 
-export async function openLspTransport(machine: Machine, worktreeId: string, language: string) {
+export async function openLspTransport(
+  machine: Machine,
+  worktreeId: string,
+  language: string,
+  knownDocumentUris?: () => Iterable<string>,
+) {
   const url = await machineWsUrl(machine, '/lsp', { worktree: worktreeId, language })
-  return new DevDeckLspTransport(new WebSocket(url), language)
+  return new DevDeckLspTransport(new WebSocket(url), language, knownDocumentUris)
 }

@@ -34,6 +34,14 @@ export function Dialog({ open, onOpenChange, children, width = 480, z = 60, clas
           style={{ maxWidth: width, zIndex: z + 1 }}
           className={cn(
             'fixed left-1/2 top-1/2 w-[calc(100vw-36px)] -translate-x-1/2 -translate-y-1/2',
+            // Fixed positioning takes the popup out of the page's scroll, so a
+            // dialog taller than the window is clipped at *both* edges — the
+            // centring translate splits the overflow — with no way to reach
+            // either end. Cap it at the viewport and scroll inside instead.
+            // `overflow-auto` (the shorthand, not `overflow-y-auto`) so that a
+            // dialog managing its own scrolling can drop it with a plain
+            // `overflow-hidden` through tailwind-merge.
+            'max-h-[calc(100dvh-36px)] overflow-auto',
             'rounded-2xl border border-devdeck-border-menu bg-devdeck-card p-[21px] text-devdeck-fg outline-none',
             'shadow-[0_24px_60px_rgba(0,0,0,0.55)] transition-all duration-150',
             'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',

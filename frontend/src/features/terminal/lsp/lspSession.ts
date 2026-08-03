@@ -1,4 +1,5 @@
 import { MonacoLspClient } from 'monaco-lsp-client'
+import { openModelUris } from '@/features/editor/openModelUris'
 import type { Machine } from '@/store/types'
 import {
   openLspTransport,
@@ -135,17 +136,47 @@ interface PoolEntry {
   promise: Promise<LspSession>
   refs: number
   session?: LspSession
+  idleTimer?: ReturnType<typeof setTimeout>
 }
+
+/** How long a session with no holders is kept before it is really disposed.
+ *  Long enough to cover the gap between closing one file and opening the next
+ *  (see `release` for why that gap is worth paying for), short enough that a
+ *  worktree the operator has moved on from stops holding a language server
+ *  process on the machine. */
+const IDLE_DISPOSE_MS = 30_000
 
 /** Ref-counted session cache. The creator is passed per call and only runs on a
  *  miss, so the pool knows nothing about machines or sockets and can be tested
  *  without either. */
-export function createLspSessionPool() {
+export function createLspSessionPool(idleDisposeMs = IDLE_DISPOSE_MS) {
   const entries = new Map<string, PoolEntry>()
+
+  function cancelIdleDisposal(entry: PoolEntry) {
+    if (entry.idleTimer === undefined) return
+    clearTimeout(entry.idleTimer)
+    entry.idleTimer = undefined
+  }
 
   return {
     async acquire(key: string, create: () => Promise<LspSession>) {
       let entry = entries.get(key)
+      if (entry) {
+        cancelIdleDisposal(entry)
+        // A session is only worth reusing while its server still answers. One
+        // whose socket died during the idle window would otherwise be handed
+        // to the next file that opens, leaving that file with no language
+        // support at all until the page is reloaded.
+        //
+        // Only an idle entry may be replaced: an errored session that still has
+        // holders is *their* session, and disposing it here would close the
+        // transport under editors that are open right now.
+        if (entry.refs === 0 && entry.session?.getStatus() === 'error') {
+          entries.delete(key)
+          entry.session.dispose()
+          entry = undefined
+        }
+      }
       if (!entry) {
         entry = { promise: create(), refs: 0 }
         entries.set(key, entry)
@@ -165,16 +196,33 @@ export function createLspSessionPool() {
       let released = false
       return {
         session,
+        /**
+         * Drops this holder's claim. The session outlives the last one by
+         * `idleDisposeMs` rather than being torn down on the spot.
+         *
+         * Closing the only open `.go` file and opening another one takes the
+         * refcount through zero, and disposing there ends the session's
+         * transport while its `MonacoLspClient` lives on: the client cannot be
+         * disposed (see `answerWithoutServer` in lspTransport.ts) and stays
+         * registered with monaco forever, so the reopen stacks a second client
+         * on top of a dead one — and pays a full language-server restart for
+         * the privilege. Holding the session across that gap means the reopen
+         * gets the same live client back.
+         */
         release() {
           if (released) return
           released = true
           const current = entries.get(key)
           if (!current || current !== entry) return
           current.refs -= 1
-          if (current.refs <= 0) {
+          if (current.refs > 0) return
+          cancelIdleDisposal(current)
+          current.idleTimer = setTimeout(() => {
+            current.idleTimer = undefined
+            if (entries.get(key) !== current || current.refs > 0) return
             entries.delete(key)
             current.session?.dispose()
-          }
+          }, idleDisposeMs)
         },
       }
     },
@@ -186,7 +234,7 @@ const pool = createLspSessionPool()
 export function acquireLspSession(machine: Machine, worktreeId: string, languageId: string) {
   const language = serverLanguage(languageId)
   return pool.acquire(`${machine.id}:${worktreeId}:${language}`, async () => {
-    const transport = await openLspTransport(machine, worktreeId, language)
+    const transport = await openLspTransport(machine, worktreeId, language, openModelUris)
     return createLspSession(transport, language)
   })
 }

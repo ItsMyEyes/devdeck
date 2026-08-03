@@ -24,6 +24,7 @@ import type { ZipArchive } from './zip'
 
 const DOCUMENT_PART = 'word/document.xml'
 const NUMBERING_PART = 'word/numbering.xml'
+const STYLES_PART = 'word/styles.xml'
 
 export interface DocxRun {
   text: string
@@ -74,6 +75,7 @@ export async function readDocx(zip: ZipArchive): Promise<DocxDocument> {
   const doc = parseXml(bytes, DOCUMENT_PART)
   const rels = await readRelationships(zip, DOCUMENT_PART)
   const numbering = await readNumbering(zip)
+  const styles = await readStyles(zip)
 
   const objectUrls: string[] = []
   const mediaCache = new Map<string, DocxImage | null>()
@@ -106,9 +108,9 @@ export async function readDocx(zip: ZipArchive): Promise<DocxDocument> {
   for (const el of Array.from(body.children)) {
     if (el.namespaceURI !== NS.w) continue
     if (el.localName === 'p') {
-      blocks.push(await readParagraph(el, rels, numbering, imageFor))
+      blocks.push(await readParagraph(el, rels, numbering, styles, imageFor))
     } else if (el.localName === 'tbl') {
-      blocks.push(await readTable(el, rels, numbering, imageFor))
+      blocks.push(await readTable(el, rels, numbering, styles, imageFor))
     }
   }
 
@@ -127,6 +129,7 @@ async function readTable(
   tbl: Element,
   rels: Map<string, Relationship>,
   numbering: NumberingMap,
+  styles: StyleMap,
   imageFor: ImageResolver,
 ): Promise<DocxTable> {
   const rows: DocxParagraph[][][] = []
@@ -135,7 +138,7 @@ async function readTable(
     for (const tc of children(tr, NS.w, 'tc')) {
       const paragraphs: DocxParagraph[] = []
       for (const p of children(tc, NS.w, 'p')) {
-        paragraphs.push(await readParagraph(p, rels, numbering, imageFor))
+        paragraphs.push(await readParagraph(p, rels, numbering, styles, imageFor))
       }
       cells.push(paragraphs)
     }
@@ -148,15 +151,15 @@ async function readParagraph(
   p: Element,
   rels: Map<string, Relationship>,
   numbering: NumberingMap,
+  styles: StyleMap,
   imageFor: ImageResolver,
 ): Promise<DocxParagraph> {
   const pPr = firstChild(p, NS.w, 'pPr')
   const styleId = attr(firstChild(pPr, NS.w, 'pStyle'), NS.w, 'val') ?? ''
 
-  const numPr = firstChild(pPr, NS.w, 'numPr')
-  const listLevel = numPr ? (intAttr(firstChild(numPr, NS.w, 'ilvl'), NS.w, 'val') ?? 0) : -1
-  const numId = numPr ? intAttr(firstChild(numPr, NS.w, 'numId'), NS.w, 'val') : null
-  const ordered = listLevel >= 0 && isOrderedList(numbering, numId, listLevel)
+  const list = resolveListMembership(pPr, styleId, styles)
+  const listLevel = list ? list.level : -1
+  const ordered = list !== null && isOrderedList(numbering, list.numId, list.level)
 
   const runs: DocxRun[] = []
   const images: DocxImage[] = []
@@ -285,6 +288,82 @@ function headingLevelFor(styleId: string): number {
   const match = /^heading\s*([1-9])$/i.exec(styleId)
   if (!match) return 0
   return Math.min(6, Number.parseInt(match[1], 10))
+}
+
+// ---- List membership ----
+//
+// A paragraph can be a list item two different ways, and real documents use
+// both. Inline `w:pPr/w:numPr` is the obvious one. The other — which the
+// ribbon's list buttons and every docx generator that uses the built-in
+// "List Bullet" / "List Number" styles produce — puts the numbering reference
+// on the *style*, leaving the paragraph itself carrying nothing but
+// `<w:pStyle w:val="ListBullet"/>`. Reading only the inline form silently
+// renders those documents' lists as plain paragraphs.
+
+interface StyleInfo {
+  basedOn: string | null
+  numId: number | null
+  ilvl: number | null
+}
+
+type StyleMap = Map<string, StyleInfo>
+
+/** Style chains are shallow in practice; this only guards against a cycle. */
+const MAX_STYLE_DEPTH = 12
+
+async function readStyles(zip: ZipArchive): Promise<StyleMap> {
+  const styles: StyleMap = new Map()
+  const bytes = await zip.readOptional(STYLES_PART)
+  if (!bytes) return styles
+
+  let doc: Document
+  try {
+    doc = parseXml(bytes, STYLES_PART)
+  } catch {
+    return styles
+  }
+
+  for (const style of descendants(doc, NS.w, 'style')) {
+    const id = attr(style, NS.w, 'styleId')
+    if (!id) continue
+    const numPr = firstChild(firstChild(style, NS.w, 'pPr'), NS.w, 'numPr')
+    styles.set(id, {
+      basedOn: attr(firstChild(style, NS.w, 'basedOn'), NS.w, 'val'),
+      numId: intAttr(firstChild(numPr, NS.w, 'numId'), NS.w, 'val'),
+      ilvl: intAttr(firstChild(numPr, NS.w, 'ilvl'), NS.w, 'val'),
+    })
+  }
+  return styles
+}
+
+/**
+ * The paragraph's list membership, or null if it is not a list item. Inline
+ * `numPr` wins; otherwise the paragraph style's chain is searched.
+ */
+function resolveListMembership(
+  pPr: Element | null,
+  styleId: string,
+  styles: StyleMap,
+): { numId: number | null; level: number } | null {
+  const numPr = firstChild(pPr, NS.w, 'numPr')
+  if (numPr) {
+    const numId = intAttr(firstChild(numPr, NS.w, 'numId'), NS.w, 'val')
+    // numId 0 is Word's explicit "remove this paragraph from its list" — used
+    // to opt a single paragraph out of a list-carrying style.
+    if (numId === 0) return null
+    return { numId, level: intAttr(firstChild(numPr, NS.w, 'ilvl'), NS.w, 'val') ?? 0 }
+  }
+
+  let currentId: string | null = styleId
+  for (let depth = 0; currentId && depth < MAX_STYLE_DEPTH; depth++) {
+    const style: StyleInfo | undefined = styles.get(currentId)
+    if (!style) return null
+    if (style.numId !== null && style.numId !== 0) {
+      return { numId: style.numId, level: style.ilvl ?? 0 }
+    }
+    currentId = style.basedOn
+  }
+  return null
 }
 
 // ---- Numbering ----

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type FormEvent } from 'react'
+import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import { Search, Star } from 'lucide-react'
 import { Select } from '@/components/ui/select'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -17,14 +17,20 @@ export interface BrowserOmniboxProps {
   machines: Machine[]
   machineHealth: Map<string, MachineHealth | undefined>
   onSelectMachine: (machineId: string) => void
-  /** Opens `BrowserUrlCard`. Fires from the URL area only, never from the
-   *  machine chip or the star. Unused while `url` is empty — that case edits
-   *  in place instead. */
-  onEdit: () => void
+  /** Whether the address is being edited *in the bar itself*. Owned by the
+   *  parent because Cmd/Ctrl+L has to turn it on from outside this component.
+   *  A tab with no URL always edits inline regardless of this flag — it has no
+   *  address to display in the first place. */
+  editing: boolean
+  /** Raised by the URL area (never the machine chip or the star), by Escape,
+   *  and by the input losing focus. Escape also rolls the draft back to the
+   *  live URL; blur deliberately does not, so a draft survives a detour to the
+   *  machine picker. */
+  onEditingChange: (editing: boolean) => void
   /** Opens `BookmarkDialog`. The star lives here rather than in the toolbar's
    *  right cluster because it acts on the *address*, not the window. */
   onBookmark: () => void
-  /** Draft address, shared with `BrowserUrlCard` and reset per doc. */
+  /** Draft address, owned by the parent and reset per doc. */
   draft: string
   onDraftChange: (value: string) => void
   onSubmit: (value: string) => void
@@ -53,7 +59,8 @@ export function BrowserOmnibox({
   machines,
   machineHealth,
   onSelectMachine,
-  onEdit,
+  editing,
+  onEditingChange,
   onBookmark,
   draft,
   onDraftChange,
@@ -62,25 +69,36 @@ export function BrowserOmnibox({
   focusSignal = 0,
 }: BrowserOmniboxProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  // A tab with no URL has no page to name, so the two-tier URL button has
-  // nothing to render and used to fall back to the literal string "New Tab" at
-  // full contrast — indistinguishable from a real domain, which left new users
-  // with no visible way in. Editing in place is safe *only* here: the
-  // click-to-open `BrowserUrlCard` exists because an overlay must hide the
-  // native webview underneath it, and an empty tab has no webview yet.
-  const editingInline = !url
+  // The address is edited in the bar itself, the way every desktop browser
+  // does it — not in a floating card. A tab with no URL is always in this
+  // state: it has no page to name, and the two-tier URL button would otherwise
+  // fall back to the literal string "New Tab" at full contrast,
+  // indistinguishable from a real domain.
+  const editingInline = editing || !url
   const { prefix, domain, rest } = splitUrlForDisplay(url)
 
   useEffect(() => {
-    // `select()` rather than `focus()` so a draft carried over from a failed
-    // navigation is replaced by the next keystroke, matching `BrowserUrlCard`.
-    if (editingInline && autoFocus) inputRef.current?.select()
-  }, [editingInline, autoFocus, docId, focusSignal])
+    if (!editingInline) return
+    // `autoFocus` is the mount-time guard that stops a *background* tile from
+    // stealing the caret; `editing` is an explicit action on this tile, so it
+    // takes the caret either way. `select()` rather than `focus()` so a draft
+    // carried over from a failed navigation is replaced by the next keystroke.
+    if (editing || autoFocus) inputRef.current?.select()
+  }, [editingInline, editing, autoFocus, docId, focusSignal])
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const value = draft.trim()
     if (value) onSubmit(value)
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Escape') return
+    // Stops here rather than bubbling to the tile: Escape in the address bar
+    // means "undo this edit", not whatever else the tile binds it to.
+    event.stopPropagation()
+    onDraftChange(url)
+    onEditingChange(false)
   }
   const options = machines.map((m) => ({
     value: m.id,
@@ -106,6 +124,12 @@ export function BrowserOmnibox({
               ref={inputRef}
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
+              onKeyDown={handleKeyDown}
+              // Leaving the bar drops the editing state but keeps the draft —
+              // clicking the machine picker mid-edit is a normal thing to do
+              // and must not throw away what was typed. An empty tab has no
+              // address to fall back to, so it just stays inline.
+              onBlur={() => onEditingChange(false)}
               placeholder="Search or enter address"
               aria-label="Address"
               type="text"
@@ -129,7 +153,7 @@ export function BrowserOmnibox({
               interactive elements is invalid HTML and overlaps their hit areas. */}
           <button
             type="button"
-            onClick={onEdit}
+            onClick={() => onEditingChange(true)}
             aria-label="Edit address"
             className="flex min-w-0 flex-1 items-center text-left text-[11px] focus-visible:outline-none pointer-coarse:text-[13px]"
           >

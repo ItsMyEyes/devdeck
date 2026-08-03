@@ -20,12 +20,15 @@ export function DocumentViewer({
   target,
   path,
   format,
+  enabled = true,
 }: {
   target: FilesTarget
   path: string
   format: DocumentFormat
+  /** False until the tab has been looked at — see DocumentFileTab's latch. */
+  enabled?: boolean
 }) {
-  const { query, progress } = useFileBytesTarget(target, path)
+  const { query, progress } = useFileBytesTarget(target, path, enabled && format.renderable)
 
   if (!format.renderable) {
     return (

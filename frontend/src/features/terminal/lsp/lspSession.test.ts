@@ -36,26 +36,37 @@ describe('uriHelpers', () => {
 
 describe('createLspSessionPool', () => {
   let next = 0
-  function fakeSession() {
+  function fakeSession(status: import('./lspSession').LspStatus = 'ready') {
     next += 1
-    return { id: `session-${next}`, dispose: vi.fn() } as unknown as import('./lspSession').LspSession
+    return {
+      id: `session-${next}`,
+      dispose: vi.fn(),
+      getStatus: () => status,
+    } as unknown as import('./lspSession').LspSession
   }
 
-  it('shares one session between holders and disposes only on the last release', async () => {
-    const create = vi.fn(async () => fakeSession())
-    const pool = createLspSessionPool()
+  it('shares one session between holders and disposes only after the last release', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi.fn(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
 
-    const first = await pool.acquire('m1:w1:go', create)
-    const second = await pool.acquire('m1:w1:go', create)
+      const first = await pool.acquire('m1:w1:go', create)
+      const second = await pool.acquire('m1:w1:go', create)
 
-    expect(create).toHaveBeenCalledTimes(1)
-    expect(first.session).toBe(second.session)
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(first.session).toBe(second.session)
 
-    first.release()
-    expect(first.session.dispose).not.toHaveBeenCalled()
+      first.release()
+      vi.advanceTimersByTime(60_000)
+      expect(first.session.dispose).not.toHaveBeenCalled()
 
-    second.release()
-    expect(first.session.dispose).toHaveBeenCalledTimes(1)
+      second.release()
+      vi.advanceTimersByTime(30_000)
+      expect(first.session.dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ignores a repeated release from the same holder', async () => {
@@ -71,18 +82,120 @@ describe('createLspSessionPool', () => {
     expect(second.session.dispose).not.toHaveBeenCalled()
   })
 
-  it('keeps separate sessions per key and recreates after full release', async () => {
-    const create = vi.fn(async () => fakeSession())
-    const pool = createLspSessionPool()
+  it('keeps separate sessions per key and recreates once the idle window passes', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi.fn(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
 
-    const go = await pool.acquire('m1:w1:go', create)
-    const ts = await pool.acquire('m1:w1:typescript', create)
-    expect(go.session).not.toBe(ts.session)
+      const go = await pool.acquire('m1:w1:go', create)
+      const ts = await pool.acquire('m1:w1:typescript', create)
+      expect(go.session).not.toBe(ts.session)
 
-    go.release()
-    const goAgain = await pool.acquire('m1:w1:go', create)
-    expect(create).toHaveBeenCalledTimes(3)
-    expect(goAgain.session).not.toBe(go.session)
+      go.release()
+      vi.advanceTimersByTime(30_000)
+      const goAgain = await pool.acquire('m1:w1:go', create)
+      expect(create).toHaveBeenCalledTimes(3)
+      expect(goAgain.session).not.toBe(go.session)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Disposing the moment the last Go file closes is what made "open a .go
+  // file, close it, open another" break every LSP feature: the session's
+  // transport shuts down, but `MonacoLspClient` cannot be disposed — its
+  // monaco providers stay registered and monaco keeps awaiting them. Holding
+  // the session across that gap means the reopen reuses the same client (and
+  // skips a gopls restart) instead of stacking a second one on top of a dead
+  // first.
+  it('reuses the session when a file is reopened inside the idle window', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi.fn(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
+
+      const first = await pool.acquire('m1:w1:go', create)
+      first.release()
+      vi.advanceTimersByTime(29_000)
+      const again = await pool.acquire('m1:w1:go', create)
+
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(again.session).toBe(first.session)
+      expect(first.session.dispose).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('disposes a session that stays idle past the window', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi.fn(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
+
+      const first = await pool.acquire('m1:w1:go', create)
+      first.release()
+      expect(first.session.dispose).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(30_000)
+      expect(first.session.dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-acquiring inside the window cancels the pending disposal', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi.fn(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
+
+      const first = await pool.acquire('m1:w1:go', create)
+      first.release()
+      await pool.acquire('m1:w1:go', create)
+      vi.advanceTimersByTime(60_000)
+
+      expect(first.session.dispose).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A cached session is only worth reusing while its server is actually
+  // answering. One whose socket died while idle would otherwise be handed back
+  // to the next file that opens, with no way to recover short of a reload.
+  it('replaces a cached session whose language server died', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi
+        .fn<() => Promise<import('./lspSession').LspSession>>()
+        .mockImplementationOnce(async () => fakeSession('error'))
+        .mockImplementation(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
+
+      const first = await pool.acquire('m1:w1:go', create)
+      first.release()
+      const again = await pool.acquire('m1:w1:go', create)
+
+      expect(create).toHaveBeenCalledTimes(2)
+      expect(again.session).not.toBe(first.session)
+      expect(first.session.dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves an errored session alone while editors still hold it', async () => {
+    const create = vi.fn(async () => fakeSession('error'))
+    const pool = createLspSessionPool(30_000)
+
+    const held = await pool.acquire('m1:w1:go', create)
+    const second = await pool.acquire('m1:w1:go', create)
+
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(second.session).toBe(held.session)
+    expect(held.session.dispose).not.toHaveBeenCalled()
   })
 
   it('does not cache a failed session', async () => {
