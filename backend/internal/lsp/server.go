@@ -53,6 +53,15 @@ func NewServer(store port.Store) *Server {
 	return &Server{store: store, installer: NewInstaller()}
 }
 
+// Installer exposes this server's installer so the deps endpoint can install
+// on demand through the *same* instance the automatic on-connect install uses.
+// Sharing it is the point: EnsureInstalled deduplicates concurrent requests for
+// a binary, so an operator pressing Install while a tab is already triggering
+// an auto-install joins that attempt instead of racing a second `go install`.
+func (s *Server) Installer() *Installer {
+	return s.installer
+}
+
 // HandleWS upgrades /ws/lsp and proxies JSON-RPC messages to a language server.
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
