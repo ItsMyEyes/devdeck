@@ -10,6 +10,7 @@ import {
   FileSearch,
   FolderPlus,
   Loader2,
+  PackageSearch,
   RefreshCw,
   Search,
   Trash2,
@@ -31,6 +32,7 @@ import {
   useWriteFileTarget,
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { DependenciesDialog } from '@/features/overlays/DependenciesDialog'
 import { archiveDefaultName } from './archiveName'
 import { ArchiveNameDialog } from './ArchiveNameDialog'
 import { DeleteFilesDialog } from './DeleteFilesDialog'
@@ -191,6 +193,7 @@ export function TerminalExplorer({
   onRequestContentSearch,
 }: TerminalExplorerProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [depsOpen, setDepsOpen] = useState(false)
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
   const entryCacheRef = useRef<Map<string, SelectedEntry>>(new Map())
   const treeContainerRef = useRef<HTMLDivElement>(null)
@@ -669,6 +672,19 @@ export function TerminalExplorer({
         >
           {writeFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus2 size={13} />}
         </button>
+        {/* Worktree-only: an SSH target has no machine to probe, and SSH files
+            get no language server in the first place. */}
+        {target.kind !== 'ssh' ? (
+          <button
+            type="button"
+            onClick={() => setDepsOpen(true)}
+            title="Check editor dependencies (language servers)"
+            aria-label="Check editor dependencies"
+            className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg"
+          >
+            <PackageSearch size={13} />
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={invalidateFiles}
@@ -679,6 +695,10 @@ export function TerminalExplorer({
           <RefreshCw size={13} className={cn(isFetching && 'animate-spin')} />
         </button>
       </div>
+
+      {target.kind !== 'ssh' ? (
+        <DependenciesDialog open={depsOpen} onOpenChange={setDepsOpen} machine={target.machine} />
+      ) : null}
 
       <ContextMenu.Root>
         <ContextMenu.Trigger

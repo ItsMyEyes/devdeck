@@ -161,6 +161,8 @@ import {
   fetchGitDiff,
   fetchGitLog,
   fetchGitStatus,
+  fetchLspDeps,
+  installLspDep,
   fetchProjectBranches,
   fetchWorktreeFile,
   fetchWorktreeFiles,
@@ -199,6 +201,7 @@ import {
   type SearchWorktreeFilesOptions,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
+import type { DependencyReport } from '@/lib/machineApi'
 import {
   deleteSSHFile,
   deleteSSHPaths,
@@ -1394,6 +1397,32 @@ export function useWorktreeFiles(machine: Machine, worktreeId: string, path: str
   })
 }
 
+// ---- Language-server dependencies ----
+
+/** Probes which language servers and toolchains exist on `machine`. Disabled
+ *  until the dialog opens: it shells out to every tool for a version string,
+ *  which is far too costly to run on a background interval. */
+export function useLspDeps(machine: Machine, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.lspDeps(machine.id),
+    queryFn: () => fetchLspDeps(machine),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+/** Installs one language server. The response is the refreshed report, so it
+ *  is written straight into the cache rather than triggering a refetch. */
+export function useInstallLspDep(machine: Machine) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (binary: string) => installLspDep(machine, binary),
+    onSuccess: (report: DependencyReport) => {
+      queryClient.setQueryData(qk.lspDeps(machine.id), report)
+    },
+  })
+}
+
 // ---- Worktree git (source control) ----
 
 export function useGitStatus(machine: Machine, worktreeId: string, active: boolean) {
@@ -1642,7 +1671,7 @@ export function useFileTarget(target: FilesTarget, path: string) {
  * Returns download progress alongside the query: these transfers are big
  * enough that a bare spinner reads as a hang.
  */
-export function useFileBytesTarget(target: FilesTarget, path: string) {
+export function useFileBytesTarget(target: FilesTarget, path: string, enabled = true) {
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null)
   const query = useQuery({
     queryKey:
@@ -1657,7 +1686,7 @@ export function useFileBytesTarget(target: FilesTarget, path: string) {
           : await downloadWorktreeFileWithProgress(target.machine, target.worktreeId, path, setProgress)
       return new Uint8Array(await blob.arrayBuffer())
     },
-    enabled: (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
+    enabled: enabled && (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
     staleTime: Infinity,
     gcTime: 30_000,
     refetchOnWindowFocus: false,

@@ -34,6 +34,9 @@ export const qk = {
    *  install-ripgrep mutation invalidate every cached content-search result
    *  for a target regardless of what was last searched. */
   worktreeGrepRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'grep'] as const,
+  /** Machine-scoped, not worktree-scoped: a toolchain belongs to the machine,
+   *  so every worktree on it shares one answer. */
+  lspDeps: (machineId: string) => ['machines', machineId, 'lsp', 'deps'] as const,
   gitRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git'] as const,
   gitStatus: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'status'] as const,
   gitLog: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'log'] as const,

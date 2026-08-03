@@ -655,3 +655,41 @@ export function updateAgentSettingsFile(machine: Machine, agentId: string, conte
     { content },
   )
 }
+
+// ---- Language-server dependencies ----
+
+export interface DependencyStatus {
+  name: string
+  installed: boolean
+  path?: string
+  version?: string
+}
+
+export interface LanguageDependencies {
+  label: string
+  server: DependencyStatus
+  prerequisite: DependencyStatus
+  installable: boolean
+  blocker?: string
+}
+
+export interface DependencyReport {
+  languages: LanguageDependencies[]
+  /** The PATH a language server is actually spawned with. Surfaced because a
+   *  server that resolves fine but cannot reach its own toolchain degrades
+   *  silently rather than failing — see backend/internal/lsp/deps.go. */
+  spawnPath: string
+  os: string
+}
+
+/** Read-only probe of this machine's language servers and toolchains. */
+export function fetchLspDeps(machine: Machine): Promise<DependencyReport> {
+  return machineRequest<DependencyReport>(machine, 'GET', '/lsp/deps')
+}
+
+/** Installs one language server and answers with the refreshed report, so the
+ *  caller renders the new state without a second round trip. Slow by nature —
+ *  `go install` and `npm install -g` take tens of seconds. */
+export function installLspDep(machine: Machine, binary: string): Promise<DependencyReport> {
+  return machineRequest<DependencyReport>(machine, 'POST', '/lsp/deps/install', { binary })
+}

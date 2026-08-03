@@ -319,6 +319,7 @@ func main() {
 	}
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
+	lspDepsH := handler.NewLspDepsHandler(lspSrv.Installer())
 	updater := &selfupdate.Updater{Client: &selfupdate.Client{
 		Owner: selfupdate.Owner,
 		Repo:  selfupdate.Repo,
@@ -432,6 +433,11 @@ func main() {
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
 	mux.HandleFunc("GET /api/tailscale-status", tailscaleStatusH.ServeHTTP)
+	// Deliberately in the shared block, not the hub-only one: each machine
+	// must report its own toolchain, and the hub reaches a runtime's copy
+	// through /api/machines/{id}/proxy/.
+	mux.HandleFunc("GET /api/lsp/deps", lspDepsH.GetDeps)
+	mux.HandleFunc("POST /api/lsp/deps/install", lspDepsH.PostInstall)
 	mux.HandleFunc("POST /api/self/restart", selfH.PostRestart)
 	mux.HandleFunc("POST /api/self/stop", selfH.PostStop)
 	mux.HandleFunc("GET /api/self/version", selfH.GetVersion)
