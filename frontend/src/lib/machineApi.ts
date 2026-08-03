@@ -693,3 +693,21 @@ export function fetchLspDeps(machine: Machine): Promise<DependencyReport> {
 export function installLspDep(machine: Machine, binary: string): Promise<DependencyReport> {
   return machineRequest<DependencyReport>(machine, 'POST', '/lsp/deps/install', { binary })
 }
+
+export interface TraceEntry {
+  seq: number
+  at: string
+  kind: string
+  detail: string
+  worktree?: string
+}
+
+/** What DevDeck actually told each language server: spawn root, initialize
+ *  params, and every document opened or closed. */
+export function fetchLspTrace(machine: Machine): Promise<{ entries: TraceEntry[] }> {
+  return machineRequest<{ entries: TraceEntry[] }>(machine, 'GET', '/lsp/trace')
+}
+
+export function clearLspTrace(machine: Machine): Promise<{ entries: TraceEntry[] }> {
+  return machineRequest<{ entries: TraceEntry[] }>(machine, 'DELETE', '/lsp/trace')
+}

@@ -37,6 +37,7 @@ export const qk = {
   /** Machine-scoped, not worktree-scoped: a toolchain belongs to the machine,
    *  so every worktree on it shares one answer. */
   lspDeps: (machineId: string) => ['machines', machineId, 'lsp', 'deps'] as const,
+  lspTrace: (machineId: string) => ['machines', machineId, 'lsp', 'trace'] as const,
   gitRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git'] as const,
   gitStatus: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'status'] as const,
   gitLog: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'git', 'log'] as const,

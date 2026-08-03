@@ -158,6 +158,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("lsp: started %s for worktree %s (%s)", spec.binary, worktreeID, root)
+	globalTracer.record("spawn", worktreeID, "%s cwd=%s rootUri=%s", spec.binary, root, rootURI)
 	go logStderr(spec.binary, worktreeID, stderr)
 
 	serverDone := make(chan error, 1)
@@ -166,7 +167,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		cancel()
 	}()
 
-	clientErr := forwardClient(ctx, conn, stdin)
+	clientErr := forwardClient(ctx, worktreeID, conn, stdin)
 	cancel()
 	_ = stdin.Close()
 	serverErr := <-serverDone
@@ -235,7 +236,7 @@ func resolveWorktreeRoot(projectPath, worktreeID string, root bool, branch strin
 	return resolved, nil
 }
 
-func forwardClient(ctx context.Context, conn *websocket.Conn, dst io.Writer) error {
+func forwardClient(ctx context.Context, worktreeID string, conn *websocket.Conn, dst io.Writer) error {
 	for {
 		messageType, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -244,6 +245,9 @@ func forwardClient(ctx context.Context, conn *websocket.Conn, dst io.Writer) err
 		if messageType != websocket.MessageText || !json.Valid(payload) {
 			return errors.New("LSP messages must be JSON text")
 		}
+		// Records only the session-shaping messages (initialize, didOpen,
+		// didClose) — see trace.go for why those are the ones that matter.
+		recordClientMessage(worktreeID, payload)
 		if err := writeFrame(dst, payload); err != nil {
 			return err
 		}

@@ -161,7 +161,9 @@ import {
   fetchGitDiff,
   fetchGitLog,
   fetchGitStatus,
+  clearLspTrace,
   fetchLspDeps,
+  fetchLspTrace,
   installLspDep,
   fetchProjectBranches,
   fetchWorktreeFile,
@@ -1420,6 +1422,25 @@ export function useInstallLspDep(machine: Machine) {
     onSuccess: (report: DependencyReport) => {
       queryClient.setQueryData(qk.lspDeps(machine.id), report)
     },
+  })
+}
+
+/** Polls while the dialog is open so a reproduction shows up without the user
+ *  having to press refresh. */
+export function useLspTrace(machine: Machine, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.lspTrace(machine.id),
+    queryFn: () => fetchLspTrace(machine),
+    enabled,
+    refetchInterval: enabled ? 2000 : false,
+  })
+}
+
+export function useClearLspTrace(machine: Machine) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => clearLspTrace(machine),
+    onSuccess: (data) => queryClient.setQueryData(qk.lspTrace(machine.id), data),
   })
 }
 

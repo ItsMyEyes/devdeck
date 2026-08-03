@@ -438,6 +438,8 @@ func main() {
 	// through /api/machines/{id}/proxy/.
 	mux.HandleFunc("GET /api/lsp/deps", lspDepsH.GetDeps)
 	mux.HandleFunc("POST /api/lsp/deps/install", lspDepsH.PostInstall)
+	mux.HandleFunc("GET /api/lsp/trace", lspDepsH.GetTrace)
+	mux.HandleFunc("DELETE /api/lsp/trace", lspDepsH.DeleteTrace)
 	mux.HandleFunc("POST /api/self/restart", selfH.PostRestart)
 	mux.HandleFunc("POST /api/self/stop", selfH.PostStop)
 	mux.HandleFunc("GET /api/self/version", selfH.GetVersion)

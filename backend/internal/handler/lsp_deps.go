@@ -30,6 +30,23 @@ func (h *LspDepsHandler) GetDeps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, lsp.Report())
 }
 
+// GetTrace returns what DevDeck actually told each language server this
+// session: the spawn root, the initialize params, and every document opened
+// or closed. It answers the one question a dependency list cannot -- a server
+// can be installed and reachable and still be handed a document it cannot
+// place inside the workspace, which it reports as undefined symbols rather
+// than as an error.
+func (h *LspDepsHandler) GetTrace(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"entries": lsp.Trace()})
+}
+
+// DeleteTrace clears the buffer so a fresh reproduction is not read against
+// stale entries.
+func (h *LspDepsHandler) DeleteTrace(w http.ResponseWriter, r *http.Request) {
+	lsp.ResetTrace()
+	writeJSON(w, http.StatusOK, map[string]any{"entries": []lsp.TraceEntry{}})
+}
+
 type installDepRequest struct {
 	Binary string `json:"binary"`
 }

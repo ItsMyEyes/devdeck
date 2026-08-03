@@ -3,7 +3,7 @@ import { Check, CircleDashed, Download, Loader2, RefreshCw, TriangleAlert } from
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { useInstallLspDep, useLspDeps } from '@/features/data/queries'
+import { useClearLspTrace, useInstallLspDep, useLspDeps, useLspTrace } from '@/features/data/queries'
 import type { DependencyStatus, LanguageDependencies } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
@@ -99,6 +99,8 @@ export function DependenciesDialog({
               </div>
             </div>
           ) : null}
+
+          <LspActivity machine={machine} open={open} />
         </>
       )}
 
@@ -183,6 +185,66 @@ function ToolLine({ tool }: { tool: DependencyStatus }) {
         </>
       ) : (
         <span className="text-devdeck-dim-2">not found</span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * What DevDeck actually told the language server, newest last.
+ *
+ * This is the part a dependency list cannot answer. Every tool can be present
+ * and correct and the editor still broken, because the server was handed a
+ * document URI it could not place inside the workspace it was initialized
+ * with — which it reports as undefined symbols, not as an error. Seeing
+ * `rootUri` next to the `didOpen` URIs makes that mismatch obvious: the
+ * documents must sit underneath the root.
+ */
+function LspActivity({ machine, open }: { machine: Machine; open: boolean }) {
+  const trace = useLspTrace(machine, open)
+  const clear = useClearLspTrace(machine)
+  const entries = trace.data?.entries ?? []
+
+  return (
+    <div className="mt-3 rounded-md border border-devdeck-border bg-devdeck-surface-2 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-wide text-devdeck-dim-2">
+          Language server activity
+        </span>
+        <button
+          type="button"
+          onClick={() => clear.mutate()}
+          disabled={clear.isPending || entries.length === 0}
+          className="cursor-pointer font-mono text-[10px] text-devdeck-dim hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
+        >
+          clear
+        </button>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="font-mono text-[10.5px] leading-[1.5] text-devdeck-dim">
+          Nothing yet. Open a source file in this worktree, then look here — the
+          spawn root and every document opened will be listed.
+        </div>
+      ) : (
+        <div className="flex max-h-[168px] flex-col gap-0.5 overflow-y-auto">
+          {entries.map((entry) => (
+            <div key={entry.seq} className="flex gap-2 font-mono text-[10.5px] leading-[1.5]">
+              <span className="flex-none text-devdeck-dim-2">{entry.at}</span>
+              <span
+                className={cn(
+                  'w-[62px] flex-none',
+                  entry.kind === 'initialize' || entry.kind === 'spawn'
+                    ? 'text-devdeck-accent-soft'
+                    : 'text-devdeck-dim',
+                )}
+              >
+                {entry.kind}
+              </span>
+              <span className="min-w-0 break-all text-devdeck-muted-2">{entry.detail}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
