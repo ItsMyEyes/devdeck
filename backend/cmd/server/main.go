@@ -105,6 +105,7 @@ func main() {
 	managedFlag := flag.Bool("managed", managed, "mark this process as supervised by an external respawn loop (set by the Tauri desktop sidecar) — /api/self/restart won't spawn its own replacement, and /api/self/stop will refuse, since the supervisor already owns this process's respawn lifecycle")
 	role := flag.String("role", envOr("DEVDECK_ROLE", config.Pick(cfg.Role, "hub")), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address) (devdeck.yaml: role)")
 	apiKey := flag.String("key", envOr("DEVDECK_KEY", config.Pick(cfg.Key, "")), "static API key; required for --role runtime, optional bearer auth for --role hub (desktop clients) (devdeck.yaml: key)")
+	signInPIN := flag.String("pin", envOr("DEVDECK_PIN", ""), "6-digit sign-in PIN for this runtime's own web UI (--role runtime only); omit to keep the stored PIN, which is generated and logged on first start")
 	hubURL := flag.String("hub-url", envOr("DEVDECK_HUB_URL", config.Pick(cfg.Hub.URL, "")), "hub base URL this runtime should self-register with on startup; empty disables self-registration (devdeck.yaml: hub.url)")
 	hubKey := flag.String("hub-key", envOr("DEVDECK_HUB_KEY", config.Pick(cfg.Hub.Key, "")), "hub's bearer key, used to authenticate this runtime's self-registration call; required if --hub-url is set (devdeck.yaml: hub.key)")
 	publicURL := flag.String("public-url", envOr("DEVDECK_PUBLIC_URL", config.Pick(cfg.Machine.PublicURL, "")), "this runtime's own reachable URL, advertised to the hub during self-registration (default: http://<--addr>) (devdeck.yaml: machine.public_url)")
@@ -230,6 +231,31 @@ func main() {
 	if *turnstileSiteKey != "" {
 		authH.SetTurnstile(service.NewTurnstileVerifier(*turnstileSiteKey, *turnstileSecretKey), proxyNets, *clientIPHeader)
 		log.Printf("auth: Cloudflare Turnstile enabled for login")
+	}
+
+	// The sign-in PIN is a runtime-only credential: it exists so an operator
+	// can get into a runtime's own web UI without pasting the runtime key,
+	// and a hub authenticates its operators with password + TOTP instead.
+	var pinSvc *service.PINService
+	if isRuntime {
+		pinSvc = service.NewPINService(st)
+		if *signInPIN != "" {
+			if err := pinSvc.Set(*signInPIN); err != nil {
+				log.Fatalf("--pin: %v", err)
+			}
+			log.Printf("auth: sign-in PIN set from --pin")
+		} else if generated, err := pinSvc.EnsureSeeded(); err != nil {
+			log.Fatalf("sign-in pin: %v", err)
+		} else if generated != "" {
+			// Printed once, at the only moment it is recoverable: the stored
+			// form is a bcrypt hash. Mirrors how the runtime key is already
+			// visible to anyone who can read this process's argv. Deliberately
+			// carries no URL — --addr may still be port 0 here, with the real
+			// port assigned when the listener binds much further down.
+			log.Printf("auth: generated sign-in PIN %s — enter it on this runtime's /runtime-sign-in page; change it from the hub's Runtimes page or this runtime's settings", generated)
+		}
+	} else if *signInPIN != "" {
+		log.Printf("auth: warning: --pin is ignored on --role %s; the sign-in PIN only applies to a runtime's own web UI", *role)
 	}
 
 	if !isRuntime {
@@ -378,16 +404,30 @@ func main() {
 			mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
 		}
 	} else {
-		// Runtimes have no password/TOTP flow: possession of --key is the
-		// entire authorization, exchanged here for a session cookie so the
-		// runtime's own web UI works in a browser.
+		// Runtimes have no password/TOTP flow. --key remains the whole
+		// machine-to-machine authorization (it is what the hub proxies with),
+		// but a human is not expected to paste 64 hex characters into a phone:
+		// the browser sign-in page takes a 6-digit PIN instead, exchanged
+		// below for the same session cookie the key would have minted.
 		authH.SetDesktopKey(*apiKey)
 		authH.SetSessionSameSite(http.SameSiteLaxMode)
 		authH.SetSessionMaxAge(12 * time.Hour)
+		authH.SetClientIPResolution(proxyNets, *clientIPHeader)
 		mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
+		mux.HandleFunc("POST /api/auth/pin-session", authH.PostPINSession)
 		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
 		mux.HandleFunc("GET /api/auth/me", authH.GetMe)
 	}
+
+	// Registered on every role, but backed by a PIN service only on a runtime
+	// (SetPINService(nil) elsewhere, which makes both handlers answer a clean
+	// 404). A hub operator can point the "Set sign-in PIN" action at any
+	// machine in the registry — including a --role both process that is this
+	// hub — and an unregistered route would fall through to the SPA handler
+	// and answer HTML, which the client cannot parse into an error.
+	authH.SetPINService(pinSvc)
+	mux.HandleFunc("GET /api/auth/pin", authH.GetPIN)
+	mux.HandleFunc("PUT /api/auth/pin", authH.PutPIN)
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
@@ -671,7 +711,9 @@ func main() {
 	}
 	root = handler.AccessLog(proxyNets, *clientIPHeader)(root)
 
-	listener, err := net.Listen("tcp", *addr)
+	// Retried rather than bound outright: during a restart this process races
+	// the one it replaces for the port. See listenRetryWindow.
+	listener, err := listenWithRetry("tcp", *addr, listenRetryWindow)
 	if err != nil {
 		log.Fatalf("listen on %s: %v", *addr, err)
 	}
@@ -748,22 +790,36 @@ func main() {
 // opt-in (empty addr = disabled) since they're separate TCP listeners
 // with their own auth, not routes on the main API mux.
 func startForwardProxies(socks5Addr, httpProxyAddr, proxyKey string) {
+	// Both bind through listenWithRetry for the same reason the main listener
+	// does: a restart overlaps the process being replaced, and these ports are
+	// held just as long as the main one. Losing that race here is fatal to the
+	// whole server, not just the proxy, so a configured proxy would otherwise
+	// re-break every restart. Binding happens here rather than inside the
+	// goroutine so a real conflict is reported before startup continues.
 	if socks5Addr != "" {
+		ln, err := listenWithRetry("tcp", socks5Addr, listenRetryWindow)
+		if err != nil {
+			log.Fatalf("socks5 proxy on %s: %v", socks5Addr, err)
+		}
 		go func() {
-			if err := netproxy.NewSOCKS5Server(proxyKey).ListenAndServe(socks5Addr); err != nil {
+			if err := netproxy.NewSOCKS5Server(proxyKey).Serve(ln); err != nil {
 				log.Fatalf("socks5 proxy on %s: %v", socks5Addr, err)
 			}
 		}()
-		log.Printf("socks5 proxy listening on %s", socks5Addr)
+		log.Printf("socks5 proxy listening on %s", ln.Addr())
 	}
 	if httpProxyAddr != "" {
+		ln, err := listenWithRetry("tcp", httpProxyAddr, listenRetryWindow)
+		if err != nil {
+			log.Fatalf("http proxy on %s: %v", httpProxyAddr, err)
+		}
 		go func() {
-			srv := &http.Server{Addr: httpProxyAddr, Handler: netproxy.NewHTTPProxyHandler(proxyKey)}
-			if err := srv.ListenAndServe(); err != nil {
+			srv := &http.Server{Handler: netproxy.NewHTTPProxyHandler(proxyKey)}
+			if err := srv.Serve(ln); err != nil {
 				log.Fatalf("http proxy on %s: %v", httpProxyAddr, err)
 			}
 		}()
-		log.Printf("http proxy listening on %s", httpProxyAddr)
+		log.Printf("http proxy listening on %s", ln.Addr())
 	}
 }
 

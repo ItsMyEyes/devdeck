@@ -1,0 +1,39 @@
+---
+title: Your first account
+description: Register, and set up 2FA if it's enabled.
+icon: UserRound
+---
+
+A fresh DevDeck instance has no accounts yet, so the first thing you'll see
+is a login screen with nowhere to go but **Register**.
+
+## Register
+
+Enter an email and a password (12 characters minimum). What happens next
+depends on whether **2FA** is turned on for the instance you're connecting
+to — 2FA (two-factor authentication) is an extra "prove it's really you"
+step using an app on your phone, on top of your password:
+
+- **2FA off** — you're logged in right away, no extra steps.
+- **2FA on** (the default for hub/runtime builds) — you're sent to a **set
+  up 2FA** screen:
+  1. Open an authenticator app on your phone (Google Authenticator, Authy,
+     1Password, and similar all work) and scan the QR code shown.
+  2. Type the 6-digit code the app generates, to confirm it worked.
+  3. Save the one-time **backup codes** shown on screen — see below.
+
+<Callout title="Save your backup codes" type="warn">
+  You won't see these codes again after this screen. They're your only way
+  back in if you ever lose your phone or your authenticator app — without
+  them, nobody can self-service recover a locked-out account.
+</Callout>
+
+From then on, logging in is a two-step form: email and password first, then
+the 6-digit code (or one of your backup codes if you don't have the app on
+hand).
+
+## Where you land
+
+Either way, you land on the home screen. Since you don't have a workspace
+yet, it shows an onboarding screen prompting you to create one — continue to
+[Workspaces and projects](/docs/getting-started/workspaces-and-projects).

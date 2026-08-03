@@ -42,6 +42,18 @@ export function deleteSSHPaths(connectionId: string, paths: readonly string[]): 
   return request<void>('POST', `/ssh/connections/${connectionId}/files/delete`, { paths })
 }
 
+export function mkdirSSHFolder(connectionId: string, path: string): Promise<SSHFileEntry> {
+  return request<SSHFileEntry>('POST', `/ssh/connections/${connectionId}/files/mkdir`, { path })
+}
+
+export function moveSSHFile(connectionId: string, from: string, to: string): Promise<SSHFileEntry> {
+  return request<SSHFileEntry>('POST', `/ssh/connections/${connectionId}/files/move`, { from, to })
+}
+
+export function copySSHFile(connectionId: string, from: string, to: string): Promise<SSHFileEntry> {
+  return request<SSHFileEntry>('POST', `/ssh/connections/${connectionId}/files/copy`, { from, to })
+}
+
 export interface SearchSSHFilesOptions {
   includeDirs?: boolean
 }

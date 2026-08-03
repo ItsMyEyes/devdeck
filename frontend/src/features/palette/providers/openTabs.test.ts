@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { openTabItems } from '@/features/palette/providers/openTabs'
+import { TAB_KIND_ICON } from '@/features/tabs/tabIcons'
 import type { TileTab, WorkspaceTileLayout } from '@/features/tabs/tileTree'
 
 const resolve = (tab: TileTab) => ({ title: tab.id, subtitle: tab.kind })
@@ -43,6 +44,16 @@ describe('openTabItems', () => {
   it('puts every item in the open group with kind open-tab', () => {
     const items = openTabItems(layout(), resolve, () => {})
     expect(items.every((i) => i.group === 'open' && i.kind === 'open-tab')).toBe(true)
+  })
+
+  it('gives every row the icon of the menu its tab belongs to', () => {
+    const items = openTabItems(layout(), resolve, () => {})
+    expect(items.map((i) => i.icon)).toEqual([
+      TAB_KIND_ICON.agents,
+      TAB_KIND_ICON.browser,
+      TAB_KIND_ICON['ssh-shell'],
+    ])
+    expect(items.every((i) => i.icon !== undefined)).toBe(true)
   })
 
   it('marks the active tab of each leaf', () => {

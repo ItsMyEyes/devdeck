@@ -3,7 +3,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame } from '@/lib/terminalClient'
 import { sshShellWsUrl } from '@/lib/sshClient'
-import { isQuickOpenShortcut, TERMINAL_THEME } from '@/features/terminal/Terminal'
+import { isAppShortcut, TERMINAL_THEME } from '@/features/terminal/Terminal'
+import { createTerminalWriter, type TerminalWriter } from '@/features/terminal/terminalWriter'
 
 /**
  * Module-level (not React-owned) registry of live SSH shell sessions, keyed
@@ -22,6 +23,10 @@ interface SSHSession {
   term: XTerm
   fit: FitAddon
   ws: WebSocket | null
+  /** Bounds how much unparsed output is held for `term` — a remote command
+   *  producing more than the renderer can keep up with otherwise grows
+   *  xterm's internal buffer without limit. See terminalWriter.ts. */
+  writer: TerminalWriter
 }
 
 const sessions = new Map<string, SSHSession>()
@@ -32,8 +37,8 @@ function connect(session: SSHSession, connectionId: string) {
   socket.binaryType = 'arraybuffer'
   session.ws = socket
   socket.onmessage = (ev) => {
-    if (typeof ev.data === 'string') term.write(ev.data)
-    else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
+    if (typeof ev.data === 'string') session.writer.write(ev.data)
+    else if (ev.data instanceof ArrayBuffer) session.writer.write(new Uint8Array(ev.data))
   }
   socket.onclose = () => {
     if (session.ws !== socket) return
@@ -58,12 +63,14 @@ function createSession(connectionId: string): SSHSession {
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.loadAddon(new WebLinksAddon())
-  // See Terminal.tsx's isQuickOpenShortcut doc comment: without this, Ctrl/Cmd+P
+  // See Terminal.tsx's isAppShortcut doc comment: without this, Ctrl/Cmd+P
   // never reaches SSHShellPane's window-level quick-open shortcut while the
   // terminal has focus — xterm swallows it as its own "send DLE" binding.
-  term.attachCustomKeyEventHandler((event) => !isQuickOpenShortcut(event))
+  // Ctrl/Cmd+K rides the same escape hatch so the command palette opens from
+  // inside an SSH shell too.
+  term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
 
-  const session: SSHSession = { term, fit, ws: null }
+  const session: SSHSession = { term, fit, ws: null, writer: createTerminalWriter(term) }
 
   term.onData((data) => {
     if (session.ws && session.ws.readyState === WebSocket.OPEN) {
@@ -114,6 +121,7 @@ export function disposeSSHSession(sessionKey: string) {
   const session = sessions.get(sessionKey)
   if (!session) return
   sessions.delete(sessionKey)
+  session.writer.dispose()
   if (session.ws) {
     session.ws.onclose = null
     session.ws.onmessage = null

@@ -122,6 +122,53 @@ func (h *SSHFileHandler) Write(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, content)
 }
 
+func (h *SSHFileHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	entry, err := h.svc.Mkdir(r.Context(), r.PathValue("id"), body.Path)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *SSHFileHandler) Move(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	entry, err := h.svc.Move(r.Context(), r.PathValue("id"), body.From, body.To)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *SSHFileHandler) Copy(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	entry, err := h.svc.Copy(r.Context(), r.PathValue("id"), body.From, body.To)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
 func (h *SSHFileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, h.svc.Delete(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))) {
 		return

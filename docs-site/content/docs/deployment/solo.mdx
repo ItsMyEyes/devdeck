@@ -1,0 +1,24 @@
+---
+title: Solo, one computer
+description: The simplest setup — one process, one machine, --role both.
+icon: Laptop
+---
+
+The simplest correct setup for a single operator working on a single
+computer: one process does the organizational bookkeeping *and* the actual
+git/terminal/editor work, and registers itself as a Machine automatically
+the moment it starts.
+
+```bash
+./devdeck-runtime-<platform> --role both --key <any-secret-string> --db devdeck.db
+```
+
+On startup it registers itself (marked "local"), so the **New project**
+machine dropdown already has an option the instant you open it — nothing
+else to configure. Everything else about it — the routes, the login, the
+UI — is identical to any other setup.
+
+<Callout title="Using the desktop app instead?">
+  Its "Host locally on this device" option does exactly this for you,
+  automatically — see [Desktop app](/docs/deployment/desktop-app).
+</Callout>

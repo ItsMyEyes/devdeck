@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { cn } from '@/lib/utils'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
@@ -25,7 +25,8 @@ export function TabStripPopoverMenu({
   children,
 }: TabStripPopoverMenuProps) {
   const [open, setOpen] = useState(false)
-  useNativeOverlayBlocker(open)
+  const popupRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open, popupRef)
 
   return (
     <Popover.Root onOpenChange={setOpen}>
@@ -35,6 +36,7 @@ export function TabStripPopoverMenu({
       <Popover.Portal>
         <Popover.Positioner side="bottom" align={align} sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
           <Popover.Popup
+            ref={popupRef}
             className={cn(
               'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
               'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',

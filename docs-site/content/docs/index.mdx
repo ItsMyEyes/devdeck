@@ -1,37 +1,53 @@
 ---
 title: Introduction
-description: What DevDeck is and what this guide covers.
+description: What DevDeck is, and where to start.
+icon: BookOpen
 ---
 
-DevDeck is a multi-project dashboard for coding agents: one operator running
-many companies' worth of work from a single pane of glass. It pairs git
-worktrees with real terminals, so every branch an agent (or you) touches gets
-its own isolated checkout, its own live PTY, and its own tiling workspace of
-terminal/editor/file-explorer/git panes.
+DevDeck is a dashboard for running coding agents (like Claude Code or Codex)
+across several client codebases at once, without juggling terminal windows
+or losing track of what's running where.
 
-Under the hood it's a Go backend (SQLite + WebSocket PTYs) and a React
-single-page app. You can run it as a single self-contained process on one
-machine, or split the "organizational data" and "execution" halves across a
-hub and one or more runtime machines — see [Deployment
-modes](/docs/deployment-modes).
+In plain terms: for every task, DevDeck gives you an isolated copy of your
+project's code (called a **worktree**) and a real, live terminal to run an
+agent in — side by side with a file editor and a git panel, all in one
+browser tab. Open five tasks and you get five independent terminals, five
+independent copies of the code, and nothing ever collides.
 
-## What this guide covers
-
-This is a step-by-step walkthrough from installing DevDeck to your first
-agent worktree, then a tour of the rest of the app:
-
-1. [Installation](/docs/installation) — get a build running
-2. [Your first account](/docs/first-account) — register and (maybe) set up 2FA
-3. [Workspaces and projects](/docs/workspaces-and-projects) — organize your work
-4. [Your first worktree](/docs/first-worktree) — spawn an agent
-5. [Working inside a worktree](/docs/working-in-a-worktree) — the tiling pane workspace
-6. [Issues](/docs/issues) — the built-in kanban tracker
-7. [Agent management](/docs/agent-management) — configure the agent CLIs themselves
-8. [Tools](/docs/tools) — document conversion and everyday dev utilities
-9. [Deployment modes](/docs/deployment-modes) — hub, runtime, and desktop
-10. [Troubleshooting](/docs/troubleshooting)
+You can run it as a single program on your own laptop, or spread it across
+several machines if you need more horsepower — see [Deployment](/docs/deployment)
+once you're past the basics.
 
 <Callout title="Coming from source?">
-  This guide covers installing pre-built releases. If you're building DevDeck
-  from source to contribute, see `TUTORIAL.md` in the repository instead.
+  This guide covers installing pre-built releases. If you're building
+  DevDeck from source to contribute code, see `TUTORIAL.md` in the
+  repository instead.
 </Callout>
+
+## Where to start
+
+New to DevDeck? Follow these in order — each one picks up exactly where the
+last left off.
+
+<Cards>
+  <Card
+    href="/docs/getting-started/installation"
+    title="Getting Started"
+    description="Install DevDeck, create your account, and spawn your first agent worktree."
+  />
+  <Card
+    href="/docs/using-devdeck/working-in-a-worktree"
+    title="Using DevDeck"
+    description="A tour of the day-to-day: the worktree workspace, issues, agent config, and tools."
+  />
+  <Card
+    href="/docs/deployment"
+    title="Deployment"
+    description="Running solo, splitting work across machines, or using the desktop app."
+  />
+  <Card
+    href="/docs/troubleshooting"
+    title="Troubleshooting"
+    description="Quick fixes for the problems people actually run into."
+  />
+</Cards>

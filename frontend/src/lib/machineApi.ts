@@ -103,6 +103,18 @@ export function deleteWorktreeFile(machine: Machine, worktreeId: string, path: s
   return machineRequest<void>(machine, 'DELETE', `/worktrees/${worktreeId}/file?path=${encodeURIComponent(path)}`)
 }
 
+export function mkdirWorktreeFolder(machine: Machine, worktreeId: string, path: string): Promise<WorktreeFileEntry> {
+  return machineRequest<WorktreeFileEntry>(machine, 'POST', `/worktrees/${worktreeId}/files/mkdir`, { path })
+}
+
+export function moveWorktreeFile(machine: Machine, worktreeId: string, from: string, to: string): Promise<WorktreeFileEntry> {
+  return machineRequest<WorktreeFileEntry>(machine, 'POST', `/worktrees/${worktreeId}/files/move`, { from, to })
+}
+
+export function copyWorktreeFile(machine: Machine, worktreeId: string, from: string, to: string): Promise<WorktreeFileEntry> {
+  return machineRequest<WorktreeFileEntry>(machine, 'POST', `/worktrees/${worktreeId}/files/copy`, { from, to })
+}
+
 export function uploadWorktreeFileWithProgress(
   machine: Machine,
   worktreeId: string,
@@ -378,6 +390,26 @@ export interface CreateFsFolderResponse {
 
 export function createFsFolder(machine: Machine, body: CreateFsFolderBody): Promise<CreateFsFolderResponse> {
   return machineRequest<CreateFsFolderResponse>(machine, 'POST', '/fs/mkdir', body)
+}
+
+// ---- Runtime sign-in PIN ----
+//
+// The hub reaches these with the runtime's own key (machineClient injects it
+// direct, or MachineProxyHandler does server-side), which is exactly the
+// authority the runtime requires to rotate its PIN. The PIN is never readable
+// back — only whether one is set.
+
+export interface MachinePinStatus {
+  configured: boolean
+  length: number
+}
+
+export function fetchMachinePinStatus(machine: Machine): Promise<MachinePinStatus> {
+  return machineRequest<MachinePinStatus>(machine, 'GET', '/auth/pin')
+}
+
+export function updateMachinePin(machine: Machine, pin: string): Promise<void> {
+  return machineRequest<void>(machine, 'PUT', '/auth/pin', { pin })
 }
 
 // ---- Forward proxy (on-demand SOCKS5/HTTP, for the machine-proxied Browser tab) ----

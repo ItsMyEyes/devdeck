@@ -1,32 +1,114 @@
 ---
 title: Troubleshooting
 description: Common issues and fixes.
+icon: LifeBuoy
 ---
 
-- **A worktree opens to a plain shell instead of an agent.** The agent CLI
-  you picked isn't on the server process's `$PATH`. Install it, or pick a
-  different agent.
-- **Tools page shows an error for a conversion.** The underlying conversion
-  CLI isn't installed on the server — the error message includes the exact
-  install command.
-- **Lost your 2FA device.** Use one of the one-time backup codes shown at
-  enrollment. If you don't have those either, there's no self-service
-  recovery — it requires direct database access to clear the account's TOTP
-  secret.
-- **A registered machine shows offline.** The hub polls that machine's
-  health endpoint with a short timeout — check the runtime process is
-  actually running and reachable at the URL you registered it with, and
-  that both machines are on the same tailnet if you're not on `127.0.0.1`.
-- **New project's machine dropdown is empty.** A brand-new hub has no
-  registered Machines yet — see [Deployment modes](/docs/deployment-modes).
-  The fastest fix is running with `--role both`, or the desktop app's "Host
-  locally" option, which registers itself automatically.
-- **Pasting a connection string fails immediately.** The hub verifies the
-  URL/key against the runtime's own API before registering it —
-  "unreachable" means the URL isn't actually reachable from the hub, and a
-  rejected key means it doesn't match that runtime's own key.
-- **Desktop app shows "⚠ Runtime not registered" instead of "Change
-  Hub…".** This device couldn't self-register as a runtime with the hub
-  you connected to — click the menu item for the reason and log path. Most
-  commonly, Tailscale isn't installed or this device isn't joined to a
-  tailnet; browsing the hub itself is unaffected either way.
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+Click a problem below to see the fix. If yours isn't listed, the
+[Deployment](/docs/deployment) and [Installation](/docs/getting-started/installation)
+pages cover the underlying concepts in more detail.
+
+## Installation and the desktop app
+
+<Accordions>
+<Accordion title="macOS says the desktop app is damaged and can't be opened">
+
+The release bundle isn't notarized (Apple's official "verified publisher"
+check), so Gatekeeper blocks it once your browser quarantines the download
+— it isn't actually damaged. Run this, then launch it again:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/DevDeck.app
+```
+
+See [Installation](/docs/getting-started/installation#first-launch-on-macos-and-windows)
+for the full explanation.
+
+</Accordion>
+<Accordion title="Desktop app opens but stays stuck loading, or can't reach its own server">
+
+On macOS, this is the same quarantine problem applied to the bundled server
+binary inside the app — clearing quarantine on the app *without* the `-r`
+flag leaves that inner binary blocked. Re-run the command above with `-dr`.
+
+</Accordion>
+<Accordion title='Desktop app shows "⚠ Runtime not registered" instead of "Change Hub…"'>
+
+This device couldn't register itself as a runtime with the hub you
+connected to — click the menu item for the exact reason and the log path.
+Most commonly, Tailscale isn't installed or this device isn't joined to a
+tailnet; browsing the hub itself still works fine either way.
+
+</Accordion>
+</Accordions>
+
+## Account and login
+
+<Accordions>
+<Accordion title="I lost my 2FA device">
+
+Use one of the one-time backup codes you were shown when you set up 2FA.
+If you don't have those either, there's no self-service recovery — it
+requires direct database access to clear the account's 2FA secret.
+
+</Accordion>
+<Accordion title="I forgot a runtime's 6-digit sign-in PIN">
+
+It's stored as a hash and can't be read back, so set a new one instead —
+from the hub's **Runtimes** page (the key-icon button on that machine's
+row). If the hub is also unavailable, restart the runtime with a
+`--pin` flag followed by 6 digits, e.g. `--pin 123456`.
+
+</Accordion>
+<Accordion title='Runtime sign-in says "too many attempts, retry in …"'>
+
+That's a brute-force lockout, not a broken PIN: 5 wrong tries from one
+client earns a 1-minute lockout, doubling with each further burst up to
+15 minutes — while it's active, even the *correct* PIN is refused. Wait it
+out, or rotate the PIN from the hub, which clears every lockout in
+progress.
+
+</Accordion>
+</Accordions>
+
+## Machines and projects
+
+<Accordions>
+<Accordion title="A worktree opens to a plain shell instead of an agent">
+
+The agent CLI you picked isn't on the server process's `$PATH`. Install
+it, or pick a different agent from the dropdown.
+
+</Accordion>
+<Accordion title="Tools page shows an error for a conversion">
+
+The underlying conversion program isn't installed on the server — the
+error message includes the exact command to install it.
+
+</Accordion>
+<Accordion title="A registered machine shows offline">
+
+The hub checks that machine's health with a short timeout. Confirm the
+runtime process is actually running and reachable at the URL you
+registered it with, and that both machines are on the same Tailscale
+tailnet if you're not both on `127.0.0.1`.
+
+</Accordion>
+<Accordion title="New project's machine dropdown is empty">
+
+A brand-new install has no registered Machines yet — see
+[Deployment](/docs/deployment) for how one gets added. The fastest fix is
+running with `--role both`, or the desktop app's "Host locally" option,
+either of which registers itself automatically.
+
+</Accordion>
+<Accordion title="Pasting a connection string fails immediately">
+
+The hub checks the URL and key against the runtime's own API before
+registering it. "Unreachable" means the URL genuinely isn't reachable from
+the hub; a rejected key means it doesn't match that runtime's own key.
+
+</Accordion>
+</Accordions>

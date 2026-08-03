@@ -1,0 +1,79 @@
+---
+title: Hub + runtime machines
+description: Split organizational data from execution across several machines.
+icon: Network
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Register a second machine when you want more CPU, a different operating
+system, or a machine that's physically closer to a particular repo, to do
+the actual execution work. All git/worktree/terminal/language-server
+activity for a project assigned to that machine happens there; the **hub**
+(the main machine) only keeps the organizational data and pulls everything
+together into one UI.
+
+## Connecting a runtime
+
+From the hub's **Machines** page → **Add Runtime**, there are two ways to
+connect one:
+
+<Tabs items={['Self-register command', 'Paste a connection string']}>
+<Tab value="Self-register command">
+
+The dialog shows a ready-to-run command with a generated key and the hub's
+own URL already filled in. Run it on the target machine and it registers
+itself the moment it starts — nothing to type on the hub side.
+
+</Tab>
+<Tab value="Paste a connection string">
+
+For a runtime that's already running, paste one `name|url|key` line into
+the hub. The hub checks it immediately against the runtime's own API
+before saving anything — so a wrong key or an unreachable URL fails right
+away, instead of silently adding a machine that doesn't actually work.
+
+</Tab>
+</Tabs>
+
+Either way, the machine then shows up on the Machines page and becomes
+selectable in **New project**. Once the hub and a runtime are on different
+physical machines, they both need to be on the same Tailscale tailnet (a
+private network Tailscale sets up between your devices) to reach each
+other.
+
+## Signing in directly to a runtime
+
+Every runtime serves its own copy of the web UI at its own address, and
+keeps a read-only copy of its slice of the hub's data — so it keeps working
+for its assigned projects even if the hub itself goes down. You can sign
+into a runtime's own UI two ways:
+
+<Tabs items={['6-digit PIN', 'Sign in via hub']}>
+<Tab value="6-digit PIN">
+
+Always works, even with the hub completely unreachable, since it's only
+checked against this one runtime process. The runtime makes up a PIN the
+first time it starts and prints it to its log; you can set your own with
+`--pin`, from the hub's **Runtimes** page (the key icon on a machine's
+row), or from the runtime's own sidebar key button.
+
+<Callout title="Not the same as --key">
+  This PIN is just for humans signing in through the browser. It's separate
+  from the runtime's `--key`, which stays the private credential the hub
+  uses to talk to it machine-to-machine.
+</Callout>
+
+Because six digits is short, the server rate-limits guesses: 5 wrong tries
+from one client earns a 1-minute lockout, doubling with each further burst
+up to 15 minutes. Setting a new PIN clears any lockout in progress.
+
+</Tab>
+<Tab value="Sign in via hub">
+
+Shown once the runtime has self-registered. Click it and the hub (using
+your already-logged-in hub session) mints a short-lived signed link and
+sends you straight to the runtime, signed in — nothing to type.
+
+</Tab>
+</Tabs>

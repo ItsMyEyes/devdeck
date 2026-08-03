@@ -575,6 +575,35 @@ export function fetchWhoami(): Promise<Whoami> {
   return request<Whoami>('GET', '/whoami')
 }
 
+// ---- Runtime sign-in PIN ----
+//
+// A runtime's own web UI signs in with a 6-digit PIN rather than the runtime
+// key: the key stays the machine-to-machine credential the hub proxies with,
+// but nobody wants to type 64 hex characters on a phone. These routes only
+// exist on a --role runtime process; on the hub they answer 404.
+
+export interface PinStatus {
+  configured: boolean
+  length: number
+}
+
+/** POST /api/auth/pin-session — the runtime's entire browser sign-in. Rejects
+ *  with 429 while the server-side lockout is in force. */
+export function postPinSession(pin: string): Promise<void> {
+  return request<void>('POST', '/auth/pin-session', { pin })
+}
+
+/** GET /api/auth/pin — whether a PIN is set. The PIN itself is stored as a
+ *  bcrypt hash and can never be read back. */
+export function fetchPinStatus(): Promise<PinStatus> {
+  return request<PinStatus>('GET', '/auth/pin')
+}
+
+/** PUT /api/auth/pin — set or rotate this process's sign-in PIN. */
+export function updatePin(pin: string): Promise<void> {
+  return request<void>('PUT', '/auth/pin', { pin })
+}
+
 // ---- Tools ----
 
 export interface MarkitdownResult {

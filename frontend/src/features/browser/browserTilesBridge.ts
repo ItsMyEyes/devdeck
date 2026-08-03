@@ -24,7 +24,9 @@ export function browserTileLabel(tabId: string, docId: string): string {
 }
 
 export function openBrowserTile(tabId: string, docId: string, proxyUrl: string, initialUrl: string): Promise<void> {
-  labelRegistry.set(browserTileLabel(tabId, docId), { tabId, docId })
+  const key = browserTileLabel(tabId, docId)
+  labelRegistry.set(key, { tabId, docId })
+  hiddenLabels.delete(key)
   return invoke('browser_tile_open', { tabId, docId, proxyUrl, initialUrl })
 }
 
@@ -46,6 +48,10 @@ export function goBackBrowserTile(tabId: string, docId: string): Promise<void> {
 
 export function goForwardBrowserTile(tabId: string, docId: string): Promise<void> {
   return invoke('browser_tile_forward', { tabId, docId })
+}
+
+export function setZoomBrowserTile(tabId: string, docId: string, scale: number): Promise<void> {
+  return invoke('browser_tile_set_zoom', { tabId, docId, scale })
 }
 
 /** Bounds in flight to Rust, and the latest bounds superseding it, keyed by
@@ -76,17 +82,59 @@ export function setBrowserTileBounds(tabId: string, docId: string, bounds: Brows
   })()
 }
 
+/** Labels currently known to be hidden, so a redundant hide never reaches
+ *  Rust. `BrowserTile`'s occlusion effect re-runs on every change to
+ *  `nativeOverlayBlockers`, and a blocker using `useNativeOverlayBlocker`'s
+ *  `live` mode (the tab-drag ghost, whose rect moves by CSS transform and so
+ *  has to be re-measured per animation frame) republishes its rect ~60x a
+ *  second. Without this, a ghost dragged across an open Browser tile fires a
+ *  `browser_tile_hide` IPC round trip every frame, each one taking the global
+ *  `BrowserTiles` mutex — the exact IPC storm the `scheduleShow` coalescing
+ *  on the other side of the effect exists to avoid.
+ *
+ *  Only `hide` is safe to skip this way: it carries no arguments, so a second
+ *  identical call is a genuine no-op. `show` carries bounds that may have
+ *  changed since the last one, so it always goes through. */
+const hiddenLabels = new Set<string>()
+
 export function hideBrowserTile(tabId: string, docId: string): Promise<void> {
+  const key = browserTileLabel(tabId, docId)
+  if (hiddenLabels.has(key)) return Promise.resolve()
+  hiddenLabels.add(key)
   return invoke('browser_tile_hide', { tabId, docId })
 }
 
 export function showBrowserTile(tabId: string, docId: string, bounds: BrowserTileBounds): Promise<void> {
+  hiddenLabels.delete(browserTileLabel(tabId, docId))
   return invoke('browser_tile_show', { tabId, docId, ...bounds })
 }
 
 export function closeBrowserTile(tabId: string, docId: string): Promise<void> {
-  labelRegistry.delete(browserTileLabel(tabId, docId))
+  const key = browserTileLabel(tabId, docId)
+  labelRegistry.delete(key)
+  // A recreated webview (machine switch rebuilds one under the same label —
+  // see `BrowserTile`'s `selectMachine`) starts visible, so a stale hidden
+  // flag here would suppress the next legitimate hide.
+  hiddenLabels.delete(key)
   return invoke('browser_tile_close', { tabId, docId })
+}
+
+export interface BrowserTileFindResult {
+  active: number
+  total: number
+}
+
+export function findInBrowserTile(
+  tabId: string,
+  docId: string,
+  query: string,
+  direction: 'next' | 'prev',
+): Promise<BrowserTileFindResult> {
+  return invoke('browser_tile_find', { tabId, docId, query, direction })
+}
+
+export function clearBrowserTileFind(tabId: string, docId: string): Promise<void> {
+  return invoke('browser_tile_find_clear', { tabId, docId })
 }
 
 /** Subscribes to page-load events for every browser-tile webview (Rust's
@@ -94,11 +142,11 @@ export function closeBrowserTile(tabId: string, docId: string): Promise<void> {
  *  the label back up in `labelRegistry` rather than parsing it, since a
  *  regex split would be ambiguous when either id contains a hyphen. */
 export function onBrowserTilePageLoad(
-  callback: (info: { tabId: string; docId: string; url: string }) => void,
+  callback: (info: { tabId: string; docId: string; url: string; loading: boolean }) => void,
 ): Promise<() => void> {
-  return listen<{ label: string; url: string }>('browser-tile-page-load', (event) => {
+  return listen<{ label: string; url: string; loading: boolean }>('browser-tile-page-load', (event) => {
     const ids = labelRegistry.get(event.payload.label)
-    if (ids) callback({ ...ids, url: event.payload.url })
+    if (ids) callback({ ...ids, url: event.payload.url, loading: event.payload.loading })
   })
 }
 

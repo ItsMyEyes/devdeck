@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use browser_tiles::BrowserTiles;
 use tauri::menu::{Menu, SubmenuBuilder};
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -79,9 +80,19 @@ pub fn run() {
             if !webview.label().starts_with("browser-") {
                 return;
             }
+            // Previously fired this same event for both Started and
+            // Finished, so `loading` flipped back to false almost
+            // immediately after every navigation — the toolbar's
+            // Reload<->Stop icon swap (chrome-replication design spec
+            // §3.3) depends on this actually distinguishing the two.
+            let loading = matches!(payload.event(), PageLoadEvent::Started);
             let _ = webview.emit(
                 "browser-tile-page-load",
-                serde_json::json!({ "label": webview.label(), "url": payload.url().to_string() }),
+                serde_json::json!({
+                    "label": webview.label(),
+                    "url": payload.url().to_string(),
+                    "loading": loading,
+                }),
             );
         })
         .invoke_handler(tauri::generate_handler![
@@ -94,6 +105,9 @@ pub fn run() {
             browser_tiles::browser_tile_hide,
             browser_tiles::browser_tile_show,
             browser_tiles::browser_tile_close,
+            browser_tiles::browser_tile_set_zoom,
+            browser_tiles::browser_tile_find,
+            browser_tiles::browser_tile_find_clear,
             choose_hub_mode,
             change_hub,
             get_startup_error,

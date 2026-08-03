@@ -3,6 +3,7 @@ import { FileWarning, Loader2, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { isDocumentPath } from '@/features/documents/documentKind'
 import type { Machine } from '@/store/types'
 import {
   useDeleteWorktreeFile,
@@ -26,6 +27,12 @@ const CodeFileEditor = lazy(() =>
 const MarkdownFileEditor = lazy(() =>
   import('./MarkdownFileEditor').then((module) => ({
     default: module.MarkdownFileEditor,
+  })),
+)
+
+const DocumentFileTab = lazy(() =>
+  import('@/features/documents/DocumentFileTab').then((module) => ({
+    default: module.DocumentFileTab,
   })),
 )
 
@@ -72,7 +79,51 @@ function toLineReveal(reveal: DefinitionReveal | undefined): LineReveal | undefi
   }
 }
 
+/**
+ * A worktree file tab. Dispatches on the path: PDF/Word/Excel/PowerPoint open
+ * as a rendered document, everything else as a text buffer.
+ *
+ * The split has to happen *here*, above any hook, because the two paths need
+ * different data. `TextFileEditor` fetches the file's UTF-8 text, which the
+ * backend refuses for these formats (see `WorktreeFileService.Read`), so
+ * merely swapping the rendered body would still fire a request that always
+ * fails.
+ */
 export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function FileEditor(
+  props,
+  ref,
+) {
+  if (isDocumentPath(props.path)) {
+    return (
+      <Suspense fallback={<DocumentTabFallback active={props.active} />}>
+        <DocumentFileTab
+          ref={ref}
+          target={{ kind: 'worktree', machine: props.machine, worktreeId: props.worktreeId }}
+          path={props.path}
+          active={props.active}
+          onDirtyChange={props.onDirtyChange}
+          onDeleted={props.onDeleted}
+        />
+      </Suspense>
+    )
+  }
+  return <TextFileEditor {...props} ref={ref} />
+})
+
+function DocumentTabFallback({ active }: { active: boolean }) {
+  return (
+    <div
+      className={cn(
+        'min-h-0 min-w-0 flex-1 items-center justify-center bg-devdeck-terminal',
+        active ? 'flex' : 'hidden',
+      )}
+    >
+      <DataLoading compact label="loading viewer…" />
+    </div>
+  )
+}
+
+const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function TextFileEditor(
   {
     worktreeId,
     machine,

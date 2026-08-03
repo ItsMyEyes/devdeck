@@ -1,4 +1,4 @@
-import { Boxes, Database, FolderGit2, GitBranch, Globe, ListTodo, Network, Newspaper, Receipt, Server, Settings, Wrench } from 'lucide-react'
+import { MODULE_ICON, PROJECT_ICON, WORKTREE_ICON } from '@/features/tabs/tabIcons'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
 /** Structural subsets of the domain types — only the fields this provider
@@ -29,18 +29,21 @@ export interface EntityActions {
  * route with no further required params. A project-scoped "jump to Issues"
  * entry would need its own drill-down (pick a project first) and is left
  * for a future pass rather than bolted on here.
+ *
+ * Every icon comes from `MODULE_ICON` — a page row must carry the same glyph
+ * the menu itself shows, never a second one picked here.
  */
 export const APP_PAGES = [
-  { path: '', label: 'Agents', icon: Boxes },
-  { path: 'machines', label: 'Machines', icon: Server },
-  { path: 'database', label: 'Database', icon: Database },
-  { path: 'ssh', label: 'SSH', icon: Network },
-  { path: 'browser', label: 'Browser', icon: Globe },
-  { path: 'tools', label: 'Tools', icon: Wrench },
-  { path: 'todos', label: 'Todos', icon: ListTodo },
-  { path: 'invoices', label: 'Invoices', icon: Receipt },
-  { path: 'news', label: 'News', icon: Newspaper },
-  { path: 'management', label: 'Management', icon: Settings },
+  { path: '', label: 'Agents', icon: MODULE_ICON.agents },
+  { path: 'machines', label: 'Machines', icon: MODULE_ICON.machines },
+  { path: 'database', label: 'Database', icon: MODULE_ICON.database },
+  { path: 'ssh', label: 'SSH', icon: MODULE_ICON.ssh },
+  { path: 'browser', label: 'Browser', icon: MODULE_ICON.browser },
+  { path: 'tools', label: 'Tools', icon: MODULE_ICON.tools },
+  { path: 'todos', label: 'Todos', icon: MODULE_ICON.todos },
+  { path: 'invoices', label: 'Invoices', icon: MODULE_ICON.invoices },
+  { path: 'news', label: 'News', icon: MODULE_ICON.news },
+  { path: 'management', label: 'Management', icon: MODULE_ICON.management },
 ] as const
 
 const OFFLINE = { reason: 'Machine is offline' }
@@ -67,7 +70,7 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
       title: wt.name ?? wt.branch,
       subtitle: project?.name,
       keywords: [wt.branch, project?.name ?? ''].filter(Boolean),
-      icon: GitBranch,
+      icon: WORKTREE_ICON,
       disabled: machineId && offlineMachineIds.has(machineId) ? OFFLINE : undefined,
       run: () => actions.openWorktree(wt.projectId, wt.id),
     })
@@ -80,7 +83,7 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
       group: 'results',
       title: project.name,
       subtitle: sources.machines.find((m) => m.id === project.machineId)?.name,
-      icon: FolderGit2,
+      icon: PROJECT_ICON,
       disabled: offlineMachineIds.has(project.machineId) ? OFFLINE : undefined,
       run: () => actions.openProject(project.id),
     })
@@ -94,7 +97,7 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
       title: connection.name,
       subtitle: `${connection.user}@${connection.host}`,
       keywords: [connection.host, connection.user],
-      icon: Network,
+      icon: MODULE_ICON.ssh,
       run: () => actions.openSSH(connection.id),
     })
   }
@@ -106,7 +109,7 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
       group: 'results',
       title: machine.name,
       subtitle: offlineMachineIds.has(machine.id) ? 'offline' : 'online',
-      icon: Server,
+      icon: MODULE_ICON.machines,
       disabled: offlineMachineIds.has(machine.id) ? OFFLINE : undefined,
       run: () => actions.openMachine(machine.id),
     })

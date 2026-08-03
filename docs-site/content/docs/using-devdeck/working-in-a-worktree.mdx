@@ -1,0 +1,62 @@
+---
+title: Working inside a worktree
+description: The tiling pane workspace, and everything you can put in it.
+icon: PanelsTopLeft
+---
+
+Opening a worktree switches the whole screen into a **tiling workspace**:
+the top header disappears, the sidebar collapses to a narrow icon rail (a
+back arrow, your workspace badge, and nav icons — the only way back once the
+header's gone), and the rest of the screen becomes a canvas you fill with
+resizable panes, arranged however you like.
+
+## Pane kinds
+
+Every pane can hold one of four things:
+
+<Cards>
+  <Card
+    title="Terminal"
+    description="A real, live terminal session the agent (or a plain shell) runs in. Navigate away and back and you reattach to the exact same session — nothing restarts. A worktree always starts with one; splitting it spins up a genuinely independent second one, with its own shell/agent and no shared output."
+  />
+  <Card
+    title="File explorer"
+    description="A tree of the worktree's files. Ctrl/Cmd-P opens quick-search; new-file and delete actions are built in."
+  />
+  <Card
+    title="Editor"
+    description="Click any file to open it. Every common language gets syntax highlighting; Go, TypeScript/JavaScript, Python, and Rust also get real autocomplete, inline error checking, and go-to-definition if you have the matching language tool installed (gopls, typescript-language-server, pyright-langserver, or rust-analyzer). Ctrl/Cmd-S saves; Ctrl/Cmd-W closes the tab."
+  />
+  <Card
+    title="Git panel"
+    description="Status, diff, stage/unstage/discard, commit, push, and pull — scoped to this worktree's own branch."
+  />
+</Cards>
+
+## Splitting and arranging panes
+
+Each pane has a small header with its own tab strip (stack several tabs in
+one pane without splitting it), "split right" / "split down" buttons, and —
+when the pane is focused — a "..." overflow menu. Drag a tab and drop it
+near a pane's edge to split in that direction, or drop it on the center to
+merge it in as another tab in that same pane.
+
+Your layout (which panes, which tabs, how big each split is) is remembered
+per worktree, so it reopens exactly the way you left it.
+
+<Callout title="On phones">
+  Panes stack one full-screen at a time instead of tiling side by side, and
+  drag-and-drop is turned off.
+</Callout>
+
+## The overflow menu
+
+On the focused pane, when its active tab is a Terminal, the "..." menu has:
+
+- **Approve** — only shown while the worktree is waiting on you to confirm
+  something.
+- **Open Git panel** / **Open file explorer** — add or jump to that pane
+  kind, since a fresh worktree starts out with only a Terminal pane.
+- **Details** — edit the worktree's branch, task, or model.
+- **Delete** — removes both DevDeck's record of it and the on-disk copy of
+  the code (the agent is stopped first, if one was running).

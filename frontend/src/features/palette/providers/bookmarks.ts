@@ -1,4 +1,5 @@
-import { Globe, Star } from 'lucide-react'
+import { Star } from 'lucide-react'
+import { MODULE_ICON } from '@/features/tabs/tabIcons'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
 /** host[:port][/path] with at least one dot, or an explicit scheme, or
@@ -48,7 +49,7 @@ export function bookmarkItems(
       group: 'results',
       title: url,
       subtitle: 'open in a Browser tile',
-      icon: Globe,
+      icon: MODULE_ICON.browser,
       run: () => openUrl(url),
     })
   }

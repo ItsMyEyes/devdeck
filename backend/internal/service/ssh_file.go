@@ -475,6 +475,168 @@ func (svc *SSHFileService) Write(ctx context.Context, connectionID, relativePath
 	})
 }
 
+// Mkdir creates an empty remote folder — SSH counterpart to
+// WorktreeFileService.Mkdir, using sftp's MkdirAll instead of os.MkdirAll.
+func (svc *SSHFileService) Mkdir(ctx context.Context, connectionID, relativePath string) (SSHFileEntry, error) {
+	clean, err := normalizeRelativePath(relativePath, false)
+	if err != nil {
+		return SSHFileEntry{}, err
+	}
+	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		abs, err := remoteAbsPath(client, clean)
+		if err != nil {
+			return SSHFileEntry{}, err
+		}
+		if _, statErr := client.Lstat(abs); statErr == nil {
+			return SSHFileEntry{}, fmt.Errorf("%q already exists: %w", clean, ErrConflict)
+		} else if !os.IsNotExist(statErr) {
+			return SSHFileEntry{}, fileOperationError("inspect folder", clean, statErr)
+		}
+		if err := client.MkdirAll(abs); err != nil {
+			return SSHFileEntry{}, fileOperationError("create folder", clean, err)
+		}
+		return SSHFileEntry{Name: path.Base(clean), Path: clean, IsDir: true}, nil
+	})
+}
+
+// Move renames/relocates a remote file or folder — SSH counterpart to
+// WorktreeFileService.Move (same conflict/self-nesting rules), using sftp's
+// Rename (which itself fails if the destination already exists on a
+// spec-conformant server, a second line of defense behind the explicit
+// Lstat check below).
+func (svc *SSHFileService) Move(ctx context.Context, connectionID, fromPath, toPath string) (SSHFileEntry, error) {
+	fromClean, err := normalizeRelativePath(fromPath, false)
+	if err != nil {
+		return SSHFileEntry{}, err
+	}
+	toClean, err := normalizeRelativePath(toPath, false)
+	if err != nil {
+		return SSHFileEntry{}, err
+	}
+	if toClean == fromClean {
+		return SSHFileEntry{}, fmt.Errorf("source and destination are the same: %w", ErrValidation)
+	}
+	if strings.HasPrefix(toClean, fromClean+"/") {
+		return SSHFileEntry{}, fmt.Errorf("cannot move %q into itself: %w", fromClean, ErrValidation)
+	}
+	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		fromAbs, err := remoteAbsPath(client, fromClean)
+		if err != nil {
+			return SSHFileEntry{}, err
+		}
+		toAbs, err := remoteAbsPath(client, toClean)
+		if err != nil {
+			return SSHFileEntry{}, err
+		}
+		info, err := client.Lstat(fromAbs)
+		if err != nil {
+			return SSHFileEntry{}, fileOperationError("inspect file", fromClean, err)
+		}
+		if _, statErr := client.Lstat(toAbs); statErr == nil {
+			return SSHFileEntry{}, fmt.Errorf("%q already exists: %w", toClean, ErrConflict)
+		} else if !os.IsNotExist(statErr) {
+			return SSHFileEntry{}, fileOperationError("inspect file", toClean, statErr)
+		}
+		if err := client.Rename(fromAbs, toAbs); err != nil {
+			return SSHFileEntry{}, fileOperationError("move file", fromClean, err)
+		}
+		return SSHFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
+	})
+}
+
+// Copy duplicates a remote file or folder (recursively, via client.Walk —
+// same traversal Archive's addRemoteSelectionToZip uses) to a new remote
+// path — SSH counterpart to WorktreeFileService.Copy.
+func (svc *SSHFileService) Copy(ctx context.Context, connectionID, fromPath, toPath string) (SSHFileEntry, error) {
+	fromClean, err := normalizeRelativePath(fromPath, false)
+	if err != nil {
+		return SSHFileEntry{}, err
+	}
+	toClean, err := normalizeRelativePath(toPath, false)
+	if err != nil {
+		return SSHFileEntry{}, err
+	}
+	if toClean == fromClean {
+		return SSHFileEntry{}, fmt.Errorf("source and destination are the same: %w", ErrValidation)
+	}
+	if strings.HasPrefix(toClean, fromClean+"/") {
+		return SSHFileEntry{}, fmt.Errorf("cannot copy %q into itself: %w", fromClean, ErrValidation)
+	}
+	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		fromAbs, err := remoteAbsPath(client, fromClean)
+		if err != nil {
+			return SSHFileEntry{}, err
+		}
+		toAbs, err := remoteAbsPath(client, toClean)
+		if err != nil {
+			return SSHFileEntry{}, err
+		}
+		info, err := client.Lstat(fromAbs)
+		if err != nil {
+			return SSHFileEntry{}, fileOperationError("inspect file", fromClean, err)
+		}
+		if _, statErr := client.Lstat(toAbs); statErr == nil {
+			return SSHFileEntry{}, fmt.Errorf("%q already exists: %w", toClean, ErrConflict)
+		} else if !os.IsNotExist(statErr) {
+			return SSHFileEntry{}, fileOperationError("inspect file", toClean, statErr)
+		}
+		if info.IsDir() {
+			if err := copyRemoteDir(client, fromAbs, toAbs); err != nil {
+				return SSHFileEntry{}, fileOperationError("copy folder", fromClean, err)
+			}
+		} else if err := copyRemoteFile(client, fromAbs, toAbs); err != nil {
+			return SSHFileEntry{}, fileOperationError("copy file", fromClean, err)
+		}
+		return SSHFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
+	})
+}
+
+func copyRemoteFile(client *sftp.Client, from, to string) error {
+	src, err := client.Open(from)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := client.Create(to)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func copyRemoteDir(client *sftp.Client, from, to string) error {
+	if err := client.MkdirAll(to); err != nil {
+		return err
+	}
+	walker := client.Walk(from)
+	for walker.Step() {
+		if walker.Err() != nil {
+			continue // permission-denied entries are skipped, mirroring addRemoteSelectionToZip
+		}
+		current := walker.Path()
+		if current == from {
+			continue
+		}
+		relative := strings.TrimPrefix(current, from+"/")
+		dest := path.Join(to, relative)
+		if walker.Stat().IsDir() {
+			if err := client.MkdirAll(dest); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyRemoteFile(client, current, dest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (svc *SSHFileService) Delete(ctx context.Context, connectionID, relativePath string) error {
 	clean, err := normalizeRelativePath(relativePath, false)
 	if err != nil {

@@ -18,4 +18,7 @@ commands.allow = [
     "browser_tile_hide",
     "browser_tile_show",
     "browser_tile_close",
+    "browser_tile_set_zoom",
+    "browser_tile_find",
+    "browser_tile_find_clear",
 ]

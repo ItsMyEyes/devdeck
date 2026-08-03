@@ -1,0 +1,11 @@
+{
+  "title": "Deployment",
+  "icon": "Server",
+  "description": "Run solo, split across machines, or use the desktop app.",
+  "pages": [
+    "index",
+    "solo",
+    "hub-and-runtimes",
+    "desktop-app"
+  ]
+}

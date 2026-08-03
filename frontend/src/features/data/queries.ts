@@ -2,7 +2,7 @@
 // Queries read the full nested workspace tree + settings; mutations invalidate on success.
 
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Machine, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
@@ -68,6 +68,7 @@ import {
   fetchMachines,
   fetchMachineVersion,
   fetchSettings,
+  fetchPinStatus,
   fetchSSHConnections,
   fetchTailscaleStatus,
   fetchWhoami,
@@ -92,6 +93,7 @@ import {
   updateMachine,
   updateNews,
   updateProject,
+  updatePin,
   updateRecurringTemplate,
   updateSettings,
   updateSSHConnection,
@@ -162,6 +164,7 @@ import {
   fetchProjectBranches,
   fetchWorktreeFile,
   fetchWorktreeFiles,
+  downloadWorktreeFileWithProgress,
   gitCommit,
   gitDiscard,
   gitPull,
@@ -182,9 +185,11 @@ import {
   updateAgentEnvProfile,
   updateAgentSettingsFile,
   updateAgentSkillContent,
+  updateMachinePin,
   updateWorktree,
   writeWorktreeFile,
   createFsFolder,
+  fetchMachinePinStatus,
   type AddMCPServerBody,
   type CreateFsFolderBody,
   type CreateWorktreeBody,
@@ -206,6 +211,7 @@ import {
   copySSHFile,
   searchSSHFiles,
   writeSSHFile,
+  downloadSSHFileWithProgress,
 } from '@/lib/sshFileApi'
 import type { FilesTarget } from '@/features/terminal/filesTarget'
 import { qk } from './keys'
@@ -241,8 +247,11 @@ export function useSettings() {
 
 // ---- Machines ----
 
-export function useMachines() {
-  return useQuery({ queryKey: qk.machines, queryFn: fetchMachines, staleTime: 10_000 })
+/** The hub's machine registry. `enabled` exists for always-mounted consumers
+ *  (global overlays) that must not fire this on a --role runtime process,
+ *  where /api/machines does not exist. */
+export function useMachines(enabled = true) {
+  return useQuery({ queryKey: qk.machines, queryFn: fetchMachines, staleTime: 10_000, enabled })
 }
 
 export function useCreateMachine() {
@@ -288,6 +297,34 @@ export function useStopMachine() {
       queryClient.invalidateQueries({ queryKey: qk.machines })
       queryClient.invalidateQueries({ queryKey: qk.machineHealth(id) })
     },
+  })
+}
+
+// ---- Runtime sign-in PIN ----
+//
+// `machine` is the remote runtime whose PIN is being read/rotated (the hub
+// path, authenticated with that runtime's key), or null to mean "this
+// process's own PIN" — the case when a runtime's own settings UI is open,
+// where there is no Machine record to talk through and the existing session
+// cookie is the credential.
+
+/** Whether a PIN is configured. The PIN itself is never readable — only a
+ *  bcrypt hash is stored — so this is the whole of what the UI can show. */
+export function useRuntimePinStatus(machine: Machine | null, enabled = true) {
+  return useQuery({
+    queryKey: qk.runtimePinStatus(machine?.id ?? ''),
+    queryFn: () => (machine ? fetchMachinePinStatus(machine) : fetchPinStatus()),
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  })
+}
+
+export function useUpdateRuntimePin(machine: Machine | null) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (pin: string) => (machine ? updateMachinePin(machine, pin) : updatePin(pin)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.runtimePinStatus(machine?.id ?? '') }),
   })
 }
 
@@ -1586,6 +1623,47 @@ export function useFileTarget(target: FilesTarget, path: string) {
     enabled: (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
     staleTime: 0,
   })
+}
+
+/**
+ * Raw bytes for one file, for the surfaces that can't use the text endpoint —
+ * today the PDF/Word/Excel/PowerPoint viewer (see
+ * `features/documents/DocumentViewer.tsx`), whose formats the text endpoint
+ * rejects outright as non-UTF-8.
+ *
+ * Deliberately unlike `useFileTarget`, which is `staleTime: 0` because a text
+ * buffer is cheap to re-fetch and may be edited underneath us. A document can
+ * be tens of megabytes and is read-only here, so it is fetched once and
+ * refreshed only on an explicit user action — hence `staleTime: Infinity` plus
+ * the exposed `refetch`. `gcTime` is short so the bytes are released soon
+ * after the tab closes rather than sitting in the cache for the default five
+ * minutes.
+ *
+ * Returns download progress alongside the query: these transfers are big
+ * enough that a bare spinner reads as a hang.
+ */
+export function useFileBytesTarget(target: FilesTarget, path: string) {
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null)
+  const query = useQuery({
+    queryKey:
+      target.kind === 'ssh'
+        ? qk.sshFileBytes(target.connectionId, path)
+        : qk.worktreeFileBytes(target.machine.id, target.worktreeId, path),
+    queryFn: async () => {
+      setProgress(null)
+      const blob =
+        target.kind === 'ssh'
+          ? await downloadSSHFileWithProgress(target.connectionId, path, setProgress)
+          : await downloadWorktreeFileWithProgress(target.machine, target.worktreeId, path, setProgress)
+      return new Uint8Array(await blob.arrayBuffer())
+    },
+    enabled: (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
+    staleTime: Infinity,
+    gcTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+  return { query, progress }
 }
 
 export function useInvalidateFilesTarget(target: FilesTarget) {

@@ -48,6 +48,12 @@ func RequireRuntimeAuth(svc *service.AuthService, key string) func(http.Handler)
 	publicPaths := map[string]bool{
 		"/api/health":           true,
 		"/api/auth/key-session": true,
+		// The 6-digit PIN sign-in is by definition reachable before any
+		// credential exists — it IS how a browser gets one. Its own lockout
+		// (service.PINService.Verify) is what keeps a short credential safe
+		// on a public route; nothing here can help, since a client with no
+		// session is exactly who this route is for.
+		"/api/auth/pin-session": true,
 		// The frontend must be able to tell "this is a runtime" apart from
 		// "this is a hub" BEFORE any credential exists, to decide whether an
 		// unauthenticated visitor should see the runtime sign-in page or the

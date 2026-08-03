@@ -11,7 +11,7 @@
  * `WorktreeLayout` per worktree is a separate, later integration step.
  */
 
-export type PaneContentKind = 'terminal' | 'git' | 'file' | 'explorer'
+export type PaneContentKind = 'terminal' | 'git' | 'file' | 'explorer' | 'untitled'
 
 interface BasePaneContent {
   /** Globally unique within one worktree's tree — see id rules below. */
@@ -42,7 +42,15 @@ export interface ExplorerContent extends BasePaneContent {
   kind: 'explorer'
 }
 
-export type PaneContent = TerminalContent | GitContent | FileContent | ExplorerContent
+/** A not-yet-saved editor buffer (VS Code's "Untitled-1") — no worktree path
+ *  backs it until the user picks one via Save As, unlike FileContent where
+ *  id === path always. Its own generated id keeps it distinguishable from
+ *  every other Untitled tab open at once. */
+export interface UntitledContent extends BasePaneContent {
+  kind: 'untitled'
+}
+
+export type PaneContent = TerminalContent | GitContent | FileContent | ExplorerContent | UntitledContent
 
 export interface LeafPane {
   type: 'leaf'
@@ -137,6 +145,21 @@ export function createExplorerContent(): ExplorerContent {
 
 export function createFileContent(path: string, label?: string): FileContent {
   return { kind: 'file', id: path, path, label: label ?? path.split('/').pop() ?? path }
+}
+
+export function createUntitledContent(label: string): UntitledContent {
+  return { kind: 'untitled', id: generateId(), label }
+}
+
+/** Counts every open Untitled tab anywhere in the tree — used to label a
+ *  freshly created one "Untitled-N" without needing a persisted counter
+ *  (unlike Terminal's nextTerminalSeq, closing an Untitled tab is expected
+ *  to free its number back up, matching VS Code's own numbering). */
+export function countUntitledContents(root: PaneNode): number {
+  if (root.type === 'leaf') {
+    return root.tabs.filter((t) => t.kind === 'untitled').length
+  }
+  return root.children.reduce((sum, child) => sum + countUntitledContents(child), 0)
 }
 
 /** The default layout for a worktree with no persisted entry yet —

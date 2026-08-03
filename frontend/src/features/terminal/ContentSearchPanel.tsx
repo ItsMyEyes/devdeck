@@ -97,6 +97,12 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const deferredQuery = useDeferredValue(query)
+  // The panel's own backdrop (below) is a translucent `fixed inset-0`
+  // full-viewport scrim, same shape as `dialog.tsx`'s — not "a fixed-size
+  // panel rather than a full-height overlay", so this deliberately stays
+  // `'viewport'`-scoped rather than narrowing to the inner panel's rect,
+  // which would leave a Browser tile outside that rect live and interactive
+  // on top of the dimmed backdrop.
   useNativeOverlayBlocker(open)
 
   const search = useContentSearchTarget(target, deferredQuery, open, { regex: regexMode, caseSensitive })

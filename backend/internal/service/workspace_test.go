@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,7 +31,7 @@ func TestRuntimeWorkspaceListNestsLocalProjectsWithoutFanout(t *testing.T) {
 	// for worktrees, proving this test would actually fail if the
 	// runtime-mode early return were ever removed.
 	hubSvc := NewWorkspaceService(st)
-	if _, err := hubSvc.List(); err != nil {
+	if _, err := hubSvc.List(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if hits == 0 {
@@ -39,7 +40,7 @@ func TestRuntimeWorkspaceListNestsLocalProjectsWithoutFanout(t *testing.T) {
 
 	hits = 0
 	svc := NewWorkspaceServiceForRuntime(st)
-	got, err := svc.List()
+	got, err := svc.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

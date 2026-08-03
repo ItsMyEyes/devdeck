@@ -23,6 +23,8 @@ type AuthHandler struct {
 	desktopKey      string
 	sessionSameSite http.SameSite
 	sessionMaxAge   time.Duration
+	// pin backs the runtime sign-in PIN routes (see pin.go); nil on the hub.
+	pin *service.PINService
 }
 
 // NewAuthHandler creates an auth handler.
@@ -35,6 +37,15 @@ func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 // siteverify is the real client, not the tunnel.
 func (h *AuthHandler) SetTurnstile(v *service.TurnstileVerifier, trustedProxies []*net.IPNet, clientIPHeader string) {
 	h.turnstile = v
+	h.trustedProxies = trustedProxies
+	h.clientIPHeader = clientIPHeader
+}
+
+// SetClientIPResolution configures how the real client IP is resolved for the
+// rate-limited PIN sign-in route. The hub already gets these via SetTurnstile;
+// a runtime has no Turnstile but still sits behind tunnels, where every
+// attempt would otherwise share the proxy's IP as one rate-limit bucket.
+func (h *AuthHandler) SetClientIPResolution(trustedProxies []*net.IPNet, clientIPHeader string) {
 	h.trustedProxies = trustedProxies
 	h.clientIPHeader = clientIPHeader
 }

@@ -8,6 +8,7 @@ import { ConfirmMachineActionDialog } from './ConfirmMachineActionDialog'
 import { TransferStatusPanel } from './TransferStatusPanel'
 import { DesktopSettingsDialog } from './DesktopSettingsDialog'
 import { MachineDialog } from '@/features/machines/MachineDialog'
+import { RuntimePinDialog } from '@/features/machines/RuntimePinDialog'
 import { SSHConnectionDialog } from '@/features/ssh/SSHConnectionDialog'
 import { RenameSSHGroupDialog } from '@/features/ssh/RenameSSHGroupDialog'
 
@@ -25,6 +26,7 @@ export function GlobalOverlays() {
       <TransferStatusPanel />
       <DesktopSettingsDialog />
       <MachineDialog />
+      <RuntimePinDialog />
       <SSHConnectionDialog />
       <RenameSSHGroupDialog />
     </>

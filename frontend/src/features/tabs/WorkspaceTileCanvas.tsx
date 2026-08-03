@@ -2,8 +2,9 @@ import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
-import { Cable, ChevronLeft, ChevronRight, Globe, LayoutGrid, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
+import { TabKindIcon } from '@/features/tabs/tabIcons'
 import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
@@ -451,7 +452,7 @@ function TileTabButton({
       >
         <button type="button" onClick={onSelect} className={selectButtonClass}>
           <TabDot active={active} focused={focused} />
-          <Cable size={12} className="flex-none" />
+          <TabKindIcon kind="ssh-shell" />
           <span className="truncate">{info.label}</span>
         </button>
         {trailingAction(info.label)}
@@ -473,7 +474,7 @@ function TileTabButton({
       >
         <button type="button" onClick={onSelect} className={selectButtonClass}>
           <TabDot active={active} focused={focused} loading={browserLoading} />
-          <Globe size={12} className="flex-none" />
+          <TabKindIcon kind="browser" />
           <span className="truncate">{info.label}</span>
         </button>
         {trailingAction(info.label)}
@@ -492,7 +493,7 @@ function TileTabButton({
     >
       <button type="button" onClick={onSelect} className={selectButtonClass}>
         <TabDot active={active} focused={focused} />
-        <LayoutGrid size={12} className="flex-none" />
+        <TabKindIcon kind="agents" />
         <span className="truncate">Agents</span>
       </button>
       {trailingAction('Agents')}
@@ -916,13 +917,9 @@ export function WorkspaceTileCanvas({
             className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-[9px] border border-devdeck-border-strong bg-devdeck-elevated px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]"
           >
             <TabDot active focused />
-            {dragTab.kind === 'agents' ? (
-              <LayoutGrid size={12} className="flex-none" />
-            ) : dragTab.kind === 'ssh-shell' ? (
-              <Cable size={12} className="flex-none" />
-            ) : dragTab.kind === 'browser' ? (
-              <Globe size={12} className="flex-none" />
-            ) : null}
+            {/* The worktree pill is the one kind that shows no glyph — its
+                "origin · name" pair already fills the pill. */}
+            {dragTab.kind === 'worktree' ? null : <TabKindIcon kind={dragTab.kind} />}
             <span className="truncate">
               {dragTab.kind === 'agents'
                 ? 'Agents'

@@ -14,6 +14,11 @@ type Store interface {
 	Settings() (domain.Settings, error)
 	UpdateSettings(p SettingsPatch) (domain.Settings, error)
 
+	// Runtime sign-in PIN. Kept off domain.Settings so the hash can never
+	// leak through GET /api/settings; "" means no PIN has been set.
+	SignInPINHash() (string, error)
+	SetSignInPINHash(hash string) error
+
 	// Workspaces (returns full nested tree)
 	Workspaces() ([]domain.Workspace, error)
 	CreateWorkspace(name string) (domain.Workspace, error)

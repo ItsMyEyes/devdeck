@@ -1,9 +1,12 @@
-import { Monitor, Plus, Power, RotateCw, Server, Settings2, Trash2 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Download, KeyRound, Monitor, Plus, Power, RefreshCw, RotateCw, Server, Settings2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
-import { useMachineHealth, useMachines } from '@/features/data/queries'
+import { qk } from '@/features/data/keys'
+import { useMachineHealth, useMachineUpdateCheck, useMachineVersion, useMachines } from '@/features/data/queries'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 function RuntimeHealth({ machineId }: { machineId: string }) {
@@ -34,8 +37,12 @@ function RuntimeHealth({ machineId }: { machineId: string }) {
 
 function MachineRow({ machine }: { machine: Machine }) {
   const openEditMachine = useDevDeckStore((s) => s.openEditMachine)
+  const openRuntimePin = useDevDeckStore((s) => s.openRuntimePin)
   const askDelete = useDevDeckStore((s) => s.askDelete)
   const askMachineAction = useDevDeckStore((s) => s.askMachineAction)
+  const build = useMachineVersion(machine.id)
+  const check = useMachineUpdateCheck(machine.id)
+  const canUpdate = check.data?.updateAvailable === true && check.data.managed === false
   return (
     <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
       <div className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-devdeck-surface-2 text-devdeck-muted">
@@ -63,6 +70,39 @@ function MachineRow({ machine }: { machine: Machine }) {
               managed
             </span>
           ) : null}
+          {build.data?.version ? (
+            <span className="flex-none rounded-md border border-devdeck-border-card bg-devdeck-surface-2 px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim-2">
+              {build.data.version}
+            </span>
+          ) : null}
+          {canUpdate ? (
+            <button
+              type="button"
+              aria-label={`Update ${machine.name} to ${check.data?.latest}`}
+              onClick={() =>
+                askMachineAction('update', machine.id, machine.name, {
+                  version: check.data?.latest,
+                  activeSessions: check.data?.activeSessions,
+                })
+              }
+              className="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-devdeck-surface-2 px-1.5 font-mono text-[9.5px] text-devdeck-green-soft hover:bg-devdeck-popover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <Download size={12} />
+              {check.data?.latest}
+            </button>
+          ) : null}
+          {/* Outside the isLocal guard below: the desktop's embedded runtime
+              serves a web UI too, and reaching it from a phone over the
+              tailnet needs the same PIN. */}
+          <button
+            type="button"
+            aria-label={`Set sign-in PIN for ${machine.name}`}
+            title="Set sign-in PIN"
+            onClick={() => openRuntimePin(machine.id, machine.name)}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <KeyRound size={13} />
+          </button>
           <button
             type="button"
             aria-label={`Restart ${machine.name}`}
@@ -110,6 +150,19 @@ export function MachinesModule() {
   const openAddMachine = useDevDeckStore((s) => s.openAddMachine)
   const total = machines?.length ?? 0
   const local = machines?.filter((machine) => machine.isLocal).length ?? 0
+  const queryClient = useQueryClient()
+  const [checking, setChecking] = useState(false)
+
+  async function checkAllForUpdates() {
+    setChecking(true)
+    try {
+      await Promise.all(
+        (machines ?? []).map((m) => queryClient.refetchQueries({ queryKey: qk.machineUpdateCheck(m.id) })),
+      )
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -125,6 +178,10 @@ export function MachinesModule() {
             {local} local · {Math.max(0, total - local)} remote
           </div>
         </div>
+        <Button variant="secondary" size="sm" onClick={() => void checkAllForUpdates()} disabled={checking}>
+          <RefreshCw size={13} className={checking ? 'animate-spin' : undefined} />
+          Check for updates
+        </Button>
         <Button size="sm" onClick={openAddMachine}>
           <Plus size={13} />
           Add runtime

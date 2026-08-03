@@ -229,6 +229,152 @@ func (svc *WorktreeFileService) Write(worktreeID, relativePath, content string) 
 	return WorktreeFileContent{Path: clean, Content: content}, nil
 }
 
+// Mkdir creates an empty folder. Unlike Write (which only ever creates the
+// file itself, not missing parents), this uses MkdirAll so "New Folder"
+// works the same one level deep as nested — the resolve(allowMissing=true)
+// call below still requires the immediate parent to already exist, matching
+// Write's existing contract.
+func (svc *WorktreeFileService) Mkdir(worktreeID, relativePath string) (WorktreeFileEntry, error) {
+	_, target, clean, err := svc.resolve(worktreeID, relativePath, false, true)
+	if err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if err := rejectReservedPath(clean, false); err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if _, statErr := os.Stat(target); statErr == nil {
+		return WorktreeFileEntry{}, fmt.Errorf("%q already exists: %w", clean, ErrConflict)
+	} else if !os.IsNotExist(statErr) {
+		return WorktreeFileEntry{}, fileOperationError("inspect folder", clean, statErr)
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return WorktreeFileEntry{}, fileOperationError("create folder", clean, err)
+	}
+	return WorktreeFileEntry{Name: path.Base(clean), Path: clean, IsDir: true}, nil
+}
+
+// Move renames or relocates a file/folder within the worktree — the single
+// primitive backing both the file tree's "Rename" (same parent, new name)
+// and "Cut" + "Paste" (new parent, same or new name). Refuses to clobber an
+// existing destination (ErrConflict) rather than silently overwriting, and
+// refuses to move a folder into itself or one of its own descendants.
+func (svc *WorktreeFileService) Move(worktreeID, fromPath, toPath string) (WorktreeFileEntry, error) {
+	_, fromTarget, fromClean, err := svc.resolve(worktreeID, fromPath, false, false)
+	if err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if err := rejectReservedPath(fromClean, false); err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	_, toTarget, toClean, err := svc.resolve(worktreeID, toPath, false, true)
+	if err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if err := rejectReservedPath(toClean, false); err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if toClean == fromClean {
+		return WorktreeFileEntry{}, fmt.Errorf("source and destination are the same: %w", ErrValidation)
+	}
+	if strings.HasPrefix(toClean, fromClean+"/") {
+		return WorktreeFileEntry{}, fmt.Errorf("cannot move %q into itself: %w", fromClean, ErrValidation)
+	}
+	info, err := os.Lstat(fromTarget)
+	if err != nil {
+		return WorktreeFileEntry{}, fileOperationError("inspect file", fromClean, err)
+	}
+	if _, statErr := os.Lstat(toTarget); statErr == nil {
+		return WorktreeFileEntry{}, fmt.Errorf("%q already exists: %w", toClean, ErrConflict)
+	} else if !os.IsNotExist(statErr) {
+		return WorktreeFileEntry{}, fileOperationError("inspect file", toClean, statErr)
+	}
+	if err := os.Rename(fromTarget, toTarget); err != nil {
+		return WorktreeFileEntry{}, fileOperationError("move file", fromClean, err)
+	}
+	return WorktreeFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
+}
+
+// Copy duplicates a file or folder (recursively) to a new path — backs the
+// file tree's "Copy" + "Paste". Same conflict/self-nesting rules as Move.
+func (svc *WorktreeFileService) Copy(worktreeID, fromPath, toPath string) (WorktreeFileEntry, error) {
+	_, fromTarget, fromClean, err := svc.resolve(worktreeID, fromPath, false, false)
+	if err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if err := rejectReservedPath(fromClean, false); err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	_, toTarget, toClean, err := svc.resolve(worktreeID, toPath, false, true)
+	if err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if err := rejectReservedPath(toClean, false); err != nil {
+		return WorktreeFileEntry{}, err
+	}
+	if toClean == fromClean {
+		return WorktreeFileEntry{}, fmt.Errorf("source and destination are the same: %w", ErrValidation)
+	}
+	if strings.HasPrefix(toClean, fromClean+"/") {
+		return WorktreeFileEntry{}, fmt.Errorf("cannot copy %q into itself: %w", fromClean, ErrValidation)
+	}
+	info, err := os.Lstat(fromTarget)
+	if err != nil {
+		return WorktreeFileEntry{}, fileOperationError("inspect file", fromClean, err)
+	}
+	if _, statErr := os.Lstat(toTarget); statErr == nil {
+		return WorktreeFileEntry{}, fmt.Errorf("%q already exists: %w", toClean, ErrConflict)
+	} else if !os.IsNotExist(statErr) {
+		return WorktreeFileEntry{}, fileOperationError("inspect file", toClean, statErr)
+	}
+	if info.IsDir() {
+		if err := copyDirRecursive(fromTarget, toTarget); err != nil {
+			return WorktreeFileEntry{}, fileOperationError("copy folder", fromClean, err)
+		}
+	} else if err := copyFileMode(fromTarget, toTarget, info.Mode()); err != nil {
+		return WorktreeFileEntry{}, fileOperationError("copy file", fromClean, err)
+	}
+	return WorktreeFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
+}
+
+func copyFileMode(from, to string, mode fs.FileMode) error {
+	src, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(to, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func copyDirRecursive(from, to string) error {
+	return filepath.WalkDir(from, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(from, current)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(to, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(dest, info.Mode().Perm())
+		}
+		return copyFileMode(current, dest, info.Mode())
+	})
+}
+
 func (svc *WorktreeFileService) Delete(worktreeID, relativePath string) error {
 	_, target, clean, err := svc.resolve(worktreeID, relativePath, false, false)
 	if err != nil {

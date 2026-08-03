@@ -1,0 +1,144 @@
+---
+title: Installation
+description: Download and run a DevDeck build from GitHub Releases.
+icon: Download
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+DevDeck ships as two kinds of downloadable build from the [GitHub Releases
+page](https://github.com/ItsMyEyes/devdeck/releases). If you're not sure
+which one you need, the short answer is: **the desktop app** — it's the
+one-click option and works for almost everyone.
+
+| Build | What it is | Best for |
+|---|---|---|
+| **Desktop app** | A regular app you install like any other, with the server built in — nothing else to run | Most people. One download, no terminal needed. |
+| **Runtime/hub binary** | A background server with no window of its own | Running DevDeck on a remote machine, a home server, or a VPS |
+
+<Steps>
+<Step>
+
+### Open the releases page
+
+Go to [github.com/ItsMyEyes/devdeck/releases](https://github.com/ItsMyEyes/devdeck/releases)
+and open the latest release at the top of the page.
+
+</Step>
+<Step>
+
+### Download the build for your platform
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+<Tab value="macOS">
+
+**Desktop app:** `devdeck-desktop-macos-aarch64.dmg` (Apple Silicon)
+
+**Headless binary** (only if you're running DevDeck on a server, not this
+computer): `devdeck-runtime-<platform>`, matching the server's OS/architecture.
+
+</Tab>
+<Tab value="Windows">
+
+**Desktop app:** `devdeck-desktop-windows-amd64-setup.exe` (or the `.msi`
+if you prefer an MSI installer)
+
+**Headless binary:** `devdeck-runtime-<platform>`, matching the server's
+OS/architecture.
+
+</Tab>
+<Tab value="Linux">
+
+**Desktop app** — pick the format your distro uses:
+
+| Distro family | Asset |
+|---|---|
+| Debian / Ubuntu | `devdeck-desktop-linux-amd64.deb` |
+| Fedora / RHEL | `devdeck-desktop-linux-amd64.rpm` |
+| Anything else | `devdeck-desktop-linux-amd64.AppImage` (portable, no install needed) |
+
+**Headless binary:** `devdeck-runtime-<platform>`, matching the server's
+OS/architecture.
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Run it
+
+- **Desktop app** — install and launch it like any native app. The first
+  launch asks how you want to run it; see [Deployment](/docs/deployment)
+  for what each choice means. macOS and Windows need one extra step on
+  their very first launch — see below.
+- **Headless binary** — make it executable and run it with a role flag,
+  for example:
+
+  ```bash
+  chmod +x devdeck-runtime-*
+  ./devdeck-runtime-* --role both --key <any-secret-string> --db devdeck.db
+  ```
+
+  See [Deployment](/docs/deployment) for what `--role` values are
+  available and when to use each.
+
+</Step>
+</Steps>
+
+## First launch on macOS and Windows
+
+Release builds aren't **code-signed or notarized** yet — think of that as a
+"verified publisher" stamp that costs a paid developer account on both
+platforms, which this project doesn't have. Without that stamp, macOS and
+Windows both treat a browser-downloaded app as unrecognized and add one
+extra confirmation step. This is normal, and **nothing is wrong with the
+download.**
+
+<Tabs items={['macOS', 'Windows']}>
+<Tab value="macOS">
+
+**What you'll see:** "DevDeck is damaged and can't be opened."
+
+It isn't actually damaged. Every file your browser downloads gets tagged
+"quarantined," and Gatekeeper (macOS's built-in security check) refuses to
+open a quarantined app that isn't notarized — and reports it as *damaged*
+instead of offering an "Open Anyway" button. Clear that one tag and it opens
+normally from then on:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/DevDeck.app
+```
+
+<Callout title="Keep the -r flag" type="warn">
+  `-r` clears the tag recursively. Without it, the app's own window opens
+  fine but its bundled server (a file *inside* the app) stays quarantined
+  and never starts — so the app looks broken instead of working. This only
+  affects this one app; it does **not** turn off Gatekeeper for anything
+  else on your Mac.
+</Callout>
+
+Building DevDeck from source instead skips this entirely — a locally built
+app was never downloaded, so it's never quarantined in the first place.
+
+</Tab>
+<Tab value="Windows">
+
+**What you'll see:** a blue SmartScreen popup saying Windows protected your
+PC.
+
+Click **More info**, then **Run anyway**. That's it — unlike macOS, Windows
+doesn't need any file to be touched or unlocked first.
+
+</Tab>
+</Tabs>
+
+<Callout title="Tailscale is optional">
+  Tailscale only matters if you're connecting more than one machine
+  together, or reaching a hub over the internet. Running DevDeck on just
+  this one computer works fine without installing it.
+</Callout>
+
+Once it's running, open the app (desktop) or its URL in a browser
+(headless binary) and continue to [Your first account](/docs/getting-started/first-account).

@@ -1,0 +1,54 @@
+---
+title: Workspaces and projects
+description: Organize your work into workspaces and projects.
+icon: FolderTree
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+DevDeck organizes everything around two nesting levels:
+
+- A **workspace** is the top-level grouping — think "one client" or "one
+  team." Everything else lives inside one.
+- A **project** is a single code repository living inside a workspace.
+
+## Create a workspace
+
+Create one (just give it a name) from the onboarding screen the first time,
+or later from the workspace switcher at the top of the sidebar.
+
+## Add a project
+
+Inside a workspace, add a project either of these ways:
+
+<Tabs items={['A folder already on disk', 'A GitHub repository']}>
+<Tab value="A folder already on disk">
+
+Point the new-project dialog at a local folder. A file picker browses the
+filesystem of whichever machine will actually run the project — not
+necessarily the computer you're clicking in, if you've registered more than
+one.
+
+</Tab>
+<Tab value="A GitHub repository">
+
+Paste a GitHub URL and DevDeck clones it for you — no need to `git clone`
+it yourself first.
+
+</Tab>
+</Tabs>
+
+Either way, you'll also pick which registered **Machine** runs it — a
+Machine is just "one computer DevDeck knows about."
+
+<Callout title="Empty machine dropdown?" type="warn">
+  A brand-new install starts with no registered Machines, so this dropdown
+  may be empty at first — see [Deployment](/docs/deployment) for how a
+  Machine gets registered. The fastest fix is running with `--role both`
+  (or the desktop app's "Host locally" option), which registers itself
+  automatically.
+</Callout>
+
+Once added, the project appears in the sidebar's project tree, with
+**Worktrees** and **Issues** tabs. Continue to [Your first
+worktree](/docs/getting-started/first-worktree).

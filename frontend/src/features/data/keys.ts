@@ -23,6 +23,9 @@ export const qk = {
     ['machines', machineId, 'worktrees', id, 'files', path] as const,
   worktreeFile: (machineId: string, id: string, path: string) =>
     ['machines', machineId, 'worktrees', id, 'file', path] as const,
+  /** Raw bytes (documents), kept separate from the UTF-8 text entry above. */
+  worktreeFileBytes: (machineId: string, id: string, path: string) =>
+    ['machines', machineId, 'worktrees', id, 'file-bytes', path] as const,
   worktreeFileSearch: (machineId: string, id: string, pattern: string) =>
     ['machines', machineId, 'worktrees', id, 'file-search', pattern] as const,
   worktreeGrep: (machineId: string, id: string, query: string) =>
@@ -50,6 +53,9 @@ export const qk = {
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
   machineVersion: (id: string) => ['machines', id, 'version'] as const,
   machineUpdateCheck: (id: string) => ['machines', id, 'updateCheck'] as const,
+  /** Whether a runtime has a sign-in PIN set. id === '' means this process
+   *  itself (a runtime looking at its own PIN), not a remote machine. */
+  runtimePinStatus: (id: string) => ['machines', id, 'pinStatus'] as const,
   tailscaleStatus: ['tailscaleStatus'] as const,
   hubKey: ['hubKey'] as const,
   bookmarks: ['bookmarks'] as const,
@@ -57,6 +63,7 @@ export const qk = {
   sshFilesRoot: (connectionId: string) => ['ssh', connectionId, 'files'] as const,
   sshFiles: (connectionId: string, path: string) => ['ssh', connectionId, 'files', path] as const,
   sshFile: (connectionId: string, path: string) => ['ssh', connectionId, 'file', path] as const,
+  sshFileBytes: (connectionId: string, path: string) => ['ssh', connectionId, 'file-bytes', path] as const,
   sshFileSearch: (connectionId: string, pattern: string) => ['ssh', connectionId, 'file-search', pattern] as const,
   sshGrep: (connectionId: string, query: string) => ['ssh', connectionId, 'grep', query] as const,
   /** Prefix of sshGrep — see worktreeGrepRoot's comment above. */

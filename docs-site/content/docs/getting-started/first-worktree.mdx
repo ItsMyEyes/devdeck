@@ -1,0 +1,52 @@
+---
+title: Your first worktree
+description: Spawn an agent worktree, or a plain root-mode terminal.
+icon: GitBranch
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+A **worktree** is DevDeck's unit of work: a separate, isolated copy of your
+project's code (on its own git branch) with its own terminal attached. Open
+three worktrees and you have three independent checkouts and three
+independent terminals — editing or running one never touches the others,
+even if they're all in the same project.
+
+From a project's **Worktrees** tab, click spawn to open the new-worktree
+dialog, which offers two modes.
+
+<Tabs items={['Branch mode', 'Root mode']}>
+<Tab value="Branch mode">
+
+The common case: a new isolated branch, with a coding agent (or a plain
+shell) attached to it.
+
+- **Branch name** — the new branch to check out. DevDeck runs a real `git
+  worktree add` behind the scenes, under `<project>/.wt/<worktree-id>`, so
+  your main checkout is never touched no matter what happens inside.
+- **Base branch** — which existing branch to branch off of.
+- **Task** — a short description of what you want done. If an agent is
+  attached, this becomes its very first instruction.
+- **Agent / Model** — pick from whichever agent CLIs DevDeck found on your
+  computer (see [Agent management](/docs/using-devdeck/agent-management)).
+  Don't have one installed? You can still spawn the worktree — it just
+  falls back to a plain shell instead of launching an agent.
+
+The new worktree shows up as a live card (running / waiting / error, with
+token and diff stats once the agent gets to work). Click it to open the
+full terminal view — see [Working inside a
+worktree](/docs/using-devdeck/working-in-a-worktree).
+
+</Tab>
+<Tab value="Root mode">
+
+Sometimes you just want a plain shell at the project's own root — no new
+branch, no agent. Root mode gives you exactly that: a terminal already
+`cd`'d into the project's own path, marked with a house icon instead of a
+branch icon so it's easy to tell apart from branch worktrees.
+
+Deleting a root-mode worktree never touches git — there's nothing to
+remove, since it's just the project's own checkout, not a separate one.
+
+</Tab>
+</Tabs>

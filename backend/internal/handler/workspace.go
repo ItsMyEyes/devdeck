@@ -18,7 +18,7 @@ func NewWorkspaceHandler(svc *service.WorkspaceService) *WorkspaceHandler {
 
 // GetWorkspaces returns the full nested workspace tree.
 func (h *WorkspaceHandler) GetWorkspaces(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.List()
+	list, err := h.svc.List(r.Context())
 	if handleStoreErr(w, err) {
 		return
 	}

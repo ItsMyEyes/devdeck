@@ -273,7 +273,12 @@ CREATE INDEX IF NOT EXISTS idx_db_query_history_conn ON db_query_history(connect
 CREATE TABLE IF NOT EXISTS settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),
   active_workspace_id TEXT,
-  default_model       TEXT NOT NULL DEFAULT 'claude-sonnet-5'
+  default_model       TEXT NOT NULL DEFAULT 'claude-sonnet-5',
+  -- bcrypt hash of this process's 6-digit runtime sign-in PIN. Empty means
+  -- "not set yet"; a runtime seeds a random one on first boot. Only the hash
+  -- is ever stored, and it never leaves the process (domain.Settings has no
+  -- field for it) — the API only reports whether one is configured.
+  signin_pin_hash     TEXT NOT NULL DEFAULT ''
 );
 
 -- sync_state tracks the runtime replica's last successful catalog apply.
@@ -373,7 +378,25 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateSettingsSignInPIN(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// migrateSettingsSignInPIN adds signin_pin_hash (introduced when the runtime
+// sign-in page replaced the pasted runtime key with a 6-digit PIN) to
+// pre-existing databases. Existing rows default to the empty string, meaning
+// no PIN set, which a runtime turns into a freshly generated one on its next
+// boot.
+func migrateSettingsSignInPIN(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE settings ADD COLUMN signin_pin_hash TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateInvoiceColumns adds columns introduced after the initial invoices

@@ -125,7 +125,18 @@ At the very top of `frontend/vite.config.ts` add the triple-slash reference, the
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // Corrected 2026-08-02: this repo has 25 hand-rolled `check()`-harness
+    // test files, not 5. Only the migrated ones are in scope — a blanket
+    // `src/**/*.test.{ts,tsx}` makes `npm test` fail on 20 unmigrated files
+    // across the database, machines, terminal and lib features, which are
+    // entirely outside this plan. The remainder is recorded as explicit debt
+    // in COMMANDS.md rather than hidden.
+    include: [
+      'src/features/palette/**/*.test.{ts,tsx}',
+      'src/features/ssh/{sshCommand,sshQuickAdd,jumpHostDraft}.test.ts',
+      'src/features/tabs/tileTree.ssh.test.ts',
+      'src/lib/{fuzzyHighlight,browserProxy}.test.ts',
+    ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
     exclude: ['node_modules/**', 'dist/**', 'src-tauri/**'],
@@ -2059,14 +2070,11 @@ The one existing caller (`WorkspaceTileArea.tsx`'s `handleCreateBrowser`) keeps 
 Run: `cd frontend && npm run typecheck`
 Expected: FAIL, listing errors in `features/tabs/NewTabDialog.tsx` and `features/tabs/WorkspaceTileArea.tsx`. This is the intended signal — those are fixed in Tasks 14 and 15. Record the exact error list; it is the checklist for those tasks.
 
-- [ ] **Step 7: Commit the store change on its own**
+- [ ] **Step 7: DO NOT COMMIT YET — leave the change in the working tree**
 
-The tree does not typecheck at this commit. That is deliberate: the store change is isolated so a reviewer can read it without the call-site churn mixed in, and Tasks 14–15 restore green.
+**Corrected 2026-08-02.** The original plan told you to commit a deliberately-broken tree here. That is impossible in this repo: `git config core.hooksPath` is `.githooks`, and `.githooks/pre-commit` runs `npm run typecheck` under `set -e`. Any commit made while `NewTabDialog.tsx` and `WorkspaceTileArea.tsx` still reference the removed `newTab` state is rejected. Bypassing the hook with `--no-verify` is NOT an acceptable workaround.
 
-```bash
-git add frontend/src/store/useDevDeckStore.ts
-git commit -m "refactor(store): replace newTab state with palette/sshQuickAdd slices and thread a URL through openBrowserTab"
-```
+Therefore **Tasks 11 through 15 are one atomic unit with a single commit at the end of Task 15.** Leave this change uncommitted and proceed to Task 12. Do not run `git commit` again until Task 15, Step 2 reports a green typecheck.
 
 ---
 
@@ -2533,13 +2541,20 @@ Autofocus the ssh-command `<Input>` on open and submit on `Enter`, so the dialog
 - [ ] **Step 2: Verify the whole tree is green again**
 
 Run: `cd frontend && npm run typecheck && npm test && npm run build`
-Expected: all three PASS. This is the first commit since Task 11 where the tree typechecks.
+Expected: all three PASS. Tasks 11–14 left the tree deliberately non-compiling; this is the step that restores it. Do not proceed to Step 3 until all three are actually green — the pre-commit hook will reject the commit otherwise, and `--no-verify` is not an acceptable workaround.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Commit Tasks 11–15 as one atomic change**
+
+**Corrected 2026-08-02.** Tasks 11, 12, 13 and 14 deliberately left no commit of their own, because the pre-commit hook runs `npm run typecheck` and the tree does not compile between the store change and the call-site fixes. This single commit therefore carries the store slice, the hook, the view, the wiring and the narrowed dialog together.
 
 ```bash
-git add -A frontend/src/features/ssh/SSHQuickAddDialog.tsx frontend/src/features/tabs/
-git commit -m "refactor(ssh): narrow NewTabDialog into SSHQuickAddDialog"
+git add -A frontend/src/store/useDevDeckStore.ts frontend/src/features/palette/ frontend/src/features/ssh/ frontend/src/features/tabs/ frontend/src/features/terminal/Terminal.tsx
+git commit -m "feat(palette): wire the command palette into the workspace
+
+Replaces the newTab store slice with palette/sshQuickAdd, adds the
+page-stack hook and view, binds Cmd+K, and narrows NewTabDialog into
+SSHQuickAddDialog. Committed as one change because the pre-commit
+typecheck hook rejects the intermediate states."
 ```
 
 ---

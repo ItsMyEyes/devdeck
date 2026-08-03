@@ -21,7 +21,8 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
-  useNativeOverlayBlocker(open)
+  const popupRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open, popupRef)
 
   const matches = useMemo(() => {
     const needle = value.trim().toLowerCase()
@@ -83,6 +84,7 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
       />
       {open && matches.length > 0 ? (
         <div
+          ref={popupRef}
           className={cn(
             'absolute left-0 right-0 top-[calc(100%+5px)] z-[100] max-h-[220px] overflow-auto rounded-[11px]',
             'border border-devdeck-border-menu bg-devdeck-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none',

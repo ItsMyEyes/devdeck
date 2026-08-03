@@ -2,15 +2,9 @@
   "title": "Docs",
   "pages": [
     "index",
-    "installation",
-    "first-account",
-    "workspaces-and-projects",
-    "first-worktree",
-    "working-in-a-worktree",
-    "issues",
-    "agent-management",
-    "tools",
-    "deployment-modes",
+    "getting-started",
+    "using-devdeck",
+    "deployment",
     "troubleshooting"
   ]
 }

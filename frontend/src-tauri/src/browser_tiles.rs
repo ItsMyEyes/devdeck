@@ -6,7 +6,8 @@
 // docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl};
 
@@ -169,6 +170,23 @@ pub fn browser_tile_forward(state: tauri::State<'_, BrowserTiles>, tab_id: Strin
     eval_history_step(&state, &tab_id, &doc_id, "history.forward()")
 }
 
+/// Thin wrapper over `Webview::set_zoom` (available on macOS 11+ / iOS 14+;
+/// no-op-returning-error on Android). No getter exists on the Tauri side, so
+/// the frontend owns the current zoom level as source of truth — see
+/// `browserZoom.ts`.
+#[tauri::command]
+pub fn browser_tile_set_zoom(
+    state: tauri::State<'_, BrowserTiles>,
+    tab_id: String,
+    doc_id: String,
+    scale: f64,
+) -> Result<(), String> {
+    let label = webview_label(&tab_id, &doc_id);
+    let map = state.0.lock().unwrap();
+    let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
+    webview.set_zoom(scale).map_err(|e| e.to_string())
+}
+
 /// Keeps the native surface glued to the placeholder div's on-screen rect —
 /// called from the frontend's `ResizeObserver` on every resize/drag/
 /// fullscreen-toggle of the tile.
@@ -235,4 +253,123 @@ pub fn browser_tile_close(state: tauri::State<'_, BrowserTiles>, tab_id: String,
         .remove(&label)
         .ok_or_else(|| format!("no browser tile webview for {label}"))?;
     webview.close().map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FindResult {
+    pub active: u32,
+    pub total: u32,
+}
+
+/// `__QUERY__`/`__STEP__` are substituted via plain string replacement
+/// rather than `format!`'s `{}` — the script itself is full of literal JS
+/// braces, and escaping every one of them for `format!` is far more
+/// error-prone than two `.replace()` calls on placeholder tokens that can't
+/// otherwise appear in the script.
+const FIND_JS_TEMPLATE: &str = r#"(function() {
+    var q = __QUERY__;
+    var step = __STEP__;
+    document.querySelectorAll('mark[data-devdeck-find]').forEach(function(mark) {
+        var parent = mark.parentNode;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+        parent.normalize();
+    });
+    if (!q) { window.__devdeckFindIndex = 0; return { active: 0, total: 0 }; }
+    var needle = q.toLowerCase();
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: function(node) {
+            var tag = node.parentNode && node.parentNode.nodeName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK') return NodeFilter.FILTER_REJECT;
+            return node.nodeValue.toLowerCase().indexOf(needle) === -1 ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT;
+        }
+    });
+    var matches = [];
+    var node;
+    while ((node = walker.nextNode())) {
+        var lower = node.nodeValue.toLowerCase();
+        var from = 0, at;
+        while ((at = lower.indexOf(needle, from)) !== -1) {
+            matches.push({ node: node, start: at, end: at + needle.length });
+            from = at + needle.length;
+        }
+    }
+    var total = matches.length;
+    if (total === 0) { window.__devdeckFindIndex = 0; return { active: 0, total: 0 }; }
+    var current = (typeof window.__devdeckFindIndex === 'number' ? window.__devdeckFindIndex : -step);
+    current = ((current + step) % total + total) % total;
+    window.__devdeckFindIndex = current;
+    matches.forEach(function(m, i) {
+        var range = document.createRange();
+        range.setStart(m.node, m.start);
+        range.setEnd(m.node, m.end);
+        var mark = document.createElement('mark');
+        mark.setAttribute('data-devdeck-find', i === current ? 'active' : 'match');
+        mark.style.background = i === current ? '#ff9632' : '#ffeb3b';
+        mark.style.color = '#000';
+        try { range.surroundContents(mark); } catch (e) {}
+        if (i === current) mark.scrollIntoView({ block: 'center', inline: 'nearest' });
+    });
+    return { active: current + 1, total: total };
+})()"#;
+
+const FIND_CLEAR_JS: &str = r#"(function() {
+    document.querySelectorAll('mark[data-devdeck-find]').forEach(function(mark) {
+        var parent = mark.parentNode;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+        parent.normalize();
+    });
+    window.__devdeckFindIndex = 0;
+})()"#;
+
+/// Holds the `BrowserTiles` lock only for the lookup-then-enqueue step
+/// (unlike `browser_tile_open`'s release-then-reacquire pattern, which is
+/// TOCTOU-prone) — `eval_with_callback` here just hands the script to the
+/// webview's own dispatcher and returns immediately, so enqueuing it while
+/// the lock is held is enough to order it correctly against a concurrent
+/// `browser_tile_close` on the same label (that command blocks on the same
+/// lock, so it can't tear the webview down before our eval is queued, and
+/// per-webview dispatch is FIFO, so it can't run ahead of an already-queued
+/// eval either). The lock is dropped before `rx.recv_timeout` below: that
+/// wait is for the page's own JS callback, which fires on the webview's
+/// event loop, not this thread, so it never needed the lock at all — held
+/// through it (as an earlier version of this function did), it serializes
+/// every other `browser_tile_*` command for up to 5s for no safety benefit.
+#[tauri::command]
+pub fn browser_tile_find(
+    state: tauri::State<'_, BrowserTiles>,
+    tab_id: String,
+    doc_id: String,
+    query: String,
+    direction: String,
+) -> Result<FindResult, String> {
+    let label = webview_label(&tab_id, &doc_id);
+
+    let query_json = serde_json::to_string(&query).map_err(|e| e.to_string())?;
+    let step = if direction == "prev" { "-1" } else { "1" };
+    let js = FIND_JS_TEMPLATE.replace("__QUERY__", &query_json).replace("__STEP__", step);
+
+    let (tx, rx) = mpsc::channel::<String>();
+    {
+        let map = state.0.lock().unwrap();
+        let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
+        webview
+            .eval_with_callback(js, move |result| {
+                let _ = tx.send(result);
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    let raw = rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "find-in-page eval timed out".to_string())?;
+    serde_json::from_str::<FindResult>(&raw).map_err(|e| format!("could not parse find result: {e}"))
+}
+
+#[tauri::command]
+pub fn browser_tile_find_clear(state: tauri::State<'_, BrowserTiles>, tab_id: String, doc_id: String) -> Result<(), String> {
+    let label = webview_label(&tab_id, &doc_id);
+    let map = state.0.lock().unwrap();
+    let webview = map.get(&label).ok_or_else(|| format!("no browser tile webview for {label}"))?;
+    webview.eval(FIND_CLEAR_JS).map_err(|e| e.to_string())
 }

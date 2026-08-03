@@ -65,6 +65,11 @@ The Go backend accepts flags:
   process or manual Machines-page step) (default `hub`, env `DEVDECK_ROLE`).
 - `--key` — static API key; required for `--role runtime`/`--role both`,
   optional bearer auth for `--role hub` (desktop clients) (env `DEVDECK_KEY`).
+- `--pin` — 6-digit sign-in PIN for a runtime's own web UI (env `DEVDECK_PIN`,
+  `--role runtime` only; ignored with a warning on other roles). Omit it and
+  the runtime generates one on first start and prints it to its log. Rejected
+  at startup if it isn't 6 digits, or is all-same/a straight run. See
+  "Runtime sign-in PIN" below.
 - `--hub-url` — hub base URL this runtime should self-register with on
   startup (env `DEVDECK_HUB_URL`, empty = self-registration disabled).
 - `--hub-key` — hub's bearer key, used to authenticate this runtime's
@@ -174,6 +179,56 @@ curl -s -H 'Authorization: Bearer soloK' http://127.0.0.1:9197/api/machines  # a
 
 See `ARCHITECTURE.md` for the roles paragraph and `CONTRACTS.md` for the
 key-auth rules and the machines registry/proxy API shapes.
+
+## Runtime sign-in PIN
+
+`--key` is the machine-to-machine credential (it is what the hub proxies
+with), but nobody wants to type 64 hex characters into a phone. A runtime's
+own web UI — `/runtime-sign-in` — therefore asks for a **6-digit PIN**
+instead, exchanged for the same session cookie the key would have minted.
+The key still works everywhere it did; it just isn't what that page asks for.
+
+The PIN is stored as a bcrypt hash and can never be read back. Set it three
+ways: `--pin` at startup, the hub's Runtimes page (the key-icon button on a
+machine row — the hub authenticates with that runtime's key), or the runtime's
+own sidebar key button. Leave all three alone and the runtime generates one on
+first start and logs it once.
+
+Six digits is only 10^6 combinations, so the server-side lockout is
+load-bearing, not defence in depth: 5 wrong attempts per client IP buys a
+1-minute lockout, doubling per further burst up to 15 minutes, on top of
+bcrypt cost 12. Attempts made *while* locked out are refused before the hash
+compare, so hammering never extends the lock.
+
+```bash
+cd backend && go run ./cmd/server --role runtime --key rtk --pin 482913 \
+  --addr 127.0.0.1:9199 --db /tmp/rt.db --open=false
+
+# Sign in — the one route reachable without a credential:
+curl -s -c jar.txt -X POST http://127.0.0.1:9199/api/auth/pin-session \
+  -H 'Content-Type: application/json' -d '{"pin":"482913"}'          # 200 + session cookie
+curl -s -o /dev/null -w '%{http_code}' -b jar.txt \
+  http://127.0.0.1:9199/api/settings                                  # 200
+
+# Wrong PIN, then the lockout (note: the CORRECT pin is refused too):
+curl -s -X POST http://127.0.0.1:9199/api/auth/pin-session \
+  -H 'Content-Type: application/json' -d '{"pin":"999999"}'          # 401 {"error":"incorrect pin"}
+# ...5 failures later:                                                # 429 + Retry-After
+
+# Read/rotate the PIN — needs the runtime key (this is the hub's path):
+curl -s -H 'Authorization: Bearer rtk' http://127.0.0.1:9199/api/auth/pin
+                                                                      # {"configured":true,"length":6}
+curl -s -X PUT -H 'Authorization: Bearer rtk' -H 'Content-Type: application/json' \
+  -d '{"pin":"571904"}' http://127.0.0.1:9199/api/auth/pin           # 204 (also clears lockouts)
+curl -s -X PUT -H 'Authorization: Bearer rtk' -H 'Content-Type: application/json' \
+  -d '{"pin":"123456"}' http://127.0.0.1:9199/api/auth/pin           # 400 "pin is too easy to guess"
+```
+
+`GET`/`PUT /api/auth/pin` are registered on every role but answer
+`404 {"error":"sign-in pin is not available on this process"}` unless the
+process is `--role runtime` — a hub operator can aim the Runtimes-page action
+at any registered machine, and an unregistered route would fall through to the
+SPA handler and return unparseable HTML.
 
 ## Installer scripts
 
@@ -374,6 +429,26 @@ git config core.hooksPath .githooks
   binary isn't on `PATH`.
 - Frontend: `cd frontend && npm test` (Vitest, jsdom). Watch mode: `npm run test:watch`.
   `make test` runs both the Go and frontend suites.
+
+  **Migration debt.** Vitest's `include` in `vite.config.ts` is an explicit
+  allowlist, not `src/**`. 19 test files predate the runner and are still
+  hand-rolled `check()` harnesses with no `it()` blocks, so they are *not* run
+  by `npm test` and are *not* covered by any gate:
+
+  ```
+  features/database/  csv, dbColors, dbTabs, dbTree, exportClient,
+                      importMap, importWizard, sqlEditorSupport,
+                      transfer, typeMap
+  features/terminal/  archiveName, fileTreeSelection, paneTree
+  features/machines/  connectionString, installCommand
+  lib/                browserTileBookmarks, contentDisposition,
+                      ripgrepInstallPrefs, saveFile
+  ```
+
+  Migrating one means replacing its `check()` scaffolding with
+  `describe`/`it`/`expect` (see `features/ssh/sshCommand.test.ts` for the
+  pattern) and adding it to the `include` list. Do not change what a migrated
+  test asserts — a failure after migration is a real pre-existing bug.
 
 ## Code generation
 

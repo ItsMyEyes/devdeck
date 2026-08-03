@@ -210,10 +210,16 @@ curl -s -H 'Authorization: Bearer rtk' http://127.0.0.1:9199/api/workspaces   # 
 
 **4. Open the runtime's own UI.** Visit `http://127.0.0.1:9199` in a browser — this is a separate address from the hub, and it now renders a sign-in page instead of a blank 401. Two ways in:
 
-- **Paste the runtime's key** (`rtk` above) into the field and submit. This always works, including with the hub unreachable, since it only checks the key against this process.
+- **Type the runtime's 6-digit PIN.** This always works, including with the hub unreachable, since it only checks against this process. The runtime generated one on first start and printed it to its own log:
+  ```
+  auth: generated sign-in PIN 482913 — enter it on this runtime's /runtime-sign-in page; …
+  ```
+  Set your own instead with `--pin 482913` at startup, from the hub's **Runtimes** page (the key-icon button on a machine row), or from the runtime's own sidebar key button once you're in. This is deliberately *not* the runtime's `--key` — that's still the machine-to-machine credential the hub proxies with, but it's 64 hex characters and this page gets opened on phones.
 - **"Sign in via hub"** button — shown only once the runtime has self-registered (it needs to know the hub's URL and its own hub-assigned machine id, both exposed via `GET /api/whoami`). Clicking it does a full top-level navigation to the hub's `/handover` route, which mints a short-lived signed token there (using your already-logged-in hub session) and redirects back to the runtime with `?t=<token>`. You land signed in without typing anything — effectively SSO from the hub session, inheriting whatever 2FA you already passed there.
 
 Either path lands on the same UI as the hub, scoped to this runtime's own workspaces/projects.
+
+A PIN this short is only safe because the server rate-limits it: 5 wrong tries from one client IP buys a 1-minute lockout (doubling per further burst, up to 15 minutes), and while locked out even the *correct* PIN is refused — so if sign-in suddenly answers "too many attempts; retry in …", that's the lockout, not a broken PIN. Rotating the PIN clears every outstanding lockout. See [COMMANDS.md's "Runtime sign-in PIN"](COMMANDS.md#runtime-sign-in-pin) for the API surface.
 
 **5. Prove the offline case.** Stop the hub process (`Ctrl-C` or `kill`), then reload the runtime's UI at `http://127.0.0.1:9199`. It keeps serving the last snapshot it pulled — the workspace and project from step 2 are still there — instead of going blank. This is the whole point of the replica: routine hub restarts/maintenance/network blips don't interrupt work already running on a runtime.
 
@@ -237,6 +243,8 @@ The window then behaves like a plain browser tab logged into that hub — same l
 If Tailscale isn't installed (or this device isn't joined to a tailnet), that background step just doesn't happen — browsing the hub is completely unaffected, but the app menu swaps **Change Hub…** for **⚠ Runtime not registered**; click it for the reason and the log path (`<app log dir>/runtime-sidecar.log`), with a button back to the hub.
 
 Desktop data lives in the OS app-data directory (macOS: `~/Library/Application Support/dev.kiyora.devdeck/`) — separate databases per mode (`devdeck.db` for "Host locally", `devdeck-runtime.db` for the background runtime spawned by "Connect to a hub"), plus a persisted `runtime-key` so that background runtime keeps the same identity across restarts.
+
+**Signing status.** Release bundles are unsigned: the macOS `.app` carries only an ad-hoc linker signature (no Apple Developer ID, not submitted to notarization), and the Windows installers have no Authenticode certificate. Both OSes therefore treat a downloaded build as coming from an unidentified developer — macOS blocks it outright until you clear the quarantine attribute, Windows shows a click-through SmartScreen prompt. See [§15](#15-troubleshooting) for the exact commands. Locally built bundles are unaffected.
 
 ### 13.5 Which one should I use?
 
@@ -280,4 +288,5 @@ It exposes four tools: `list_projects`, `create_issue` (assignee is required —
 - **A registered machine shows offline.** The hub polls `GET /api/machines/{id}/health` with a 3-second timeout — check the runtime process is actually running and reachable on the URL you registered it with, and that both machines are on the same tailnet if you're not on `127.0.0.1`.
 - **New project's machine dropdown is empty.** A brand-new `--role hub` process has no registered Machines yet — see [§13](#13-deployment-modes-hub-both-and-desktop): the fastest fix is restarting with `--role both`, which registers itself automatically.
 - **Pasting a connection string fails immediately.** The hub verifies the URL/key against the runtime's `/api/whoami` before registering it — "unreachable" means the URL isn't actually reachable from the hub (check the tailnet), and a rejected key means it doesn't match that runtime's own `--key`.
+- **macOS refuses to open the downloaded desktop app: "DevDeck is damaged and can't be opened."** Release `.dmg` builds are ad-hoc signed only — no Apple Developer ID, no notarization (see [§13.4](#134-desktop-app)) — so Gatekeeper hard-blocks the bundle once your browser stamps it with `com.apple.quarantine`. The app is fine; clear the attribute once and launch again: `xattr -dr com.apple.quarantine /Applications/DevDeck.app`. Keep the `-r` — the bundled `Contents/MacOS/devdeck-server` sidecar is quarantined too, and without it the window opens but the backend never starts. This is scoped to that one bundle, not Gatekeeper as a whole. On Windows the equivalent prompt is SmartScreen: **More info → Run anyway**. Bundles you build yourself were never downloaded, so they're never quarantined.
 - **Desktop app shows "⚠ Runtime not registered" instead of "Change Hub…".** This device couldn't self-register as a runtime with the hub you connected to — click the menu item for the reason and log path (`<app log dir>/runtime-sidecar.log`). Most commonly, Tailscale isn't installed or this device isn't joined to a tailnet; browsing the hub itself is unaffected either way.

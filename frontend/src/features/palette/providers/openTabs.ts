@@ -1,3 +1,4 @@
+import { TAB_KIND_ICON } from '@/features/tabs/tabIcons'
 import type { TileNode, TileTab, WorkspaceTileLayout } from '@/features/tabs/tileTree'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
@@ -17,6 +18,9 @@ export type ResolveTabLabel = (tab: TileTab) => TabLabel
  *
  * Running an item focuses the leaf that owns it rather than opening anything
  * — that is the "window switcher" half of the palette.
+ *
+ * Each row carries its tab kind's menu icon (`TAB_KIND_ICON`), so a row and
+ * the pill it points at read as the same thing.
  */
 export function openTabItems(
   layout: WorkspaceTileLayout,
@@ -38,6 +42,7 @@ export function openTabItems(
           title: label.title,
           subtitle: parts.length > 0 ? parts.join(' · ') : undefined,
           keywords: [tab.kind],
+          icon: TAB_KIND_ICON[tab.kind],
           run: () => focus(node.id, tab.id),
         })
       }

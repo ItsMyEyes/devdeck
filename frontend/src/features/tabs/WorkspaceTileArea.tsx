@@ -11,7 +11,8 @@ import { disposeSSHSession } from '@/features/ssh/sshTerminalRegistry'
 import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
 import { worktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
-import { NewTabDialog } from './NewTabDialog'
+import { CommandPalette } from '@/features/palette/CommandPalette'
+import { SSHQuickAddDialog } from '@/features/ssh/SSHQuickAddDialog'
 import { WorkspaceTileCanvas } from './WorkspaceTileCanvas'
 import { createDefaultTileLayout, findTileLeaf, findTileTab, firstLeafId, focusTileLeaf, selectTileTab } from './tileTree'
 import type { TileTab, WorkspaceTileLayout } from './tileTree'
@@ -37,9 +38,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   const closeWorktreeTab = useDevDeckStore((s) => s.closeWorktreeTab)
   const pruneWorktreeTabs = useDevDeckStore((s) => s.pruneWorktreeTabs)
   const removeBrowserTile = useDevDeckStore((s) => s.removeBrowserTile)
-  const openSpawn = useDevDeckStore((s) => s.openSpawn)
-  const openNewTab = useDevDeckStore((s) => s.openNewTab)
-  const openBrowserTab = useDevDeckStore((s) => s.openBrowserTab)
+  const openPalette = useDevDeckStore((s) => s.openPalette)
   const openSSHShellTab = useDevDeckStore((s) => s.openSSHShellTab)
   const workspace = useWorkspace(wsId).data
   const worktrees = workspace ? workspace.projects.flatMap((p) => p.worktrees) : []
@@ -64,11 +63,10 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     }
   }
 
-  function handleCreateBrowser(machineId: string) {
-    openBrowserTab(wsId, machineId)
-    navigate({ to: '/w/$wsId/browser', params: { wsId } })
-  }
-
+  /** Called after the SSH quick-add dialog saves a host, so the freshly
+   *  created connection opens in a shell straight away. Browser and Agent
+   *  creation no longer pass through here — the palette's own hook opens
+   *  those and navigates itself. */
   function handleCreateSSH(connectionId: string) {
     openSSHShellTab(wsId, connectionId)
     navigate({ to: '/w/$wsId', params: { wsId } })
@@ -143,9 +141,11 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     if (activeTab) navigateToTab(activeTab)
   }
 
+  /** The tab strip's `+` button and every palette-opening chord land here, so
+   *  the palette always acts on a leaf that is actually focused. */
   function handleNewTab(leafId: string) {
     commit(focusTileLeaf(layout, leafId))
-    openNewTab(wsId, leafId)
+    openPalette(wsId, leafId)
   }
 
   // `WorkspaceTileCanvas.onTreeChange` only ever hands back the new `root`
@@ -203,6 +203,15 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
       const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId)
       const inTerminalWorkspace = showContent && activeTab?.kind === 'worktree'
       const key = event.key.toLowerCase()
+
+      // Cmd/Ctrl+K is the one chord that always means "open the palette",
+      // with no context rule at all — including inside a worktree terminal,
+      // where xterm is told to let it through via `isAppShortcut`.
+      if (key === 'k' && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        handleNewTab(leaf.id)
+        return
+      }
 
       if (!event.altKey && !event.shiftKey && /^[1-4]$/.test(event.key)) {
         const nextTab = leaf.tabs[Number(event.key) - 1]
@@ -266,7 +275,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
               />
             )
           },
-          browser: ({ tab }) => <BrowserTile tabId={tab.id} />,
+          browser: ({ leafId, tab }) => <BrowserTile tabId={tab.id} isFocused={leafId === layout.focusedLeafId} />,
           sshShell: ({ leafId, tab }) => (
             <SSHShellPane connectionId={tab.connectionId} isFocused={leafId === layout.focusedLeafId} />
           ),
@@ -282,14 +291,8 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         showContent={showContent}
         className="min-h-0"
       />
-      <NewTabDialog
-        wsId={wsId}
-        projects={workspace?.projects ?? []}
-        currentProjectId={currentProjectId}
-        onCreateBrowser={handleCreateBrowser}
-        onCreateShell={(projectId) => openSpawn(projectId, 'root')}
-        onCreateSSH={handleCreateSSH}
-      />
+      <CommandPalette wsId={wsId} leafId={layout.focusedLeafId} />
+      <SSHQuickAddDialog onCreateSSH={handleCreateSSH} />
     </>
   )
 }

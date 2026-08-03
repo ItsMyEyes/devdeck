@@ -7,7 +7,20 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
+import { createTerminalWriter } from '@/features/terminal/terminalWriter'
 import type { Machine } from '@/store/types'
+
+/** How long a connection must survive before its backoff counter is cleared.
+ *  Resetting on `open` is wrong: the handshake is tiny and succeeds even on a
+ *  link that then fails to carry the history replay, so a socket that opens
+ *  and dies seconds later would pin the delay at its floor and reconnect in a
+ *  tight loop — each attempt costing a fresh full replay. */
+const CONNECTION_HEALTHY_MS = 10_000
+
+/** Floor between manually-triggered reconnects (tab focus, `online` events),
+ *  so a flapping network or rapid tab switching can't bypass the backoff by
+ *  kicking a new attempt on every event. */
+const MIN_KICK_INTERVAL_MS = 2_000
 
 export interface TerminalHandle {
   /** Write a line to the session's stdin (used by the "send input" box). */
@@ -58,14 +71,23 @@ function isTerminalExitedFrame(data: string) {
   }
 }
 
-/** Cmd/Ctrl+P without Alt/Shift is xterm's own binding for "send DLE (0x10) to
+/** Chords the app claims globally, which xterm must therefore not swallow.
+ *
+ *  Cmd/Ctrl+P without Alt/Shift is xterm's own binding for "send DLE (0x10) to
  *  the shell" — its keydown listener runs in the capture phase and calls
  *  `stopPropagation`, so the window-level quick-open shortcut in
  *  ExpandedTerminal.tsx/SSHShellPane.tsx never sees the keystroke while a
  *  terminal has focus. `attachCustomKeyEventHandler` returning `false` is
- *  xterm's documented way to let a key combo escape untouched instead. */
-export function isQuickOpenShortcut(event: KeyboardEvent) {
-  return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p'
+ *  xterm's documented way to let a key combo escape untouched instead.
+ *
+ *  Cmd/Ctrl+K joins it for the command palette (WorkspaceTileArea.tsx), which
+ *  must open from anywhere — including a focused terminal. Nothing is lost:
+ *  neither this file nor sshTerminalRegistry.ts ever bound Cmd+K to
+ *  clear-screen. */
+export function isAppShortcut(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false
+  const key = event.key.toLowerCase()
+  return key === 'p' || key === 'k'
 }
 
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
@@ -148,7 +170,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     } catch {
       // WebGL unavailable (headless env, old GPU driver) — falls back to xterm's default renderer.
     }
-    term.attachCustomKeyEventHandler((event) => !isQuickOpenShortcut(event))
+    term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
     term.open(host)
     fit.fit()
     termRef.current = term
@@ -162,6 +184,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let everOpened = false
     let attempts = 0
     let retryTimer: number | undefined
+    let healthyTimer: number | undefined
+    let lastConnectAt = 0
+    const writer = createTerminalWriter(term)
     // Set when reconnecting to a screen that already has content. The reset
     // happens together with the first frame of the new connection (which is
     // always the server's banner + history replay), so the stale screen stays
@@ -178,15 +203,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       onExitRef.current?.()
     }
 
+    const clearHealthyTimer = () => {
+      if (healthyTimer !== undefined) {
+        window.clearTimeout(healthyTimer)
+        healthyTimer = undefined
+      }
+    }
+
     const connect = () => {
       if (disposed || !resolvedUrl) return
+      lastConnectAt = Date.now()
       const ws = new WebSocket(resolvedUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
       ws.onopen = () => {
         everOpened = true
-        attempts = 0
+        // Clear the backoff only once this connection has proven it can stay
+        // up — see CONNECTION_HEALTHY_MS. Opening is not evidence of health.
+        clearHealthyTimer()
+        healthyTimer = window.setTimeout(() => {
+          healthyTimer = undefined
+          attempts = 0
+        }, CONNECTION_HEALTHY_MS)
         // flush queued frames + sync current size
         ws.send(resizeFrame(term.cols, term.rows))
         for (const f of outbox.current) ws.send(f)
@@ -201,10 +240,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           resetOnNextFrame = false
           term.reset()
         }
-        if (typeof ev.data === 'string') term.write(ev.data)
-        else if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data))
+        // Routed through the writer so a burst (a reattach replay, or a
+        // runaway process) can't grow xterm's parse buffer without bound.
+        if (typeof ev.data === 'string') writer.write(ev.data)
+        else if (ev.data instanceof ArrayBuffer) writer.write(new Uint8Array(ev.data))
       }
       ws.onclose = (event) => {
+        clearHealthyTimer()
         if (event.reason === 'terminal exited') handleExit()
         else if (!exited) scheduleReconnect()
       }
@@ -246,11 +288,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (ws.readyState === WebSocket.OPEN) ws.send(resizeFrame(term.cols, term.rows))
         return
       }
+      // Jumping the pending backoff is for genuine "the situation changed"
+      // moments. Rate-limit it so a flapping link or fast tab switching can't
+      // turn every event into another attempt and defeat the backoff — each
+      // attempt costs a full history replay on the wire. `attempts` is
+      // deliberately not cleared here; only staying connected clears it.
+      if (Date.now() - lastConnectAt < MIN_KICK_INTERVAL_MS) return
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer)
         retryTimer = undefined
       }
-      attempts = 0
       resetOnNextFrame = true
       connect()
     }
@@ -313,7 +360,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     return () => {
       disposed = true
+      writer.dispose()
       if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+      if (healthyTimer !== undefined) window.clearTimeout(healthyTimer)
       if (fitTimer !== undefined) window.clearTimeout(fitTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', kick)

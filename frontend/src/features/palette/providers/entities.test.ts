@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { APP_PAGES, entityItems } from '@/features/palette/providers/entities'
+import { MODULE_ICON, PROJECT_ICON, WORKTREE_ICON } from '@/features/tabs/tabIcons'
 import type { EntityActions, EntitySources } from '@/features/palette/providers/entities'
 
 const actions: EntityActions = {
@@ -34,6 +35,18 @@ describe('entityItems', () => {
     expect(counts['ssh-host']).toBe(1)
     expect(counts.machine).toBe(1)
     expect(counts.page).toBe(APP_PAGES.length)
+  })
+
+  it('carries each entity the icon of the menu it lives under', () => {
+    const items = entityItems(sources(), actions)
+    const iconOf = (id: string) => items.find((i) => i.id === id)?.icon
+    expect(iconOf('worktree:wt1')).toBe(WORKTREE_ICON)
+    expect(iconOf('project:p1')).toBe(PROJECT_ICON)
+    expect(iconOf('ssh:c1')).toBe(MODULE_ICON.ssh)
+    expect(iconOf('machine:m1')).toBe(MODULE_ICON.machines)
+    expect(iconOf('page:ssh')).toBe(MODULE_ICON.ssh)
+    expect(iconOf('page:index')).toBe(MODULE_ICON.agents)
+    expect(items.every((i) => i.icon !== undefined)).toBe(true)
   })
 
   it('puts everything in the results group', () => {

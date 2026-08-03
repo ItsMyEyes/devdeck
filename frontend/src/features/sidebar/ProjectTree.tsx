@@ -61,7 +61,7 @@ export function ProjectTree() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-4">
       <div className="mb-2.5 flex items-center justify-between px-2">
-        <span className="font-mono text-[10.5px] font-semibold tracking-[0.16em] text-devdeck-dim">GROUPS</span>
+        <span className="font-mono text-[10.5px] font-semibold tracking-[0.16em] text-devdeck-dim">Projects</span>
         <button
           type="button"
           onClick={openNewProject}

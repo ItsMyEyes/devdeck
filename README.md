@@ -2,9 +2,19 @@
 
 > One operator, many companies. A multi-project dashboard for coding agents — git worktrees + real terminals, in the browser.
 
-DevDeck lets a single operator run several codebases across several client workspaces from one dashboard: spin up a git worktree, attach a coding agent to it in a real PTY terminal, edit files with LSP-backed intelligence, review the diff, and track the work as kanban issues — without leaving the browser. It also handles the business side of running client work: todos, invoices (with recurring billing and finance reporting), and a news feed.
+DevDeck lets a single operator run several codebases across several client workspaces from one dashboard: spin up a git worktree, attach a coding agent to it in a real PTY terminal, edit files with LSP-backed intelligence, review the diff, and track the work as kanban issues — without leaving the browser. It also covers the small stuff around that work: per-workspace todos and a news feed.
 
-New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from `git clone` to your first agent worktree.
+New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from `git clone` to your first agent worktree, or skim **[How it works](#how-it-works)** below for the 90-second version.
+
+## How it works
+
+1. **Create a workspace.** One per client or team — everything else nests under it.
+2. **Add a project.** Point at a local folder or paste a GitHub URL; DevDeck clones it and you pick which machine runs it.
+3. **Spawn a worktree.** Give it a branch name, a base branch, and — optionally — a coding agent and model. DevDeck runs a real `git worktree add` under the hood, so your main checkout is never touched.
+4. **Work in the tiling workspace.** The screen becomes a canvas of resizable panes: a live terminal attached to the agent's PTY, a file explorer, an LSP-backed editor, and a git panel — split, stack, and arrange however you like. Navigate away and back and you reattach to the same running process; nothing restarts.
+5. **Review and ship.** Watch the diff build up in the git panel, stage/commit/push without leaving the tab, and track the work as a kanban issue the agent can file and update itself through the built-in MCP server.
+
+Clone → worktree → agent → review → merge — repeat across as many projects and clients as you're juggling, all from one dashboard.
 
 ## Features
 
@@ -13,9 +23,16 @@ New here? Start with **[TUTORIAL.md](TUTORIAL.md)** for a full walkthrough from 
 - **In-app editor with real LSP support** (CodeMirror 6 + `gopls` / `typescript-language-server` / `pyright` / `rust-analyzer`): autocomplete, diagnostics, go-to-definition, right next to the terminal.
 - **Git panel** — status, diff, stage/unstage, discard, commit, push, pull — scoped to the worktree you're in.
 - **Issue tracker** — a drag-and-drop kanban board per project (attachments, comments, an auto-recorded activity log), plus a standalone MCP server so an agent working in a worktree can file and update its own issues.
-- **Invoices, Todos, News** — per-workspace, with recurring invoice templates and a finance-analysis view.
+- **Todos & News** — a lightweight per-workspace task list and update feed, so the small stuff doesn't need a separate tool.
 - **Tools page** — document → Markdown (`markitdown`) and Markdown → Word/PDF (`pandoc`, with Mermaid diagrams rendered inline), plus a handful of everyday dev utilities (JWT/Base64/hash/UUID/etc).
-- **Multi-machine, or all-in-one.** Split into a **hub** (organizational data — workspaces, projects, invoices, the machine registry) and any number of **runtime** machines (execution — git, worktrees, terminals, LSP), talking directly to each other over one Tailscale tailnet, with self-registration so a runtime can add itself with no manual step; or run solo with one `--role both` process, or the desktop app, which can also self-register your own machine as a runtime against a hub you host elsewhere — see [TUTORIAL.md](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
+- **Multi-machine, or all-in-one.** Split into a **hub** (organizational data — workspaces, projects, the machine registry) and any number of **runtime** machines (execution — git, worktrees, terminals, LSP), talking directly to each other over one Tailscale tailnet, with self-registration so a runtime can add itself with no manual step; or run solo with one `--role both` process, or the desktop app, which can also self-register your own machine as a runtime against a hub you host elsewhere — see [TUTORIAL.md](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
+
+## Coming soon
+
+- **Database module** — an in-app SQL client scoped to a worktree: object tree, editable table grid, DDL view, SQL editor, and CSV/SQL import-export — so you can inspect the schema your agent just touched without leaving DevDeck.
+- **Invoices** — per-workspace billing: draft invoices with dynamic line items, company/bank presets, recurring templates that auto-generate monthly, and a finance-analysis rollup.
+
+Both already have working UIs behind the scenes — they're being hardened before they're front and center.
 
 ## Install
 

@@ -1,0 +1,11 @@
+{
+  "title": "Using DevDeck",
+  "icon": "LayoutPanelLeft",
+  "description": "The day-to-day tour: the worktree workspace, issues, agents, and tools.",
+  "pages": [
+    "working-in-a-worktree",
+    "issues",
+    "agent-management",
+    "tools"
+  ]
+}

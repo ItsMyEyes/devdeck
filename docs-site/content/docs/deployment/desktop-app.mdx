@@ -1,0 +1,42 @@
+---
+title: Desktop app
+description: A native macOS/Windows/Linux app — host locally, or connect to a hub.
+icon: AppWindow
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+DevDeck also ships as a native app for macOS, Windows, and Linux. The
+first time you launch it, it asks how you want to run it — you can revisit
+that choice anytime from the app menu's **Change Hub…** item.
+
+<Tabs items={['Host locally on this device', 'Connect to a hub I already host']}>
+<Tab value="Host locally on this device">
+
+The app bundles the same backend as a background process, with its own
+local database — a complete, self-contained setup with nothing to
+configure. It registers itself automatically, exactly like [Solo
+mode](/docs/deployment/solo), so **New project** works immediately.
+
+</Tab>
+<Tab value="Connect to a hub I already host">
+
+Point the app at a hub running elsewhere by giving it that hub's tailnet
+URL and its key. The window then behaves like a browser tab logged into
+that hub.
+
+In the background, if this device is on a Tailscale tailnet, the app also
+quietly starts its own bundled backend as a second, separate runtime
+process that self-registers with the hub you pointed it at — so your own
+computer shows up as a usable runtime on that hub within a few seconds,
+with nothing else to install or run.
+
+<Callout title="No Tailscale on this device?">
+  That background self-registration step simply doesn't happen — browsing
+  the hub itself is completely unaffected, but the app menu swaps **Change
+  Hub…** for **⚠ Runtime not registered**; click it for the reason and the
+  log path.
+</Callout>
+
+</Tab>
+</Tabs>

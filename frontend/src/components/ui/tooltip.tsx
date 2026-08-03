@@ -1,5 +1,5 @@
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
-import { useState, type ReactElement } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 import { Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
@@ -19,7 +19,8 @@ export function Tooltip({
   children: ReactElement
 }) {
   const [localOpen, setLocalOpen] = useState(false)
-  useNativeOverlayBlocker(open ?? localOpen)
+  const popupRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open ?? localOpen, popupRef)
 
   return (
     <BaseTooltip.Root open={open} onOpenChange={setLocalOpen}>
@@ -27,6 +28,7 @@ export function Tooltip({
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} style={{ zIndex: 70 }}>
           <BaseTooltip.Popup
+            ref={popupRef}
             className={cn(
               'max-w-[220px] rounded-md border border-devdeck-border-menu bg-devdeck-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-devdeck-fg-2',
               'shadow-[0_12px_30px_rgba(0,0,0,0.5)] transition-all duration-150',
@@ -45,7 +47,8 @@ export function Tooltip({
 /** Small "i" icon that shows explanatory text in a tooltip on hover/focus. */
 export function InfoTooltip({ text, className }: { text: string; className?: string }) {
   const [open, setOpen] = useState(false)
-  useNativeOverlayBlocker(open)
+  const popupRef = useRef<HTMLDivElement>(null)
+  useNativeOverlayBlocker(open, popupRef)
 
   return (
     <BaseTooltip.Root onOpenChange={setOpen}>
@@ -59,6 +62,7 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side="top" sideOffset={6} style={{ zIndex: 70 }}>
           <BaseTooltip.Popup
+            ref={popupRef}
             className={cn(
               'max-w-[220px] rounded-md border border-devdeck-border-menu bg-devdeck-popover px-2.5 py-1.5 text-[11.5px] leading-snug text-devdeck-fg-2',
               'shadow-[0_12px_30px_rgba(0,0,0,0.5)] transition-all duration-150',

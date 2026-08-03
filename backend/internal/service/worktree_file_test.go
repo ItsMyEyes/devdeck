@@ -138,6 +138,117 @@ func TestWorktreeFileServiceCRUDAndRegexSearch(t *testing.T) {
 	}
 }
 
+func TestWorktreeFileServiceMkdirMoveAndCopy(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	root := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(base, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	workspace, err := st.CreateWorkspace("Workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := st.CreateProject(workspace.ID, "Project", "~/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", "~/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewWorktreeFileService(st)
+
+	dir, err := svc.Mkdir(worktree.ID, "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dir.IsDir || dir.Path != "docs" {
+		t.Fatalf("Mkdir entry = %+v, want IsDir docs", dir)
+	}
+	if info, statErr := os.Stat(filepath.Join(root, "docs")); statErr != nil || !info.IsDir() {
+		t.Fatalf("docs not created on disk: %v", statErr)
+	}
+	if _, err := svc.Mkdir(worktree.ID, "docs"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Mkdir over existing folder error = %v, want ErrConflict", err)
+	}
+	if _, err := svc.Mkdir(worktree.ID, ".git"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Mkdir reserved path error = %v, want ErrValidation", err)
+	}
+
+	renamed, err := svc.Move(worktree.ID, "src/main.go", "src/entry.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Path != "src/entry.go" {
+		t.Fatalf("Move (rename) entry = %+v, want src/entry.go", renamed)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "src", "main.go")); !os.IsNotExist(statErr) {
+		t.Fatalf("src/main.go still exists after Move: %v", statErr)
+	}
+
+	moved, err := svc.Move(worktree.ID, "src/entry.go", "docs/entry.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Path != "docs/entry.go" {
+		t.Fatalf("Move (cross-dir) entry = %+v, want docs/entry.go", moved)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(root, "docs", "entry.go")); readErr != nil || string(data) != "package main" {
+		t.Fatalf("moved file content = %q, %v, want %q", data, readErr, "package main")
+	}
+
+	if _, err := svc.Move(worktree.ID, "docs", "docs/nested"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Move folder into itself error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Move(worktree.ID, "docs/entry.go", "docs/entry.go"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Move to same path error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Write(worktree.ID, "README.md", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Move(worktree.ID, "docs/entry.go", "README.md"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Move onto existing file error = %v, want ErrConflict", err)
+	}
+
+	copied, err := svc.Copy(worktree.ID, "docs/entry.go", "docs/entry-copy.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Path != "docs/entry-copy.go" {
+		t.Fatalf("Copy entry = %+v, want docs/entry-copy.go", copied)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(root, "docs", "entry.go")); readErr != nil || string(data) != "package main" {
+		t.Fatalf("Copy source mutated: %q, %v", data, readErr)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(root, "docs", "entry-copy.go")); readErr != nil || string(data) != "package main" {
+		t.Fatalf("Copy destination content = %q, %v, want %q", data, readErr, "package main")
+	}
+
+	dirCopy, err := svc.Copy(worktree.ID, "docs", "docs-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirCopy.IsDir {
+		t.Fatalf("Copy of a folder entry = %+v, want IsDir", dirCopy)
+	}
+	for _, want := range []string{"entry.go", "entry-copy.go"} {
+		if data, readErr := os.ReadFile(filepath.Join(root, "docs-copy", want)); readErr != nil || string(data) != "package main" {
+			t.Fatalf("docs-copy/%s = %q, %v, want %q", want, data, readErr, "package main")
+		}
+	}
+}
+
 func TestWorktreeFileServiceUploadDeleteManyAndArchive(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("HOME", base)

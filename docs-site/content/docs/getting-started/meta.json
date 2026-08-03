@@ -1,0 +1,12 @@
+{
+  "title": "Getting Started",
+  "icon": "Rocket",
+  "description": "From zero to your first agent worktree.",
+  "defaultOpen": true,
+  "pages": [
+    "installation",
+    "first-account",
+    "workspaces-and-projects",
+    "first-worktree"
+  ]
+}

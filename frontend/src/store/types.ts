@@ -390,3 +390,22 @@ export interface Whoami {
   /** This runtime's own hub-assigned machine id, empty until self-registration first succeeds. */
   machineId: string
 }
+
+/** Purely frontend UI state — no backend counterpart, so the CONTRACTS.md
+ *  domain-type-mirroring rule doesn't apply here. Lives in `types.ts` rather
+ *  than colocated in `useDevDeckStore.ts` (like `BrowserDocState`) because
+ *  every occlusion-aware component (7+ files across `components/ui/` and
+ *  `features/browser/`) needs to import just the type, not the store's own
+ *  runtime logic. */
+export interface OverlayBlockerRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/** A blocker's on-screen footprint. `'viewport'` is a first-class region —
+ *  not a special-cased rect — meaning "covers the whole app": a modal
+ *  backdrop, the mobile sidebar drawer. Anything smaller reports its own
+ *  `OverlayBlockerRect` instead. See `useNativeOverlayBlocker.ts`. */
+export type OverlayBlockerRegion = OverlayBlockerRect | 'viewport'

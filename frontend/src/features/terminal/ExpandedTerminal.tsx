@@ -198,6 +198,18 @@ function TerminalWorkspace({
     () => deserializeLayout(storedLayout) ?? createDefaultLayout(worktree.id),
     [storedLayout, worktree.id],
   )
+  // `layout` gets a fresh reference on essentially any pane/tab action in this
+  // worktree (every `setWorktreeLayout` call produces a new `storedLayout`).
+  // `openFile`/`openDefinition` are handed down into `CodeFileEditor`'s
+  // `languageExtensions` memo, which rebuilds the whole LSP extension set
+  // (tearing down and recreating the live `LanguageServerPlugin`, resending
+  // `textDocument/didOpen` at version 0) whenever that callback's identity
+  // changes — so they must not depend on `layout` directly. Mirrors the
+  // `dirtyFilesRef` pattern just above.
+  const layoutRef = useRef(layout)
+  useEffect(() => {
+    layoutRef.current = layout
+  }, [layout])
 
   function commitLayout(next: WorktreeLayout) {
     setWorktreeLayout(worktree.id, next)
@@ -261,23 +273,24 @@ function TerminalWorkspace({
 
   const openFile = useCallback(
     (path: string) => {
-      const existingLeaf = findLeafForContent(layout.root, path)
+      const current = layoutRef.current
+      const existingLeaf = findLeafForContent(current.root, path)
       if (existingLeaf) {
         setWorktreeLayout(worktree.id, {
-          ...layout,
-          root: selectTabInTree(layout.root, existingLeaf.id, path),
+          ...current,
+          root: selectTabInTree(current.root, existingLeaf.id, path),
           focusedPaneId: existingLeaf.id,
         })
         return
       }
-      const targetPaneId = layout.focusedPaneId
+      const targetPaneId = current.focusedPaneId
       setWorktreeLayout(worktree.id, {
-        ...layout,
-        root: addContentToLeaf(layout.root, targetPaneId, createFileContent(path)),
+        ...current,
+        root: addContentToLeaf(current.root, targetPaneId, createFileContent(path)),
         focusedPaneId: targetPaneId,
       })
     },
-    [layout, worktree.id, setWorktreeLayout],
+    [worktree.id, setWorktreeLayout],
   )
 
   const openDefinition = useCallback(

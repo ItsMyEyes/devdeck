@@ -55,7 +55,12 @@ const installTimeout = 10 * time.Minute
 var runInstallCommand = func(ctx context.Context, prereqPath string, args []string) error {
 	ctx, cancel := context.WithTimeout(ctx, installTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, prereqPath, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, prereqPath, args...)
+	// `go install` / `npm install -g` shell out to git and to their own
+	// toolchains, so the child needs the same augmented PATH the server spawn
+	// gets — see detect.AugmentedEnv.
+	cmd.Env = detect.AugmentedEnv()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %s: %w: %s", prereqPath, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

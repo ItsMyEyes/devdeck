@@ -110,6 +110,13 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	cmd := exec.CommandContext(ctx, binary, spec.args...)
 	cmd.Dir = root
+	// Without this the server inherits the backend's own PATH, which for a
+	// GUI-launched or service-managed backend omits Homebrew, ~/.local/bin and
+	// ~/go/bin. ResolveBinary compensates for that when locating the server
+	// itself, but a language server then shells out to its toolchain — gopls
+	// runs `go list` — and that lookup would fail. See detect.AugmentedEnv for
+	// why the resulting failure is silent and confusing rather than loud.
+	cmd.Env = detect.AugmentedEnv()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		s.closeWithError(ctx, conn, fmt.Sprintf("open %s stdin: %v", spec.binary, err))

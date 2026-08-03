@@ -21,6 +21,7 @@ import type { DBRowEdit } from '@/lib/api'
 import type {
   DBConnection,
   DBEngine,
+  OverlayBlockerRegion,
   Priority,
   Project,
   SSHConnection,
@@ -49,18 +50,21 @@ export type NewProjectMode = 'local' | 'clone'
 export type BrowseTarget = 'newPath' | 'cloneParent' | 'edit'
 export type NewTabKind = 'browser' | 'shell' | 'ssh'
 
-interface NewTabState {
+/** Which leaf the palette will act on. Not persisted — see `partialize`. */
+interface PaletteState {
   open: boolean
   wsId: string | null
   leafId: string | null
-  kind: NewTabKind
-  /** Empty until the user (or the dialog's own default-to-first-machine
-   *  effect) picks one — both kinds require this before Create is enabled. */
-  machineId: string
-  /** SSH kind only: the saved connection to open, or `NEW_SSH_HOST` for the
-   *  inline "create from an ssh command" form. Empty until the dialog's own
-   *  default-selection effect picks one. */
-  sshConnectionId: string
+}
+
+/** The SSH quick-add form, reached from the palette's Create group or from a
+ *  typed `ssh …` command that needs credentials the palette cannot supply.
+ *  `prefillRaw` seeds the ssh-command field. */
+interface SSHQuickAddState {
+  open: boolean
+  wsId: string | null
+  leafId: string | null
+  prefillRaw: string
 }
 interface SpawnState {
   open: boolean
@@ -98,6 +102,14 @@ interface MachineDialogState {
   name: string
   url: string
   key: string
+}
+/** Which runtime's 6-digit sign-in PIN the RuntimePinDialog is rotating.
+ *  machineId is null when the dialog targets *this* process (a runtime
+ *  changing its own PIN from settings) rather than a remote runtime. */
+interface RuntimePinDialogState {
+  open: boolean
+  machineId: string | null
+  machineName: string
 }
 interface SSHDialogState {
   open: boolean
@@ -175,13 +187,13 @@ function generateDocId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function createBrowserDoc(id: string, machineId: string | null = null): BrowserDocState {
-  return { id, machineId, proxy: null, url: null, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
+function createBrowserDoc(id: string, machineId: string | null = null, url: string | null = null): BrowserDocState {
+  return { id, machineId, proxy: null, url, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
 }
 
-function createBrowserTileState(machineId: string | null = null): BrowserTileState {
+function createBrowserTileState(machineId: string | null = null, url: string | null = null): BrowserTileState {
   const docId = generateDocId()
-  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId, machineId)] }
+  return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId, machineId, url)] }
 }
 
 /**
@@ -207,7 +219,8 @@ interface DevDeckState {
    *  DesktopSettingsDialog. In-memory only, never persisted; regenerates on
    *  every app restart since the Rust side mints a fresh key per launch. */
   hubApiKey: string | null
-  newTab: NewTabState
+  palette: PaletteState
+  sshQuickAdd: SSHQuickAddState
   spawn: SpawnState
   newProject: NewProjectState
   newWorkspace: { open: boolean; name: string }
@@ -226,6 +239,7 @@ interface DevDeckState {
   todoDraft: { text: string; pri: Priority }
   todoFilter: TodoFilter
   machineDialog: MachineDialogState
+  runtimePinDialog: RuntimePinDialogState
   /** Not persisted — how many files the currently-open worktree (if any) has
    *  unsaved. `SidebarRail`'s back button lives outside `ExpandedTerminal`
    *  now, so this is how it gates its own dirty-file confirm. */
@@ -259,15 +273,16 @@ interface DevDeckState {
    *  below) — a restored `browser` tab reopens to its blank/bookmarks home
    *  state, same as `ensureBrowserTile` lazily re-creating a missing entry. */
   browserTiles: Record<string, BrowserTileState>
-  /** Count of currently-open DOM overlays that must render above everything
+  /** Currently-open DOM overlays that must render above the entire app DOM
    *  (command palettes, dialogs, dropdowns) — Tauri's native child webviews
    *  (Browser tiles) are separate OS-composited surfaces the window manager
    *  always stacks above the app's own DOM, so no CSS `z-index` can put a
-   *  DOM overlay in front of one. `BrowserTile` hides its native webview
-   *  while this is nonzero and restores it once every blocker has closed —
-   *  see `FileQuickOpen`'s `useEffect` for the push/pop pattern other
-   *  full-screen overlays should follow. */
-  nativeOverlayBlockers: number
+   *  DOM overlay in front of one. Keyed by a per-hook-instance id (see
+   *  `useNativeOverlayBlocker.ts`'s `useId()`) rather than a bare counter,
+   *  so `BrowserTile` can hide only for the blockers whose own reported
+   *  region actually overlaps its rect — an empty object is the exact
+   *  equivalent of today's `nativeOverlayBlockers === 0`. */
+  nativeOverlayBlockers: Record<string, OverlayBlockerRegion>
   /** True for the duration of an interactive pane-divider drag (see
    *  `WorkspaceTileCanvas.tsx`'s `TileSplitView`). Native child webviews
    *  (Browser tiles) ignore CSS `overflow-hidden` clipping and can visibly
@@ -297,13 +312,14 @@ interface DevDeckState {
   setWorkspaceTileLayout: (wsId: string, layout: WorkspaceTileLayout) => void
   selectAgentsTab: (wsId: string) => void
 
-  // new tab chooser (tab strip "+")
-  openNewTab: (wsId: string, leafId: string) => void
-  closeNewTab: () => void
-  setNewTab: (patch: Partial<Pick<NewTabState, 'kind' | 'machineId' | 'sshConnectionId'>>) => void
+  // command palette
+  openPalette: (wsId: string, leafId: string) => void
+  closePalette: () => void
+  openSSHQuickAdd: (wsId: string, leafId: string, prefillRaw: string) => void
+  closeSSHQuickAdd: () => void
 
   // browser tile (Tauri only)
-  openBrowserTab: (wsId: string, machineId?: string) => void
+  openBrowserTab: (wsId: string, machineId?: string, url?: string) => void
   openSSHShellTab: (wsId: string, connectionId: string) => void
   ensureBrowserTile: (tabId: string) => void
   setBrowserDocState: (tabId: string, docId: string, patch: Partial<Omit<BrowserDocState, 'id'>>) => void
@@ -312,8 +328,8 @@ interface DevDeckState {
   selectBrowserDoc: (tabId: string, docId: string) => void
   setBrowserTileFullscreen: (tabId: string, fullscreen: boolean) => void
   removeBrowserTile: (tabId: string) => void
-  pushNativeOverlayBlocker: () => void
-  popNativeOverlayBlocker: () => void
+  pushNativeOverlayBlocker: (id: string, region: OverlayBlockerRegion) => void
+  popNativeOverlayBlocker: (id: string) => void
   setTileDragActive: (active: boolean) => void
   startTransfer: (transfer: Transfer) => void
   updateTransferProgress: (
@@ -369,6 +385,12 @@ interface DevDeckState {
   openEditMachine: (id: string, name: string, url: string, key: string) => void
   closeMachineDialog: () => void
   setMachineDialog: (patch: Partial<Omit<MachineDialogState, 'open' | 'editingId'>>) => void
+
+  // runtime sign-in PIN dialog
+  /** Pass a machineId to rotate a remote runtime's PIN from the hub, or null
+   *  to rotate this process's own (a runtime's settings). */
+  openRuntimePin: (machineId: string | null, machineName: string) => void
+  closeRuntimePin: () => void
 
   // ssh dialog
   sshDialog: SSHDialogState
@@ -462,7 +484,8 @@ export const useDevDeckStore = create<DevDeckState>()(
       wsMenuOpen: false,
       desktopSettingsOpen: false,
       hubApiKey: null,
-      newTab: { open: false, wsId: null, leafId: null, kind: 'browser', machineId: '', sshConnectionId: '' },
+      palette: { open: false, wsId: null, leafId: null },
+      sshQuickAdd: { open: false, wsId: null, leafId: null, prefillRaw: '' },
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '', existingWtId: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
@@ -474,6 +497,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       todoDraft: { text: '', pri: 'normal' },
       todoFilter: 'all',
       machineDialog: { open: false, editingId: null, name: '', url: '', key: '' },
+      runtimePinDialog: { open: false, machineId: null, machineName: '' },
       sshDialog: {
         open: false,
         editingId: null,
@@ -523,7 +547,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
       browserTiles: {},
-      nativeOverlayBlockers: 0,
+      nativeOverlayBlockers: {},
       tileDragActive: false,
 
       // Toasts are fired directly through sonner — no store field, so coalesced
@@ -573,20 +597,18 @@ export const useDevDeckStore = create<DevDeckState>()(
           s.workspaceTileLayouts[wsId] = pruneTileTabs(layout, liveWtIds)
         }),
 
-      openNewTab: (wsId, leafId) =>
-        set(
-          (s) =>
-            void (s.newTab = { open: true, wsId, leafId, kind: 'browser', machineId: '', sshConnectionId: '' }),
-        ),
-      closeNewTab: () => set((s) => void (s.newTab.open = false)),
-      setNewTab: (patch) => set((s) => void Object.assign(s.newTab, patch)),
+      openPalette: (wsId, leafId) => set((s) => void (s.palette = { open: true, wsId, leafId })),
+      closePalette: () => set((s) => void (s.palette.open = false)),
+      openSSHQuickAdd: (wsId, leafId, prefillRaw) =>
+        set((s) => void (s.sshQuickAdd = { open: true, wsId, leafId, prefillRaw })),
+      closeSSHQuickAdd: () => set((s) => void (s.sshQuickAdd.open = false)),
 
-      openBrowserTab: (wsId, machineId) =>
+      openBrowserTab: (wsId, machineId, url) =>
         set((s) => {
           const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
           const tab = createBrowserTab()
           s.workspaceTileLayouts[wsId] = openTileTab(layout, tab)
-          s.browserTiles[tab.id] = createBrowserTileState(machineId ?? null)
+          s.browserTiles[tab.id] = createBrowserTileState(machineId ?? null, url ?? null)
         }),
       openSSHShellTab: (wsId, connectionId) =>
         set((s) => {
@@ -633,8 +655,8 @@ export const useDevDeckStore = create<DevDeckState>()(
           if (tile) tile.fullscreen = fullscreen
         }),
       removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
-      pushNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers += 1)),
-      popNativeOverlayBlocker: () => set((s) => void (s.nativeOverlayBlockers = Math.max(0, s.nativeOverlayBlockers - 1))),
+      pushNativeOverlayBlocker: (id, region) => set((s) => void (s.nativeOverlayBlockers[id] = region)),
+      popNativeOverlayBlocker: (id) => set((s) => void delete s.nativeOverlayBlockers[id]),
       setTileDragActive: (active) => set((s) => void (s.tileDragActive = active)),
       startTransfer: (transfer) => set((s) => void s.transfers.push(transfer)),
       updateTransferProgress: (id, patch) =>
@@ -748,6 +770,10 @@ export const useDevDeckStore = create<DevDeckState>()(
         set((s) => void (s.machineDialog = { open: true, editingId: id, name, url, key })),
       closeMachineDialog: () => set((s) => void (s.machineDialog.open = false)),
       setMachineDialog: (patch) => set((s) => void Object.assign(s.machineDialog, patch)),
+
+      openRuntimePin: (machineId, machineName) =>
+        set((s) => void (s.runtimePinDialog = { open: true, machineId, machineName })),
+      closeRuntimePin: () => set((s) => void (s.runtimePinDialog.open = false)),
 
       openAddSSHConnection: () =>
         set(

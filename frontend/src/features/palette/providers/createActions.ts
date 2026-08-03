@@ -1,4 +1,4 @@
-import { Globe, Network, TerminalSquare } from 'lucide-react'
+import { MODULE_ICON, PROJECT_ICON } from '@/features/tabs/tabIcons'
 import type { PaletteItem, PalettePage } from '@/features/palette/paletteTypes'
 
 export interface CreateActionDeps {
@@ -24,6 +24,7 @@ function machinePage(deps: CreateActionDeps): PalettePage {
         kind: 'machine',
         group: 'results',
         title: machine.name,
+        icon: MODULE_ICON.machines,
         disabled: deps.offlineMachineIds.has(machine.id) ? { reason: 'Machine is offline' } : undefined,
         run: () => deps.openBrowser(machine.id),
       })),
@@ -43,7 +44,7 @@ function sshPage(deps: CreateActionDeps): PalettePage {
         title: connection.name,
         subtitle: `${connection.user}@${connection.host}`,
         keywords: [connection.host, connection.user],
-        icon: Network,
+        icon: MODULE_ICON.ssh,
         run: () => deps.openSSHConnection(connection.id),
       })),
       {
@@ -51,7 +52,7 @@ function sshPage(deps: CreateActionDeps): PalettePage {
         kind: 'create',
         group: 'create',
         title: 'New host from ssh command…',
-        icon: Network,
+        icon: MODULE_ICON.ssh,
         run: () => deps.openSSHQuickAdd(''),
       },
     ],
@@ -69,6 +70,7 @@ function spawnPage(deps: CreateActionDeps): PalettePage {
         kind: 'project',
         group: 'results',
         title: project.name,
+        icon: PROJECT_ICON,
         disabled: deps.offlineMachineIds.has(project.machineId) ? { reason: 'Machine is offline' } : undefined,
         run: () => deps.openSpawn(project.id),
       })),
@@ -89,7 +91,7 @@ export function createActionItems(deps: CreateActionDeps): PaletteItem[] {
       kind: 'create',
       group: 'create',
       title: 'New Browser tab',
-      icon: Globe,
+      icon: MODULE_ICON.browser,
       drillInto: () => machinePage(deps),
     },
     {
@@ -97,7 +99,7 @@ export function createActionItems(deps: CreateActionDeps): PaletteItem[] {
       kind: 'create',
       group: 'create',
       title: 'New SSH…',
-      icon: Network,
+      icon: MODULE_ICON.ssh,
       drillInto: () => sshPage(deps),
     },
     {
@@ -105,7 +107,7 @@ export function createActionItems(deps: CreateActionDeps): PaletteItem[] {
       kind: 'create',
       group: 'create',
       title: 'New Agent…',
-      icon: TerminalSquare,
+      icon: MODULE_ICON.agents,
       drillInto: () => spawnPage(deps),
     },
   ]

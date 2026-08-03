@@ -40,7 +40,15 @@ func NewWorkspaceServiceForRuntime(s port.Store) *WorkspaceService {
 // On a runtime, this fanout is skipped entirely: there are no other machines
 // to ask, and the local replica's own worktrees are already attached by the
 // store.
-func (svc *WorkspaceService) List() ([]domain.Workspace, error) {
+//
+// ctx is the caller's — normally the inbound request's — so a client that
+// gives up takes its fan-out down with it. These fetches previously used
+// context.Background(), which meant an abandoned request (a browser
+// navigating away, or a retry fired because a slow runtime blew past the
+// client's patience) still held a goroutine and a socket per project until
+// machineclient's own timeout expired, piling up exactly when the network is
+// already struggling.
+func (svc *WorkspaceService) List(ctx context.Context) ([]domain.Workspace, error) {
 	workspaces, err := svc.store.Workspaces()
 	if err != nil {
 		return nil, err
@@ -64,7 +72,7 @@ func (svc *WorkspaceService) List() ([]domain.Workspace, error) {
 					log.Printf("workspaces: project %s: machine %s: %v", proj.ID, proj.MachineID, err)
 					return
 				}
-				worktrees, err := machineclient.FetchWorktrees(context.Background(), machine, proj.ID)
+				worktrees, err := machineclient.FetchWorktrees(ctx, machine, proj.ID)
 				if err != nil {
 					log.Printf("workspaces: project %s: %v", proj.ID, err)
 					return

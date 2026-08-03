@@ -84,6 +84,36 @@ All data access goes through `port.Store` (defined in `backend/internal/port/sto
   loopback desktop deployments (WebKit webviews reject Secure cookies over
   plain `http://127.0.0.1`). Web deployments keep the default (`true`).
 
+### Runtime sign-in PIN
+
+A second, human-facing credential for a runtime's **own** web UI. It never
+replaces `--key`, which remains the machine-to-machine credential (and is what
+authorizes changing the PIN).
+
+- `POST /api/auth/pin-session` (`--role runtime` only): body `{"pin":"482913"}`
+  → the same `devdeck_session` cookie `key-session` mints. **Public** — in
+  `RequireRuntimeAuth`'s allowlist alongside `/api/health` and `/api/whoami`,
+  since it is how an unauthenticated browser gets a credential at all.
+- `GET`/`PUT /api/auth/pin`: registered on every role, but 404
+  `{"error":"sign-in pin is not available on this process"}` unless this
+  process is `--role runtime`. `GET` → `{"configured":bool,"length":6}`;
+  `PUT {"pin":"..."}` → 204. Both sit behind the normal auth middleware, so
+  the runtime key (the hub's path, via `MachineProxyHandler`) or an existing
+  session (the runtime's own settings UI) is required.
+- Exactly 6 ASCII digits; all-same and straight ascending/descending runs are
+  rejected with 400. Only a bcrypt hash is persisted (`settings.signin_pin_hash`,
+  never on `domain.Settings` — it must not leak through `GET /api/settings`),
+  so a PIN is never readable back.
+- **The lockout is load-bearing, not defence in depth** — 10^6 combinations
+  cannot rely on secrecy. Per client IP: 5 failures → 1-minute lockout,
+  doubling per further burst, capped at 15 minutes; `429` + `Retry-After`
+  while in force, checked *before* the bcrypt compare so hammering costs the
+  server nothing and never extends the lock. A successful sign-in or a PIN
+  rotation clears the record. Wrong-PIN and no-PIN-configured return an
+  identical body on purpose.
+- A runtime with no PIN set seeds a random one at startup and logs it once;
+  `--pin`/`DEVDECK_PIN` overrides it and fails startup on an invalid value.
+
 ## Machines API (hub role only — runtime registry)
 
 ```go

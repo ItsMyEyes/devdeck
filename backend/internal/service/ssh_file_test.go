@@ -784,3 +784,70 @@ func TestSSHFileServiceDownloadRejectsDirectoryAndBadPaths(t *testing.T) {
 		t.Errorf("rejected downloads wrote %d bytes, want 0", dst.Len())
 	}
 }
+
+func TestSSHFileServiceMkdirMoveAndCopy(t *testing.T) {
+	svc, homeDir := newDownloadTestSSHConnection(t)
+	ctx := context.Background()
+
+	dir, err := svc.Mkdir(ctx, "sc-test", "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dir.IsDir || dir.Path != "notes" {
+		t.Fatalf("Mkdir entry = %+v, want IsDir notes", dir)
+	}
+	if info, statErr := os.Stat(filepath.Join(homeDir, "notes")); statErr != nil || !info.IsDir() {
+		t.Fatalf("notes not created on disk: %v", statErr)
+	}
+	if _, err := svc.Mkdir(ctx, "sc-test", "notes"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Mkdir over existing folder error = %v, want ErrConflict", err)
+	}
+
+	moved, err := svc.Move(ctx, "sc-test", "README.md", "notes/README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Path != "notes/README.md" {
+		t.Fatalf("Move entry = %+v, want notes/README.md", moved)
+	}
+	if _, statErr := os.Stat(filepath.Join(homeDir, "README.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("README.md still exists after Move: %v", statErr)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(homeDir, "notes", "README.md")); readErr != nil || string(data) != "read me\n" {
+		t.Fatalf("moved file content = %q, %v, want %q", data, readErr, "read me\n")
+	}
+
+	if _, err := svc.Move(ctx, "sc-test", "notes", "notes/nested"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Move folder into itself error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.Move(ctx, "sc-test", "docs/logo.png", "notes/README.md"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Move onto existing file error = %v, want ErrConflict", err)
+	}
+
+	copied, err := svc.Copy(ctx, "sc-test", "notes/README.md", "notes/README-copy.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Path != "notes/README-copy.md" {
+		t.Fatalf("Copy entry = %+v, want notes/README-copy.md", copied)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(homeDir, "notes", "README.md")); readErr != nil || string(data) != "read me\n" {
+		t.Fatalf("Copy source mutated: %q, %v", data, readErr)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(homeDir, "notes", "README-copy.md")); readErr != nil || string(data) != "read me\n" {
+		t.Fatalf("Copy destination content = %q, %v, want %q", data, readErr, "read me\n")
+	}
+
+	dirCopy, err := svc.Copy(ctx, "sc-test", "notes", "notes-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirCopy.IsDir {
+		t.Fatalf("Copy of a folder entry = %+v, want IsDir", dirCopy)
+	}
+	for _, want := range []string{"README.md", "README-copy.md"} {
+		if data, readErr := os.ReadFile(filepath.Join(homeDir, "notes-copy", want)); readErr != nil || string(data) != "read me\n" {
+			t.Fatalf("notes-copy/%s = %q, %v, want %q", want, data, readErr, "read me\n")
+		}
+	}
+}

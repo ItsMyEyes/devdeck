@@ -1,0 +1,50 @@
+---
+title: Agent management
+description: Configure the coding agent CLIs DevDeck launches inside worktrees.
+icon: Bot
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+The **Agent management** sidebar item is where you configure the coding
+agents themselves — one panel per agent (Claude, Codex, Gemini, Pi,
+OpenCode, whichever DevDeck finds installed on your computer).
+
+<Accordions>
+<Accordion title="Models">
+
+The built-in catalog of models for that agent, merged with any custom
+model aliases you've already set up locally for that CLI.
+
+</Accordion>
+<Accordion title="Skills">
+
+Install a skill (a packaged set of instructions that teaches the agent how
+to do a specific kind of task) into the agent's real skill folder — for
+example `~/.claude/skills` for Claude — or remove one. Skills that shipped
+with the agent are read-only and can't be removed.
+
+</Accordion>
+<Accordion title="MCP servers (Claude and Codex only)">
+
+MCP (Model Context Protocol) is how an agent connects to external tools —
+think of it as a plugin system. Add one as either `stdio` (a local command,
+its arguments, and environment variables) or `http` (just a URL). Whatever
+you enter is redacted again after saving, so it isn't shown back to you in
+plain text.
+
+</Accordion>
+<Accordion title="Env profiles (Claude and Codex only)">
+
+Save a named snapshot of an "LLM endpoint" — base URL, auth token, model
+alias slots, and any extra environment variables — then switch an agent to
+it with one click. Useful if you're routing that agent's traffic through a
+proxy or a self-hosted endpoint instead of talking to the vendor directly.
+
+</Accordion>
+</Accordions>
+
+<Callout title="Hand-editing config">
+  There's also a raw settings-file editor (`settings.json` for Claude,
+  `config.toml` for Codex) for anything the options above don't cover yet.
+</Callout>

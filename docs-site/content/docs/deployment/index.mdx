@@ -1,0 +1,48 @@
+---
+title: Deployment overview
+description: Solo, hub + runtime machines, or the desktop app — pick your shape.
+icon: Boxes
+---
+
+DevDeck is one program (plus an optional native desktop shell wrapped
+around it) that you can run in a few different shapes, depending on your
+situation. None of them change what DevDeck does — only how many computers
+are involved in doing it.
+
+## The one rule that applies to every mode
+
+Every project runs on a registered **Machine** — that's just DevDeck's name
+for "a computer it knows about." Git, worktrees, terminals, and language
+servers all happen on whichever Machine you assign a project to, picked
+from a dropdown in the **New project** dialog.
+
+A brand-new install starts with an *empty* list of Machines, so that
+dropdown starts out empty too. Every mode below is really just a different
+answer to the same question: **how does a Machine get into that list?**
+
+## Which one should I use?
+
+| Your situation | Use |
+|---|---|
+| Just you, one computer, simplest possible setup | [Solo](/docs/deployment/solo) — `--role both`, or the desktop app's "Host locally" |
+| You, plus a second or third machine for more power | [Hub + runtime machines](/docs/deployment/hub-and-runtimes) |
+| You want a native app, and already host a hub elsewhere | [Desktop app](/docs/deployment/desktop-app) → "Connect to a hub" |
+| You want a native app and nothing else running anywhere | [Desktop app](/docs/deployment/desktop-app) → "Host locally" |
+
+<Cards>
+  <Card
+    href="/docs/deployment/solo"
+    title="Solo"
+    description="One computer, one process. The simplest correct setup for a single operator."
+  />
+  <Card
+    href="/docs/deployment/hub-and-runtimes"
+    title="Hub + runtime machines"
+    description="Split organizational data from execution across several machines."
+  />
+  <Card
+    href="/docs/deployment/desktop-app"
+    title="Desktop app"
+    description="A native macOS/Windows/Linux app, hosting locally or connecting to a hub."
+  />
+</Cards>

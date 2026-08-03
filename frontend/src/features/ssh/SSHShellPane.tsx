@@ -24,12 +24,14 @@ import {
   selectTabInTree,
   splitLeaf,
 } from '@/features/terminal/paneTree'
-import type { DropZone, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from '@/features/terminal/paneTree'
+import type { DropZone, FileContent, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from '@/features/terminal/paneTree'
 import { TerminalExplorer } from '@/features/terminal/TerminalExplorer'
 import { SSHFileEditor } from '@/features/terminal/SSHFileEditor'
+import type { SSHFileEditorHandle } from '@/features/terminal/SSHFileEditor'
 import { FileQuickOpen } from '@/features/terminal/FileQuickOpen'
 import { ContentSearchPanel } from '@/features/terminal/ContentSearchPanel'
 import type { LineReveal } from '@/features/terminal/PlainCodeEditor'
+import { UnsavedChangesDialog } from '@/features/terminal/UnsavedChangesDialog'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
 
@@ -78,8 +80,15 @@ export function SSHShellPane({
   const [quickOpen, setQuickOpen] = useState(false)
   const [contentSearch, setContentSearch] = useState(false)
   const [lineReveals, setLineReveals] = useState<Record<string, LineReveal>>({})
+  // Pending "close a dirty file/pane?" confirmation — contentId is null for a
+  // whole-pane close (Save saves every dirty tab in the pane at once).
+  const [closeConfirm, setCloseConfirm] = useState<{ paneId: string; contentId: string | null; paths: string[] } | null>(
+    null,
+  )
+  const [closeConfirmSaving, setCloseConfirmSaving] = useState(false)
   const revealRequest = useRef(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const fileHandles = useRef(new Map<string, SSHFileEditorHandle>())
   const isDesktop = useIsDesktop()
 
   const setDirtyFileCount = useDevDeckStore((s) => s.setDirtyFileCount)
@@ -206,10 +215,16 @@ export function SSHShellPane({
 
   function handleCloseTab(paneId: string, contentId: string) {
     const content = findContent(layout.root, contentId)
-    if (content?.kind === 'file') {
-      if (dirtyFiles.has(content.path) && !window.confirm(`Close ${basename(content.path)} without saving?`)) return
-      cleanupFileBookkeeping(content.path)
+    if (content?.kind === 'file' && dirtyFiles.has(content.path)) {
+      setCloseConfirm({ paneId, contentId, paths: [content.path] })
+      return
     }
+    finishCloseTab(paneId, contentId)
+  }
+
+  function finishCloseTab(paneId: string, contentId: string) {
+    const content = findContent(layout.root, contentId)
+    if (content?.kind === 'file') cleanupFileBookkeeping(content.path)
     if (content?.kind === 'terminal') disposeSSHSession(content.sessionKey)
     commitLayout(closeTab(layout, paneId, contentId))
   }
@@ -217,9 +232,17 @@ export function SSHShellPane({
   function handleClosePane(paneId: string) {
     const pane = findPane(layout.root, paneId)
     if (!pane || pane.type !== 'leaf') return
-    const dirtyTabs = pane.tabs.filter((t) => t.kind === 'file' && dirtyFiles.has(t.path))
-    if (dirtyTabs.length > 0 && !window.confirm(`Close this pane? ${dirtyTabs.length} file${dirtyTabs.length === 1 ? '' : 's'} unsaved.`))
+    const dirtyTabs = pane.tabs.filter((t): t is FileContent => t.kind === 'file' && dirtyFiles.has(t.path))
+    if (dirtyTabs.length > 0) {
+      setCloseConfirm({ paneId, contentId: null, paths: dirtyTabs.map((t) => t.path) })
       return
+    }
+    finishClosePane(paneId)
+  }
+
+  function finishClosePane(paneId: string) {
+    const pane = findPane(layout.root, paneId)
+    if (!pane || pane.type !== 'leaf') return
     let next = layout
     for (const tab of pane.tabs) {
       next = closeTab(next, paneId, tab.id)
@@ -227,6 +250,38 @@ export function SSHShellPane({
       if (tab.kind === 'terminal') disposeSSHSession(tab.sessionKey)
     }
     commitLayout(next)
+  }
+
+  /** UnsavedChangesDialog's "Save" (or "Save All" for a pane) — saves every
+   *  dirty path this close would affect, keeping the dialog open (so the
+   *  operator can retry or cancel) if any write fails. */
+  async function handleCloseConfirmSave() {
+    if (!closeConfirm) return
+    setCloseConfirmSaving(true)
+    try {
+      await Promise.all(closeConfirm.paths.map((path) => fileHandles.current.get(path)?.save()))
+    } catch {
+      setCloseConfirmSaving(false)
+      return
+    }
+    setCloseConfirmSaving(false)
+    const { paneId, contentId } = closeConfirm
+    setCloseConfirm(null)
+    if (contentId) finishCloseTab(paneId, contentId)
+    else finishClosePane(paneId)
+  }
+
+  function handleCloseConfirmDiscard() {
+    if (!closeConfirm) return
+    const { paneId, contentId } = closeConfirm
+    setCloseConfirm(null)
+    if (contentId) finishCloseTab(paneId, contentId)
+    else finishClosePane(paneId)
+  }
+
+  function handleCloseConfirmCancel() {
+    setCloseConfirmSaving(false)
+    setCloseConfirm(null)
   }
 
   function handleSplitPane(paneId: string, direction: SplitDirection) {
@@ -381,10 +436,18 @@ export function SSHShellPane({
       )
     },
     git: () => null,
+    // No SSH UI path creates an 'untitled' tab yet (only the worktree pane's
+    // "+" menu has "New File") — this satisfies PaneContentRendererMap's
+    // exhaustiveness without dead-wiring an editor no user action can reach.
+    untitled: () => null,
     file: ({ content, isActive }) => {
       if (content.kind !== 'file') return null
       return (
         <SSHFileEditor
+          ref={(handle) => {
+            if (handle) fileHandles.current.set(content.path, handle)
+            else fileHandles.current.delete(content.path)
+          }}
           connectionId={connectionId}
           path={content.path}
           active={isActive}
@@ -437,6 +500,15 @@ export function SSHShellPane({
         target={{ kind: 'ssh', connectionId }}
         onClose={() => setContentSearch(false)}
         onOpenMatch={openAtLine}
+      />
+
+      <UnsavedChangesDialog
+        open={closeConfirm !== null}
+        names={closeConfirm ? closeConfirm.paths.map(basename) : []}
+        saving={closeConfirmSaving}
+        onSave={() => void handleCloseConfirmSave()}
+        onDiscard={handleCloseConfirmDiscard}
+        onCancel={handleCloseConfirmCancel}
       />
     </div>
   )

@@ -1,17 +1,21 @@
-import { Terminal } from 'lucide-react'
 import { parseSSHCommand } from '@/features/ssh/sshCommand'
+import { MODULE_ICON } from '@/features/tabs/tabIcons'
+import type { LucideIcon } from 'lucide-react'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
 export interface PaletteVerb {
   name: string
   aliases: string[]
   argHint: string
+  /** The menu this verb creates in — its hint row wears the same icon as the
+   *  rows the verb will produce. */
+  icon: LucideIcon
 }
 
 export const PALETTE_VERBS: PaletteVerb[] = [
-  { name: 'ssh', aliases: [], argHint: '<ssh command | host>' },
-  { name: 'agent-new', aliases: ['agents-new'], argHint: '<project>' },
-  { name: 'browser', aliases: ['open'], argHint: '<url>' },
+  { name: 'ssh', aliases: [], argHint: '<ssh command | host>', icon: MODULE_ICON.ssh },
+  { name: 'agent-new', aliases: ['agents-new'], argHint: '<project>', icon: MODULE_ICON.agents },
+  { name: 'browser', aliases: ['open'], argHint: '<url>', icon: MODULE_ICON.browser },
 ]
 
 function findVerb(word: string): PaletteVerb | undefined {
@@ -55,7 +59,7 @@ export function verbHintItems(query: string): PaletteItem[] {
       group: 'results' as const,
       title: `${verb.name} ${verb.argHint}`,
       subtitle: 'command',
-      icon: Terminal,
+      icon: verb.icon,
       completion: `${verb.name} `,
     }))
 }

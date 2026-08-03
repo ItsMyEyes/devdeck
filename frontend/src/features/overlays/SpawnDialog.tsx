@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { GitBranch, House } from 'lucide-react'
+import { FolderGit2, GitBranch, House } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -20,6 +20,7 @@ import {
 import { useScope } from '@/features/useScope'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
+import { worktreeLabel } from '@/lib/worktreeLabel'
 
 export function SpawnDialog() {
   const navigate = useNavigate()
@@ -68,8 +69,19 @@ export function SpawnDialog() {
 
   const models = useAgentModels(machine, agentId).data ?? []
 
-  const branchMode = spawn.mode !== 'root'
-  const canSubmit = Boolean(project && machine) && machineOnline && !createWorktree.isPending
+  const branchMode = spawn.mode === 'branch'
+  const rootMode = spawn.mode === 'root'
+  const existingMode = spawn.mode === 'existing'
+  // Root-mode worktrees are always freshly spawned, never reused (see
+  // worktreeLabel.ts's rootShellIndex doc comment) — only branch worktrees
+  // make sense to reopen here.
+  const existingWorktrees = (project?.worktrees ?? []).filter((w) => !w.root)
+  const selectedExistingWt = existingWorktrees.find((w) => w.id === spawn.existingWtId)
+  const canSubmit =
+    Boolean(project && machine) &&
+    machineOnline &&
+    !createWorktree.isPending &&
+    (!existingMode || Boolean(selectedExistingWt))
 
   useEffect(() => {
     if (!spawn.open || !spawn.chooseProject || spawn.projectId || !workspace || machinesQuery.isPending) return
@@ -99,15 +111,38 @@ export function SpawnDialog() {
     }
   }, [branchMode, branches, spawn.base, setSpawn])
 
+  useEffect(() => {
+    if (!existingMode || existingWorktrees.length === 0) return
+    if (existingWorktrees.some((w) => w.id === spawn.existingWtId)) return
+    setSpawn({ existingWtId: existingWorktrees[0].id })
+  }, [existingMode, existingWorktrees, setSpawn, spawn.existingWtId])
+
   function submit() {
     const projectId = project?.id
     if (!projectId || !machine || !project) return
+
+    if (spawn.mode === 'existing') {
+      if (!selectedExistingWt) return
+      closeSpawn()
+      setSidebarOpen(false)
+      const targetWsId = workspaces.find((candidate) => candidate.projects.some((p) => p.id === projectId))?.id
+      if (targetWsId) {
+        if (isTauri) openWorktreeTab(targetWsId, projectId, selectedExistingWt.id)
+        navigate({
+          to: '/w/$wsId/p/$projectId/wt/$wtId',
+          params: { wsId: targetWsId, projectId, wtId: selectedExistingWt.id },
+        })
+      }
+      return
+    }
+
+    const mode = spawn.mode
     createWorktree.mutate(
       {
         machine,
         projectId,
         body: {
-          mode: spawn.mode,
+          mode,
           // Root mode is a plain shell terminal — no agent is picked, so no
           // model/task must be sent, or the backend would treat it as an
           // agent session (see backend/internal/service/worktree.go Create).
@@ -139,13 +174,21 @@ export function SpawnDialog() {
   return (
     <Dialog open={spawn.open} onOpenChange={(open) => !open && closeSpawn()} width={480}>
       <div className="mb-1 flex items-center gap-2.5">
-        {branchMode ? <GitBranch size={14} className="text-devdeck-accent" /> : <House size={14} className="text-devdeck-purple" />}
-        <DialogTitle>{branchMode ? 'New worktree' : 'Root terminal'}</DialogTitle>
+        {branchMode ? (
+          <GitBranch size={14} className="text-devdeck-accent" />
+        ) : existingMode ? (
+          <FolderGit2 size={14} className="text-devdeck-accent" />
+        ) : (
+          <House size={14} className="text-devdeck-purple" />
+        )}
+        <DialogTitle>{branchMode ? 'New worktree' : existingMode ? 'Open worktree' : 'Root terminal'}</DialogTitle>
       </div>
       <DialogDescription className="mb-4">
         {branchMode
           ? `git worktree add${project ? ` · ${project.name}` : ''}`
-          : `terminal in project root · no branch${project ? ` · ${project.path}` : ''}`}
+          : existingMode
+            ? `open a terminal in an existing worktree${project ? ` · ${project.name}` : ''}`
+            : `terminal in project root · no branch${project ? ` · ${project.path}` : ''}`}
       </DialogDescription>
 
       {spawn.chooseProject ? (
@@ -179,11 +222,33 @@ export function SpawnDialog() {
           <GitBranch size={13} />
           New branch
         </ModeTab>
-        <ModeTab active={!branchMode} onClick={() => setSpawn({ mode: 'root' })}>
+        <ModeTab active={existingMode} onClick={() => setSpawn({ mode: 'existing' })}>
+          <FolderGit2 size={13} />
+          Existing worktree
+        </ModeTab>
+        <ModeTab active={rootMode} onClick={() => setSpawn({ mode: 'root' })}>
           <House size={13} />
           Project root
         </ModeTab>
       </div>
+
+      {existingMode && (
+        <div className="mb-5">
+          <Label>Worktree</Label>
+          {existingWorktrees.length > 0 ? (
+            <Select
+              value={spawn.existingWtId}
+              onValueChange={(existingWtId) => setSpawn({ existingWtId })}
+              options={existingWorktrees.map((w) => ({ value: w.id, label: worktreeLabel(project, w) }))}
+              aria-label="Worktree"
+            />
+          ) : (
+            <p className="mt-1 font-mono text-[11px] text-devdeck-dim">
+              No worktrees yet for this project — create one with "New branch".
+            </p>
+          )}
+        </div>
+      )}
 
       {branchMode && (
         <div className="mb-3.5">
@@ -237,7 +302,7 @@ export function SpawnDialog() {
           Cancel
         </Button>
         <Button onClick={submit} disabled={!canSubmit}>
-          {createWorktree.isPending ? 'Creating…' : 'Create →'}
+          {existingMode ? 'Open →' : createWorktree.isPending ? 'Creating…' : 'Create →'}
         </Button>
       </div>
     </Dialog>

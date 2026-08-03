@@ -1,0 +1,32 @@
+---
+title: Tools
+description: Document conversion and everyday dev utilities.
+icon: Wrench
+---
+
+The **Tools** sidebar item is a workspace-agnostic utility page — it isn't
+tied to any project, so it's always one click away.
+
+## Document conversion
+
+These two tools run an external program on the server to do the heavy
+lifting. If that program isn't installed there, you'll get a clear error
+with the exact install command instead of a silent failure:
+
+<Cards>
+  <Card
+    title="Document → Markdown"
+    description="Upload a PDF, Word, PowerPoint, Excel, image, audio, or HTML file (25MB max) and get back editable Markdown. PDFs keep their layout; if the server has an LLM API key configured, images also get automatic AI-written descriptions."
+  />
+  <Card
+    title="Markdown → Document"
+    description="Write or paste Markdown and export it as a .docx or .pdf file. Any fenced ```mermaid code block is rendered into an image first, so diagrams show up correctly in the exported document."
+  />
+</Cards>
+
+## Everyday utilities
+
+The rest of the page is small dev utilities that run entirely in your
+browser — nothing is uploaded anywhere: JWT decode, Base64, URL
+encode/decode, hashing, JSON/XML/CSV formatting, UUID generation, and
+timestamp conversion.

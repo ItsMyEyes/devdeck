@@ -1,10 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useState } from 'react'
 import { FileWarning, Loader2, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { isDocumentPath } from '@/features/documents/documentKind'
 import { useDeleteFileTarget, useFileTarget, useWriteFileTarget } from '@/features/data/queries'
-import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { FilesTarget } from './filesTarget'
 import { MaterialFileIcon } from './MaterialFileIcon'
@@ -12,6 +12,16 @@ import type { LineReveal } from './PlainCodeEditor'
 
 const PlainCodeEditor = lazy(() =>
   import('./PlainCodeEditor').then((module) => ({ default: module.PlainCodeEditor })),
+)
+
+const MarkdownFileEditor = lazy(() =>
+  import('./MarkdownFileEditor').then((module) => ({ default: module.MarkdownFileEditor })),
+)
+
+const DocumentFileTab = lazy(() =>
+  import('@/features/documents/DocumentFileTab').then((module) => ({
+    default: module.DocumentFileTab,
+  })),
 )
 
 interface SSHFileEditorProps {
@@ -22,6 +32,13 @@ interface SSHFileEditorProps {
   onDeleted: (path: string) => void
   /** Content search's "open at line" entry point — see PlainCodeEditor.tsx's LineReveal doc comment. */
   reveal?: LineReveal
+}
+
+export interface SSHFileEditorHandle {
+  /** Writes the current draft, resolving once saved or rejecting if the write
+   *  fails — used by the close-tab "Save" action, which needs to know
+   *  whether it's safe to actually close. No-ops if there's nothing dirty. */
+  save: () => Promise<void>
 }
 
 function basename(path: string) {
@@ -35,8 +52,46 @@ function isMarkdownPath(path: string) {
 /** SSH's counterpart to FileEditor.tsx — same chrome (dirty tracking,
  *  save/revert/delete, markdown special-case), but the buffer is a remote
  *  file over SFTP and there is no per-language server, so it renders
- *  PlainCodeEditor instead of the worktree's LSP-backed CodeFileEditor. */
-export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDeleted, reveal }: SSHFileEditorProps) {
+ *  PlainCodeEditor instead of the worktree's LSP-backed CodeFileEditor.
+ *
+ *  Documents (PDF/Word/Excel/PowerPoint) branch off above every hook for the
+ *  same reason FileEditor.tsx does — see that file's dispatch comment. */
+export const SSHFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(function SSHFileEditor(
+  props,
+  ref,
+) {
+  if (isDocumentPath(props.path)) {
+    return (
+      <Suspense
+        fallback={
+          <div
+            className={cn(
+              'min-h-0 min-w-0 flex-1 items-center justify-center bg-devdeck-terminal',
+              props.active ? 'flex' : 'hidden',
+            )}
+          >
+            <DataLoading compact label="loading viewer…" />
+          </div>
+        }
+      >
+        <DocumentFileTab
+          ref={ref}
+          target={{ kind: 'ssh', connectionId: props.connectionId }}
+          path={props.path}
+          active={props.active}
+          onDirtyChange={props.onDirtyChange}
+          onDeleted={props.onDeleted}
+        />
+      </Suspense>
+    )
+  }
+  return <SSHTextFileEditor {...props} ref={ref} />
+})
+
+const SSHTextFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(function SSHTextFileEditor(
+  { connectionId, path, active, onDirtyChange, onDeleted, reveal },
+  ref,
+) {
   const target: FilesTarget = { kind: 'ssh', connectionId }
   const [draft, setDraft] = useState('')
   const [initialized, setInitialized] = useState(false)
@@ -55,13 +110,18 @@ export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDel
     onDirtyChange(path, dirty)
   }, [dirty, onDirtyChange, path])
 
+  async function saveNow() {
+    if (!initialized || !dirty) return
+    await writeFile.mutateAsync({ path, content: draft })
+    toast.success(`Saved ${basename(path)}`)
+  }
+
   function save() {
     if (!initialized || writeFile.isPending) return
-    writeFile.mutate(
-      { path, content: draft },
-      { onSuccess: () => toast.success(`Saved ${basename(path)}`) },
-    )
+    void saveNow().catch(() => undefined)
   }
+
+  useImperativeHandle(ref, () => ({ save: saveNow }))
 
   useEffect(() => {
     if (!active) return
@@ -162,15 +222,15 @@ export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDel
           </button>
         </div>
       ) : isMarkdownPath(path) ? (
-        <div className="min-h-0 flex-1 overflow-auto bg-[#090a0c]">
-          <div className="w-full px-6 py-8 md:px-10">
-            <MarkdownEditor
-              value={draft}
-              onChange={setDraft}
-              placeholder="Empty markdown file. Click to edit."
-            />
-          </div>
-        </div>
+        <Suspense
+          fallback={
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+              <DataLoading compact label="loading editor…" />
+            </div>
+          }
+        >
+          <MarkdownFileEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={reveal} />
+        </Suspense>
       ) : (
         <Suspense
           fallback={
@@ -179,9 +239,9 @@ export function SSHFileEditor({ connectionId, path, active, onDirtyChange, onDel
             </div>
           }
         >
-          <PlainCodeEditor path={path} value={draft} onChange={setDraft} reveal={reveal} />
+          <PlainCodeEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={reveal} />
         </Suspense>
       )}
     </div>
   )
-}
+})
