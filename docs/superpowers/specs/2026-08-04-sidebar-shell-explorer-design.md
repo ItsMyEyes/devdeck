@@ -1,270 +1,317 @@
-# Sidebar Shell Explorer
+# Per-Tab Shell Sidebar
 
 **Date:** 2026-08-04
 **Status:** design approved, pending implementation plan
+**Revises:** the first draft of this file (commit `b57615b`), which put a single
+explorer in the app-level sidebar. See [Superseded approach](#superseded-approach).
 
 ## Problem
 
-When a worktree or SSH shell tab is focused, the left sidebar panel keeps showing
-the Projects tree. The file tree for the shell you are actually working in exists
-only as a pane tab inside the tiling canvas (`PaneContent` kind `explorer`), which
-means it competes with the terminal for the content area. Operators want the
-VSCode arrangement: the file tree as persistent left-hand chrome, terminal owning
-the full content area.
+The file tree for the shell you are working in exists only as a pane tab inside
+the tiling canvas (`PaneContent` kind `explorer`), so it competes with the
+terminal for the content area. And with two shells open side by side there is no
+way to see both trees at once, let alone move a file from one to the other —
+today that means download to the laptop, then upload to the other host.
 
 ## Goal
 
-While a shell tab (worktree or SSH) is focused, the 306px sidebar panel shows a
-file explorer rooted at that shell's working directory instead of the Projects
-tree. The swap follows tab focus automatically. The panel becomes drag-resizable.
+Every shell tab — worktree or SSH — owns a left sidebar inside its own pane. Two
+shells split side by side show two independent sidebars, each rooted at its own
+filesystem. Each sidebar carries an Explorer and (for worktrees) a Git panel,
+selected from a VSCode-style icon rail. Files and folders drag from one sidebar
+to the other, transferring across worktrees, machines, and SSH hosts. The sidebar
+toggles from a button at the far left of the pane header and from Cmd/Ctrl+B.
 
 ## Non-goals
 
-- The in-pane `explorer` pane tab stays exactly as it is. Both surfaces coexist;
-  neither is deprecated and the `+` menu entry is untouched.
-- `TerminalExplorer`'s tree rendering, context menu, drag-and-drop, upload, zip,
-  and deps-dialog behaviour are unchanged. This spec only adds a second mount
-  site and two optional controlled props.
-- No change to routing. The sidebar reads focus state; it never navigates.
+- The app-level Projects sidebar (`features/sidebar/Sidebar.tsx`) is untouched.
+- The in-pane `explorer` and `git` pane tabs stay exactly as they are. Both
+  surfaces coexist; the `+` menu is unchanged.
+- `TerminalExplorer` and `GitPanel` are not modified. This spec adds a second
+  mount site for each and nothing more.
+- SSH shells get no Git panel — `GitPanel` requires a worktree id and a machine,
+  and there is no SSH-side git support to expose.
+
+## Superseded approach
+
+The first draft swapped the app-level 306px sidebar between the Projects tree and
+an explorer that followed the focused tab. One sidebar cannot be two shells'
+sidebars at once, so that design cannot satisfy the goal above and is dropped
+whole: `useActiveShellTarget`, `ShellExplorerPanel`, the `shellCommand` store
+bridge, the dismiss override, and the app-sidebar mode switch are all gone.
+
+The replacement is strictly smaller. Because the sidebar now lives *inside*
+`ExpandedTerminal` / `SSHShellPane`, it is a sibling of the `PaneCanvas` that
+already owns the target, `openFile`, the dirty-file bookkeeping, and the
+quick-open / content-search dialogs. Every callback `TerminalExplorer` needs is
+already in scope. No cross-component bridge exists to build, and no controlled
+`expanded` prop is needed either — backgrounded tile tabs are `display:none`'d
+rather than unmounted, so tree state survives tab switching on its own.
 
 ## Architecture
 
-Five units, each independently testable.
+### 1. `ShellSidebar`
 
-### 1. `useActiveShellTarget` — which shell is focused
-
-New file: `frontend/src/features/sidebar/useActiveShellTarget.ts`
-
-```ts
-export type ActiveShell =
-  | { kind: 'worktree'; key: string; worktreeId: string; machine: Machine; rootLabel: string }
-  | { kind: 'ssh'; key: string; connectionId: string; rootLabel: string }
-
-export function useActiveShellTarget(): ActiveShell | null
-```
-
-`key` is the identity used everywhere downstream (command routing, expanded-state
-bucket, React `key`): `wt:<worktreeId>` or `ssh:<connectionId>`. It matches the
-store slice each shell's layout lives in.
-
-Resolution, mirroring the derivation `useScope` already performs:
-
-1. `workspaceTileLayouts[wsId]` → `findTileLeaf(root, focusedLeafId)` → the tab
-   whose id equals the leaf's `activeTabId`.
-2. `kind === 'worktree'` → look up the project and worktree in `useWorkspace(wsId)`,
-   the machine in `useMachines()` (same lookup `ProjectTree.ProjectRow` does).
-   `rootLabel` = project name, falling back to the worktree label.
-   If the machine is missing, return `null` — `TerminalExplorer` cannot build a
-   worktree target without one.
-3. `kind === 'ssh-shell'` → `connectionId` from the tab; `rootLabel` = the
-   connection's name from the SSH connections query, falling back to `'SSH'`.
-4. `agents` / `browser` / no tab → `null`.
-5. No tile layout for this workspace (web mode, non-Tauri) → fall back to
-   `useScope().wtId`; resolve it the same way as step 2. No SSH fallback exists
-   because SSH shells are tile-only.
-
-The hook returns a referentially stable object (memoized on the identifying
-fields), so consumers can depend on it in effects without churn.
-
-### 2. `ShellExplorerPanel` — the sidebar mount site
-
-New file: `frontend/src/features/sidebar/ShellExplorerPanel.tsx`
+New file: `frontend/src/features/terminal/ShellSidebar.tsx`
 
 ```tsx
-<ShellExplorerPanel shell={activeShell} onBack={dismiss} />
+interface ShellSidebarProps {
+  shellKey: string                                   // 'wt:<id>' | 'ssh:<id>'
+  target: FilesTarget
+  rootLabel: string
+  git?: { worktreeId: string; machine: Machine }     // omitted for SSH
+  onOpenFile: (path: string) => void
+  onFileDeleted: (paths: string[]) => void
+  onRequestQuickOpen: () => void
+  onRequestContentSearch: () => void
+  contentSearchShortcut?: string
+}
 ```
 
-Layout: a single-row back bar (`‹ Projects`, height 28px) above
-`<TerminalExplorer/>`. No other chrome — `TerminalExplorer` already renders its
-own 36px toolbar carrying `rootLabel` and the upload / zip / delete / new-folder /
-new-file / deps buttons, and it already hides the deps button for `ssh` targets.
+Layout: a 40px icon rail, the panel, and a 4px drag strip on the right edge.
 
-Props passed through:
+The rail holds one button per panel — `Files` for Explorer, `GitBranch` for Git —
+with the active one marked. The Git button is absent when `git` is undefined, so
+an SSH sidebar shows a single-entry rail rather than a disabled control for a
+capability that does not exist.
 
-| prop | worktree | ssh |
-|---|---|---|
-| `target` | `{ kind: 'worktree', machine, worktreeId }` | `{ kind: 'ssh', connectionId }` |
-| `rootLabel` | `shell.rootLabel` | `shell.rootLabel` |
-| `contentSearchShortcut` | `'Ctrl Shift F'` | omitted |
-| `onOpenFile` / `onFileDeleted` / `onRequestQuickOpen` / `onRequestContentSearch` | dispatch a shell command (§3) | same |
+The panel body renders `<TerminalExplorer {...} />` or
+`<GitPanel worktreeId machine active={open && panel === 'git'} />`, both
+unmodified. Open state, selected panel, and width are read from the store by
+`shellKey` (§3); the component holds no state of its own.
 
-Mounted with `key={shell.key}` so switching shells gets a clean instance rather
-than a tree showing the previous shell's paths mid-fetch.
+**Closing hides, it does not unmount.** A closed sidebar renders with
+`display: none` rather than being torn down, so the explorer's expanded-path set
+and scroll position survive a toggle — the same reason `TileLeafView` hides
+backgrounded tabs instead of unmounting them. Unmounting would make Cmd/Ctrl+B
+quietly destructive.
 
-### 3. Shell command bridge — sidebar → pane
+Drag strip behaviour: `pointerdown` captures the pointer and records start x and
+width, `pointermove` writes `setShellSidebarWidth`, `pointerup` releases,
+`dblclick` resets to the default. `role="separator"`, `aria-orientation="vertical"`,
+and arrow-key adjustment for keyboard users.
 
-`TerminalExplorer`'s four callbacks all resolve to state owned by the pane
-components: `ExpandedTerminal` holds `dirtyFiles`, `definitionReveals`,
-`quickOpen`, `contentSearch`; `SSHShellPane` holds the same shape against
-`sshTileLayouts`. Reimplementing `openFile` and `handleFilesDeleted` in the store
-would duplicate that bookkeeping and let the two copies drift.
+### 2. Mount sites
 
-Instead the sidebar posts an intent and the already-mounted pane executes it with
-the functions it already has.
+`ExpandedTerminal` and `SSHShellPane` each wrap their existing body in a flex row:
+
+```tsx
+<div className="flex min-h-0 flex-1">
+  <ShellSidebar shellKey={shellKey} … />   {/* self-hiding, see §1 */}
+  <div className="flex min-w-0 flex-1 flex-col">
+    <PaneCanvas … />
+    {/* MobileKeyToolbar, FileQuickOpen, ContentSearchPanel, dialogs — unchanged */}
+  </div>
+</div>
+```
+
+The four callbacks are the *same function references* already handed to
+`renderers.explorer`: `openFile`, `handleFilesDeleted`, `() => setQuickOpen(true)`,
+`() => setContentSearch(true)`. `SSHShellPane` passes no `git` and no
+`contentSearchShortcut`, matching what it passes its in-pane explorer today.
+
+### 3. Sidebar state
 
 Store addition (`frontend/src/store/useDevDeckStore.ts`):
 
 ```ts
-type ShellCommandOp =
-  | { kind: 'open-file'; path: string }
-  | { kind: 'files-deleted'; paths: string[] }
-  | { kind: 'quick-open' }
-  | { kind: 'content-search' }
-
-shellCommand: { targetKey: string; nonce: number; op: ShellCommandOp } | null
-dispatchShellCommand: (targetKey: string, op: ShellCommandOp) => void   // increments nonce
+shellSidebars: Record<string, { open: boolean; panel: 'explorer' | 'git'; width: number }>
+setShellSidebarOpen:  (shellKey: string, open: boolean) => void
+setShellSidebarPanel: (shellKey: string, panel: 'explorer' | 'git') => void
+setShellSidebarWidth: (shellKey: string, width: number) => void
 ```
 
-`nonce` is a monotonically increasing counter, not a timestamp — it must be
-replayable and must re-fire when the same op is issued twice in a row (deleting
-two files one after the other, opening the same file twice).
+Keyed by `shellKey` (`wt:<worktreeId>` / `ssh:<connectionId>`), persisted.
+Defaults for an unseen shell: `{ open: true, panel: 'explorer', width: 280 }`.
+Width is clamped to `[200, 560]` **on write**, so a corrupted or hand-edited
+persisted value cannot produce an unusable panel.
 
-`shellCommand` is **not persisted** (excluded in `partialize`): a queued intent
-must never survive a reload and re-fire against a pane that has moved on.
+Open-by-default is a deliberate trade: existing shells lose ~320px of terminal
+width on first launch after the update, in exchange for the feature being visible
+without knowing the shortcut. Each shell remembers its own state from then on.
 
-Consumer side, identical in `ExpandedTerminal` and `SSHShellPane`:
+### 4. Toggle button
+
+`PanelHeader` gains one prop, keeping it presentational as its doc comment
+requires:
 
 ```ts
-useShellCommands(`wt:${worktree.id}`, {
-  'open-file': ({ path }) => openFile(path),
-  'files-deleted': ({ paths }) => handleFilesDeleted(paths),
-  'quick-open': () => setQuickOpen(true),
-  'content-search': () => setContentSearch(true),
-})
+/** Rendered flush-left, before the tab strip. Used for the shell sidebar toggle. */
+leadingContent?: ReactNode
 ```
 
-`useShellCommands` (`frontend/src/features/terminal/useShellCommands.ts`) is a
-`useEffect` keyed on `nonce` that no-ops unless `targetKey` matches. It reads the
-handlers from a ref so a caller passing an inline object literal does not re-fire
-the effect.
+`PaneCanvas` gains `paneLeadingContent?: (pane: LeafPane) => ReactNode`, the exact
+shape of the existing `paneOverflowActions` / `paneNewTabActions` render props.
 
-Safety: the sidebar only renders `ShellExplorerPanel` for the *focused* tab, and
-the focused tab's pane is mounted by definition, so a dispatched command always
-has a live consumer. If focus changes between dispatch and effect (not reachable
-today, but cheap to guard), the mismatched `targetKey` drops it silently.
+The shell pane returns the toggle **only for the first leaf in document order**,
+so a split shows exactly one toggle and it sits adjacent to the sidebar it
+controls. (`paneTree.ts` needs a `firstLeafId` helper if it lacks one;
+`tileTree.ts` already has the equivalent.)
 
-### 4. Sidebar mode switch
+Icon: `PanelLeftClose` / `PanelLeftOpen`, already used by the app sidebar rail.
+Tooltip reads "Toggle sidebar (⌘B)" or "(Ctrl+B)" by platform.
 
-`frontend/src/features/sidebar/Sidebar.tsx`, replacing the current
-`{view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />}`:
+### 5. Cmd/Ctrl+B
 
-```tsx
-showExplorer
-  ? <ShellExplorerPanel shell={activeShell} onBack={dismissExplorer} />
-  : view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />
-```
+Both `ExpandedTerminal` and `SSHShellPane` already run a window-level `keydown`
+handler gated on their `isFocused` prop — the same mechanism that keeps Ctrl+P
+from opening quick-open in both tiles of a split. Cmd/Ctrl+B is one more branch in
+that existing handler and needs no new registry.
 
-`canExpandPanel` needs no change: a focused worktree tab already resolves to
-`view === 'agents'` and a focused ssh-shell tab to `view === 'ssh'`, both of which
-already permit the panel.
+`preventDefault()` runs before xterm.js sees the key, on every platform. This
+shadows the tmux prefix and readline's backward-char inside DevDeck terminals on
+Windows and Linux. That cost was raised and the uniform binding was chosen
+deliberately; it is not an oversight. If it turns out to bite, the escape hatch is
+to make the binding configurable rather than to change the default.
 
-**Dismiss override.** Store field `explorerDismissedForShell: string | null`,
-holding the `shell.key` the operator last dismissed. `showExplorer` is
-`activeShell !== null && explorerDismissedForShell !== activeShell.key`.
+### 6. Cross-shell drag-and-drop transfer
 
-`shell.key` is the right granularity because it is bijective with the tile-tab id:
-a worktree tab's id *is* its `wtId` and an ssh-shell tab's id is
-`ssh-<connectionId>` (see `createWorktreeTab` / `createSSHShellTab`), so keying on
-the shell is keying on the tab without carrying a second identifier. The override
-therefore evaporates the moment focus moves to a different shell — matching the
-chosen "follows focus automatically" behaviour, with the back button as a
-temporary escape rather than a mode. Not persisted.
-
-**Expanded-state preservation.** `TerminalExplorer` holds its `expanded` path set
-in local `useState`, so remounting per shell would collapse the tree on every tab
-switch. Two optional controlled props are added:
+`TerminalExplorer` already emits an internal drag payload under `ENTRY_DRAG_MIME`
+carrying the dragged paths. The payload is extended to identify its origin:
 
 ```ts
-expanded?: ReadonlySet<string>
-onExpandedChange?: (next: ReadonlySet<string>) => void
+{ shellKey: string; paths: string[]; hasDir: boolean }
 ```
 
-When omitted the component keeps its current internal state, so the in-pane mount
-site is byte-for-byte unaffected. The sidebar supplies them from a store slice
-`shellExplorerExpanded: Record<string, string[]>` keyed by `shell.key` (persisted,
-so a reopened shell restores its tree shape).
+On drop, the receiving tree compares `shellKey` to its own:
 
-### 5. Resizable panel
+- **Same shell** → the existing move-within-tree path. Unchanged.
+- **Different shell** → a transfer, routed to a new
+  `frontend/src/features/terminal/shellTransfer.ts`.
 
-Store: `sidebarPanelWidth: number` (persisted, default `306`), clamped to
-`[240, 560]` on write so a corrupted or pre-existing persisted value cannot render
-an unusable panel.
+Both sidebars live in the same document (a split is two tile leaves in one
+window, not two OS windows), so `dataTransfer` carries the payload natively.
 
-`Sidebar.tsx` applies it as an inline `style={{ width }}` on the `<aside>` in place
-of the current `w-[306px]` class (the collapsed `w-[56px]` case is untouched), plus
-a 4px drag strip absolutely positioned on the panel's right edge:
+Transfer routing:
 
-- `pointerdown` → `setPointerCapture`, record start x and start width
-- `pointermove` → `setSidebarPanelWidth(startWidth + dx)` (the store clamps)
-- `pointerup` → release capture
-- `dblclick` → reset to `306`
-- `cursor-col-resize`, `role="separator"`, `aria-orientation="vertical"`,
-  and arrow-key adjustment for keyboard users
+| Selection | Route |
+|---|---|
+| files only | per file: `downloadFile(path, name)` → `new File([blob], name)` → `uploadFiles(destFolder, [file])` |
+| contains a folder | `downloadZip(paths, name)` on the source → `POST …/files/extract` (multipart) on the destination |
 
-One width shared by both panel modes — a width that changed under you when you
-switched tabs would read as a bug, not a feature.
+Both primitives already exist for **both** target kinds in `useFileTransfers`.
+Only `extract` is new (§7). The zip route sends the archive as the request body
+and extracts server-side — no temp artifact is written to the destination, so a
+failed transfer leaves nothing to clean up.
+
+Progress reuses the store's existing transfer slice (`startTransfer` /
+`updateTransferProgress` / `finishTransfer`), so cross-shell transfers appear in
+the same UI as uploads and downloads. On settle, the file queries for **both**
+source and destination are invalidated.
+
+Bytes route through the browser. For a multi-gigabyte tree that is the wrong
+shape, and a server-to-server relay would be the fix; that is out of scope here
+and worth revisiting if it becomes a real complaint.
+
+### 7. Backend: extract endpoints
+
+Two new routes, mirroring the existing symmetric pairs:
+
+```
+POST /api/worktrees/{id}/files/extract
+POST /api/ssh/connections/{id}/files/extract
+```
+
+Multipart, same shape as `Upload`: an `archive` file part and a `path` field
+naming the destination folder. Service methods
+`Extract(ctx, id, destFolder string, r io.Reader) ([]FileEntry, error)`, the
+inverse of the existing `Archive`.
+
+- **Worktree**: `archive/zip` over the received bytes, writing each entry beneath
+  the resolved destination.
+- **SSH**: the same decode in Go, writing each entry over the existing SFTP
+  path — no dependency on an `unzip` binary being present on the remote host.
+
+Security, and the reason this endpoint gets the most test attention:
+
+- **Zip-slip guard.** Reject any entry whose cleaned path escapes the
+  destination: `..` segments, absolute paths, and paths that resolve outside the
+  root after cleaning. Rejection fails the whole request rather than skipping the
+  entry, so a partially-extracted malicious archive is not a reachable state.
+- **Symlink entries are rejected**, not followed.
+- **Budget caps** on entry count and total uncompressed size, rejecting zip bombs
+  before writing anything.
+
+Responses use the standard `{"error": "message"}` envelope and `handleStoreErr`
+for store errors, per `CONTRACTS.md`.
 
 ## Data flow
 
 ```
-focused tile tab ──useActiveShellTarget──► ActiveShell | null
-                                                │
-                              ┌─────────────────┴─────────────────┐
-                        null │                                    │ shell
-                             ▼                                    ▼
-                   ProjectTree / SSHGroupTree            ShellExplorerPanel
-                                                                  │
-                                                          TerminalExplorer
-                                                                  │ callbacks
-                                                                  ▼
-                                              dispatchShellCommand(key, op)
-                                                                  │
-                                                    useShellCommands(key, …)
-                                                                  ▼
-                                    ExpandedTerminal / SSHShellPane existing handlers
-                                                                  │
-                                              worktreeLayouts / sshTileLayouts
+ ExpandedTerminal (worktree tab)          ExpandedTerminal (other worktree tab)
+ ┌──────────────────────────────┐         ┌──────────────────────────────┐
+ │ ShellSidebar   │ PaneCanvas  │         │ ShellSidebar   │ PaneCanvas  │
+ │ ▪ rail 40px    │ ┌─────────┐ │         │ ▪ rail 40px    │ ┌─────────┐ │
+ │   📄 Explorer  │ │PanelHdr │ │         │   📄 Explorer  │ │PanelHdr │ │
+ │   ⎇  Git       │ │[◨]Term ×│ │         │   ⎇  Git       │ │[◨]Term ×│ │
+ │ ▪ TerminalExpl │ │         │ │         │ ▪ TerminalExpl │ │         │ │
+ │      │         │ │Terminal │ │         │      ▲         │ │Terminal │ │
+ └──────┼─────────┴─┴─────────┘─┘         └──────┼─────────┴─┴─────────┘─┘
+        │                                        │
+        └────── drag: {shellKey, paths} ─────────┘
+                          │
+                  shellKey differs
+                          ▼
+                   shellTransfer.ts
+              files → download + upload
+              folders → zip + POST extract
 ```
 
 ## Error and empty states
 
-- **No shell focused** → Projects tree, exactly as today.
-- **Worktree focused but machine unreachable or unassigned** → `useActiveShellTarget`
-  returns `null` and the sidebar stays on Projects. `ProjectTree` already marks
-  those worktrees unreachable and blocks opening them, so an explorer that could
-  only ever show a fetch error is worse than no explorer.
-- **File listing fails / is empty** → owned by `TerminalExplorer`, unchanged.
-- **Dispatch with no matching consumer** → dropped silently. Not user-reachable
-  in the current UI; the guard exists so a future background-tab explorer cannot
-  corrupt a different shell's layout.
+- **SSH shell** → no Git entry in the rail at all.
+- **Drop onto the same shell** → ordinary move, unchanged.
+- **Drop of OS files onto a sidebar** → existing upload path, unchanged.
+- **Partial transfer failure** → toast naming the failed count; both trees
+  invalidated so the UI resyncs to whatever actually landed.
+- **Extract rejected** (zip-slip, oversize) → error toast carrying the server
+  message; nothing written on the destination.
+- **Shell unreachable / listing fails** → `TerminalExplorer`'s existing error
+  state, unchanged.
+- **Sidebar width dragged to a bound** → clamps silently, no error.
 
 ## Testing
 
+**Frontend**
+
 | Unit | Test |
 |---|---|
-| `useActiveShellTarget` | worktree tab → worktree target; ssh-shell tab → ssh target; agents and browser tabs → `null`; worktree whose machine is missing → `null`; no tile layout → route-scope fallback |
-| `dispatchShellCommand` | nonce strictly increases; two identical consecutive ops produce two distinct nonces; `shellCommand` absent from persisted state |
-| `useShellCommands` | fires on matching `targetKey`; ignores mismatched key; does not re-fire when the handler object identity changes but `nonce` does not |
-| dismiss override | dismiss hides the explorer for that shell; focusing a different shell clears it; refocusing the dismissed shell in the same session keeps it dismissed; absent from persisted state |
-| `sidebarPanelWidth` | clamped at both bounds; double-click resets to 306 |
-| `Sidebar` render | Projects ↔ Explorer swap follows the focused tab |
+| `shellSidebars` slice | defaults for an unseen key; width clamped at both bounds; two shell keys stay independent |
+| drag payload | same-`shellKey` drop routes to move; differing `shellKey` routes to transfer; malformed payload is ignored, not thrown on |
+| `shellTransfer` | files-only selection takes the download/upload route; a selection containing a folder takes the zip/extract route; partial failure still invalidates both sides |
+| `ShellSidebar` | Git rail entry absent without a `git` prop, present with one |
+| `PanelHeader` / `PaneCanvas` | `leadingContent` renders only for the first leaf; a split shows exactly one toggle |
+| Cmd/Ctrl+B | toggles only the `isFocused` shell; a split leaves the unfocused shell's sidebar alone |
 
-Existing `ExpandedTerminal` and `SSHShellPane` behaviour must be unchanged when
-no command is dispatched — the in-pane explorer path is the regression risk.
+**Backend**
+
+| Unit | Test |
+|---|---|
+| `Extract` happy path | worktree and SSH: nested dirs and files land at the right paths |
+| zip-slip | `../x`, `/abs/x`, `a/../../x` each rejected; destination left untouched |
+| symlink entry | rejected |
+| budgets | entry-count and uncompressed-size caps reject before any write |
+| error shape | `{"error": "..."}` envelope on every failure path |
+
+The in-pane `explorer` and `git` pane tabs must behave identically before and
+after — that is the regression surface.
 
 ## Implementation order
 
-`frontend/src/store/useDevDeckStore.ts` is a convergence file (see
-`ORCHESTRATION.md`) and carries four of the additions here — `shellCommand`,
-`explorerDismissedForShell`, `shellExplorerExpanded`, `sidebarPanelWidth`. All store
-changes land in one serialized step; nothing else may touch that file in parallel.
+`backend/cmd/server/main.go` and `frontend/src/store/useDevDeckStore.ts` are
+convergence files (`ORCHESTRATION.md`); each is touched in exactly one serialized
+step and nothing else may edit them in parallel.
 
-1. Store slice + `dispatchShellCommand` (serialized).
-2. `useShellCommands` + wire into `ExpandedTerminal` and `SSHShellPane`.
-3. `TerminalExplorer` optional controlled `expanded` props (default-preserving).
-4. `useActiveShellTarget`.
-5. `ShellExplorerPanel`.
-6. `Sidebar` mode switch + dismiss button.
-7. Resizable panel.
+1. Worktree `Extract` service + handler + Go tests.
+2. SSH `Extract` service + handler + Go tests.
+3. Route registration in `main.go` *(serialized)*.
+4. `shellSidebars` store slice *(serialized)*.
+5. `ShellSidebar` component.
+6. `PanelHeader.leadingContent` + `PaneCanvas.paneLeadingContent` + `firstLeafId`.
+7. Mount in `ExpandedTerminal` and `SSHShellPane`; Cmd/Ctrl+B branch in the
+   existing keydown handlers.
+8. Drag payload extension + `shellTransfer.ts` + wiring into `TerminalExplorer`'s
+   drop handler.
 
-Verify with `npm run typecheck`, `npx vitest run`, `npm run build`.
+Verify with `go vet ./...`, `go test ./...`, `npm run typecheck`, `npx vitest run`,
+`npm run build`.
