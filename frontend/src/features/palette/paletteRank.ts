@@ -26,7 +26,20 @@ const PREFIX_BONUS = 10_000
 const ALREADY_OPEN_BONUS = 5_000
 const OPEN_BONUS = 1_000
 
+/** The strict half of the matcher, and the *only* one `literalKeywords` gets:
+ *  a long haystack such as a filesystem path contains almost any short query
+ *  as a subsequence, so letting paths through `fuzzyMatches` would make every
+ *  row match every query. */
+function substringMatches(haystack: string, query: string): boolean {
+  const trimmed = query.trim()
+  if (trimmed === '') return true
+  return haystack.toLowerCase().includes(trimmed.toLowerCase())
+}
+
 /**
+ * Substring match, then a subsequence-walk fallback — what `title` and
+ * `keywords` are matched with.
+ *
  * `computeHighlight` (see `@/lib/fuzzyHighlight`) never returns `null` — an
  * empty pattern and a genuine non-match both resolve to `[]`, because its
  * job is purely to pick which characters of an *already-matched* string to
@@ -38,9 +51,9 @@ const OPEN_BONUS = 1_000
 function fuzzyMatches(haystack: string, query: string): boolean {
   const trimmed = query.trim()
   if (trimmed === '') return true
+  if (substringMatches(haystack, trimmed)) return true
   const lowerHay = haystack.toLowerCase()
   const lowerQuery = trimmed.toLowerCase()
-  if (lowerHay.includes(lowerQuery)) return true
   let cursor = 0
   for (const ch of lowerQuery) {
     const idx = lowerHay.indexOf(ch, cursor)
@@ -56,8 +69,11 @@ function scoreOne(
   frecency: (id: string) => number,
   isOpen: (id: string) => boolean,
 ) {
-  const haystacks = [item.title, ...(item.keywords ?? [])]
-  if (!haystacks.some((hay) => fuzzyMatches(hay, query))) return null
+  const fuzzyHay = [item.title, ...(item.keywords ?? [])]
+  const literalHay = item.literalKeywords ?? []
+  const matched =
+    fuzzyHay.some((hay) => fuzzyMatches(hay, query)) || literalHay.some((hay) => substringMatches(hay, query))
+  if (!matched) return null
 
   // Highlight ranges only make sense against the title, which is what the
   // row renders — a keyword-only match highlights nothing, and this is `[]`

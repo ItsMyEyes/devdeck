@@ -22,6 +22,7 @@ import {
 } from './lsp/lspRename'
 import { createEditorOpener } from './lsp/editorOpener'
 import { crossFileTargets, normalizeDefinitionResult } from './lsp/lspDefinition'
+import { normalizeReferenceResult, toMonacoRange } from './lsp/lspReferences'
 import { languageForPath } from '@/features/editor/languageForPath'
 import {
   findDefinition,
@@ -239,6 +240,7 @@ export function CodeFileEditor({
     let releaseFn: (() => void) | null = null
     let openerDisposable: { dispose(): void } | null = null
     let definitionDisposable: { dispose(): void } | null = null
+    let referencesDisposable: { dispose(): void } | null = null
     void acquireLspSession(machine, worktreeId, languageId)
       .then((acquired) => {
         if (cancelled) {
@@ -302,6 +304,35 @@ export function CodeFileEditor({
             },
           },
         )
+
+        // Find All References (shift+F12 / peek). Registered for the same
+        // reason as the definition provider above, but the built-in one fails
+        // far more often: it maps every result through translateBackRange, so
+        // a single call site in an unopened file rejects the whole batch — and
+        // finding call sites in other files is the entire feature. See
+        // lspReferences.ts. Same-file results are kept, not filtered like
+        // definitions: monaco's ReferencesModel dedupes any overlap with the
+        // built-in provider, while dropping them would hide local call sites
+        // whenever the built-in provider has thrown.
+        referencesDisposable = monaco.languages.registerReferenceProvider(
+          languageForPath(pathRef.current),
+          {
+            provideReferences: async (model, position, context) => {
+              const raw = await acquired.session.transport
+                .request('textDocument/references', {
+                  textDocument: { uri: model.uri.toString() },
+                  position: { line: position.lineNumber - 1, character: position.column - 1 },
+                  context: { includeDeclaration: context.includeDeclaration },
+                })
+                .catch(() => null)
+
+              return normalizeReferenceResult(raw).map((target) => ({
+                uri: monaco.Uri.parse(target.uri),
+                range: toMonacoRange(target.range),
+              }))
+            },
+          },
+        )
       })
       .catch(() => undefined)
     return () => {
@@ -309,6 +340,7 @@ export function CodeFileEditor({
       releaseFn?.()
       openerDisposable?.dispose()
       definitionDisposable?.dispose()
+      referencesDisposable?.dispose()
     }
   }, [languageId, worktreeId, machine])
 

@@ -740,6 +740,7 @@ function TerminalWorkspace({
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
+        contentSearchShortcut="Ctrl Shift F"
       />
     ),
     untitled: ({ content, isActive }) => {

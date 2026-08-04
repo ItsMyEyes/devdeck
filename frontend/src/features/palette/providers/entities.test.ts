@@ -15,7 +15,7 @@ function sources(overrides: Partial<EntitySources> = {}): EntitySources {
   return {
     wsId: 'ws1',
     worktrees: [{ id: 'wt1', projectId: 'p1', branch: 'feat/palette', name: 'feat/palette' }],
-    projects: [{ id: 'p1', name: 'acme/api', machineId: 'm1' }],
+    projects: [{ id: 'p1', name: 'acme/api', machineId: 'm1', path: '~/Documents/freelance/mabes/superapps/core' }],
     sshConnections: [{ id: 'c1', name: 'prod-db', host: '10.1.1.4', user: 'root' }],
     machines: [{ id: 'm1', name: 'mac-studio' }],
     offlineMachineIds: new Set<string>(),
@@ -76,7 +76,7 @@ describe('entityItems', () => {
   })
 
   it('namespaces ids by kind so a project and a machine sharing an id do not collide', () => {
-    const items = entityItems(sources({ projects: [{ id: 'x', name: 'p', machineId: 'x' }], machines: [{ id: 'x', name: 'm' }] }), actions)
+    const items = entityItems(sources({ projects: [{ id: 'x', name: 'p', machineId: 'x', path: '~/x' }], machines: [{ id: 'x', name: 'm' }] }), actions)
     const ids = items.map((i) => i.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
@@ -87,5 +87,31 @@ describe('entityItems', () => {
       actions,
     )
     expect(items.every((i) => i.kind === 'page')).toBe(true)
+  })
+
+  it('carries the machine name in keywords and the full path in literalKeywords on project rows', () => {
+    const project = entityItems(sources(), actions).find((i) => i.kind === 'project')
+    expect(project?.keywords).toContain('mac-studio')
+    expect(project?.literalKeywords).toEqual(['~/Documents/freelance/mabes/superapps/core'])
+  })
+
+  it('carries branch, project name and machine name in keywords, the owning project path in literalKeywords, and a "project · machine" subtitle on worktree rows', () => {
+    const worktree = entityItems(sources(), actions).find((i) => i.kind === 'worktree')
+    expect(worktree?.keywords).toEqual(['feat/palette', 'acme/api', 'mac-studio'])
+    expect(worktree?.literalKeywords).toEqual(['~/Documents/freelance/mabes/superapps/core'])
+    expect(worktree?.subtitle).toBe('acme/api · mac-studio')
+  })
+
+  it('still produces a worktree row, with no thrown error, when its owning project does not resolve', () => {
+    let items: ReturnType<typeof entityItems> = []
+    expect(() => {
+      items = entityItems(
+        sources({ worktrees: [{ id: 'wt-orphan', projectId: 'missing', branch: 'orphan' }], projects: [] }),
+        actions,
+      )
+    }).not.toThrow()
+    const worktree = items.find((i) => i.id === 'worktree:wt-orphan')
+    expect(worktree).toBeDefined()
+    expect(worktree?.subtitle).toBeUndefined()
   })
 })

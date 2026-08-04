@@ -363,11 +363,12 @@ export function SSHShellPane({
         setQuickOpen(true)
         return
       }
-      if (primary && event.shiftKey && key === 'f') {
-        event.preventDefault()
-        setContentSearch(true)
-        return
-      }
+      // Deliberately no Ctrl/Cmd+Shift+F binding here, unlike the worktree
+      // pane (ExpandedTerminal.tsx): content search over SSH is reachable
+      // only from the explorer's "Search in files" action, so the chord stays
+      // free for the browser/OS while an SSH shell has focus. TerminalExplorer
+      // is told not to advertise it either (contentSearchShortcut is omitted
+      // in this file's renderers).
       if (primary && key === 't') {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)

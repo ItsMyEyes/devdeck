@@ -1,4 +1,5 @@
 import { MODULE_ICON, PROJECT_ICON, WORKTREE_ICON } from '@/features/tabs/tabIcons'
+import { projectFacets } from '@/features/palette/providers/projectFacets'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
 /** Structural subsets of the domain types — only the fields this provider
@@ -6,7 +7,7 @@ import type { PaletteItem } from '@/features/palette/paletteTypes'
 export interface EntitySources {
   wsId: string
   worktrees: { id: string; projectId: string; branch: string; name?: string }[]
-  projects: { id: string; name: string; machineId: string }[]
+  projects: { id: string; name: string; machineId: string; path: string }[]
   sshConnections: { id: string; name: string; host: string; user: string }[]
   machines: { id: string; name: string }[]
   offlineMachineIds: Set<string>
@@ -63,13 +64,19 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
   for (const wt of sources.worktrees) {
     const machineId = projectMachine.get(wt.projectId)
     const project = sources.projects.find((p) => p.id === wt.projectId)
+    // D3: the path is already searchable + displayed on the project row, so a
+    // worktree row surfaces `project · machine` instead of repeating it. When
+    // the owning project can't be resolved (stale/deleted), the row still
+    // renders — it just loses the facets that depend on it.
+    const facets = project ? projectFacets(project, sources.machines) : undefined
     items.push({
       id: `worktree:${wt.id}`,
       kind: 'worktree',
       group: 'results',
       title: wt.name ?? wt.branch,
-      subtitle: project?.name,
-      keywords: [wt.branch, project?.name ?? ''].filter(Boolean),
+      subtitle: facets ? `${project!.name} · ${facets.machineName}` : undefined,
+      keywords: [wt.branch, project?.name ?? '', facets?.machineName ?? ''].filter(Boolean),
+      literalKeywords: facets?.literalKeywords,
       icon: WORKTREE_ICON,
       disabled: machineId && offlineMachineIds.has(machineId) ? OFFLINE : undefined,
       run: () => actions.openWorktree(wt.projectId, wt.id),
@@ -77,12 +84,15 @@ export function entityItems(sources: EntitySources, actions: EntityActions): Pal
   }
 
   for (const project of sources.projects) {
+    const facets = projectFacets(project, sources.machines)
     items.push({
       id: `project:${project.id}`,
       kind: 'project',
       group: 'results',
       title: project.name,
-      subtitle: sources.machines.find((m) => m.id === project.machineId)?.name,
+      subtitle: facets.subtitle,
+      keywords: facets.keywords,
+      literalKeywords: facets.literalKeywords,
       icon: PROJECT_ICON,
       disabled: offlineMachineIds.has(project.machineId) ? OFFLINE : undefined,
       run: () => actions.openProject(project.id),

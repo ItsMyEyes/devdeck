@@ -97,6 +97,41 @@ describe('rankPaletteItems', () => {
     expect(flattenRanked(groups)[0].ranges).toEqual([[0, 4]])
   })
 
+  it('matches a literalKeywords value on substring', () => {
+    const groups = rankPaletteItems(
+      [
+        item({
+          id: 'proj',
+          title: 'core',
+          group: 'results',
+          literalKeywords: ['~/Documents/freelance/mabes/superapps/core'],
+        }),
+      ],
+      'superapps',
+      noFrecency,
+    )
+    expect(flattenRanked(groups)).toHaveLength(1)
+  })
+
+  it('does not match a literalKeywords value on subsequence (D1)', () => {
+    // "docs" subsequence-walks this path (d…o…c…s all appear in order inside
+    // "Documents"), but literalKeywords disables that fallback — only a
+    // literal substring should surface the row.
+    const groups = rankPaletteItems(
+      [
+        item({
+          id: 'proj',
+          title: 'core',
+          group: 'results',
+          literalKeywords: ['~/Documents/freelance/mabes/superapps/core'],
+        }),
+      ],
+      'docs',
+      noFrecency,
+    )
+    expect(flattenRanked(groups)).toHaveLength(0)
+  })
+
   it('drops empty non-create groups entirely', () => {
     const groups = rankPaletteItems(
       [item({ id: 'o', title: 'alpha', group: 'open' }), item({ id: 'c', title: 'New SSH', group: 'create', kind: 'create' })],

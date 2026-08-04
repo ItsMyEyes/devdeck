@@ -24,6 +24,10 @@ export interface PaletteItem {
   subtitle?: string
   /** Extra text matched alongside `title` — host, IP, project name. */
   keywords?: string[]
+  /** Matched like `keywords`, but with the subsequence fallback disabled —
+   *  for long haystacks (filesystem paths) where a subsequence match is
+   *  near-universal and would make every row match every query. */
+  literalKeywords?: string[]
   group: PaletteGroup
   icon?: LucideIcon
   /** Rendered greyed out; `run` is refused and the reason is toasted. */

@@ -42,8 +42,12 @@ type FilePool struct {
 // entry's ssh client without paying for a subsystem handshake they don't
 // use.
 type filePoolEntry struct {
-	ssh      *ssh.Client
-	sftp     *sftp.Client
+	ssh  *ssh.Client
+	sftp *sftp.Client
+	// home caches the SFTP session's initial working directory (see Home).
+	// Empty until first resolved; scoped to this entry, so an evicted and
+	// re-dialed connection re-resolves it instead of inheriting a stale value.
+	home     string
 	lastUsed time.Time
 }
 
@@ -167,6 +171,47 @@ func (p *FilePool) Get(ctx context.Context, connectionID string) (*sftp.Client, 
 	entry.lastUsed = time.Now()
 	p.mu.Unlock()
 	return sftpClient, nil
+}
+
+// Home returns connectionID's remote home directory — the SFTP session's
+// initial working directory, which is the root every SSHFileService path is
+// resolved against. It is resolved once per live connection and cached on
+// the pool entry: it cannot change while a connection is up, whereas the
+// SFTP REALPATH round trip it costs was previously paid on *every* file
+// operation (list a folder, open a file, save, rename, ...), which is a
+// whole extra round trip per request on a high-latency link.
+//
+// The cache is keyed to the specific *sftp.Client it was resolved from, so
+// an evicted-and-redialed connection (possibly a different user or host
+// after the connection was edited) always re-resolves rather than reusing
+// the previous connection's home.
+func (p *FilePool) Home(ctx context.Context, connectionID string) (string, error) {
+	client, err := p.Get(ctx, connectionID)
+	if err != nil {
+		return "", err
+	}
+
+	p.mu.Lock()
+	if entry, ok := p.entries[connectionID]; ok && entry.sftp == client && entry.home != "" {
+		home := entry.home
+		entry.lastUsed = time.Now()
+		p.mu.Unlock()
+		return home, nil
+	}
+	p.mu.Unlock()
+
+	home, err := client.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	p.mu.Lock()
+	if entry, ok := p.entries[connectionID]; ok && entry.sftp == client {
+		entry.home = home
+		entry.lastUsed = time.Now()
+	}
+	p.mu.Unlock()
+	return home, nil
 }
 
 // Evict closes and drops connectionID's cached pair, if any, so the next

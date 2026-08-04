@@ -1,7 +1,7 @@
 // React-query hooks: backend is the source of truth for domain data.
 // Queries read the full nested workspace tree + settings; mutations invalidate on success.
 
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import type { Machine, Workspace } from '@/store/types'
 import {
@@ -1618,6 +1618,11 @@ export function useFileSearchTarget(
         : searchWorktreeFiles(target.machine, target.worktreeId, pattern, options),
     enabled: enabled && (target.kind === 'ssh' || target.worktreeId.length > 0),
     staleTime: 0,
+    // Every keystroke is a new query key, so without this the result list
+    // unmounts into the "searching…" spinner between each character — over a
+    // remote SSH connection that reads as a search that never resolves. Keep
+    // showing the previous pattern's hits until the new ones land.
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -1642,6 +1647,9 @@ export function useContentSearchTarget(target: FilesTarget, query: string, enabl
         : grepWorktreeFiles(target.machine, target.worktreeId, query, options),
     enabled: enabled && query.trim().length > 0 && (target.kind === 'ssh' || target.worktreeId.length > 0),
     staleTime: 0,
+    // Same reason as useFileSearchTarget above — hold the previous query's
+    // matches on screen instead of blanking the panel on every keystroke.
+    placeholderData: keepPreviousData,
   })
 }
 

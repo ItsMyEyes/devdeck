@@ -1,16 +1,39 @@
 import { MODULE_ICON, PROJECT_ICON } from '@/features/tabs/tabIcons'
+import { projectFacets } from '@/features/palette/providers/projectFacets'
 import type { PaletteItem, PalettePage } from '@/features/palette/paletteTypes'
 
 export interface CreateActionDeps {
   query: string
   machines: { id: string; name: string }[]
-  projects: { id: string; name: string; machineId: string }[]
+  projects: { id: string; name: string; machineId: string; path: string }[]
   sshConnections: { id: string; name: string; host: string; user: string }[]
   offlineMachineIds: Set<string>
   openBrowser: (machineId: string) => void
   openSSHConnection: (connectionId: string) => void
   openSSHQuickAdd: (prefillRaw: string) => void
   openSpawn: (projectId: string) => void
+}
+
+/** The project rows behind both "New Agent…" (the drill-down page) and the
+ *  `agent-new <arg>` verb. `idPrefix` keeps the two surfaces' row ids — and
+ *  therefore their frecency entries and `aria-activedescendant` targets —
+ *  distinct. */
+export function agentProjectRows(deps: CreateActionDeps, idPrefix: string): PaletteItem[] {
+  return deps.projects.map((project) => {
+    const facets = projectFacets(project, deps.machines)
+    return {
+      id: `${idPrefix}:${project.id}`,
+      kind: 'project',
+      group: 'results',
+      title: project.name,
+      subtitle: facets.subtitle,
+      keywords: facets.keywords,
+      literalKeywords: facets.literalKeywords,
+      icon: PROJECT_ICON,
+      disabled: deps.offlineMachineIds.has(project.machineId) ? { reason: 'Machine is offline' } : undefined,
+      run: () => deps.openSpawn(project.id),
+    }
+  })
 }
 
 function machinePage(deps: CreateActionDeps): PalettePage {
@@ -64,16 +87,7 @@ function spawnPage(deps: CreateActionDeps): PalettePage {
     id: 'create-agent',
     breadcrumb: 'New Agent',
     placeholder: 'Choose a project…',
-    items: () =>
-      deps.projects.map((project) => ({
-        id: `create-agent:${project.id}`,
-        kind: 'project',
-        group: 'results',
-        title: project.name,
-        icon: PROJECT_ICON,
-        disabled: deps.offlineMachineIds.has(project.machineId) ? { reason: 'Machine is offline' } : undefined,
-        run: () => deps.openSpawn(project.id),
-      })),
+    items: () => agentProjectRows(deps, 'create-agent'),
   }
 }
 

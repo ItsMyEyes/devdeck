@@ -18,7 +18,7 @@ import {
   type QuickAddPlan,
   type SSHQuickAddDraft,
 } from '@/features/ssh/sshQuickAdd'
-import { MODULE_ICON, PROJECT_ICON } from '@/features/tabs/tabIcons'
+import { MODULE_ICON } from '@/features/tabs/tabIcons'
 import { createDefaultTileLayout, findTileTab, focusTileLeaf, selectTileTab } from '@/features/tabs/tileTree'
 import type { TileNode, TileTab } from '@/features/tabs/tileTree'
 import { worktreeLabel, worktreeTabLabel } from '@/lib/worktreeLabel'
@@ -34,7 +34,7 @@ import {
 import { MAX_ROWS_PER_GROUP, flattenRanked, rankPaletteItems } from '@/features/palette/paletteRank'
 import { bookmarkItems, normalizeUrl } from '@/features/palette/providers/bookmarks'
 import { matchVerb, sshCommandPreview, verbHintItems } from '@/features/palette/providers/commands'
-import { createActionItems } from '@/features/palette/providers/createActions'
+import { agentProjectRows, createActionItems } from '@/features/palette/providers/createActions'
 import type { CreateActionDeps } from '@/features/palette/providers/createActions'
 import { entityItems } from '@/features/palette/providers/entities'
 import type { EntityActions, EntitySources } from '@/features/palette/providers/entities'
@@ -72,6 +72,20 @@ export function assemblePaletteItems(sources: PaletteItemSources): PaletteItem[]
   const { query, openTabs, entities, bookmarks, verbHints, createActions, recent } = sources
   if (query.trim() === '') return [...openTabs, ...recent, ...createActions]
   return [...openTabs, ...recent, ...entities, ...bookmarks, ...verbHints, ...createActions]
+}
+
+/**
+ * The string rows are filtered and scored against.
+ *
+ * When a verb has taken over the input, its rows are titled with the *entity*
+ * name (`superapps_mabes`), not the typed text (`agent-new mabes`) — scoring
+ * against the full query matches nothing and the verb renders empty. A
+ * drill-down page keeps the raw query, because its own input is already
+ * reset when the page is pushed.
+ */
+export function paletteRankQuery(deferredQuery: string, verbArg: string | null, hasActivePage: boolean): string {
+  if (hasActivePage) return deferredQuery
+  return verbArg ?? deferredQuery
 }
 
 export interface CommandPaletteModel {
@@ -194,7 +208,13 @@ export function useCommandPalette({
   // association exists only by nesting inside `Project.worktrees`).
 
   const paletteProjects = useMemo(
-    () => projects.map((project) => ({ id: project.id, name: project.name, machineId: project.machineId })),
+    () =>
+      projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        machineId: project.machineId,
+        path: project.path,
+      })),
     [projects],
   )
   const paletteWorktrees = useMemo(
@@ -522,27 +542,24 @@ export function useCommandPalette({
           group: 'results',
           title: sshValid ? `Connect & save "${sshDraft.name}"` : `New SSH host "${sshDraft.name}"…`,
           subtitle: sshValid ? 'creates the host and opens a shell' : 'needs credentials — opens the form',
+          // This row *is* the typed command, so matching it against that same
+          // command has to be a tautology. It can't be left to the title:
+          // `deriveSSHQuickAddName` names the row after the target alone
+          // (`root@host`), so `ssh root@host -J bastion` would score
+          // `root@host -J bastion` against `Connect & save "root@host"` — no
+          // substring, and the subsequence walk dies at the space — and the
+          // row would vanish exactly when the command is most worth confirming.
+          keywords: [arg],
           icon: MODULE_ICON.ssh,
           run: sshValid ? () => runSSHQuickAdd(sshParsed, sshDraft) : () => openQuickAddForm(sshDraft.raw),
         },
       ]
     }
 
-    if (verb.name === 'agent-new') {
-      const needle = arg.toLowerCase()
-      return paletteProjects
-        .filter((project) => project.name.toLowerCase().includes(needle))
-        .map((project) => ({
-          id: `command:agent-new:${project.id}`,
-          kind: 'project',
-          group: 'results',
-          title: project.name,
-          subtitle: 'new agent',
-          icon: PROJECT_ICON,
-          disabled: offlineMachineIds.has(project.machineId) ? { reason: 'Machine is offline' } : undefined,
-          run: () => openSpawn(project.id),
-        }))
-    }
+    // rankPaletteItems now filters these rows itself, using every facet
+    // (name, machine, path) — see `paletteRankQuery` below for why that only
+    // works once the rows are scored against `arg`, not the full query.
+    if (verb.name === 'agent-new') return agentProjectRows(createDeps, 'command:agent-new')
 
     const url = normalizeUrl(arg)
     return [
@@ -552,24 +569,15 @@ export function useCommandPalette({
         group: 'results',
         title: url,
         subtitle: defaultMachineId ? 'open in a Browser tile' : 'no machine registered',
+        // Same tautology as the ssh row above: `normalizeUrl` can rewrite the
+        // argument beyond recognition, and this row is the typed input.
+        keywords: [arg],
         icon: MODULE_ICON.browser,
         disabled: defaultMachineId ? undefined : { reason: 'Register a machine before opening a Browser tile' },
         run: () => openUrl(url),
       },
     ]
-  }, [
-    verbMatch,
-    sshParsed,
-    sshDraft,
-    sshValid,
-    runSSHQuickAdd,
-    openQuickAddForm,
-    paletteProjects,
-    offlineMachineIds,
-    openSpawn,
-    defaultMachineId,
-    openUrl,
-  ])
+  }, [verbMatch, sshParsed, sshDraft, sshValid, runSSHQuickAdd, openQuickAddForm, createDeps, defaultMachineId, openUrl])
 
   const activePage = pages.length > 0 ? pages[pages.length - 1] : null
 
@@ -600,9 +608,15 @@ export function useCommandPalette({
 
   const frecencyFor = useCallback((id: string) => frecencyScore(frecency, id, Date.now()), [frecency])
 
+  // Whenever verbItems is active, `items` is only [...verbItems, ...createActions],
+  // and Create rows bypass filtering anyway — so scoring against the verb's
+  // argument instead of the full query is safe here, and it's what fixes the
+  // dead-verb bug (see `paletteRankQuery`'s doc comment). It also fixes
+  // highlight ranges, which are computed from this same query.
+  const rankQuery = paletteRankQuery(deferredQuery, verbMatch?.arg ?? null, activePage !== null)
   const groups = useMemo(
-    () => rankPaletteItems(items, deferredQuery, frecencyFor, isEntityOpen),
-    [items, deferredQuery, frecencyFor, isEntityOpen],
+    () => rankPaletteItems(items, rankQuery, frecencyFor, isEntityOpen),
+    [items, rankQuery, frecencyFor, isEntityOpen],
   )
   const rows = useMemo(() => flattenRanked(groups), [groups])
 

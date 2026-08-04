@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -849,5 +850,114 @@ func TestSSHFileServiceMkdirMoveAndCopy(t *testing.T) {
 		if data, readErr := os.ReadFile(filepath.Join(homeDir, "notes-copy", want)); readErr != nil || string(data) != "read me\n" {
 			t.Fatalf("notes-copy/%s = %q, %v, want %q", want, data, readErr, "read me\n")
 		}
+	}
+}
+
+// TestSSHFileServiceSearchReusesCollectedListing proves a second search does
+// NOT re-walk the remote tree. Quick-open re-queries on every keystroke and
+// the pattern is only ever applied in Go, so re-running `find` per keystroke
+// re-derived an identical listing at the cost of seconds of remote I/O each
+// — and, because nothing cancelled the abandoned ones, piled up SSH channels
+// until sshd's MaxSessions cap started failing every later request.
+//
+// The out-of-band file is the assertion: it is created behind the service's
+// back (so nothing invalidates the cache), and a search that re-walked would
+// find it.
+func TestSSHFileServiceSearchReusesCollectedListing(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, homeDir := newGrepTestSSHConnection(t, "")
+
+	if _, err := svc.Search(context.Background(), "sc-test", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(homeDir, "appeared-later.go"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := svc.Search(context.Background(), "sc-test", "appeared", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Search = %v, want no results: the cached listing was discarded and the remote tree re-walked", results)
+	}
+}
+
+// TestSSHFileServiceSearchSeesPathsChangedThroughTheService is the other half
+// of the caching contract: DevDeck's own writes invalidate the listing, so an
+// operator never has to wait out sshListingTTL to quick-open a file they just
+// created here.
+func TestSSHFileServiceSearchSeesPathsChangedThroughTheService(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, _ := newGrepTestSSHConnection(t, "")
+	ctx := context.Background()
+
+	if _, err := svc.Search(ctx, "sc-test", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Write(ctx, "sc-test", "src/added.go", "package main\n"); err != nil {
+		t.Fatal(err)
+	}
+	results, err := svc.Search(ctx, "sc-test", "added", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0] != "src/added.go" {
+		t.Fatalf("Search after Write = %v, want [src/added.go]", results)
+	}
+
+	if err := svc.Delete(ctx, "sc-test", "src/added.go"); err != nil {
+		t.Fatal(err)
+	}
+	results, err = svc.Search(ctx, "sc-test", "added", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Search after Delete = %v, want no results", results)
+	}
+}
+
+// TestSSHFileServiceSearchReportsCollectionFailure proves a remote listing
+// that could not run surfaces as an error rather than an empty result set.
+// Swallowing it (the old `stdout, _, _ :=`) made a genuinely broken remote
+// search render in quick-open as the indistinguishable, and wrong, "No
+// matching files or folders".
+func TestSSHFileServiceSearchReportsCollectionFailure(t *testing.T) {
+	// An empty PATH means the remote shell cannot resolve `find` at all.
+	svc, _ := newGrepTestSSHConnection(t, t.TempDir())
+
+	results, err := svc.Search(context.Background(), "sc-test", "", false)
+	if err == nil {
+		t.Fatalf("Search = %v, want an error when the remote listing command cannot run", results)
+	}
+}
+
+// TestSSHFileServiceReadReturnsWholeFile guards the switch from io.ReadAll to
+// io.Copy in Read. io.Copy takes sftp.File's WriteTo fast path (many read
+// requests pipelined concurrently) instead of ReadAll's serial 512-byte-and-
+// growing reads, which is what made opening a remote file in the editor cost
+// dozens of round trips. The content here is deliberately larger than one
+// SFTP packet so it exercises the multi-chunk path, not just a single read.
+func TestSSHFileServiceReadReturnsWholeFile(t *testing.T) {
+	svc, homeDir := newGrepTestSSHConnection(t, "")
+
+	var sb strings.Builder
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(&sb, "line %d — αβγ\n", i)
+	}
+	want := sb.String()
+	if err := os.WriteFile(filepath.Join(homeDir, "big.txt"), []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Read(context.Background(), "sc-test", "big.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != want {
+		t.Fatalf("Read returned %d bytes, want %d (content mismatch)", len(got.Content), len(want))
 	}
 }

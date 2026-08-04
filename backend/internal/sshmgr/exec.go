@@ -67,6 +67,17 @@ func shellJoin(args []string) string {
 // CommandExists to tell "found" from "not found". A nonzero remote exit
 // status is returned as a non-nil error (typically *ssh.ExitError), along
 // with whatever stdout/stderr was captured before the process exited.
+//
+// ctx bounds the *remote command*, not just the dial: Start/Wait is used
+// instead of Run so a canceled or timed-out caller closes the SSH channel
+// immediately (which hangs up the remote command's stdio) and gets
+// ctx.Err() back, rather than blocking until the command finishes on its
+// own. That matters because every RunCommand holds one channel on the
+// shared pooled connection, and sshd caps those (OpenSSH's MaxSessions
+// defaults to 10) — without cancellation, abandoned requests pile up
+// channels until NewSession itself starts failing, taking the SFTP half of
+// the same connection down with it. Whatever the command managed to print
+// before the cancellation is still returned alongside ctx.Err().
 func RunCommand(ctx context.Context, pool *FilePool, connectionID string, args []string) ([]byte, []byte, error) {
 	type output struct {
 		stdout []byte
@@ -83,8 +94,23 @@ func RunCommand(ctx context.Context, pool *FilePool, connectionID string, args [
 		sess.Stdout = &stdout
 		sess.Stderr = &stderr
 
-		runErr := sess.Run(shellJoin(args))
-		return output{stdout: stdout.Bytes(), stderr: stderr.Bytes()}, runErr
+		if err := sess.Start(shellJoin(args)); err != nil {
+			return output{}, fmt.Errorf("start command: %w", err)
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- sess.Wait() }()
+
+		select {
+		case runErr := <-done:
+			// Wait has returned, so its stdout/stderr copiers are finished
+			// and both buffers are safe to read without racing them.
+			return output{stdout: stdout.Bytes(), stderr: stderr.Bytes()}, runErr
+		case <-ctx.Done():
+			_ = sess.Close()
+			<-done
+			return output{stdout: stdout.Bytes(), stderr: stderr.Bytes()}, ctx.Err()
+		}
 	})
 	return out.stdout, out.stderr, err
 }

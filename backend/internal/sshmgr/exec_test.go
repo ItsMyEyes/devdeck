@@ -2,7 +2,10 @@ package sshmgr
 
 import (
 	"context"
+	"errors"
+	"os"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -201,5 +204,112 @@ func TestRunCommandEvictsAndRetriesDeadConnection(t *testing.T) {
 	pool.mu.Unlock()
 	if newEntry == entry {
 		t.Error("dead connection was not evicted and redialed")
+	}
+}
+
+// TestRunCommandStopsWaitingWhenContextIsCanceled proves RunCommand bounds
+// the *remote command*, not merely the dial. Before Start/Wait replaced Run,
+// a canceled or timed-out caller stayed blocked until the remote command
+// finished on its own, so abandoned requests kept holding SSH channels on
+// the shared pooled connection — and sshd caps those (OpenSSH's MaxSessions
+// defaults to 10), which is how a burst of quick-open searches could wedge
+// every later request, SFTP included.
+func TestRunCommandStopsWaitingWhenContextIsCanceled(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, _, err := RunCommand(ctx, pool, "sc-test", []string{"sleep", "10"})
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RunCommand error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("RunCommand blocked %s — it waited out the remote command instead of the context", elapsed)
+	}
+}
+
+// TestRunCommandStillReturnsOutputAfterCancellation proves cancellation
+// doesn't throw away what the command already printed, so a partial listing
+// stays usable to the caller that asked for it.
+func TestRunCommandStillReturnsOutputAfterCancellation(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	stdout, _, err := RunCommand(ctx, pool, "sc-test", []string{"sh", "-c", "printf early; sleep 10"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RunCommand error = %v, want context.DeadlineExceeded", err)
+	}
+	if string(stdout) != "early" {
+		t.Errorf("stdout = %q, want %q — output printed before cancellation was dropped", stdout, "early")
+	}
+}
+
+// TestFilePoolHomeCachesPerLiveConnection proves Home resolves the remote
+// working directory once and then serves it from the pool entry, instead of
+// spending an SFTP REALPATH round trip on every single file operation. The
+// sentinel write is the assertion: a second call that re-resolved would
+// return the real cwd, not the sentinel.
+func TestFilePoolHomeCachesPerLiveConnection(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+	ctx := context.Background()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := pool.Home(ctx, "sc-test")
+	if err != nil {
+		t.Fatalf("Home: %v", err)
+	}
+	if home != cwd {
+		t.Fatalf("Home = %q, want the SFTP session's working directory %q", home, cwd)
+	}
+
+	pool.mu.Lock()
+	pool.entries["sc-test"].home = "/sentinel"
+	pool.mu.Unlock()
+
+	again, err := pool.Home(ctx, "sc-test")
+	if err != nil {
+		t.Fatalf("Home (second call): %v", err)
+	}
+	if again != "/sentinel" {
+		t.Errorf("Home (second call) = %q, want the cached %q — it re-resolved instead of reusing the entry", again, "/sentinel")
+	}
+}
+
+// TestFilePoolHomeReresolvesAfterEvict proves the cache is tied to the live
+// connection rather than the connection id, so a redial (possibly after the
+// saved connection was edited to a different user or host) never inherits
+// the previous connection's home directory.
+func TestFilePoolHomeReresolvesAfterEvict(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+	ctx := context.Background()
+
+	if _, err := pool.Home(ctx, "sc-test"); err != nil {
+		t.Fatalf("Home: %v", err)
+	}
+	pool.mu.Lock()
+	pool.entries["sc-test"].home = "/sentinel"
+	pool.mu.Unlock()
+
+	pool.Evict("sc-test")
+
+	home, err := pool.Home(ctx, "sc-test")
+	if err != nil {
+		t.Fatalf("Home after evict: %v", err)
+	}
+	if home == "/sentinel" {
+		t.Error("Home returned the evicted connection's cached value instead of re-resolving")
 	}
 }

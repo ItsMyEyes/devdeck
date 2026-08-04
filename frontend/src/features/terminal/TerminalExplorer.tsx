@@ -55,8 +55,13 @@ interface TerminalExplorerProps {
   onFileDeleted: (paths: string[]) => void
   /** Omitted for SSH connections — there's no remote file quick-open (yet). */
   onRequestQuickOpen?: () => void
-  /** Opens the "Search in Files" content-search panel (Ctrl+Shift+F). */
+  /** Opens the "Search in Files" content-search panel. */
   onRequestContentSearch?: () => void
+  /** Keyboard chord shown next to "Search in files", for the surfaces that
+   *  actually bind one. Omitted by the SSH pane, which reaches content search
+   *  only through the action itself — advertising a chord it doesn't listen
+   *  for would just be a dead key hint. */
+  contentSearchShortcut?: string
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -191,6 +196,7 @@ export function TerminalExplorer({
   onFileDeleted,
   onRequestQuickOpen,
   onRequestContentSearch,
+  contentSearchShortcut,
 }: TerminalExplorerProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [depsOpen, setDepsOpen] = useState(false)
@@ -821,9 +827,11 @@ export function TerminalExplorer({
         >
           <FileSearch size={12} />
           <span>Search in files</span>
-          <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
-            Ctrl Shift F
-          </kbd>
+          {contentSearchShortcut ? (
+            <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
+              {contentSearchShortcut}
+            </kbd>
+          ) : null}
         </button>
       ) : null}
 

@@ -12,6 +12,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,12 +23,28 @@ import (
 	"devdeck/backend/internal/sshmgr"
 )
 
-// sshSearchBudget bounds how long Search's remote `find` may run before its
-// context is canceled — a safety net for a huge or slow remote home
-// directory, not the common case: unlike the old SFTP-walk implementation
-// (one round trip per directory), `find` runs entirely on the remote host and
-// returns its full listing in one round trip, so this budget is rarely hit.
-const sshSearchBudget = 6 * time.Second
+// sshSearchBudget bounds how long collecting a connection's remote path
+// listing (Search's `find`) may run before its context is canceled — a
+// safety net for a huge or slow remote home directory. Since RunCommand is
+// context-aware this genuinely kills the remote command and frees its SSH
+// channel, rather than merely abandoning a request that keeps running.
+const sshSearchBudget = 20 * time.Second
+
+// sshListingTTL is how long one connection's collected remote path listing
+// is reused before it's re-collected.
+//
+// Without a cache, Search re-ran a full remote `find` over the entire home
+// directory *per keystroke*: FileQuickOpen re-queries on every character
+// (and once more, with an empty pattern, the moment it opens), and the
+// pattern is only ever applied in Go afterward — so every one of those
+// requests re-walked the identical tree to produce the identical listing.
+// On a real host that is seconds of remote I/O each, and because nothing
+// cancels an abandoned request, the finds pile up as concurrent SSH
+// channels until sshd's per-connection MaxSessions cap (10 by default) is
+// hit, at which point every later request — including the SFTP half of the
+// same pooled connection — starts failing. Collecting once and matching
+// in-process turns each keystroke into a pure in-memory scan.
+const sshListingTTL = 30 * time.Second
 
 // sshRgInstallTimeout bounds how long InstallRipgrep's GitHub API call +
 // asset download + extract + remote SFTP write may run before being
@@ -67,20 +84,76 @@ type SSHFileContent struct {
 // already governs what this user's session can reach, so there is nothing
 // extra for DevDeck to enforce.
 type SSHFileService struct {
-	pool *sshmgr.FilePool
+	pool     *sshmgr.FilePool
+	listings *sshListingCache
 }
 
 func NewSSHFileService(pool *sshmgr.FilePool) *SSHFileService {
-	return &SSHFileService{pool: pool}
+	return &SSHFileService{pool: pool, listings: newSSHListingCache()}
 }
 
-// remoteAbsPath resolves clean (already normalizeRelativePath'd) against the
-// connection's home directory. Re-fetches the home dir on every call rather
-// than caching it — an extra SFTP REALPATH round trip is imperceptible next
-// to a human clicking through a file tree, and it keeps the pool free of
-// per-connection cached state that would need invalidating on redial.
-func remoteAbsPath(client *sftp.Client, clean string) (string, error) {
-	home, err := client.Getwd()
+// sshPathListing is one connection's complete set of searchable remote
+// paths, relative to its home directory: every file, and every directory
+// (trailing-slash-suffixed, per FileQuickOpen's isDirectoryResult
+// contract). Both halves are always collected together so a quick-open
+// search and a files-only search share one cache entry instead of each
+// forcing its own remote walk.
+type sshPathListing struct {
+	files []string
+	dirs  []string
+}
+
+// sshListingEntry caches one connection's listing. Its mutex doubles as a
+// single-flight guard: concurrent Search calls for the same connection
+// queue behind whichever one is collecting, then all read the fresh result,
+// so a burst of keystrokes can never fan out into a burst of remote finds.
+type sshListingEntry struct {
+	mu        sync.Mutex
+	listing   sshPathListing
+	collected time.Time
+	valid     bool
+}
+
+type sshListingCache struct {
+	mu      sync.Mutex
+	entries map[string]*sshListingEntry
+}
+
+func newSSHListingCache() *sshListingCache {
+	return &sshListingCache{entries: make(map[string]*sshListingEntry)}
+}
+
+func (c *sshListingCache) entry(connectionID string) *sshListingEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[connectionID]
+	if !ok {
+		entry = &sshListingEntry{}
+		c.entries[connectionID] = entry
+	}
+	return entry
+}
+
+// invalidate drops connectionID's cached listing so the next Search
+// re-collects it. Called by every operation that changes which paths exist
+// (write, mkdir, move, copy, delete, upload) so an operator never has to
+// wait out sshListingTTL to find a file DevDeck itself just created.
+func (c *sshListingCache) invalidate(connectionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, connectionID)
+}
+
+// absPath resolves clean (already normalizeRelativePath'd) against the
+// connection's home directory. The home lookup goes through
+// sshmgr.FilePool.Home, which resolves it once per live connection and
+// caches it on the pool entry — previously this cost one SFTP REALPATH
+// round trip on every single file operation, which on a high-latency link
+// is a whole extra round trip per list/open/save. Invalidation is handled
+// for free by the pool: the cached value is tied to the specific SFTP
+// client it came from, so an evicted-and-redialed connection re-resolves.
+func (svc *SSHFileService) absPath(ctx context.Context, connectionID, clean string) (string, error) {
+	home, err := svc.pool.Home(ctx, connectionID)
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory failed")
 	}
@@ -96,7 +169,7 @@ func (svc *SSHFileService) List(ctx context.Context, connectionID, relativePath 
 		return nil, err
 	}
 	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]SSHFileEntry, error) {
-		abs, err := remoteAbsPath(client, clean)
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return nil, err
 		}
@@ -167,22 +240,30 @@ func findListArgs(root string, wantDirs bool) []string {
 }
 
 // listRemotePaths runs findListArgs(root, wantDirs) over connectionID's
-// pooled SSH connection and scores each returned line against matcher,
-// appending hits to matches. A nonzero find exit status (e.g. one
-// permission-denied subdirectory among many readable ones) is not treated as
-// fatal — whatever it printed to stdout before that is still used, mirroring
-// the old walker's "skip permission-denied entries, keep going" behavior;
-// only a transport-level failure (already retried once inside
-// sshmgr.RunCommand) leaves stdout empty.
+// pooled SSH connection and returns each printed path relative to
+// homePrefix (directories trailing-slash-suffixed).
+//
+// A nonzero find exit status (e.g. one permission-denied subdirectory among
+// many readable ones) is not treated as fatal — whatever it printed to
+// stdout before that is still used, mirroring the old walker's "skip
+// permission-denied entries, keep going" behavior. A run that produced *no*
+// output at all, though, is reported as an error rather than silently
+// returning an empty listing: that is what a genuine failure looks like
+// (find missing from PATH, the search budget expiring, sshd refusing
+// another channel), and swallowing it made a broken remote search
+// indistinguishable in the UI from a home directory with nothing in it.
 func listRemotePaths(
 	ctx context.Context,
 	pool *sshmgr.FilePool,
 	connectionID, root, homePrefix string,
-	matcher filePathMatcher,
-	matches *[]fileSearchMatch,
 	wantDirs bool,
-) error {
-	stdout, _, _ := sshmgr.RunCommand(ctx, pool, connectionID, findListArgs(root, wantDirs))
+) ([]string, error) {
+	stdout, stderr, runErr := sshmgr.RunCommand(ctx, pool, connectionID, findListArgs(root, wantDirs))
+	if runErr != nil && len(bytes.TrimSpace(stdout)) == 0 {
+		return nil, listRemotePathsError(stderr, runErr)
+	}
+
+	paths := make([]string, 0, 256)
 	scanner := bufio.NewScanner(bytes.NewReader(stdout))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for scanner.Scan() {
@@ -192,44 +273,117 @@ func listRemotePaths(
 		}
 		relative := strings.TrimPrefix(line, homePrefix)
 		if wantDirs {
-			addFileSearchMatch(matches, matcher, relative+"/", true)
-		} else {
-			addFileSearchMatch(matches, matcher, relative, false)
+			relative += "/"
 		}
+		paths = append(paths, relative)
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("search files failed")
+	}
+	return paths, nil
+}
+
+// listRemotePathsError turns a failed remote `find` into a message the
+// operator can act on, preferring the remote's own stderr (e.g. "find:
+// command not found") over a bare exit code, and naming the timeout case
+// explicitly since that is the one a huge remote home directory produces.
+func listRemotePathsError(stderr []byte, runErr error) error {
+	// Deliberately not wrapped in ErrValidation: a timeout is the server
+	// giving up on the remote host, not a bad request, so it should surface
+	// as a 500 carrying this message rather than a 400.
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return fmt.Errorf("listing remote files timed out after %s — the remote home directory may be very large", sshSearchBudget)
+	}
+	if detail := strings.TrimSpace(string(stderr)); detail != "" {
+		return fmt.Errorf("list remote files failed: %s", firstStderrLine(detail))
+	}
+	return fmt.Errorf("list remote files failed")
+}
+
+func firstStderrLine(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return strings.TrimSpace(s[:idx])
+	}
+	return s
+}
+
+// listing returns connectionID's remote path listing, collecting it via
+// `find` only when there is no fresh cached copy (see sshListingTTL for why
+// caching is what makes remote quick-open usable at all). Files and
+// directories are collected concurrently: they are two independent remote
+// walks, so running them together halves the latency an operator waits on a
+// cold cache, and two channels is well inside any sshd's session budget.
+func (svc *SSHFileService) listing(ctx context.Context, connectionID string) (sshPathListing, error) {
+	entry := svc.listings.entry(connectionID)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.valid && time.Since(entry.collected) < sshListingTTL {
+		return entry.listing, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, sshSearchBudget)
+	defer cancel()
+
+	home, err := svc.pool.Home(ctx, connectionID)
+	if err != nil {
+		return sshPathListing{}, fmt.Errorf("resolve home directory failed")
+	}
+	homePrefix := strings.TrimSuffix(home, "/") + "/"
+
+	var (
+		wg                sync.WaitGroup
+		files, dirs       []string
+		filesErr, dirsErr error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		files, filesErr = listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, false)
+	}()
+	go func() {
+		defer wg.Done()
+		dirs, dirsErr = listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, true)
+	}()
+	wg.Wait()
+
+	if filesErr != nil {
+		return sshPathListing{}, filesErr
+	}
+	if dirsErr != nil {
+		return sshPathListing{}, dirsErr
+	}
+
+	entry.listing = sshPathListing{files: files, dirs: dirs}
+	entry.collected = time.Now()
+	entry.valid = true
+	return entry.listing, nil
 }
 
 // Search returns remote file paths matched by the same fuzzy/regex matcher
 // as WorktreeFileService.Search (shared filePathMatcher, searchSkipDirs,
-// maxFileSearchResults — defined in worktree_file.go, same package). Unlike
-// the old implementation (an sftp.Client.Walk costing one SFTP round trip per
-// directory — slow enough that an interactive quick-open search needed its
-// own time budget to avoid hanging), this execs `find` once (twice when
-// includeDirs is set: once for files, once for directories) over the pooled
-// SSH connection via sshmgr.RunCommand, same transport Grep already uses —
-// trading many small round trips for one or two, with the whole listing
-// streamed back in a single response.
+// maxFileSearchResults — defined in worktree_file.go, same package).
+//
+// The remote host is only ever asked for the *unfiltered* listing (see
+// listing/sshListingTTL) — the pattern has always been applied in Go, so
+// re-walking the remote tree per keystroke bought nothing and cost
+// everything. Matching therefore runs entirely against the cached listing,
+// which makes a keystroke's worth of work an in-memory scan rather than a
+// remote filesystem walk.
 func (svc *SSHFileService) Search(ctx context.Context, connectionID, pattern string, includeDirs bool) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, sshSearchBudget)
-	defer cancel()
-
-	home, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (string, error) {
-		return client.Getwd()
-	})
+	listing, err := svc.listing(ctx, connectionID)
 	if err != nil {
-		return nil, fmt.Errorf("resolve home directory failed")
+		return nil, err
 	}
-	homePrefix := strings.TrimSuffix(home, "/") + "/"
 
 	matcher := newFilePathMatcher(pattern)
-	matches := make([]fileSearchMatch, 0)
-	if err := listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, matcher, &matches, false); err != nil {
-		return nil, fmt.Errorf("search files failed")
+	matches := make([]fileSearchMatch, 0, maxFileSearchResults)
+	for _, file := range listing.files {
+		addFileSearchMatch(&matches, matcher, file, false)
 	}
 	if includeDirs {
-		if err := listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, matcher, &matches, true); err != nil {
-			return nil, fmt.Errorf("search files failed")
+		for _, dir := range listing.dirs {
+			addFileSearchMatch(&matches, matcher, dir, true)
 		}
 	}
 
@@ -293,9 +447,7 @@ func (svc *SSHFileService) Grep(ctx context.Context, connectionID, query string,
 		engine = "grep"
 	}
 
-	home, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (string, error) {
-		return client.Getwd()
-	})
+	home, err := svc.pool.Home(ctx, connectionID)
 	if err != nil {
 		return GrepResult{}, fmt.Errorf("resolve home directory failed")
 	}
@@ -349,7 +501,7 @@ func (svc *SSHFileService) Read(ctx context.Context, connectionID, relativePath 
 		return SSHFileContent{}, err
 	}
 	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileContent, error) {
-		abs, err := remoteAbsPath(client, clean)
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return SSHFileContent{}, err
 		}
@@ -373,10 +525,20 @@ func (svc *SSHFileService) Read(ctx context.Context, connectionID, relativePath 
 			return SSHFileContent{}, fileOperationError("read file", clean, err)
 		}
 		defer file.Close()
-		data, err := io.ReadAll(file)
-		if err != nil {
+		// io.Copy, not io.ReadAll: sftp.File implements io.WriterTo, whose
+		// WriteTo pipelines many read requests concurrently, and io.Copy
+		// picks that up automatically. io.ReadAll instead calls Read against
+		// a buffer that starts at 512 bytes and grows, so every one of those
+		// small reads was a separate serial SFTP round trip — dozens of them
+		// for an ordinary source file, which is what made opening a remote
+		// file in the editor take seconds on any non-LAN connection. Download
+		// (below) already had this right; Read did not.
+		var buf bytes.Buffer
+		buf.Grow(int(info.Size()) + bytes.MinRead)
+		if _, err := io.Copy(&buf, file); err != nil {
 			return SSHFileContent{}, fileOperationError("read file", clean, err)
 		}
+		data := buf.Bytes()
 		if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
 			return SSHFileContent{}, fmt.Errorf("%q is not a UTF-8 text file: %w", clean, ErrValidation)
 		}
@@ -408,7 +570,7 @@ func (svc *SSHFileService) Download(ctx context.Context, connectionID, relativeP
 		return SSHDownloadMeta{}, err
 	}
 	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHDownloadMeta, error) {
-		abs, err := remoteAbsPath(client, clean)
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return SSHDownloadMeta{}, err
 		}
@@ -446,8 +608,8 @@ func (svc *SSHFileService) Write(ctx context.Context, connectionID, relativePath
 	if err != nil {
 		return SSHFileContent{}, err
 	}
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileContent, error) {
-		abs, err := remoteAbsPath(client, clean)
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileContent, error) {
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return SSHFileContent{}, err
 		}
@@ -473,6 +635,10 @@ func (svc *SSHFileService) Write(ctx context.Context, connectionID, relativePath
 		}
 		return SSHFileContent{Path: clean, Content: content}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
+	return result, err
 }
 
 // Mkdir creates an empty remote folder — SSH counterpart to
@@ -482,8 +648,8 @@ func (svc *SSHFileService) Mkdir(ctx context.Context, connectionID, relativePath
 	if err != nil {
 		return SSHFileEntry{}, err
 	}
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
-		abs, err := remoteAbsPath(client, clean)
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return SSHFileEntry{}, err
 		}
@@ -497,6 +663,10 @@ func (svc *SSHFileService) Mkdir(ctx context.Context, connectionID, relativePath
 		}
 		return SSHFileEntry{Name: path.Base(clean), Path: clean, IsDir: true}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
+	return result, err
 }
 
 // Move renames/relocates a remote file or folder — SSH counterpart to
@@ -519,12 +689,12 @@ func (svc *SSHFileService) Move(ctx context.Context, connectionID, fromPath, toP
 	if strings.HasPrefix(toClean, fromClean+"/") {
 		return SSHFileEntry{}, fmt.Errorf("cannot move %q into itself: %w", fromClean, ErrValidation)
 	}
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
-		fromAbs, err := remoteAbsPath(client, fromClean)
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		fromAbs, err := svc.absPath(ctx, connectionID, fromClean)
 		if err != nil {
 			return SSHFileEntry{}, err
 		}
-		toAbs, err := remoteAbsPath(client, toClean)
+		toAbs, err := svc.absPath(ctx, connectionID, toClean)
 		if err != nil {
 			return SSHFileEntry{}, err
 		}
@@ -542,6 +712,10 @@ func (svc *SSHFileService) Move(ctx context.Context, connectionID, fromPath, toP
 		}
 		return SSHFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
+	return result, err
 }
 
 // Copy duplicates a remote file or folder (recursively, via client.Walk —
@@ -562,12 +736,12 @@ func (svc *SSHFileService) Copy(ctx context.Context, connectionID, fromPath, toP
 	if strings.HasPrefix(toClean, fromClean+"/") {
 		return SSHFileEntry{}, fmt.Errorf("cannot copy %q into itself: %w", fromClean, ErrValidation)
 	}
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
-		fromAbs, err := remoteAbsPath(client, fromClean)
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (SSHFileEntry, error) {
+		fromAbs, err := svc.absPath(ctx, connectionID, fromClean)
 		if err != nil {
 			return SSHFileEntry{}, err
 		}
-		toAbs, err := remoteAbsPath(client, toClean)
+		toAbs, err := svc.absPath(ctx, connectionID, toClean)
 		if err != nil {
 			return SSHFileEntry{}, err
 		}
@@ -589,6 +763,10 @@ func (svc *SSHFileService) Copy(ctx context.Context, connectionID, fromPath, toP
 		}
 		return SSHFileEntry{Name: path.Base(toClean), Path: toClean, IsDir: info.IsDir()}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
+	return result, err
 }
 
 func copyRemoteFile(client *sftp.Client, from, to string) error {
@@ -643,7 +821,7 @@ func (svc *SSHFileService) Delete(ctx context.Context, connectionID, relativePat
 		return err
 	}
 	_, err = sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (struct{}, error) {
-		abs, err := remoteAbsPath(client, clean)
+		abs, err := svc.absPath(ctx, connectionID, clean)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -652,6 +830,9 @@ func (svc *SSHFileService) Delete(ctx context.Context, connectionID, relativePat
 		}
 		return struct{}{}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
 	return err
 }
 
@@ -663,8 +844,8 @@ func (svc *SSHFileService) Upload(ctx context.Context, connectionID, folderPath 
 	if err != nil {
 		return nil, err
 	}
-	return sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]SSHFileEntry, error) {
-		absDir, err := remoteAbsPath(client, cleanDir)
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]SSHFileEntry, error) {
+		absDir, err := svc.absPath(ctx, connectionID, cleanDir)
 		if err != nil {
 			return nil, err
 		}
@@ -710,6 +891,10 @@ func (svc *SSHFileService) Upload(ctx context.Context, connectionID, folderPath 
 		}
 		return entries, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
+	return result, err
 }
 
 func (svc *SSHFileService) DeleteMany(ctx context.Context, connectionID string, paths []string) error {
@@ -719,7 +904,7 @@ func (svc *SSHFileService) DeleteMany(ctx context.Context, connectionID string, 
 	}
 	_, err = sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) (struct{}, error) {
 		for _, clean := range pruned {
-			abs, err := remoteAbsPath(client, clean)
+			abs, err := svc.absPath(ctx, connectionID, clean)
 			if err != nil {
 				return struct{}{}, err
 			}
@@ -729,6 +914,9 @@ func (svc *SSHFileService) DeleteMany(ctx context.Context, connectionID string, 
 		}
 		return struct{}{}, nil
 	})
+	if err == nil {
+		svc.listings.invalidate(connectionID)
+	}
 	return err
 }
 
@@ -741,7 +929,7 @@ func (svc *SSHFileService) Archive(ctx context.Context, connectionID string, pat
 		zw := zip.NewWriter(dst)
 		seen := make(map[string]bool)
 		for _, clean := range pruned {
-			abs, err := remoteAbsPath(client, clean)
+			abs, err := svc.absPath(ctx, connectionID, clean)
 			if err != nil {
 				_ = zw.Close()
 				return struct{}{}, err
