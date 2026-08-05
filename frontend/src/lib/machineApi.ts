@@ -15,6 +15,7 @@ import type {
   FsEntry,
   MCPServer,
   Machine,
+  PublishedSOCKSStatus,
   TermLine,
   Worktree,
 } from '@/store/types'
@@ -449,6 +450,30 @@ export interface ProxyStartResponse {
  *  webview proxy_url on any platform can carry credentials. */
 export function startProxy(machine: Machine): Promise<ProxyStartResponse> {
   return machineRequest<ProxyStartResponse>(machine, 'POST', '/proxy/start')
+}
+
+// ---- Published SOCKS5 (persistent, keyed, operator-toggled) ----
+
+export interface PublishedSOCKSRequest {
+  enabled: boolean
+  /** Omit or 0 to keep the machine's stored port. */
+  port?: number
+  rotateKey?: boolean
+}
+
+/** Reads this machine's persistent SOCKS5 publication. Unlike startProxy's
+ *  ephemeral pair, this listener is fixed-port, always keyed, and survives
+ *  restart. */
+export function fetchPublishedSocks(machine: Machine): Promise<PublishedSOCKSStatus> {
+  return machineRequest<PublishedSOCKSStatus>(machine, 'GET', '/proxy/publish')
+}
+
+/** Applies publication state live on the machine and persists it. */
+export function setPublishedSocks(
+  machine: Machine,
+  body: PublishedSOCKSRequest,
+): Promise<PublishedSOCKSStatus> {
+  return machineRequest<PublishedSOCKSStatus>(machine, 'PUT', '/proxy/publish', body)
 }
 
 // ---- Agents / Models / Skills (installed CLI agents live on the machine) ----

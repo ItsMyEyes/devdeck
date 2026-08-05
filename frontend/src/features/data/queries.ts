@@ -3,6 +3,7 @@
 
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import type { Machine, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
@@ -194,12 +195,15 @@ import {
   writeWorktreeFile,
   createFsFolder,
   fetchMachinePinStatus,
+  fetchPublishedSocks,
+  setPublishedSocks,
   type AddMCPServerBody,
   type CreateFsFolderBody,
   type CreateWorktreeBody,
   type EnvProfileInput,
   type EnvProfilePatch,
   type GrepOptions,
+  type PublishedSOCKSRequest,
   type SearchWorktreeFilesOptions,
   type UpdateWorktreeBody,
 } from '@/lib/machineApi'
@@ -425,6 +429,33 @@ export function useTailscaleStatus(enabled: boolean) {
     queryFn: fetchTailscaleStatus,
     enabled,
     staleTime: 5_000,
+  })
+}
+
+/** One machine's SOCKS5 publication. `enabled` gates the fetch so the app
+ *  never pulls a live proxy credential speculatively — it is requested only
+ *  while the Settings network section is on screen. */
+export function usePublishedSocks(machine: Machine | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.publishedSocks(machine?.id ?? ''),
+    queryFn: () => fetchPublishedSocks(machine as Machine),
+    enabled: enabled && !!machine,
+    staleTime: 5_000,
+  })
+}
+
+export function useSetPublishedSocks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ machine, body }: { machine: Machine; body: PublishedSOCKSRequest }) =>
+      setPublishedSocks(machine, body),
+    onSuccess: (_data, { machine }) =>
+      queryClient.invalidateQueries({ queryKey: qk.publishedSocks(machine.id) }),
+    onError: (err, { machine }) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update the SOCKS5 proxy')
+      // Resync: the machine may have applied part of the change before failing.
+      void queryClient.invalidateQueries({ queryKey: qk.publishedSocks(machine.id) })
+    },
   })
 }
 

@@ -56,6 +56,7 @@ export const qk = {
   machines: ['machines'] as const,
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
   machineVersion: (id: string) => ['machines', id, 'version'] as const,
+  publishedSocks: (id: string) => ['machines', id, 'publishedSocks'] as const,
   machineUpdateCheck: (id: string) => ['machines', id, 'updateCheck'] as const,
   /** Whether a runtime has a sign-in PIN set. id === '' means this process
    *  itself (a runtime looking at its own PIN), not a remote machine. */

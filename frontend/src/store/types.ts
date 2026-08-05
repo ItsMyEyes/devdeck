@@ -152,6 +152,19 @@ export interface Machine {
   signingPublicKey: string
 }
 
+/** Mirror of backend/internal/domain/PublishedSOCKSStatus — one machine's
+ *  persistent SOCKS5 publication. `enabled` is operator intent; `running` is
+ *  what is actually bound right now (they differ after a failed boot bind). */
+export interface PublishedSOCKSStatus {
+  enabled: boolean
+  port: number
+  running: boolean
+  boundAddr?: string
+  /** Copy-ready `socks5://devdeck:<key>@host:port`; absent when not running. */
+  url?: string
+  key: string
+}
+
 /** A saved page in the machine-proxied Browser tile. Server-side (not
  *  localStorage) so the same bookmarks show up whether you're on the desktop
  *  app or a phone hitting the same hub — see backend/internal/domain.Bookmark. */
