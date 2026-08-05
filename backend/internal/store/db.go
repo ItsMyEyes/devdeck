@@ -279,6 +279,13 @@ CREATE TABLE IF NOT EXISTS settings (
   -- is ever stored, and it never leaves the process (domain.Settings has no
   -- field for it) — the API only reports whether one is configured.
   signin_pin_hash     TEXT NOT NULL DEFAULT ''
+  ,
+  -- Persistent SOCKS5 forward-proxy publication for THIS machine. Survives
+  -- restart: enabled=1 re-binds on boot. See
+  -- docs/superpowers/specs/2026-08-06-published-socks5-design.md
+  socks_publish_enabled INTEGER NOT NULL DEFAULT 0,
+  socks_publish_port    INTEGER NOT NULL DEFAULT 1080,
+  socks_publish_key     TEXT NOT NULL DEFAULT ''
 );
 
 -- sync_state tracks the runtime replica's last successful catalog apply.
@@ -382,6 +389,9 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateSettingsPublishedSOCKS(db); err != nil {
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -394,6 +404,25 @@ func migrateSettingsSignInPIN(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE settings ADD COLUMN signin_pin_hash TEXT NOT NULL DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err
+		}
+	}
+	return nil
+}
+
+// migrateSettingsPublishedSOCKS adds the published-SOCKS5 columns
+// (introduced when the proxy became toggleable from Settings) to
+// pre-existing databases.
+func migrateSettingsPublishedSOCKS(db *sql.DB) error {
+	cols := []string{
+		"socks_publish_enabled INTEGER NOT NULL DEFAULT 0",
+		"socks_publish_port INTEGER NOT NULL DEFAULT 1080",
+		"socks_publish_key TEXT NOT NULL DEFAULT ''",
+	}
+	for _, col := range cols {
+		if _, err := db.Exec("ALTER TABLE settings ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
 		}
 	}
 	return nil

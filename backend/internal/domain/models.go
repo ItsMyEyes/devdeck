@@ -215,6 +215,20 @@ type Settings struct {
 	DefaultModel      string  `json:"defaultModel"`
 }
 
+// PublishedSOCKSConfig is one machine's persistent forward-proxy publication
+// state, stored on that machine's own settings singleton. Distinct from the
+// ephemeral, unauthenticated pair service.ProxyService starts for the desktop
+// webview: this one is operator-toggled, fixed-port, and always keyed.
+//
+// Key is deliberately serializable — like Machine.Key, it is a credential the
+// operator must be able to read and paste into another tool. It rides only on
+// the authenticated /api/proxy/publish routes, never on GET /api/settings.
+type PublishedSOCKSConfig struct {
+	Enabled bool   `json:"enabled"`
+	Port    int    `json:"port"`
+	Key     string `json:"key"`
+}
+
 // Machine mirrors the frontend Machine type — a registered runtime machine
 // in the hub's machine registry.
 type Machine struct {

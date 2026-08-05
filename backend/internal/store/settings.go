@@ -57,3 +57,23 @@ func (s *Store) setActiveWorkspace(id *string) error {
 	_, err := s.db.Exec(`UPDATE settings SET active_workspace_id = ? WHERE id = 1`, id)
 	return err
 }
+
+// PublishedSOCKS returns this machine's forward-proxy publication state.
+// Kept off Settings()/domain.Settings for the same reason SignInPINHash is:
+// the key must never ride along in the JSON GET /api/settings serves.
+func (s *Store) PublishedSOCKS() (domain.PublishedSOCKSConfig, error) {
+	var cfg domain.PublishedSOCKSConfig
+	err := s.db.QueryRow(
+		`SELECT socks_publish_enabled, socks_publish_port, socks_publish_key FROM settings WHERE id = 1`,
+	).Scan(&cfg.Enabled, &cfg.Port, &cfg.Key)
+	return cfg, err
+}
+
+// SetPublishedSOCKS replaces this machine's forward-proxy publication state.
+func (s *Store) SetPublishedSOCKS(cfg domain.PublishedSOCKSConfig) error {
+	_, err := s.db.Exec(
+		`UPDATE settings SET socks_publish_enabled = ?, socks_publish_port = ?, socks_publish_key = ? WHERE id = 1`,
+		cfg.Enabled, cfg.Port, cfg.Key,
+	)
+	return err
+}

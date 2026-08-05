@@ -19,6 +19,11 @@ type Store interface {
 	SignInPINHash() (string, error)
 	SetSignInPINHash(hash string) error
 
+	// Published SOCKS5 forward proxy for this machine. Kept off
+	// domain.Settings so the key can never leak through GET /api/settings.
+	PublishedSOCKS() (domain.PublishedSOCKSConfig, error)
+	SetPublishedSOCKS(cfg domain.PublishedSOCKSConfig) error
+
 	// Workspaces (returns full nested tree)
 	Workspaces() ([]domain.Workspace, error)
 	CreateWorkspace(name string) (domain.Workspace, error)
