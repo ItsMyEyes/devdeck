@@ -127,7 +127,10 @@ func TestPublishedSOCKSPutEnablesAndReturnsURL(t *testing.T) {
 
 func TestPublishedSOCKSPutPortConflictUsesErrorEnvelope(t *testing.T) {
 	h := newPublishedSOCKSHandler(t)
-	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	// Wildcard blocker, matching what the service binds — see the same note on
+	// TestApplyPortConflictReturnsErrorNotPanic in the service package: a
+	// loopback blocker does not conflict with a wildcard bind on Darwin/BSD.
+	blocker, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)
 	}

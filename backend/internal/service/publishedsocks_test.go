@@ -223,7 +223,12 @@ func TestApplyRejectsInvalidPort(t *testing.T) {
 
 func TestApplyPortConflictReturnsErrorNotPanic(t *testing.T) {
 	svc, store := newTestSOCKSService(t)
-	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	// The blocker binds the wildcard, matching what bindLocked binds. A
+	// loopback blocker (127.0.0.1:port) does NOT conflict with a wildcard
+	// bind on Darwin/BSD — Go sets SO_REUSEADDR on listeners, and BSD lets a
+	// wildcard and a more-specific address coexist under it, so this test
+	// would pass on Linux and fail on macOS while proving nothing either way.
+	blocker, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)
 	}
