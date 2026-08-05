@@ -392,6 +392,8 @@ func main() {
 	}
 	proxySvc := service.NewProxyService(advertiseURL.Hostname())
 	proxyH := handler.NewProxyHandler(proxySvc)
+	publishedSOCKSSvc := service.NewPublishedSOCKSService(st, advertiseURL.Hostname())
+	publishedSOCKSH := handler.NewPublishedSOCKSHandler(publishedSOCKSSvc)
 
 	mux := http.NewServeMux()
 
@@ -696,6 +698,11 @@ func main() {
 
 	mux.HandleFunc("POST /api/proxy/start", proxyH.PostStart)
 
+	// Registered on every role: publishing a proxy from a runtime (to reach
+	// that machine's network from elsewhere) is the primary use case.
+	mux.HandleFunc("GET /api/proxy/publish", publishedSOCKSH.Get)
+	mux.HandleFunc("PUT /api/proxy/publish", publishedSOCKSH.Put)
+
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
@@ -797,6 +804,13 @@ func main() {
 		openBrowserSoon(uiURL)
 	}
 	startForwardProxies(*socks5Addr, *httpProxyAddr, *proxyKey)
+	// Replay this machine's stored publication. Never fatal, unlike
+	// startForwardProxies: that config is operator-typed at launch, whereas
+	// this is replayed automatically, so a since-taken port must not stop
+	// the server from booting.
+	if err := publishedSOCKSSvc.StartIfEnabled(); err != nil {
+		log.Printf("published socks5 proxy: %v", err)
+	}
 	if err := http.Serve(listener, root); err != nil {
 		log.Fatalf("server: %v", err)
 	}
