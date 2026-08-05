@@ -125,6 +125,7 @@ export default defineConfig({
       'src/features/terminal/PanelHeader.test.tsx',
       'src/features/terminal/ExpandedTerminal.test.tsx',
       'src/features/ssh/SSHShellPane.test.tsx',
+      'src/features/overlays/SocksPublishSection.test.tsx',
       'src/store/shellSidebars.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold

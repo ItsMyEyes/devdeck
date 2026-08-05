@@ -25,6 +25,7 @@ import { useVsCodeMode } from '@/features/editor/useVsCodeMode'
 import type { TailscaleHubStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { SocksPublishSection } from './SocksPublishSection'
 import { VersionSection } from './VersionSection'
 
 const MASKED_KEY = '••••••••••••••••'
@@ -72,7 +73,7 @@ const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
   },
   network: {
     title: 'Network',
-    subtitle: 'Tailscale exposure status for this hub.',
+    subtitle: 'Tailscale exposure and forward-proxy publishing for this hub and its runtimes.',
   },
   editor: {
     title: 'Editor',
@@ -354,6 +355,15 @@ export function DesktopSettingsDialog() {
                     </span>
                   </div>
                 </InsetPanel>
+                <Divider />
+                <SectionHeadRow
+                  label="Forward proxy"
+                  title="SOCKS5"
+                  description="Publish a SOCKS5 proxy on a machine so other tools can route through that machine's network."
+                />
+                <div className="mt-3">
+                  <SocksPublishSection open={open && section === 'network'} />
+                </div>
               </>
             )}
 
