@@ -229,6 +229,20 @@ type PublishedSOCKSConfig struct {
 	Key     string `json:"key"`
 }
 
+// PublishedSOCKSStatus is PublishedSOCKSConfig plus live liveness, as served
+// by GET/PUT /api/proxy/publish. Enabled is operator intent; Running is what
+// is actually bound right now — they differ when a boot-time bind failed.
+type PublishedSOCKSStatus struct {
+	Enabled   bool   `json:"enabled"`
+	Port      int    `json:"port"`
+	Running   bool   `json:"running"`
+	BoundAddr string `json:"boundAddr,omitempty"`
+	// URL is the copy-ready socks5://devdeck:<key>@<advertiseHost>:<port>,
+	// empty when not running.
+	URL string `json:"url,omitempty"`
+	Key string `json:"key"`
+}
+
 // Machine mirrors the frontend Machine type — a registered runtime machine
 // in the hub's machine registry.
 type Machine struct {
