@@ -95,6 +95,7 @@ function seedOpenTile() {
             url: 'https://google.com',
             title: 'Google',
             loading: false,
+            loadError: null,
             history: ['https://google.com'],
             historyIndex: 0,
           },

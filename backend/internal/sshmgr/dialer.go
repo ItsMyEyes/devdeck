@@ -3,9 +3,9 @@
 // docs/superpowers/specs/2026-07-14-ssh-management-design.md). It is a
 // sibling of internal/terminal, not an extension of it: sessions are backed
 // by golang.org/x/crypto/ssh instead of a local PTY. Dial resolves
-// JumpConnectionID chains (bastion hops); ExecutorMachineID routing to a
-// non-hub runtime is still a later phase — Dial always executes on this
-// process regardless of ExecutorMachineID.
+// JumpConnectionID chains (bastion hops) and honours ExecutorMachineID by
+// opening the underlying TCP connection through that runtime's forward
+// proxy — see executor.go, which is the whole of that routing.
 package sshmgr
 
 import (
@@ -55,10 +55,26 @@ const maxJumpChainDepth = 8
 type Dialer struct {
 	store   ConnStore
 	secrets SecretSource
+	// machines and proxies resolve ExecutorMachineID routing (executor.go).
+	// Both nil means "always dial from this process", which is what a
+	// runtime-role backend and the older tests want — executorDialer falls
+	// back to a direct dial rather than failing when either is missing.
+	machines MachineSource
+	proxies  ProxyStarter
 }
 
 func NewDialer(store ConnStore, secrets SecretSource) *Dialer {
 	return &Dialer{store: store, secrets: secrets}
+}
+
+// WithExecutorRouting enables ExecutorMachineID routing, returning the same
+// dialer for chaining at the wiring site. Separate from NewDialer so the
+// existing constructor (and every test built on it) keeps working unchanged
+// and hub-local dialing stays the default.
+func (d *Dialer) WithExecutorRouting(machines MachineSource, proxies ProxyStarter) *Dialer {
+	d.machines = machines
+	d.proxies = proxies
+	return d
 }
 
 // Dial connects to the saved connection and completes the SSH handshake.
@@ -116,6 +132,9 @@ func (d *Dialer) dial(ctx context.Context, connectionID string, visited map[stri
 	var nc net.Conn
 	var jumpClient *ssh.Client
 	if conn.JumpConnectionID != nil && *conn.JumpConnectionID != "" {
+		// A jump chain already dictates where the final hop originates: the
+		// bastion dials it. The chain's *first* hop is the one that honours
+		// its own ExecutorMachineID, via the recursion below.
 		jumpClient, err = d.dial(ctx, *conn.JumpConnectionID, visited)
 		if err != nil {
 			return nil, fmt.Errorf("dial jump connection: %w", err)
@@ -126,7 +145,11 @@ func (d *Dialer) dial(ctx context.Context, connectionID string, visited map[stri
 			return nil, fmt.Errorf("dial %s via jump host: %w", addr, err)
 		}
 	} else {
-		nc, err = (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", addr)
+		dialer, err := d.executorDialer(ctx, conn)
+		if err != nil {
+			return nil, err
+		}
+		nc, err = dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("dial %s: %w", addr, err)
 		}

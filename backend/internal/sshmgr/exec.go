@@ -79,6 +79,39 @@ func shellJoin(args []string) string {
 // the same connection down with it. Whatever the command managed to print
 // before the cancellation is still returned alongside ctx.Err().
 func RunCommand(ctx context.Context, pool *FilePool, connectionID string, args []string) ([]byte, []byte, error) {
+	return runRemote(ctx, pool, connectionID, shellJoin(args))
+}
+
+// RunPipeline runs stages as a single remote shell pipeline — stage[0] |
+// stage[1] | ... — with every stage's argv quoted through the same shellJoin
+// RunCommand uses, so the only shell syntax in the resulting command is the
+// pipe characters this function itself inserts. No element of any stage can
+// be reinterpreted as shell syntax, whatever it contains.
+//
+// This exists so a listing command can be bounded *on the remote side*
+// (`find ... | head -c N`): when the downstream stage hits its limit and
+// exits, the upstream stage takes SIGPIPE and stops walking, so a pathological
+// remote tree costs a bounded amount of remote I/O and a bounded number of
+// bytes on the wire — rather than being streamed in full only to be
+// truncated once it has already been paid for.
+//
+// Note that a pipeline's exit status is the *last* stage's, so an upstream
+// stage's nonzero exit (find hitting an unreadable directory, or dying of
+// SIGPIPE) is masked. That is the desired behavior for the listing use case,
+// which already treats a partial-but-nonempty find result as success.
+func RunPipeline(ctx context.Context, pool *FilePool, connectionID string, stages [][]string) ([]byte, []byte, error) {
+	joined := make([]string, len(stages))
+	for i, stage := range stages {
+		joined[i] = shellJoin(stage)
+	}
+	return runRemote(ctx, pool, connectionID, strings.Join(joined, " | "))
+}
+
+// runRemote executes one already-assembled remote command string, applying
+// the pooling/eviction and context-cancellation contract documented on
+// RunCommand above. Callers never build this string themselves — it always
+// comes from shellJoin (RunCommand) or shellJoin-per-stage (RunPipeline).
+func runRemote(ctx context.Context, pool *FilePool, connectionID string, cmd string) ([]byte, []byte, error) {
 	type output struct {
 		stdout []byte
 		stderr []byte
@@ -94,7 +127,7 @@ func RunCommand(ctx context.Context, pool *FilePool, connectionID string, args [
 		sess.Stdout = &stdout
 		sess.Stderr = &stderr
 
-		if err := sess.Start(shellJoin(args)); err != nil {
+		if err := sess.Start(cmd); err != nil {
 			return output{}, fmt.Errorf("start command: %w", err)
 		}
 

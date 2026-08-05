@@ -67,6 +67,57 @@ func TestRunCommandEscapesShellMetacharactersLiterally(t *testing.T) {
 	}
 }
 
+// TestRunPipelineConnectsStagesAndQuotesEachOne proves RunPipeline's two
+// guarantees at once: the stages really are joined into a working shell
+// pipeline (stage 2 sees stage 1's stdout), and the only shell syntax in the
+// delivered command is the pipe RunPipeline itself inserts — an argument
+// containing pipes, semicolons and substitutions is still passed through
+// literally, exactly as RunCommand promises.
+func TestRunPipelineConnectsStagesAndQuotesEachOne(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	dangerousArg := "a|b; $(whoami) `oops` && rm -rf /nonexistent\n"
+
+	stdout, stderr, err := RunPipeline(context.Background(), pool, "sc-test", [][]string{
+		{"printf", "%s", dangerousArg},
+		{"cat"},
+	})
+	if err != nil {
+		t.Fatalf("RunPipeline: %v (stderr=%q)", err, stderr)
+	}
+	if string(stdout) != dangerousArg {
+		t.Errorf("stdout = %q, want %q (metacharacters were shell-interpreted, or the pipeline did not connect)", stdout, dangerousArg)
+	}
+}
+
+// TestRunPipelineStopsUpstreamStageAtDownstreamLimit proves the property the
+// remote file listing depends on: when a downstream stage exits at its limit,
+// the upstream stage is stopped by SIGPIPE rather than being allowed to run to
+// completion. That is what bounds a listing's cost on the remote host itself
+// instead of merely truncating output the host has already paid to produce.
+func TestRunPipelineStopsUpstreamStageAtDownstreamLimit(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	// An unbounded producer: without SIGPIPE termination this never returns.
+	producer := []string{"sh", "-c", "while :; do printf 'xxxxxxxxxx'; done"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stdout, _, err := RunPipeline(ctx, pool, "sc-test", [][]string{producer, {"head", "-c", "64"}})
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	if len(stdout) != 64 {
+		t.Errorf("stdout length = %d, want 64 (downstream limit must bound the pipeline)", len(stdout))
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Error("pipeline ran to the context deadline, so the unbounded upstream stage was never stopped")
+	}
+}
+
 func TestRunCommandCapturesStdoutAndStderrSeparately(t *testing.T) {
 	addr, _ := startTestSSHServer(t, nil)
 	pool := newTestPool(t, addr)

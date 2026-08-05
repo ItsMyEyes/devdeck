@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
-import { Check, FilePlus, FilePlus2, FileText, FolderTree, GitBranch, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
+import {
+  Check,
+  FilePlus,
+  FilePlus2,
+  FileText,
+  FolderTree,
+  GitBranch,
+  GitCompare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings2,
+  TerminalSquare,
+  Trash2,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
 import type { FileEditorHandle } from './FileEditor'
+import type { FileLocation } from './fileLocation'
 import { FileQuickOpen } from './FileQuickOpen'
 import { GitPanel } from './GitPanel'
 import { MaterialFileIcon } from './MaterialFileIcon'
@@ -26,6 +40,7 @@ import {
   createExplorerContent,
   createFileContent,
   createGitContent,
+  createGitDiffContent,
   createUntitledContent,
   deserializeLayout,
   findContent,
@@ -37,7 +52,18 @@ import {
   selectTabInTree,
   splitLeaf,
 } from './paneTree'
-import type { DropZone, FileContent, LeafPane, PaneContent, PaneNode, SplitDirection, WorktreeLayout } from './paneTree'
+import type {
+  DropZone,
+  FileContent,
+  GitDiffTarget,
+  LeafPane,
+  PaneContent,
+  PaneNode,
+  SplitDirection,
+  WorktreeLayout,
+} from './paneTree'
+import { GitDiffPane, gitDiffLabel } from './GitDiffPane'
+import { ShellSidebar } from './ShellSidebar'
 import { Terminal, type TerminalHandle } from './Terminal'
 import { TerminalExplorer } from './TerminalExplorer'
 import { UnsavedChangesDialog } from './UnsavedChangesDialog'
@@ -61,6 +87,9 @@ function basename(path: string) {
 
 /** Safely larger than any real line's length — see openAtLine's doc comment. */
 const LINE_END_CHAR_OFFSET = 1_000_000
+
+/** Matches the existing platform sniff in `WorkspaceTileCanvas.tsx`'s `primaryShortcutLabel`. */
+const IS_APPLE_PLATFORM = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 
 function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
@@ -89,6 +118,30 @@ export function useIsDesktop() {
     return () => mql.removeEventListener('change', onChange)
   }, [])
   return isDesktop
+}
+
+/** Pane header's flush-left toggle for this shell's own `ShellSidebar` (spec
+ *  §2/§4) — `PaneCanvas`'s `paneLeadingContent` renders this only for the
+ *  tree's first leaf, so a split shows exactly one, docked next to the
+ *  sidebar it drives. Shared by `ExpandedTerminal` (worktree shells) and
+ *  `SSHShellPane`, the same way `OverflowItem`/`useIsDesktop` above are. */
+export function ShellSidebarToggle({ shellKey }: { shellKey: string }) {
+  const open = useDevDeckStore((s) => shellSidebarState(s.shellSidebars, shellKey).open)
+  const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
+  const shortcut = IS_APPLE_PLATFORM ? '⌘B' : 'Ctrl+B'
+  return (
+    <div className="flex flex-none items-center gap-1 px-1.5">
+      <button
+        type="button"
+        onClick={() => setShellSidebarOpen(shellKey, !open)}
+        title={`Toggle sidebar (${shortcut})`}
+        aria-label="Toggle sidebar"
+        className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+      >
+        {open ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
+      </button>
+    </div>
+  )
 }
 
 const overflowItemClass =
@@ -190,9 +243,13 @@ function TerminalWorkspace({
   const askDelete = useDevDeckStore((s) => s.askDelete)
   const setDirtyFileCount = useDevDeckStore((s) => s.setDirtyFileCount)
   const setWorktreeLayout = useDevDeckStore((s) => s.setWorktreeLayout)
+  const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
   const storedLayout = useDevDeckStore((s) => s.worktreeLayouts[worktree.id])
   const updateWorktree = useUpdateWorktree()
   const killTerminalSession = useKillTerminalSession(machine)
+
+  // Per-shell sidebar (spec §1/§3) — keyed the same way for every worktree tab.
+  const shellKey = `wt:${worktree.id}`
 
   const layout = useMemo(
     () => deserializeLayout(storedLayout) ?? createDefaultLayout(worktree.id),
@@ -323,6 +380,25 @@ function TerminalWorkspace({
       })
     },
     [openDefinition],
+  )
+
+  /** Quick-open's `path:line:column` entry point. Unlike `openAtLine` above
+   *  this collapses the range to a caret: the user named a position, not a
+   *  match, so selecting through to the end of the line would mean their first
+   *  keystroke deletes the rest of it. */
+  const openFileAt = useCallback(
+    (path: string, location?: FileLocation) => {
+      if (!location) {
+        openFile(path)
+        return
+      }
+      const position = {
+        line: Math.max(0, location.line - 1),
+        character: Math.max(0, (location.column ?? 1) - 1),
+      }
+      openDefinition(path, { range: { start: position, end: position } })
+    },
+    [openFile, openDefinition],
   )
 
   const handleFilesDeleted = useCallback(
@@ -507,6 +583,32 @@ function TerminalWorkspace({
     })
   }
 
+  /** Opens one file's (or commit's) diff as its own pane tab, refocusing the
+   *  existing tab when that same target is already open — `createGitDiffContent`
+   *  ids by target key, so `findLeafForContent` finds it the same way `openFile`
+   *  finds an already-open path. */
+  const openGitDiff = useCallback(
+    (target: GitDiffTarget) => {
+      const current = layoutRef.current
+      const content = createGitDiffContent(target, gitDiffLabel(target))
+      const existingLeaf = findLeafForContent(current.root, content.id)
+      if (existingLeaf) {
+        setWorktreeLayout(worktree.id, {
+          ...current,
+          root: selectTabInTree(current.root, existingLeaf.id, content.id),
+          focusedPaneId: existingLeaf.id,
+        })
+        return
+      }
+      setWorktreeLayout(worktree.id, {
+        ...current,
+        root: addContentToLeaf(current.root, current.focusedPaneId, content),
+        focusedPaneId: current.focusedPaneId,
+      })
+    },
+    [worktree.id, setWorktreeLayout],
+  )
+
   /** Cmd/Ctrl+G / Cmd/Ctrl+E — opens (or refocuses) the Git/Explorer tab in the
    *  focused pane, or closes it if it's already the focused pane's active tab. */
   function toggleKindInFocusedPane(kind: 'git' | 'explorer') {
@@ -605,10 +707,16 @@ function TerminalWorkspace({
         toggleKindInFocusedPane('explorer')
         return
       }
+      if (primary && key === 'b') {
+        event.preventDefault()
+        const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
+        setShellSidebarOpen(shellKey, !isOpen)
+        return
+      }
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [layout, dirtyFiles, isFocused])
+  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
 
   const focusedPane = findPane(layout.root, layout.focusedPaneId)
   const focusedActiveContent =
@@ -628,6 +736,7 @@ function TerminalWorkspace({
   function tabIcon(content: PaneContent): ReactNode {
     if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
     if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
+    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-accent" />
     if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
     if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-dim" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />
@@ -711,7 +820,11 @@ function TerminalWorkspace({
         </div>
       )
     },
-    git: ({ isActive }) => <GitPanel worktreeId={worktree.id} machine={machine} active={isActive} />,
+    git: ({ isActive }) => <GitPanel worktreeId={worktree.id} machine={machine} active={isActive} shellKey={shellKey} />,
+    'git-diff': ({ content }) => {
+      if (content.kind !== 'git-diff') return null
+      return <GitDiffPane worktreeId={worktree.id} machine={machine} target={content.target} />
+    },
     file: ({ content, isActive }) => {
       if (content.kind !== 'file') return null
       return (
@@ -734,6 +847,7 @@ function TerminalWorkspace({
     },
     explorer: () => (
       <TerminalExplorer
+        shellKey={shellKey}
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         rootLabel={projectName ?? label}
         onOpenFile={openFile}
@@ -758,51 +872,71 @@ function TerminalWorkspace({
     },
   }
 
+  // Only the tree's first leaf (document order) gets the toggle — a split
+  // shows exactly one, adjacent to the sidebar it controls (spec §4).
+  const firstPaneId = firstLeafId(layout.root)
+
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-terminal">
-      <PaneCanvas
-        root={layout.root}
-        focusedPaneId={layout.focusedPaneId}
-        renderers={renderers}
-        onTreeChange={handleTreeChange}
-        onFocusPane={handleFocusPane}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onSplitPane={handleSplitPane}
-        onClosePane={handleClosePane}
-        tabIcon={tabIcon}
-        isTabDirty={isTabDirty}
-        paneOverflowActions={renderOverflowActions}
-        paneNewTabActions={renderNewTabActions}
-        dragEnabled={isDesktop}
-      />
-
-      {focusedTerminalSessionKey ? (
-        <MobileKeyToolbar ctrlArmed={ctrlArmed} onToggleCtrl={() => setCtrlArmed((armed) => !armed)} onSend={sendKey} />
-      ) : null}
-
-      <FileQuickOpen
-        open={quickOpen}
+    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-terminal">
+      <ShellSidebar
+        shellKey={shellKey}
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
-        onClose={() => setQuickOpen(false)}
+        rootLabel={projectName ?? label}
+        git={{ worktreeId: worktree.id, machine }}
+        onOpenGitDiff={openGitDiff}
         onOpenFile={openFile}
+        onFileDeleted={handleFilesDeleted}
+        onRequestQuickOpen={() => setQuickOpen(true)}
+        onRequestContentSearch={() => setContentSearch(true)}
+        contentSearchShortcut="Ctrl Shift F"
       />
 
-      <ContentSearchPanel
-        open={contentSearch}
-        target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
-        onClose={() => setContentSearch(false)}
-        onOpenMatch={openAtLine}
-      />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PaneCanvas
+          root={layout.root}
+          focusedPaneId={layout.focusedPaneId}
+          renderers={renderers}
+          onTreeChange={handleTreeChange}
+          onFocusPane={handleFocusPane}
+          onSelectTab={handleSelectTab}
+          onCloseTab={handleCloseTab}
+          onSplitPane={handleSplitPane}
+          onClosePane={handleClosePane}
+          tabIcon={tabIcon}
+          isTabDirty={isTabDirty}
+          paneLeadingContent={(pane) => (pane.id === firstPaneId ? <ShellSidebarToggle shellKey={shellKey} /> : null)}
+          paneOverflowActions={renderOverflowActions}
+          paneNewTabActions={renderNewTabActions}
+          dragEnabled={isDesktop}
+        />
 
-      <UnsavedChangesDialog
-        open={closeConfirm !== null}
-        names={closeConfirm ? closeConfirm.paths.map(basename) : []}
-        saving={closeConfirmSaving}
-        onSave={() => void handleCloseConfirmSave()}
-        onDiscard={handleCloseConfirmDiscard}
-        onCancel={handleCloseConfirmCancel}
-      />
+        {focusedTerminalSessionKey ? (
+          <MobileKeyToolbar ctrlArmed={ctrlArmed} onToggleCtrl={() => setCtrlArmed((armed) => !armed)} onSend={sendKey} />
+        ) : null}
+
+        <FileQuickOpen
+          open={quickOpen}
+          target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
+          onClose={() => setQuickOpen(false)}
+          onOpenFile={openFileAt}
+        />
+
+        <ContentSearchPanel
+          open={contentSearch}
+          target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
+          onClose={() => setContentSearch(false)}
+          onOpenMatch={openAtLine}
+        />
+
+        <UnsavedChangesDialog
+          open={closeConfirm !== null}
+          names={closeConfirm ? closeConfirm.paths.map(basename) : []}
+          saving={closeConfirmSaving}
+          onSave={() => void handleCloseConfirmSave()}
+          onDiscard={handleCloseConfirmDiscard}
+          onCancel={handleCloseConfirmCancel}
+        />
+      </div>
     </div>
   )
 }

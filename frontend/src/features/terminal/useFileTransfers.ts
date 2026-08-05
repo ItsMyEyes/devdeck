@@ -3,10 +3,16 @@ import { useCallback, useState } from 'react'
 import {
   downloadWorktreeFileWithProgress,
   downloadWorktreeZipWithProgress,
+  extractWorktreeArchiveWithProgress,
   uploadWorktreeFileWithProgress,
   type WorktreeFileEntry,
 } from '@/lib/machineApi'
-import { downloadSSHFileWithProgress, downloadSSHZipWithProgress, uploadSSHFileWithProgress } from '@/lib/sshFileApi'
+import {
+  downloadSSHFileWithProgress,
+  downloadSSHZipWithProgress,
+  extractSSHArchiveWithProgress,
+  uploadSSHFileWithProgress,
+} from '@/lib/sshFileApi'
 import { qk } from '@/features/data/keys'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { FilesTarget } from './filesTarget'
@@ -154,5 +160,46 @@ export function useFileTransfers(target: FilesTarget) {
     [target, startTransfer, updateTransferProgress, finishTransfer],
   )
 
-  return { uploadFiles, downloadZip, downloadFile, uploading, downloading }
+  /** Uploads a zip and extracts it server-side into `folderPath` — the
+   *  destination half of shellTransfer.ts's folder route (spec §6), and the
+   *  only new primitive this feature needed: the existing `extract`
+   *  endpoint (spec §7) has no client wrapper yet. Same transfer lifecycle
+   *  and cache invalidation as uploadFiles, so a cross-shell folder drop
+   *  shows up in TransferStatusPanel exactly like an ordinary upload. */
+  const extractArchive = useCallback(
+    async (folderPath: string, archive: Blob, label: string): Promise<WorktreeFileEntry[]> => {
+      const id = crypto.randomUUID()
+      startTransfer({
+        id,
+        kind: 'upload',
+        label,
+        totalFiles: 1,
+        completedFiles: 0,
+        totalBytes: archive.size,
+        loadedBytes: 0,
+        status: 'active',
+      })
+      setUploading(true)
+      try {
+        const onProgress = (progress: { loaded: number; total: number }) =>
+          updateTransferProgress(id, { loadedBytes: progress.loaded, totalBytes: progress.total })
+        const entries =
+          target.kind === 'ssh'
+            ? await extractSSHArchiveWithProgress(target.connectionId, folderPath, archive, onProgress)
+            : await extractWorktreeArchiveWithProgress(target.machine, target.worktreeId, folderPath, archive, onProgress)
+        finishTransfer(id, 'done')
+        return entries
+      } catch (error) {
+        finishTransfer(id, 'error', error instanceof Error ? error.message : undefined)
+        throw error
+      } finally {
+        setUploading(false)
+        const filesRootKey = target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
+        await queryClient.invalidateQueries({ queryKey: filesRootKey })
+      }
+    },
+    [target, startTransfer, updateTransferProgress, finishTransfer, queryClient],
+  )
+
+  return { uploadFiles, downloadZip, downloadFile, extractArchive, uploading, downloading }
 }

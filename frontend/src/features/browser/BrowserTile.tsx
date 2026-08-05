@@ -8,11 +8,13 @@ import { startProxy } from '@/lib/machineApi'
 import type { Bookmark, Machine } from '@/store/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { BookmarkDialog } from './BookmarkDialog'
+import { BrowserErrorPanel } from './BrowserErrorPanel'
 import { BrowserFaviconChip } from './BrowserFaviconChip'
 import { BrowserFindBar } from './BrowserFindBar'
 import { BrowserOmnibox } from './BrowserOmnibox'
 import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BROWSER_LOAD_TIMEOUT_MS, timeoutLoadError } from './browserLoadError'
 import { recordPageLoad } from './browserHistory'
 import { visibleTileRect } from './visibleTileRect'
 import { DEFAULT_ZOOM, zoomStep } from './browserZoom'
@@ -297,13 +299,19 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
   // the placeholder measure empty, this effect is what has to *re-run* on the
   // switch for anything to be sent at all. Reselecting the tab re-runs it the
   // same way and shows the webview again at its freshly measured rect.
+  //
+  // `doc.loadError` joins the hide conditions for a reason CSS can't cover: the
+  // native webview is an OS surface composited above the app's DOM, so the error
+  // panel rendered in the placeholder's place would sit *behind* whatever the
+  // failed page left on screen. The webview has to actually go away for the
+  // panel to be visible at all.
   useEffect(() => {
     if (!doc?.url || !openedDocsRef.current.has(doc.id)) return
     const docId = doc.id
     const el = bodyRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    if (!isActive || !visibleTileRect(rect, nativeOverlayBlockers, tileDragActive)) {
+    if (!isActive || doc.loadError || !visibleTileRect(rect, nativeOverlayBlockers, tileDragActive)) {
       cancelScheduledShow()
       void hideBrowserTile(tabId, docId)
       return
@@ -311,7 +319,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     scheduleShow(tabId, docId, () => bodyRef.current?.getBoundingClientRect())
     return cancelScheduledShow
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url])
+  }, [isActive, nativeOverlayBlockers, tileDragActive, tabId, doc?.id, doc?.url, doc?.loadError])
 
   // Sync the address bar/title/history from real navigation inside the native
   // webview. `loading` comes straight from the `on_page_load` payload, so the
@@ -326,7 +334,10 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     let unlisten: (() => void) | undefined
     void onBrowserTilePageLoad(({ tabId: t, docId: d, url, loading }) => {
       if (t !== tabId) return
-      setBrowserDocState(t, d, { url, loading })
+      // A committed load clears any error panel: a page that merely outran the
+      // timeout and then arrived should not be left behind a "took too long"
+      // panel with the real page hidden underneath it.
+      setBrowserDocState(t, d, loading ? { url, loading } : { url, loading, loadError: null })
       if (loading) return
 
       const initiated = initiatedLoadRef.current
@@ -345,6 +356,21 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     return () => unlisten?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
+
+  // Nothing native ever reports a *failed* load: `on_page_load` fires when a
+  // page commits and stays silent otherwise, so a webview pointed at a dead
+  // forward proxy or an unreachable host left the toolbar spinning with no way
+  // out but closing the tab. This timer is what ends that wait. Armed per
+  // navigation (the doc's url and reload state are in the deps) and torn down
+  // by the cleanup the moment `loading` clears on its own.
+  useEffect(() => {
+    if (!doc?.loading) return
+    const docId = doc.id
+    const timer = window.setTimeout(() => {
+      setBrowserDocState(tabId, docId, { loading: false, loadError: timeoutLoadError() })
+    }, BROWSER_LOAD_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [tabId, doc?.id, doc?.loading, doc?.url, setBrowserDocState])
 
   // Follow the loaded page's own <title> (falls back to the humanized
   // hostname set by navigate()/goHistory() below until the real title
@@ -443,7 +469,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     if (!proxy) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
     initiatedLoadRef.current = true
-    setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, history, historyIndex: history.length - 1 })
+    setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, loadError: null, history, historyIndex: history.length - 1 })
     // First navigation for this doc (doc.url was still null): the mount
     // effect above creates the native webview once the placeholder <div>
     // exists, sized correctly from the start — see that effect's comment
@@ -466,7 +492,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
   const goHistory = async (delta: -1 | 1) => {
     const nextIndex = doc.historyIndex + delta
     if (nextIndex < 0 || nextIndex >= doc.history.length) return
-    setBrowserDocState(tabId, doc.id, { loading: true })
+    setBrowserDocState(tabId, doc.id, { loading: true, loadError: null })
     await (delta === -1 ? goBackBrowserTile(tabId, doc.id) : goForwardBrowserTile(tabId, doc.id))
   }
 
@@ -480,7 +506,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
 
   const reload = async () => {
     if (!doc.url) return
-    setBrowserDocState(tabId, doc.id, { loading: true })
+    setBrowserDocState(tabId, doc.id, { loading: true, loadError: null })
     await reloadBrowserTile(tabId, doc.id)
   }
 
@@ -514,7 +540,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     if (!url) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
     initiatedLoadRef.current = true
-    setBrowserDocState(tabId, doc.id, { url, title: bookmark.title, loading: true, history, historyIndex: history.length - 1 })
+    setBrowserDocState(tabId, doc.id, { url, title: bookmark.title, loading: true, loadError: null, history, historyIndex: history.length - 1 })
   }
 
   const closeInternalTab = async (docId: string) => {
@@ -663,7 +689,22 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
             )}
           </div>
         ) : (
-          <div ref={bodyRef} className="absolute inset-0" />
+          // The placeholder stays mounted even while the panel is up: it is what
+          // the bounds/occlusion effects measure, and losing it would strand the
+          // native webview at whatever rect it last had. The panel sits over it,
+          // which only works because `loadError` also hides the webview — see
+          // the occlusion effect.
+          <>
+            <div ref={bodyRef} className="absolute inset-0" />
+            {doc.loadError ? (
+              <BrowserErrorPanel
+                error={doc.loadError}
+                url={doc.url}
+                onRetry={() => void reload()}
+                className="absolute inset-0 rounded-b-lg"
+              />
+            ) : null}
+          </>
         )}
       </div>
 

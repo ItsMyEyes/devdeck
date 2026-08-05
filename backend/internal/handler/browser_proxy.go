@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -24,6 +27,14 @@ const (
 	browserUserAgent     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 	browserProxyCSP      = "sandbox allow-downloads allow-forms allow-modals allow-popups allow-scripts"
 	browserProxyReferrer = "no-referrer"
+
+	// postMessage type the injected script uses to tell the parent frame that a
+	// load committed, and with what status. The Browser module cannot read
+	// X-DevDeck-Browser-Upstream-Status itself — an iframe has no access to its
+	// own response headers — so the status has to travel in-band, inside the
+	// document. Without it the module can only observe `load`, which fires just
+	// the same for a 404 page as for a good one.
+	browserLoadedMessageType = "devdeck-browser:loaded"
 )
 
 var (
@@ -80,17 +91,18 @@ func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rawURL := r.URL.Query().Get("url")
 	proxyToken := r.URL.Query().Get("token")
 	if h.svc != nil {
 		if err := h.svc.ValidateBrowserProxyToken(proxyToken); err != nil {
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			writeBrowserFailure(w, r, rawURL, http.StatusUnauthorized, "browser proxy session expired")
 			return
 		}
 	}
 
-	target, err := normalizeBrowserURL(r.URL.Query().Get("url"))
+	target, err := normalizeBrowserURL(rawURL)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeBrowserFailure(w, r, rawURL, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -100,7 +112,7 @@ func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), body)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid url")
+		writeBrowserFailure(w, r, target.String(), http.StatusBadRequest, "invalid url")
 		return
 	}
 	copyBrowserRequestHeaders(req.Header, r.Header, r.Method, target)
@@ -108,7 +120,8 @@ func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 	client := h.clientForProxyToken(proxyToken)
 	resp, err := client.Do(req)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "browser proxy fetch failed")
+		status, message := browserFetchFailure(err)
+		writeBrowserFailure(w, r, target.String(), status, message)
 		return
 	}
 	defer resp.Body.Close()
@@ -126,10 +139,10 @@ func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 	case "text/html", "application/xhtml+xml":
 		data, err := readBrowserText(resp.Body)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, err.Error())
+			writeBrowserFailure(w, r, target.String(), http.StatusBadGateway, err.Error())
 			return
 		}
-		out := []byte(rewriteBrowserHTML(string(data), base, proxyToken))
+		out := []byte(rewriteBrowserHTML(string(data), base, proxyToken, resp.StatusCode))
 		writeBrowserResponseHeaders(w.Header(), resp.Header, "text/html; charset=utf-8", len(out), true, base.String())
 		writeBrowserStatus(w, resp.StatusCode)
 		if r.Method != http.MethodHead {
@@ -138,7 +151,7 @@ func (h *BrowserProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 	case "text/css":
 		data, err := readBrowserText(resp.Body)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, err.Error())
+			writeBrowserFailure(w, r, target.String(), http.StatusBadGateway, err.Error())
 			return
 		}
 		out := []byte(rewriteBrowserCSS(string(data), base, proxyToken))
@@ -314,6 +327,127 @@ func readBrowserText(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
+// browserFetchFailure separates "upstream never answered in time" from every
+// other transport failure, so the Browser surface can say which one happened
+// instead of showing one generic message for both. The transport's 20s
+// ResponseHeaderTimeout is what usually trips this; a cancelled request context
+// (the operator navigated away mid-load) reports as a timeout too, but by then
+// there is no frame left to render the answer.
+func browserFetchFailure(err error) (int, string) {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return http.StatusGatewayTimeout, "the site did not respond in time"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout, "the site did not respond in time"
+	}
+	return http.StatusBadGateway, "the site could not be reached"
+}
+
+// writeBrowserFailure reports a proxy-level failure — bad URL, expired proxy
+// token, unreachable upstream, oversized document — in a form the Browser
+// surface can actually use.
+//
+// Document requests get a rendered page instead of the `{"error":…}` envelope
+// they used to get, which an iframe has no choice but to display as raw JSON
+// text. Sub-resource requests (scripts, styles, images) keep the envelope:
+// nothing renders them, and the frame's error handling keys off the document
+// load anyway.
+//
+// The page goes out with a 200 for the same reason writeBrowserStatus downgrades
+// upstream error statuses — JSONErrorMiddleware holds every >=400 /api body and
+// rewrites it into a JSON envelope, so an HTML page sent with its real status
+// would never reach the frame intact. The real status rides along in
+// X-DevDeck-Browser-Upstream-Status and in the page's own postMessage.
+func writeBrowserFailure(w http.ResponseWriter, r *http.Request, targetURL string, status int, message string) {
+	if !isBrowserDocumentDest(browserFetchDest(r.Header.Get("Sec-Fetch-Dest"))) {
+		writeErr(w, status, message)
+		return
+	}
+
+	out := []byte(browserProxyErrorDocument(targetURL, status, message))
+	header := w.Header()
+	header.Set("Content-Type", "text/html; charset=utf-8")
+	header.Set("Content-Length", strconv.Itoa(len(out)))
+	header.Set("Content-Security-Policy", browserProxyCSP)
+	header.Set("Referrer-Policy", browserProxyReferrer)
+	header.Set("X-Robots-Tag", "noindex")
+	writeBrowserStatus(w, status)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(out)
+	}
+}
+
+// isBrowserDocumentDest reports whether a request is the frame's own top-level
+// navigation rather than a sub-resource it pulled in. browserFetchDest already
+// falls back to "document" when the header is missing or unrecognized, which is
+// the safe default here: a request DevDeck can't classify gets the renderable
+// answer rather than raw JSON.
+// quoteForScript quotes a value for embedding inside a <script> block.
+// strconv.Quote alone is not enough: an HTML parser ends the block at the first
+// literal "</script>" in it no matter what the JS string quoting says, so a
+// target URL carrying one breaks out into markup. The proxied page is sandboxed
+// into an opaque origin and can't touch DevDeck's, but it can still postMessage
+// the parent frame, which trusts messages by source window alone.
+func quoteForScript(value string) string {
+	return strings.ReplaceAll(strconv.Quote(value), "</", `<\/`)
+}
+
+func isBrowserDocumentDest(dest string) bool {
+	switch dest {
+	case "document", "frame", "iframe":
+		return true
+	default:
+		return false
+	}
+}
+
+// browserProxyErrorDocument renders a proxy failure as a standalone page. Its
+// script posts the same devdeck-browser:loaded message a rewritten upstream page
+// would, carrying `error` as well so the module can tell "DevDeck could not
+// fetch this" from "the site answered with an error" — the two want different
+// wording in the panel. The visible body is the fallback for anything that
+// renders this page without a DevDeck parent listening.
+func browserProxyErrorDocument(targetURL string, status int, message string) string {
+	payload := "{ type: " + quoteForScript(browserLoadedMessageType) +
+		", url: " + quoteForScript(targetURL) +
+		", status: " + strconv.Itoa(status) +
+		", error: " + quoteForScript(message) + " }"
+	heading := strconv.Itoa(status) + " " + http.StatusText(status)
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>` + xhtml.EscapeString(heading) + `</title>
+<script>
+(() => {
+  try {
+    window.parent.postMessage(` + payload + `, "*");
+  } catch {}
+})();
+</script>
+<style>
+  body { margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         background: #111317; color: #c9ced6; text-align: center;
+         font: 13px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width: 26rem; padding: 1.5rem; }
+  h1 { margin: 0 0 .5rem; font-size: 14px; font-weight: 600; color: #e6e9ee; }
+  p { margin: 0 0 .75rem; }
+  code { font: 11px ui-monospace, SFMono-Regular, monospace; color: #7d8694; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>` + xhtml.EscapeString(heading) + `</h1>
+<p>` + xhtml.EscapeString(message) + `</p>
+<code>` + xhtml.EscapeString(targetURL) + `</code>
+</main>
+</body>
+</html>
+`
+}
+
 func writeBrowserStatus(w http.ResponseWriter, upstreamStatus int) {
 	if upstreamStatus >= http.StatusBadRequest {
 		// JSONErrorMiddleware rewrites >=400 /api responses into JSON envelopes.
@@ -428,18 +562,18 @@ func skipBrowserHeader(key string) bool {
 	}
 }
 
-func rewriteBrowserHTML(doc string, base *url.URL, proxyToken string) string {
+func rewriteBrowserHTML(doc string, base *url.URL, proxyToken string, upstreamStatus int) string {
 	root, err := xhtml.Parse(strings.NewReader(doc))
 	if err != nil {
-		return injectBrowserNavigationScript(doc, base, proxyToken)
+		return injectBrowserNavigationScript(doc, base, proxyToken, upstreamStatus)
 	}
 	effectiveBase := browserDocumentBase(root, base)
 	rewriteBrowserHTMLNode(root, effectiveBase, proxyToken)
-	injectBrowserNavigationScriptNode(root, browserNavigationScript(effectiveBase, proxyToken))
+	injectBrowserNavigationScriptNode(root, browserNavigationScript(effectiveBase, proxyToken, upstreamStatus))
 
 	var out strings.Builder
 	if err := xhtml.Render(&out, root); err != nil {
-		return injectBrowserNavigationScript(doc, base, proxyToken)
+		return injectBrowserNavigationScript(doc, base, proxyToken, upstreamStatus)
 	}
 	return out.String()
 }
@@ -574,8 +708,8 @@ func browserProxyURL(targetURL, proxyToken string) string {
 	return browserProxyPath + "?" + values.Encode()
 }
 
-func injectBrowserNavigationScript(doc string, base *url.URL, proxyToken string) string {
-	script := `<script>` + browserNavigationScript(base, proxyToken) + `</script>`
+func injectBrowserNavigationScript(doc string, base *url.URL, proxyToken string, upstreamStatus int) string {
+	script := `<script>` + browserNavigationScript(base, proxyToken, upstreamStatus) + `</script>`
 	lower := strings.ToLower(doc)
 	if idx := strings.Index(lower, "</head>"); idx >= 0 {
 		return doc[:idx] + script + doc[idx:]
@@ -610,17 +744,27 @@ func findBrowserHTMLNode(n *xhtml.Node, name string) *xhtml.Node {
 	return nil
 }
 
-func browserNavigationScript(base *url.URL, proxyToken string) string {
+func browserNavigationScript(base *url.URL, proxyToken string, upstreamStatus int) string {
 	return `
 (() => {
-  const baseURL = ` + strconv.Quote(base.String()) + `;
-  const proxyPath = ` + strconv.Quote(browserProxyPath) + `;
-  const proxyToken = ` + strconv.Quote(proxyToken) + `;
+  const baseURL = ` + quoteForScript(base.String()) + `;
+  const proxyPath = ` + quoteForScript(browserProxyPath) + `;
+  const proxyToken = ` + quoteForScript(proxyToken) + `;
   const notify = (url) => {
     try {
       window.parent.postMessage({ type: "devdeck-browser:navigate", url }, "*");
     } catch {}
   };
+  // Sent at parse time, ahead of the frame's own load event, so the module
+  // learns the upstream status even for a page that then stalls on a slow
+  // sub-resource. This is the only channel available: the frame cannot read
+  // its own response headers.
+  try {
+    window.parent.postMessage(
+      { type: ` + quoteForScript(browserLoadedMessageType) + `, url: baseURL, status: ` + strconv.Itoa(upstreamStatus) + ` },
+      "*",
+    );
+  } catch {}
   const targetURL = (raw) => {
     if (!raw || raw.startsWith("#")) return "";
     if (raw.startsWith(proxyPath + "?")) {

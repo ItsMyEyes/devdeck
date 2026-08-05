@@ -162,14 +162,24 @@ export function MonacoEditor({
     })
   }, [vscodeMode, options, readOnly])
 
-  // Deps are [reveal, ready, mounted], NOT [reveal, value]. `ready` flips
-  // false->true exactly once, when the file's real content finishes loading, and
-  // never changes again for the life of this tab, whereas `value` changes on
-  // every keystroke. Depending on `value` re-runs this effect after every edit —
-  // re-selecting reveal's range and re-focusing — because `reveal` is never
-  // cleared once a search or definition jump has fired. That snapped the cursor
-  // back to the searched location on every keystroke, making it look like only
-  // that location could be edited.
+  // Deps are [reveal, ready, mounted, registryKey], NOT [reveal, value].
+  // `ready` flips false->true exactly once, when the file's real content
+  // finishes loading, and never changes again for the life of this tab, whereas
+  // `value` changes on every keystroke. Depending on `value` re-runs this effect
+  // after every edit — re-selecting reveal's range and re-focusing — because
+  // `reveal` is never cleared once a search or definition jump has fired. That
+  // snapped the cursor back to the searched location on every keystroke, making
+  // it look like only that location could be edited.
+  //
+  // `registryKey` is here because it is the *only* signal that the instance
+  // below was rebuilt on a fresh model scrolled back to line 1. `mounted` cannot
+  // stand in for it: the layout effect above calls setMounted(false) in its
+  // cleanup and setMounted(true) in its setup within one commit, so React
+  // collapses the pair to no change at all and this effect would never re-run.
+  // That is exactly what happens on every content-search jump into a code file —
+  // the reveal lands, then the LSP session resolves `uri` a moment later, the
+  // key changes, and the rebuilt editor sat at the top of the file with the
+  // jump silently discarded.
   useEffect(() => {
     const instance = editorRef.current
     if (!instance || !reveal || !ready) return
@@ -181,7 +191,7 @@ export function MonacoEditor({
     instance.setSelection(range)
     instance.revealRangeInCenter(range)
     instance.focus()
-  }, [reveal, ready, mounted])
+  }, [reveal, ready, mounted, registryKey])
 
   return (
     <div className={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden', className)}>

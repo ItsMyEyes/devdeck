@@ -2,15 +2,16 @@ package service
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,11 @@ import (
 // safety net for a huge or slow remote home directory. Since RunCommand is
 // context-aware this genuinely kills the remote command and frees its SSH
 // channel, rather than merely abandoning a request that keeps running.
-const sshSearchBudget = 20 * time.Second
+//
+// A var rather than a const purely so tests can shrink it — same
+// reassign-in-test pattern as installRipgrepOverSSH below; nothing in
+// production ever writes it.
+var sshSearchBudget = 20 * time.Second
 
 // sshListingTTL is how long one connection's collected remote path listing
 // is reused before it's re-collected.
@@ -44,7 +49,33 @@ const sshSearchBudget = 20 * time.Second
 // hit, at which point every later request — including the SFTP half of the
 // same pooled connection — starts failing. Collecting once and matching
 // in-process turns each keystroke into a pure in-memory scan.
-const sshListingTTL = 30 * time.Second
+//
+// Now that a collection is one pruned traversal
+// rather than two unpruned ones (roughly three seconds on a real developer
+// home directory, against a walk that previously could not finish inside
+// sshSearchBudget at all), the dominant remaining cost of remote search is
+// how often that traversal repeats. Every DevDeck-initiated change to the
+// remote tree already invalidates this cache explicitly (see invalidate
+// below), so the TTL only bounds staleness from changes made *outside*
+// DevDeck — a git pull in the SSH shell, say. Two minutes keeps that lag
+// short while cutting cold-collection frequency fourfold versus the previous
+// 30 seconds.
+const sshListingTTL = 2 * time.Minute
+
+// sshListingByteCap bounds how many bytes of `find` output one collection may
+// consume, enforced remotely via `head -c` (see collectRemoteListing) so the
+// remote walk is stopped by SIGPIPE rather than merely truncated after the
+// cost has already been paid.
+//
+// This is a backstop against a pathological remote tree, NOT a working limit:
+// a cap that binds in normal use would silently drop files from quick-open,
+// which is the same class of bug as the silently-truncated timeout this change
+// exists to fix. Sized against measurement, not guesswork — a heavily
+// populated real developer home directory yields ~30 MB / ~230k paths once
+// sshSearchSkipDirs has pruned the caches, so 64 MiB leaves better than 2x
+// headroom before truncation is even possible, and a collection that does hit
+// it is logged rather than passed off as complete.
+const sshListingByteCap = 64 << 20
 
 // sshRgInstallTimeout bounds how long InstallRipgrep's GitHub API call +
 // asset download + extract + remote SFTP write may run before being
@@ -200,22 +231,75 @@ func (svc *SSHFileService) List(ctx context.Context, connectionID, relativePath 
 	})
 }
 
-// findListArgs builds a `find <root> ...` argv that lists every file (or,
-// when wantDirs is true, every directory) under root, one per line, skipping
-// the same directories by name (wherever they occur, not just at the top
-// level) that WorktreeFileService.Search's local walk and rgGrepArgs/
-// grepFallbackArgs already exclude (searchSkipDirs). `-mindepth 1` excludes
-// root itself, matching the old walker's "skip the starting entry" check.
-// find's default (non `-L`) `-type f`/`-type d` tests never match a symlink
-// (its own type is `l`), so symlinks are skipped for free, mirroring the old
-// walker's explicit os.ModeSymlink check. Only skip-dir names and the
-// (server-controlled) root path go into this command — the user-supplied
-// search pattern never does; matching happens entirely in Go afterward via
-// filePathMatcher, so there is no shell-injection surface here the way there
-// is for Grep's query/includePattern.
-func findListArgs(root string, wantDirs bool) []string {
-	skipDirs := make([]string, 0, len(searchSkipDirs))
+// sshSearchSkipDirs is the set of directory names pruned from an SSH
+// connection's remote listing. It is deliberately *not* searchSkipDirs (the
+// worktree set) but a superset of it, because the two searches are rooted at
+// wildly different scales: a worktree search starts at one project checkout,
+// whereas an SSH search starts at the operator's entire home directory.
+//
+// That difference is the whole reason remote search was unusable. Measured on
+// a real developer home directory, the worktree-tuned prune set left ~508k
+// files still to walk and the traversal did not finish inside sshSearchBudget
+// at all; the entries added below — language toolchain caches (go/pkg/mod via
+// `pkg`, .cargo, .rustup, .nvm, .npm, .bun, .m2, .gradle), OS/app caches
+// (Library, .cache, AppData), and virtualenv/build noise — brought the same
+// tree to ~130k entries in about 3 seconds. None of these hold files an
+// operator would ever quick-open; they are pure traversal cost.
+//
+// searchSkipDirs is left untouched on purpose: it also drives worktree search
+// and both grep argument builders, where pruning names like `target` or
+// `Library` would silently change what a project-scoped search can find.
+var sshSearchSkipDirs = func() map[string]bool {
+	skip := map[string]bool{
+		// Language/package-manager caches.
+		"pkg": true, ".cargo": true, ".rustup": true, ".nvm": true,
+		".npm": true, ".bun": true, ".deno": true, ".yarn": true,
+		".pnpm-store": true, ".m2": true, ".gradle": true, ".stack": true,
+		".ivy2": true, ".sbt": true, ".gem": true, ".pyenv": true, ".rbenv": true,
+		// OS / application caches and state.
+		"Library": true, "AppData": true, ".cache": true, ".Trash": true,
+		"snap": true, ".vscode-server": true, ".cursor-server": true,
+		// Python virtualenv / tool caches.
+		".venv": true, "venv": true, "__pycache__": true, ".tox": true,
+		".mypy_cache": true, ".pytest_cache": true, ".ruff_cache": true,
+		// Infrastructure state.
+		".terraform": true,
+	}
 	for dir := range searchSkipDirs {
+		skip[dir] = true
+	}
+	return skip
+}()
+
+// findListingArgs builds a `find <root> ...` argv that lists every file *and*
+// every directory under root in a **single traversal**, NUL-delimited, with
+// directories distinguished by a trailing slash (per FileQuickOpen's
+// isDirectoryResult contract).
+//
+// One traversal, not two: the previous implementation ran a `-type f` find and
+// a `-type d` find concurrently, which walked the identical tree twice and
+// paid twice the remote I/O to produce two halves of one listing. Emitting
+// both from one walk halves the cost outright.
+//
+// NUL delimiting, not newlines: a path containing a newline would otherwise
+// split into two bogus listing entries. `-print0` and `printf '%s/\0'` are
+// both available on GNU, BSD and busybox find/printf. The format string is a
+// fixed literal and every path arrives as an *argument* to printf, so a `%`
+// in a filename is data, never a conversion specifier. `-exec ... +` batches
+// many paths per printf invocation, so this costs a handful of execs for the
+// whole walk rather than one per directory.
+//
+// `-mindepth 1` excludes root itself, matching the old walker's "skip the
+// starting entry" check. find's default (non `-L`) `-type f`/`-type d` tests
+// never match a symlink (its own type is `l`), so symlinks are skipped for
+// free, mirroring the old walker's explicit os.ModeSymlink check. Only
+// skip-dir names and the (server-controlled) root path go into this command —
+// the user-supplied search pattern never does; matching happens entirely in Go
+// afterward via filePathMatcher, so there is no shell-injection surface here
+// the way there is for Grep's query/includePattern.
+func findListingArgs(root string) []string {
+	skipDirs := make([]string, 0, len(sshSearchSkipDirs))
+	for dir := range sshSearchSkipDirs {
 		skipDirs = append(skipDirs, dir)
 	}
 	sort.Strings(skipDirs)
@@ -231,63 +315,93 @@ func findListArgs(root string, wantDirs bool) []string {
 		}
 		args = append(args, ")", "-prune", "-o")
 	}
-	if wantDirs {
-		args = append(args, "-type", "d", "-print")
-	} else {
-		args = append(args, "-type", "f", "-print")
-	}
-	return args
+	return append(args,
+		"(",
+		"-type", "d", "-exec", "printf", `%s/\0`, "{}", "+",
+		"-o",
+		"-type", "f", "-print0",
+		")",
+	)
 }
 
-// listRemotePaths runs findListArgs(root, wantDirs) over connectionID's
-// pooled SSH connection and returns each printed path relative to
-// homePrefix (directories trailing-slash-suffixed).
+// collectRemoteListing runs findListingArgs(root) over connectionID's pooled
+// SSH connection and splits its NUL-delimited output into files and
+// directories, each path relative to homePrefix.
+//
+// The walk is capped *on the remote side* by piping it through
+// `head -c sshListingByteCap`: when the cap is reached head exits, find takes
+// SIGPIPE and stops walking, so neither the remote I/O nor the bytes on the
+// wire can grow without bound on a pathological home directory. Truncation is
+// detected here by the output having reached the cap, since a pipeline's exit
+// status is head's and therefore says nothing about the upstream find.
 //
 // A nonzero find exit status (e.g. one permission-denied subdirectory among
-// many readable ones) is not treated as fatal — whatever it printed to
-// stdout before that is still used, mirroring the old walker's "skip
-// permission-denied entries, keep going" behavior. A run that produced *no*
-// output at all, though, is reported as an error rather than silently
-// returning an empty listing: that is what a genuine failure looks like
-// (find missing from PATH, the search budget expiring, sshd refusing
-// another channel), and swallowing it made a broken remote search
-// indistinguishable in the UI from a home directory with nothing in it.
-func listRemotePaths(
+// many readable ones) is not treated as fatal — whatever it printed to stdout
+// before that is still used, mirroring the old walker's "skip
+// permission-denied entries, keep going" behavior.
+//
+// A timeout, however, is now always an error, even when partial output was
+// captured. Silently returning the prefix of the tree that find happened to
+// emit before the budget expired was the single most user-visible half of the
+// "remote search is broken" bug: the operator typed a filename they knew
+// existed, the listing had been cut off long before reaching it, and the UI
+// reported a clean "no results" that was indistinguishable from the file not
+// being there. An explicit, actionable error is strictly better than a
+// confidently wrong empty list.
+func collectRemoteListing(
 	ctx context.Context,
 	pool *sshmgr.FilePool,
 	connectionID, root, homePrefix string,
-	wantDirs bool,
-) ([]string, error) {
-	stdout, stderr, runErr := sshmgr.RunCommand(ctx, pool, connectionID, findListArgs(root, wantDirs))
-	if runErr != nil && len(bytes.TrimSpace(stdout)) == 0 {
-		return nil, listRemotePathsError(stderr, runErr)
+) (sshPathListing, error) {
+	stdout, stderr, runErr := sshmgr.RunPipeline(ctx, pool, connectionID, [][]string{
+		findListingArgs(root),
+		{"head", "-c", strconv.Itoa(sshListingByteCap)},
+	})
+	if runErr != nil && (errors.Is(runErr, context.DeadlineExceeded) || len(bytes.TrimSpace(stdout)) == 0) {
+		return sshPathListing{}, collectRemoteListingError(stderr, runErr)
 	}
 
-	paths := make([]string, 0, 256)
-	scanner := bufio.NewScanner(bytes.NewReader(stdout))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	// Hitting the cap cannot be detected from the exit status (a pipeline
+	// reports head's, which is a clean 0), so it is detected from the output
+	// length. A truncated run's final record is very likely a path cut in
+	// half, so drop everything after the last complete (NUL-terminated)
+	// record rather than surfacing a mangled path.
+	if len(stdout) >= sshListingByteCap {
+		log.Printf(
+			"ssh search: connection %s listing hit the %d MiB cap and is incomplete — remote home directory is unusually large",
+			connectionID, sshListingByteCap>>20,
+		)
+		if last := bytes.LastIndexByte(stdout, 0); last >= 0 {
+			stdout = stdout[:last+1]
+		}
+	}
+
+	listing := sshPathListing{
+		files: make([]string, 0, 1024),
+		dirs:  make([]string, 0, 256),
+	}
+	for _, record := range bytes.Split(stdout, []byte{0}) {
+		if len(record) == 0 {
 			continue
 		}
-		relative := strings.TrimPrefix(line, homePrefix)
-		if wantDirs {
-			relative += "/"
+		relative := strings.TrimPrefix(string(record), homePrefix)
+		if relative == "" {
+			continue
 		}
-		paths = append(paths, relative)
+		if strings.HasSuffix(relative, "/") {
+			listing.dirs = append(listing.dirs, relative)
+			continue
+		}
+		listing.files = append(listing.files, relative)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("search files failed")
-	}
-	return paths, nil
+	return listing, nil
 }
 
-// listRemotePathsError turns a failed remote `find` into a message the
+// collectRemoteListingError turns a failed remote `find` into a message the
 // operator can act on, preferring the remote's own stderr (e.g. "find:
 // command not found") over a bare exit code, and naming the timeout case
 // explicitly since that is the one a huge remote home directory produces.
-func listRemotePathsError(stderr []byte, runErr error) error {
+func collectRemoteListingError(stderr []byte, runErr error) error {
 	// Deliberately not wrapped in ErrValidation: a timeout is the server
 	// giving up on the remote host, not a bad request, so it should surface
 	// as a 500 carrying this message rather than a 400.
@@ -309,10 +423,11 @@ func firstStderrLine(s string) string {
 
 // listing returns connectionID's remote path listing, collecting it via
 // `find` only when there is no fresh cached copy (see sshListingTTL for why
-// caching is what makes remote quick-open usable at all). Files and
-// directories are collected concurrently: they are two independent remote
-// walks, so running them together halves the latency an operator waits on a
-// cold cache, and two channels is well inside any sshd's session budget.
+// caching is what makes remote quick-open usable at all).
+//
+// Files and directories come back from one traversal (findListingArgs), not
+// from two concurrent walks of the same tree as before — see that function
+// for why walking twice was pure waste.
 func (svc *SSHFileService) listing(ctx context.Context, connectionID string) (sshPathListing, error) {
 	entry := svc.listings.entry(connectionID)
 	entry.mu.Lock()
@@ -331,30 +446,12 @@ func (svc *SSHFileService) listing(ctx context.Context, connectionID string) (ss
 	}
 	homePrefix := strings.TrimSuffix(home, "/") + "/"
 
-	var (
-		wg                sync.WaitGroup
-		files, dirs       []string
-		filesErr, dirsErr error
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		files, filesErr = listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, false)
-	}()
-	go func() {
-		defer wg.Done()
-		dirs, dirsErr = listRemotePaths(ctx, svc.pool, connectionID, home, homePrefix, true)
-	}()
-	wg.Wait()
-
-	if filesErr != nil {
-		return sshPathListing{}, filesErr
-	}
-	if dirsErr != nil {
-		return sshPathListing{}, dirsErr
+	listing, err := collectRemoteListing(ctx, svc.pool, connectionID, home, homePrefix)
+	if err != nil {
+		return sshPathListing{}, err
 	}
 
-	entry.listing = sshPathListing{files: files, dirs: dirs}
+	entry.listing = listing
 	entry.collected = time.Now()
 	entry.valid = true
 	return entry.listing, nil
@@ -1028,4 +1125,127 @@ func addRemoteFileToZip(client *sftp.Client, zw *zip.Writer, abs, zipName string
 		return fmt.Errorf("zip file %q failed", zipName)
 	}
 	return nil
+}
+
+// Extract decodes a zip archive read from r and writes its entries beneath
+// destFolder over SFTP — the inverse of Archive, and the SSH counterpart of
+// WorktreeFileService.Extract. Every entry is validated by the shared
+// planZipExtraction (zip_extract.go) — normalizeRelativePath's zip-slip
+// guard, a symlink-entry rejection, and the entry-count/uncompressed-size
+// budgets — entirely before anything is written, so a rejected archive can
+// never leave a partially-extracted destFolder behind. Unlike the worktree
+// version, entries are decoded here in Go and written one at a time over the
+// already-open pooled SFTP connection this service uses for Upload — there
+// is deliberately no dependency on an `unzip` binary existing on the remote
+// host.
+func (svc *SSHFileService) Extract(ctx context.Context, connectionID, destFolder string, r io.Reader) ([]SSHFileEntry, error) {
+	cleanDir, err := normalizeRelativePath(destFolder, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// archive/zip.NewReader needs random access to find the central
+	// directory at the end of the stream, so the upload is spooled to a
+	// temp file rather than buffered in memory — mirrors
+	// WorktreeFileService.Extract's identical requirement.
+	tmp, err := os.CreateTemp("", "devdeck-ssh-extract-*.zip")
+	if err != nil {
+		return nil, fmt.Errorf("read archive failed")
+	}
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+	size, err := io.Copy(tmp, r)
+	if err != nil {
+		return nil, fmt.Errorf("read archive failed")
+	}
+	zr, err := zip.NewReader(tmp, size)
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip archive: %w", ErrValidation)
+	}
+	if len(zr.File) > maxExtractEntries {
+		return nil, fmt.Errorf("archive has more than %d entries: %w", maxExtractEntries, ErrValidation)
+	}
+
+	plan, err := planZipExtraction(zr.File)
+	if err != nil {
+		return nil, err
+	}
+
+	// Invalidate the cached listing unconditionally once the plan has
+	// validated: a mid-write failure can leave hundreds of files already
+	// on the host, and a stale listing would hide them from FileQuickOpen
+	// and Search for up to sshListingTTL. The other mutating methods share
+	// the success-only pattern, but Extract writes far more entries per
+	// call, so a partial write is far more likely here.
+	defer svc.listings.invalidate(connectionID)
+
+	result, err := sshmgr.WithSFTPClient(ctx, svc.pool, connectionID, func(client *sftp.Client) ([]SSHFileEntry, error) {
+		absDir, err := svc.absPath(ctx, connectionID, cleanDir)
+		if err != nil {
+			return nil, err
+		}
+		info, err := client.Stat(absDir)
+		if err != nil {
+			return nil, fileOperationError("inspect extract folder", cleanDir, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("%q is not a folder: %w", cleanDir, ErrValidation)
+		}
+
+		entries := make([]SSHFileEntry, 0, len(plan))
+		for _, item := range plan {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			entryPath := path.Join(cleanDir, item.relative)
+			abs := path.Join(absDir, item.relative)
+			if item.isDir {
+				if err := client.MkdirAll(abs); err != nil {
+					return nil, fileOperationError("create folder", entryPath, err)
+				}
+				entries = append(entries, SSHFileEntry{Name: path.Base(entryPath), Path: entryPath, IsDir: true})
+				continue
+			}
+			if err := client.MkdirAll(path.Dir(abs)); err != nil {
+				return nil, fileOperationError("create folder", path.Dir(entryPath), err)
+			}
+			if err := extractRemoteZipEntry(client, item.zipFile, abs); err != nil {
+				return nil, fileOperationError("write file", entryPath, err)
+			}
+			written, err := client.Stat(abs)
+			if err != nil {
+				return nil, fileOperationError("inspect extracted file", entryPath, err)
+			}
+			entries = append(entries, SSHFileEntry{Name: path.Base(entryPath), Path: entryPath, IsDir: false, Size: written.Size()})
+		}
+		return entries, nil
+	})
+	return result, err
+}
+
+// extractRemoteZipEntry writes one non-directory zip entry's decompressed
+// content to abs over the pooled SFTP client — the remote counterpart of
+// worktree_file.go's extractZipEntry. There is no permission-bit
+// preservation here (unlike the local version's zf.Mode().Perm()): Upload,
+// above, doesn't preserve uploaded files' modes either, so this keeps
+// Extract consistent with how every other SSH write in this file already
+// behaves rather than introducing a one-off exception.
+func extractRemoteZipEntry(client *sftp.Client, zf *zip.File, abs string) error {
+	rc, err := zf.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	out, err := client.Create(abs)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, rc)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }

@@ -348,6 +348,268 @@ func TestWorktreeFileServiceUploadDeleteManyAndArchive(t *testing.T) {
 	}
 }
 
+// newExtractTestWorktree builds a worktree fixture for the Extract tests: an
+// existing "dest" folder to extract into, matching Upload's contract that
+// the destination folder must already exist.
+func newExtractTestWorktree(t *testing.T) (*WorktreeFileService, string, string) {
+	t.Helper()
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	root := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(base, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	workspace, err := st.CreateWorkspace("Workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := st.CreateProject(workspace.ID, "Project", "~/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := st.CreateWorktree(project.ID, "root", "", "", "", "", "", "~/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewWorktreeFileService(st), worktree.ID, root
+}
+
+// buildTestZip builds an in-memory zip archive from name -> content pairs.
+// A name ending in "/" is written as an explicit, empty directory entry.
+func buildTestZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if content != "" {
+			if _, err := w.Write([]byte(content)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// assertDirEmpty fails the test unless dir contains no entries — used after
+// every rejected Extract to prove the whole request was rejected before
+// anything was written, never partially.
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("%s not empty after a rejected Extract: %v", dir, entries)
+	}
+}
+
+func TestWorktreeFileServiceExtractHappyPathNestedDirectories(t *testing.T) {
+	svc, worktreeID, root := newExtractTestWorktree(t)
+	archive := buildTestZip(t, map[string]string{
+		"README.md":          "hello",
+		"src/":               "",
+		"src/nested/":        "",
+		"src/nested/main.go": "package main",
+	})
+
+	entries, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("Extract returned no entries")
+	}
+
+	wantContents := map[string]string{
+		"dest/README.md":          "hello",
+		"dest/src/nested/main.go": "package main",
+	}
+	for relPath, want := range wantContents {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		if string(data) != want {
+			t.Errorf("%s content = %q, want %q", relPath, data, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(root, "dest", "src", "nested")); err != nil || !info.IsDir() {
+		t.Fatalf("dest/src/nested not created as a folder: %v", err)
+	}
+}
+
+// TestWorktreeFileServiceExtractRejectsEscapingAndAbsolutePaths covers the
+// zip-slip guard's three shapes: a leading ".." segment, an absolute path,
+// and a path that only escapes after path.Clean collapses its "..". Every
+// case must reject the whole archive and leave the destination untouched.
+func TestWorktreeFileServiceExtractRejectsEscapingAndAbsolutePaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{"parent traversal", "../x"},
+		{"absolute path", "/abs/x"},
+		{"nested traversal", "a/../../x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, worktreeID, root := newExtractTestWorktree(t)
+			archive := buildTestZip(t, map[string]string{tt.entry: "malicious"})
+
+			if _, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+				t.Fatalf("Extract(%q) error = %v, want ErrValidation", tt.entry, err)
+			}
+			assertDirEmpty(t, filepath.Join(root, "dest"))
+		})
+	}
+}
+
+// TestWorktreeFileServiceExtractRejectsSymlinkEntry proves a symlink entry
+// (not a regular file or directory) is rejected rather than followed —
+// header.SetMode(os.ModeSymlink) is exactly how a zip tool encodes a real
+// symlink on Unix, so this is a faithful malicious-archive fixture.
+func TestWorktreeFileServiceExtractRejectsSymlinkEntry(t *testing.T) {
+	svc, worktreeID, root := newExtractTestWorktree(t)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	header := &zip.FileHeader{Name: "escape-link"}
+	header.SetMode(os.ModeSymlink | 0o777)
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("../../etc/passwd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, extractErr := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(buf.Bytes()))
+	if !errors.Is(extractErr, ErrValidation) {
+		t.Fatalf("symlink entry error = %v, want ErrValidation", extractErr)
+	}
+	if !strings.Contains(extractErr.Error(), "is a symlink") {
+		t.Fatalf("symlink error message = %q, want it to name the symlink", extractErr)
+	}
+	assertDirEmpty(t, filepath.Join(root, "dest"))
+}
+
+// TestWorktreeFileServiceExtractRejectsReservedPath proves the reserved-path
+// guard is exercised by Extract, and is case-insensitive. The lower-case
+// ".git" is the obvious target; ".GIT" is the one that historically slipped
+// through — on the case-insensitive volumes DevDeck runs on it is the same
+// directory, so an archive entry ".GIT/config" must be rejected rather than
+// overwriting a worktree's git config.
+func TestWorktreeFileServiceExtractRejectsReservedPath(t *testing.T) {
+	for _, entry := range []string{".git/config", ".GIT/config", "dest/../.git/config"} {
+		t.Run(entry, func(t *testing.T) {
+			svc, worktreeID, root := newExtractTestWorktree(t)
+			archive := buildTestZip(t, map[string]string{entry: "malicious"})
+
+			if _, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+				t.Fatalf("Extract(%q) error = %v, want ErrValidation", entry, err)
+			}
+			assertDirEmpty(t, filepath.Join(root, "dest"))
+		})
+	}
+}
+
+// TestWorktreeFileServiceExtractRejectsSymlinkEscape proves Extract refuses
+// to write through an already-present symlinked directory. ensureInside is
+// purely lexical, so a destination folder that contains a symlink (which a
+// git checkout legitimately creates, since git tracks symlinks) must not let
+// an archive entry resolve outside the worktree root.
+func TestWorktreeFileServiceExtractRejectsSymlinkEscape(t *testing.T) {
+	svc, worktreeID, root := newExtractTestWorktree(t)
+	// Place the escape target OUTSIDE the worktree root (a sibling directory),
+	// so a follow of the symlink would genuinely leave the root.
+	outside := filepath.Join(filepath.Dir(root), "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "dest", "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := buildTestZip(t, map[string]string{"link/authorized_keys": "escape"})
+	if _, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("symlink-escape Extract error = %v, want ErrValidation", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "authorized_keys")); !os.IsNotExist(err) {
+		t.Fatalf("symlink escape wrote outside the worktree: %v", err)
+	}
+}
+
+// TestWorktreeFileServiceExtractRejectsTooManyEntries proves the entry-count
+// budget rejects the archive before writing a single file.
+func TestWorktreeFileServiceExtractRejectsTooManyEntries(t *testing.T) {
+	svc, worktreeID, root := newExtractTestWorktree(t)
+
+	files := make(map[string]string, maxExtractEntries+1)
+	for i := 0; i < maxExtractEntries+1; i++ {
+		files[fmt.Sprintf("f%05d.txt", i)] = ""
+	}
+	archive := buildTestZip(t, files)
+
+	if _, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("over-cap entry count error = %v, want ErrValidation", err)
+	}
+	assertDirEmpty(t, filepath.Join(root, "dest"))
+}
+
+// TestWorktreeFileServiceExtractRejectsOversizeUncompressedTotal proves the
+// uncompressed-size budget is enforced from the zip's declared metadata
+// before any entry is decompressed. zip.Writer.CreateRaw lets the test
+// declare a huge UncompressedSize64 while writing a single real byte — the
+// same cheap lie a hostile "zip bomb" archive would tell, and exactly why
+// the guard must reject on the declared total rather than only after
+// inflating each entry.
+func TestWorktreeFileServiceExtractRejectsOversizeUncompressedTotal(t *testing.T) {
+	svc, worktreeID, root := newExtractTestWorktree(t)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	raw := []byte("x")
+	header := &zip.FileHeader{
+		Name:               "big.bin",
+		Method:             zip.Store,
+		UncompressedSize64: maxExtractUncompressedBytes + 1,
+		CompressedSize64:   uint64(len(raw)),
+	}
+	w, err := zw.CreateRaw(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Extract(context.Background(), worktreeID, "dest", bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrValidation) {
+		t.Fatalf("over-cap uncompressed size error = %v, want ErrValidation", err)
+	}
+	assertDirEmpty(t, filepath.Join(root, "dest"))
+}
+
 // newGrepTestWorktree builds a worktree fixture with content for Grep tests:
 // a TODO comment in src/main.go (mixed case), a TODO in README.md, and a
 // TODO inside node_modules/ + .git/ that must never appear in results

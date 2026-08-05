@@ -8,7 +8,7 @@ afterEach(() => {
 })
 
 function makeDoc(id: string, title: string): BrowserDocState {
-  return { id, machineId: null, proxy: null, url: `https://${id}.example.com`, title, loading: false, history: [], historyIndex: -1 }
+  return { id, machineId: null, proxy: null, url: `https://${id}.example.com`, title, loading: false, loadError: null, history: [], historyIndex: -1 }
 }
 
 describe('BrowserTabStrip close control', () => {

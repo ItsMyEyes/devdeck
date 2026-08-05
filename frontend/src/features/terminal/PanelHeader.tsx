@@ -33,6 +33,8 @@ export interface PanelHeaderProps {
   onClose: () => void
   /** Gates the "..." overflow menu, matching the spec's "rendered only when isFocused" rule. Defaults to true. */
   isFocused?: boolean
+  /** Rendered flush-left, before the tab strip — e.g. the shell sidebar toggle. Omit to render nothing. */
+  leadingContent?: ReactNode
   /** Extra chrome rendered after the tab strip (e.g. worktree status/branch/cost) — composed by the caller, never computed here. */
   titleContent?: ReactNode
   /** Arbitrary actions (Details/Delete/Approve, ...) rendered inside the "..." popover. Omit to hide the overflow button entirely. */
@@ -60,6 +62,7 @@ export function PanelHeader({
   onSplitDown,
   onClose,
   isFocused = true,
+  leadingContent,
   titleContent,
   overflowActions,
   newTabActions,
@@ -72,6 +75,7 @@ export function PanelHeader({
         className,
       )}
     >
+      {leadingContent}
       <div className="flex flex-1 items-stretch overflow-x-auto">
         {tabs.map((tab) => (
           <PanelHeaderTabButton

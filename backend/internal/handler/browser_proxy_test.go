@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -321,7 +323,7 @@ func TestBrowserProxyReturnsScriptStubWhenUpstreamServesHTMLForModule(t *testing
 	}
 }
 
-func TestBrowserProxyRejectsInvalidTokenWhenAuthConfigured(t *testing.T) {
+func TestBrowserProxyRejectsInvalidTokenForSubresources(t *testing.T) {
 	called := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -331,6 +333,7 @@ func TestBrowserProxyRejectsInvalidTokenWhenAuthConfigured(t *testing.T) {
 
 	h := &BrowserProxyHandler{client: upstream.Client(), svc: newTestAuthServiceForMiddleware(t)}
 	req := httptest.NewRequest(http.MethodGet, browserProxyPath+"?url="+url.QueryEscape(upstream.URL)+"&token=invalid", nil)
+	req.Header.Set("Sec-Fetch-Dest", "script")
 	rec := httptest.NewRecorder()
 
 	h.Proxy(rec, req)
@@ -340,6 +343,112 @@ func TestBrowserProxyRejectsInvalidTokenWhenAuthConfigured(t *testing.T) {
 	}
 	if called {
 		t.Fatal("upstream was called despite invalid browser proxy token")
+	}
+}
+
+// A rejected *document* navigation is the one case that does not get the 401 on
+// the wire: JSONErrorMiddleware would turn the body into a JSON envelope, which
+// the sandboxed iframe can only render as raw text. The status travels in the
+// header and in the page's own postMessage instead — see writeBrowserFailure.
+func TestBrowserProxyRendersInvalidTokenAsPageForDocuments(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := &BrowserProxyHandler{client: upstream.Client(), svc: newTestAuthServiceForMiddleware(t)}
+	req := httptest.NewRequest(http.MethodGet, browserProxyPath+"?url="+url.QueryEscape(upstream.URL)+"&token=invalid", nil)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	rec := httptest.NewRecorder()
+
+	h.Proxy(rec, req)
+
+	if called {
+		t.Fatal("upstream was called despite invalid browser proxy token")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 so the frame can render the page", rec.Code)
+	}
+	if got := rec.Header().Get("X-DevDeck-Browser-Upstream-Status"); got != "401" {
+		t.Fatalf("upstream status header = %q, want 401", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, browserLoadedMessageType) || !strings.Contains(body, "status: 401") {
+		t.Fatalf("error page does not report its status to the parent frame: %s", body)
+	}
+}
+
+func TestBrowserProxyRendersUnreachableUpstreamAsPage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	target := upstream.URL
+	// Closed before the request, so the dial fails the way an unreachable site
+	// does — the path that used to answer with a bare `{"error":…}` envelope.
+	upstream.Close()
+
+	h := &BrowserProxyHandler{client: http.DefaultClient}
+	req := httptest.NewRequest(http.MethodGet, browserProxyPath+"?url="+url.QueryEscape(target), nil)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	rec := httptest.NewRecorder()
+
+	h.Proxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 so the frame can render the page", rec.Code)
+	}
+	if got := rec.Header().Get("X-DevDeck-Browser-Upstream-Status"); got != "502" {
+		t.Fatalf("upstream status header = %q, want 502", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("content type = %q, want text/html", ct)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "could not be reached") {
+		t.Fatalf("error page missing the reason: %s", body)
+	}
+}
+
+func TestBrowserProxyReportsUpstreamErrorStatusToParentFrame(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<html><head></head><body>gone</body></html>`))
+	}))
+	defer upstream.Close()
+
+	h := &BrowserProxyHandler{client: upstream.Client()}
+	req := httptest.NewRequest(http.MethodGet, browserProxyPath+"?url="+url.QueryEscape(upstream.URL), nil)
+	rec := httptest.NewRecorder()
+
+	h.Proxy(rec, req)
+
+	// Still a 200 on the wire (writeBrowserStatus) so the site's own 404 page
+	// renders, but the injected script now tells the module what really happened.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, browserLoadedMessageType) {
+		t.Fatalf("rewritten page does not post a load message: %s", body)
+	}
+	if !strings.Contains(body, "status: 404") {
+		t.Fatalf("rewritten page does not carry the upstream 404: %s", body)
+	}
+}
+
+func TestBrowserFetchFailureDistinguishesTimeouts(t *testing.T) {
+	status, message := browserFetchFailure(context.DeadlineExceeded)
+	if status != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", status)
+	}
+	if !strings.Contains(message, "in time") {
+		t.Fatalf("message = %q, want it to name the timeout", message)
+	}
+
+	if status, _ := browserFetchFailure(errors.New("connection refused")); status != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for a non-timeout failure", status)
 	}
 }
 

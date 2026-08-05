@@ -153,6 +153,30 @@ export function downloadWorktreeZipWithProgress(
   })
 }
 
+/** POST .../files/extract — the inverse of downloadWorktreeZipWithProgress:
+ *  decompresses `archive` into `folderPath` server-side. Field names
+ *  ("archive" file part, "path" form field) match
+ *  WorktreeFileHandler.Extract exactly, same multipart shape as
+ *  uploadWorktreeFileWithProgress. */
+export function extractWorktreeArchiveWithProgress(
+  machine: Machine,
+  worktreeId: string,
+  folderPath: string,
+  archive: Blob,
+  onProgress: (progress: TransferProgress) => void,
+): Promise<WorktreeFileEntry[]> {
+  const form = new FormData()
+  form.append('archive', archive, 'archive.zip')
+  form.append('path', folderPath)
+  return machineXhr<WorktreeFileEntry[]>(machine, {
+    method: 'POST',
+    path: `/worktrees/${worktreeId}/files/extract`,
+    body: form,
+    onUploadProgress: onProgress,
+    responseType: 'json',
+  })
+}
+
 /** Raw bytes for a single file. Goes through machineXhr rather than a plain
  *  `<a download>` link because direct mode needs an Authorization header,
  *  which an anchor can't carry. */

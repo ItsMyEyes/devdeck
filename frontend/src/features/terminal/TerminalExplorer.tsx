@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, MutableRefObject, ReactNode } from 'react'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { useIsFetching } from '@tanstack/react-query'
 import {
   Archive,
   ChevronRight,
+  ChevronsDownUp,
   Download,
   FilePlus2,
   FileSearch,
   FolderPlus,
   Loader2,
+  MoreHorizontal,
   PackageSearch,
   RefreshCw,
   Search,
@@ -19,6 +21,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
+import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { canPickSaveLocation, pickSaveTarget, SAVE_CANCELLED, type SaveTarget } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 import { qk } from '@/features/data/keys'
@@ -45,10 +48,35 @@ import {
   type SelectedEntry,
   type SelectionState,
 } from './fileTreeSelection'
+import { setEntryDragImage } from './dragImage'
+import { parentPath, planDrop, resolveDropFolder, type DropRow } from './dropTarget'
+import {
+  clearExplorerClipboard,
+  getExplorerClipboard,
+  resolvePasteRoute,
+  setExplorerClipboard,
+  subscribeExplorerClipboard,
+} from './explorerClipboard'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import { useDragAutoExpand } from './useDragAutoExpand'
+import {
+  encodeShellDragPayload,
+  getShellTransferHandle,
+  parseShellDragPayload,
+  registerShellTransferHandle,
+  resolveDropRoute,
+  transferAcrossShells,
+  unregisterShellTransferHandle,
+  type ShellTransferHandle,
+} from './shellTransfer'
 import { useFileTransfers } from './useFileTransfers'
 
 interface TerminalExplorerProps {
+  /** `wt:<worktreeId>` | `ssh:<connectionId>` — this tree's own identity in
+   *  the cross-shell drag payload (spec §6). Stamped onto every entry this
+   *  tree drags out, and compared against an incoming drop's origin to tell
+   *  a same-tree move apart from a transfer from a different shell. */
+  shellKey: string
   target: FilesTarget
   rootLabel: string
   onOpenFile: (path: string) => void
@@ -68,30 +96,19 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof ApiError ? error.message : fallback
 }
 
-function parentPath(filePath: string) {
-  const index = filePath.lastIndexOf('/')
-  return index >= 0 ? filePath.slice(0, index) : ''
+function plural(count: number, noun = 'item') {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
 }
 
 function filesRootKey(target: FilesTarget) {
   return target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId)
 }
 
-/** Custom drag MIME carrying the dragged entries' paths — distinct from the
- *  browser's 'Files' type (an OS file drag) so drop handlers can tell an
- *  internal tree move apart from an upload. */
+/** Custom drag MIME carrying the dragged entries' ShellDragPayload — distinct
+ *  from the browser's 'Files' type (an OS file drag) so drop handlers can
+ *  tell an internal tree move apart from an upload, and (spec §6) a
+ *  same-shell move apart from a cross-shell transfer. */
 const ENTRY_DRAG_MIME = 'application/x-devdeck-entry-paths'
-
-function readDraggedPaths(event: DragEvent<HTMLDivElement>): string[] {
-  const raw = event.dataTransfer.getData(ENTRY_DRAG_MIME)
-  if (!raw) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((path): path is string => typeof path === 'string') : []
-  } catch {
-    return []
-  }
-}
 
 /** Inline "type a name directly in the tree" row backing both New File/New
  *  Folder creation and Rename — replaces the old window.prompt()-based flow,
@@ -189,7 +206,44 @@ function ContextMenuSeparator() {
   return <ContextMenu.Separator className="my-1 h-px bg-devdeck-border" />
 }
 
+/** One entry in the header's "..." overflow menu. Mirrors ContextMenuAction's
+ *  look, but it is a plain button inside a Popover rather than a
+ *  ContextMenu.Item — the two menus are different base-ui primitives. */
+function HeaderMenuAction({
+  label,
+  icon,
+  shortcut,
+  disabled,
+  danger,
+  onClick,
+}: {
+  label: string
+  icon: ReactNode
+  shortcut?: string
+  disabled?: boolean
+  danger?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-devdeck-fg-2',
+        'hover:bg-devdeck-hover-wash disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent',
+        danger && 'text-devdeck-red-soft hover:bg-devdeck-red-tint-hover',
+      )}
+    >
+      <span className="flex h-4 w-4 flex-none items-center justify-center">{icon}</span>
+      <span className="flex-1 truncate">{label}</span>
+      {shortcut ? <span className="font-mono text-[10px] text-devdeck-dim">{shortcut}</span> : null}
+    </button>
+  )
+}
+
 export function TerminalExplorer({
+  shellKey,
   target,
   rootLabel,
   onOpenFile,
@@ -211,15 +265,34 @@ export function TerminalExplorer({
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const [creating, setCreating] = useState<{ parentPath: string; kind: 'file' | 'folder' } | null>(null)
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
-  const [clipboard, setClipboard] = useState<{ paths: string[]; mode: 'cut' | 'copy' } | null>(null)
+  // Module-level, not component state: Copy in one pane has to enable Paste in
+  // every other mounted pane (spec §5). `useSyncExternalStore` re-renders this
+  // tree whenever any tree copies.
+  const clipboard = useSyncExternalStore(subscribeExplorerClipboard, getExplorerClipboard, getExplorerClipboard)
   const [menuEntry, setMenuEntry] = useState<SelectedEntry | null>(null)
   const writeFile = useWriteFileTarget(target)
   const mkdir = useMkdirTarget(target)
   const moveFile = useMoveFileTarget(target)
   const copyFile = useCopyFileTarget(target)
-  const { uploadFiles, downloadZip, downloadFile, uploading, downloading } = useFileTransfers(target)
+  const { uploadFiles, downloadZip, downloadFile, extractArchive, uploading, downloading } = useFileTransfers(target)
   const deletePaths = useDeletePathsTarget(target)
   const invalidateFiles = useInvalidateFilesTarget(target)
+
+  // Registers this tree's download/upload/extract primitives under its own
+  // shellKey (spec §6) so a *different* shell's drop handler can transfer
+  // out of this one — see shellTransfer.ts's registry doc comment. The
+  // sidebar's TerminalExplorer and the in-pane 'explorer' pane-tab
+  // TerminalExplorer can both be mounted under the same shellKey at once
+  // (spec non-goals: "both surfaces coexist"), so cleanup unregisters this
+  // exact handle instance rather than the shellKey outright — the registry
+  // itself decides whether some other still-mounted registration survives.
+  // useFileTransfers' functions are useCallback-memoized per target, so this
+  // only actually re-registers when shellKey or target genuinely change.
+  useEffect(() => {
+    const handle: ShellTransferHandle = { target, downloadFile, downloadZip, uploadFiles, extractArchive, invalidate: invalidateFiles }
+    registerShellTransferHandle(shellKey, handle)
+    return () => unregisterShellTransferHandle(shellKey, handle)
+  }, [shellKey, target, downloadFile, downloadZip, uploadFiles, extractArchive, invalidateFiles])
   const isFetching = useIsFetching({ queryKey: filesRootKey(target) }) > 0
   const selectedEntries = useMemo(() => Object.values(selection.selected), [selection.selected])
   const selectedPaths = useMemo(() => selectedEntries.map((entry) => entry.path), [selectedEntries])
@@ -242,6 +315,18 @@ export function TerminalExplorer({
       else next.add(path)
       return next
     })
+  }
+
+  const expandDir = useCallback((path: string) => {
+    setExpanded((current) => (current.has(path) ? current : new Set(current).add(path)))
+  }, [])
+
+  /** Hovering a collapsed folder mid-drag opens it, so a nested destination is
+   *  reachable without dropping first (spec §4). */
+  const autoExpand = useDragAutoExpand(expandDir)
+
+  function collapseAll() {
+    setExpanded(new Set())
   }
 
   function clearSelection() {
@@ -353,73 +438,149 @@ export function TerminalExplorer({
     return menuEntry.isDir ? menuEntry.path : parentPath(menuEntry.path)
   }
 
-  function cutSelection() {
+  function putOnClipboard(mode: 'cut' | 'copy') {
     const entries = menuTargetEntries()
     if (entries.length === 0) return
-    setClipboard({ paths: entries.map((entry) => entry.path), mode: 'cut' })
+    setExplorerClipboard({
+      shellKey,
+      paths: entries.map((entry) => entry.path),
+      hasDir: entries.some((entry) => entry.isDir),
+      mode,
+    })
+    toast.success(`${plural(entries.length)} ready to paste`)
   }
 
-  function copySelection() {
-    const entries = menuTargetEntries()
-    if (entries.length === 0) return
-    setClipboard({ paths: entries.map((entry) => entry.path), mode: 'copy' })
-  }
-
+  /** Paste routes on where the entries came from (spec §5): same shell keeps
+   *  the local move/copy primitives, a different shell goes through
+   *  shellTransfer — which copies, since the bytes cross the browser and
+   *  deleting a source after an unverified remote write is how a transfer
+   *  turns into data loss. */
   function pasteClipboard() {
     if (!clipboard || clipboard.paths.length === 0) return
     const folder = menuTargetFolder()
-    const op = clipboard.mode === 'cut' ? moveFile : copyFile
-    const paths = clipboard.paths
-    Promise.allSettled(
-      paths.map((from) => {
-        const name = from.split('/').pop() ?? from
-        const to = folder ? `${folder}/${name}` : name
-        return op.mutateAsync({ from, to })
-      }),
-    ).then((results) => {
-      const failed = results.filter((result) => result.status === 'rejected').length
-      const verb = clipboard.mode === 'cut' ? 'move' : 'copy'
-      if (failed > 0) toast.error(`Could not ${verb} ${failed} item${failed === 1 ? '' : 's'}`)
-      if (failed < paths.length) {
-        toast.success(`${paths.length - failed} item${paths.length - failed === 1 ? '' : 's'} ${verb === 'move' ? 'moved' : 'copied'}`)
+    const route = resolvePasteRoute(clipboard, shellKey)
+
+    if (route === 'transfer') {
+      const source = getShellTransferHandle(clipboard.shellKey)
+      if (!source) {
+        toast.error('That pane is no longer open')
+        return
       }
-      if (clipboard.mode === 'cut') setClipboard(null)
+      if (clipboard.mode === 'cut') toast.info('Copied across panes — the original was kept')
+      void transferAcrossShells(source, ownTransferHandle(), clipboard.paths, clipboard.hasDir, folder)
+      return
+    }
+
+    const plan = planDrop(clipboard.paths, folder)
+    if (!plan.ok) {
+      toast.error(plan.reason)
+      return
+    }
+    if (plan.moves.length === 0) {
+      toast.info(`Already in ${folder || 'root'}`)
+      return
+    }
+    runFileOps(plan.moves, route === 'move' ? 'move' : 'copy')
+    if (clipboard.mode === 'cut') clearExplorerClipboard()
+  }
+
+  /**
+   * Runs a planned batch of moves or copies and always reports the outcome.
+   * Every drop and paste funnels through here so no path can end without the
+   * operator learning what happened — the silent `return` this replaced is
+   * what made a broken drop look identical to an ignored one.
+   */
+  function runFileOps(moves: readonly { from: string; to: string }[], op: 'move' | 'copy') {
+    const mutation = op === 'move' ? moveFile : copyFile
+    void Promise.allSettled(moves.map(({ from, to }) => mutation.mutateAsync({ from, to }))).then((results) => {
+      const rejected = results.filter((result) => result.status === 'rejected')
+      const done = moves.length - rejected.length
+      if (done > 0) toast.success(`${plural(done)} ${op === 'move' ? 'moved' : 'copied'}`)
+      if (rejected.length > 0) {
+        const first = rejected[0]
+        toast.error(errorMessage(first?.reason, `Could not ${op} ${plural(rejected.length)}`))
+      }
     })
   }
 
-  /** Drag-and-drop move: `paths` dropped onto `targetFolder`. Reuses the same
-   *  moveFile primitive Cut/Paste and Rename already use. Same-location drops
-   *  (dragged back onto their own parent) are silently skipped rather than
-   *  surfaced as errors — the backend rejects same source/dest, but that's an
-   *  expected no-op here, not a mistake worth a toast. */
-  function moveEntries(paths: readonly string[], targetFolder: string) {
-    const moves = paths
-      .map((from) => {
-        const name = from.split('/').pop() ?? from
-        const to = targetFolder ? `${targetFolder}/${name}` : name
-        return { from, to }
-      })
-      .filter(({ from, to }) => from !== to)
-    if (moves.length === 0) return
-    Promise.allSettled(moves.map(({ from, to }) => moveFile.mutateAsync({ from, to }))).then((results) => {
-      const failed = results.filter((result) => result.status === 'rejected').length
-      if (failed > 0) toast.error(`Could not move ${failed} item${failed === 1 ? '' : 's'}`)
-      if (failed < moves.length) {
-        toast.success(`${moves.length - failed} item${moves.length - failed === 1 ? '' : 's'} moved`)
-      }
-    })
+  /** Drag-and-drop within this tree: a plain drop moves, ⌥/Alt copies
+   *  (spec §2). Rejections and no-ops both get a toast. */
+  function applyEntriesToFolder(paths: readonly string[], targetFolder: string, op: 'move' | 'copy') {
+    const plan = planDrop(paths, targetFolder)
+    if (!plan.ok) {
+      toast.error(plan.reason)
+      return
+    }
+    // Every entry already lives here — a genuine no-op, not a failure.
+    if (plan.moves.length === 0) return
+    runFileOps(plan.moves, op)
   }
 
   /** Begins an internal tree drag: dragging a selected row drags the whole
-   *  multi-selection, dragging an unselected row drags just that entry. */
-  function beginDragEntry(entry: SelectedEntry): string[] {
-    const paths = selection.selected[entry.path] && selectedCount > 1 ? selectedPaths : [entry.path]
+   *  multi-selection, dragging an unselected row drags just that entry.
+   *  Returns the encoded ENTRY_DRAG_MIME payload (spec §6) rather than a
+   *  bare path list, so the row's dragstart handler can set it verbatim
+   *  without needing to know this tree's own shellKey. */
+  function beginDragEntry(entry: SelectedEntry, dataTransfer: DataTransfer): string {
+    const dragging = selection.selected[entry.path] && selectedCount > 1 ? selectedEntries : [entry]
+    const paths = dragging.map((dragged) => dragged.path)
+    const hasDir = dragging.some((dragged) => dragged.isDir)
     setDraggingPaths(paths)
-    return paths
+    setEntryDragImage(dataTransfer, dragging.map((dragged) => dragged.name))
+    return encodeShellDragPayload({ shellKey, paths, hasDir })
   }
 
   function endDragEntry() {
     setDraggingPaths(null)
+    setDropTargetPath(null)
+    setIsDragOver(false)
+    autoExpand.cancel()
+  }
+
+  /** This tree's own transfer primitives, in the shape shellTransfer moves
+   *  bytes through — the destination half of a cross-shell drop or paste. */
+  function ownTransferHandle(): ShellTransferHandle {
+    return { target, downloadFile, downloadZip, uploadFiles, extractArchive, invalidate: invalidateFiles }
+  }
+
+  /** Cross-shell half of a drop (spec §6): `payload.shellKey` already differs
+   *  from this tree's own. A source that vanished mid-drag used to return
+   *  silently, which read to the operator as "drag-and-drop doesn't work" —
+   *  it says so now. */
+  function transferFromOtherShell(payload: { shellKey: string; paths: string[]; hasDir: boolean }, targetFolder: string) {
+    const source = getShellTransferHandle(payload.shellKey)
+    if (!source) {
+      toast.error('That pane is no longer open')
+      return
+    }
+    void transferAcrossShells(source, ownTransferHandle(), payload.paths, payload.hasDir, targetFolder)
+  }
+
+  /** Single entry point for both the tree-root and per-row drop handlers.
+   *  `row` is whatever the pointer was over — the *pointer* picks the
+   *  destination folder, never the selection (spec §3). */
+  function handleEntryDrop(event: DragEvent<HTMLDivElement>, row: DropRow | null) {
+    const payload = parseShellDragPayload(event.dataTransfer.getData(ENTRY_DRAG_MIME))
+    if (!payload) return
+    const targetFolder = resolveDropFolder(row)
+    if (resolveDropRoute(payload, shellKey) === 'move') {
+      applyEntriesToFolder(payload.paths, targetFolder, event.altKey ? 'copy' : 'move')
+      return
+    }
+    transferFromOtherShell(payload, targetFolder)
+  }
+
+  /** What a drag hovering this tree would do if dropped now, so the cursor
+   *  badge and the outcome can't disagree: an OS file drag uploads, a foreign
+   *  shell's entries copy, this tree's own entries move unless ⌥ is held. */
+  function dropEffectFor(event: DragEvent<HTMLDivElement>): 'move' | 'copy' {
+    if (!event.dataTransfer.types.includes(ENTRY_DRAG_MIME)) return 'copy'
+    if (event.altKey) return 'copy'
+    const payload = parseShellDragPayload(event.dataTransfer.getData(ENTRY_DRAG_MIME))
+    // getData is empty during dragover in most browsers, so an unreadable
+    // payload here means "can't tell yet" — assume this tree's own drag,
+    // which is the common case and the one whose badge matters.
+    return payload && payload.shellKey !== shellKey ? 'copy' : 'move'
   }
 
   function copyPathToPasteboard(entry: SelectedEntry) {
@@ -517,28 +678,38 @@ export function TerminalExplorer({
     void uploadToFolder(uploadTarget, files)
   }
 
+  /** WebKit only treats an element as a drop target when `dragenter` is
+   *  cancelled too — Chromium is happy with `dragover` alone. Both are
+   *  cancelled here so the tree accepts drops on every engine. */
   function handleTreeDragOver(event: DragEvent<HTMLDivElement>) {
     const internal = event.dataTransfer.types.includes(ENTRY_DRAG_MIME)
     if (!internal && !event.dataTransfer.types.includes('Files')) return
     event.preventDefault()
-    event.dataTransfer.dropEffect = internal ? 'move' : 'copy'
+    event.dataTransfer.dropEffect = dropEffectFor(event)
     setIsDragOver(true)
   }
 
   function handleTreeDragLeave(event: DragEvent<HTMLDivElement>) {
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
     setIsDragOver(false)
+    setDropTargetPath(null)
+    autoExpand.cancel()
   }
 
+  /** A drop that reaches the container was over empty space or a file row, so
+   *  it lands at the tree root. It deliberately no longer consults
+   *  `uploadTarget` (the *selected* row's parent) — that was Cause 2. */
   function handleTreeDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setIsDragOver(false)
+    setDropTargetPath(null)
+    autoExpand.cancel()
     if (event.dataTransfer.types.includes(ENTRY_DRAG_MIME)) {
-      moveEntries(readDraggedPaths(event), uploadTarget)
+      handleEntryDrop(event, null)
       return
     }
     const files = Array.from(event.dataTransfer.files ?? [])
-    void uploadToFolder(uploadTarget, files)
+    void uploadToFolder('', files)
   }
 
   function handlePaste(event: ClipboardEvent<HTMLElement>) {
@@ -611,96 +782,118 @@ export function TerminalExplorer({
   return (
     <aside className="flex min-h-0 flex-1 flex-col bg-devdeck-surface" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
+      {/* Two inline actions + an overflow menu, rather than the six-to-seven
+          inline buttons this header used to carry. The sidebar this renders in
+          is 200-560px wide (SHELL_SIDEBAR_MIN/MAX_WIDTH), and 7 * 32px of
+          buttons plus the root label needed ~350px — so at anything near the
+          default width the buttons crushed the label and spilled past the
+          panel edge. Only New File and Refresh stay inline; everything else
+          moves into "..." and keeps its keyboard shortcut and context-menu
+          entry. */}
       <div className="flex h-9 flex-none items-center border-b border-devdeck-border bg-devdeck-surface-2">
         <div
           title={rootLabel}
-          className="flex h-full max-w-[45%] items-center truncate border-r border-devdeck-border bg-devdeck-surface px-3 font-mono text-[11px] text-devdeck-fg"
+          className="flex h-full min-w-0 flex-1 items-center truncate border-r border-devdeck-border bg-devdeck-surface px-3 font-mono text-[11px] text-devdeck-fg"
         >
           {rootLabel}
         </div>
-        {selectedCount > 0 ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 font-mono text-[10.5px] text-devdeck-muted">
-            <span className="truncate">{selectedCount} selected</span>
-            <button
-              type="button"
-              onClick={clearSelection}
-              title="Clear selection"
-              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ) : (
-          <div className="flex-1" />
-        )}
         <button
           type="button"
-          onClick={() => uploadInputRef.current?.click()}
-          disabled={uploading}
-          title={`Upload files to ${uploadTargetLabel}`}
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          onClick={() => startCreate(uploadTarget, 'file')}
+          disabled={writeFile.isPending}
+          title={`New file in ${uploadTargetLabel} (Ctrl+N)`}
+          aria-label="New file"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
-          {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-        </button>
-        <button
-          type="button"
-          onClick={() => void requestArchive(selectedEntries)}
-          disabled={selectedCount === 0 || downloading}
-          title="Zip selected files and folders"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {downloading ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
-        </button>
-        <button
-          type="button"
-          onClick={removeSelected}
-          disabled={selectedCount === 0 || deletePaths.isPending}
-          title="Delete selected files and folders"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-red-soft disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {deletePaths.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+          {writeFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus2 size={13} />}
         </button>
         <button
           type="button"
           onClick={() => startCreate(uploadTarget, 'folder')}
           disabled={mkdir.isPending}
           title={`New folder in ${uploadTargetLabel}`}
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          aria-label="New folder"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
           {mkdir.isPending ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />}
         </button>
         <button
           type="button"
-          onClick={() => startCreate(uploadTarget, 'file')}
-          disabled={writeFile.isPending}
-          title={`New file in ${uploadTargetLabel} (Ctrl+N)`}
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
-        >
-          {writeFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus2 size={13} />}
-        </button>
-        {/* Worktree-only: an SSH target has no machine to probe, and SSH files
-            get no language server in the first place. */}
-        {target.kind !== 'ssh' ? (
-          <button
-            type="button"
-            onClick={() => setDepsOpen(true)}
-            title="Check editor dependencies (language servers)"
-            aria-label="Check editor dependencies"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg"
-          >
-            <PackageSearch size={13} />
-          </button>
-        ) : null}
-        <button
-          type="button"
           onClick={invalidateFiles}
           disabled={isFetching}
           title="Refresh files"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          aria-label="Refresh files"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
         >
           <RefreshCw size={13} className={cn(isFetching && 'animate-spin')} />
         </button>
+        <button
+          type="button"
+          onClick={collapseAll}
+          disabled={expanded.size === 0}
+          title="Collapse all folders"
+          aria-label="Collapse all folders"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
+        >
+          <ChevronsDownUp size={13} />
+        </button>
+        <TabStripPopoverMenu
+          trigger={<MoreHorizontal size={13} />}
+          triggerTitle="More file actions"
+          triggerAriaLabel="More file actions"
+          align="end"
+          triggerClassName="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg"
+        >
+          <div className="flex min-w-[190px] flex-col gap-0.5">
+            <HeaderMenuAction
+              label="Upload files…"
+              icon={uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              disabled={uploading}
+              onClick={() => uploadInputRef.current?.click()}
+            />
+            <HeaderMenuAction
+              label="Zip selected"
+              icon={downloading ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
+              disabled={selectedCount === 0 || downloading}
+              onClick={() => void requestArchive(selectedEntries)}
+            />
+            {/* Worktree-only: an SSH target has no machine to probe, and SSH
+                files get no language server in the first place. */}
+            {target.kind !== 'ssh' ? (
+              <HeaderMenuAction
+                label="Editor dependencies…"
+                icon={<PackageSearch size={13} />}
+                onClick={() => setDepsOpen(true)}
+              />
+            ) : null}
+            <HeaderMenuAction
+              label="Delete selected"
+              icon={deletePaths.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              disabled={selectedCount === 0 || deletePaths.isPending}
+              danger
+              onClick={removeSelected}
+            />
+          </div>
+        </TabStripPopoverMenu>
       </div>
+
+      {/* Its own row rather than a chip wedged into the header strip: the
+          sidebar is 200-560px wide, and the count competed with the root
+          label for the same space. */}
+      {selectedCount > 0 ? (
+        <div className="flex h-7 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-accent/10 pl-3 pr-1.5 font-mono text-[10.5px] text-devdeck-fg-2">
+          <span className="min-w-0 flex-1 truncate">{selectedCount} selected</span>
+          <button
+            type="button"
+            onClick={clearSelection}
+            title="Clear selection"
+            aria-label="Clear selection"
+            className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      ) : null}
 
       {target.kind !== 'ssh' ? (
         <DependenciesDialog open={depsOpen} onOpenChange={setDepsOpen} machine={target.machine} />
@@ -712,12 +905,15 @@ export function TerminalExplorer({
             <div
               ref={treeContainerRef}
               onContextMenu={handleTreeContextMenu}
+              onDragEnter={handleTreeDragOver}
               onDragOver={handleTreeDragOver}
               onDragLeave={handleTreeDragLeave}
               onDrop={handleTreeDrop}
               className={cn(
                 'min-h-0 flex-1 overflow-auto py-1',
-                isDragOver && 'outline outline-2 outline-dashed outline-devdeck-accent -outline-offset-2',
+                // Root-targeted drop: the pointer is over empty space or a
+                // file row, so the drop lands at the tree root.
+                isDragOver && dropTargetPath === null && 'bg-devdeck-accent/[0.06] ring-1 ring-inset ring-devdeck-accent/70',
               )}
             />
           }
@@ -745,9 +941,12 @@ export function TerminalExplorer({
             onDownloadFile={(entry) => void downloadEntry(entry)}
             onSetDropTarget={setDropTargetPath}
             onDropFilesToFolder={(path, files) => void uploadToFolder(path, files)}
-            onDropEntriesToFolder={(path, paths) => moveEntries(paths, path)}
+            onDropEntriesToFolder={(row, event) => handleEntryDrop(event, row)}
             onDragStartEntry={beginDragEntry}
             onDragEndEntry={endDragEntry}
+            onDragOverFolder={autoExpand.hover}
+            onLeaveFolder={autoExpand.cancel}
+            dropEffectFor={dropEffectFor}
             deletePending={deletePaths.isPending}
             downloadPending={downloading}
           />
@@ -766,8 +965,8 @@ export function TerminalExplorer({
               <ContextMenuAction label="New File..." shortcut="⌘N" onClick={() => startCreate(menuTargetFolder(), 'file')} />
               <ContextMenuAction label="New Folder..." onClick={() => startCreate(menuTargetFolder(), 'folder')} />
               <ContextMenuSeparator />
-              <ContextMenuAction label="Cut" shortcut="⌘X" disabled={!menuEntry} onClick={cutSelection} />
-              <ContextMenuAction label="Copy" shortcut="⌘C" disabled={!menuEntry} onClick={copySelection} />
+              <ContextMenuAction label="Cut" shortcut="⌘X" disabled={!menuEntry} onClick={() => putOnClipboard('cut')} />
+              <ContextMenuAction label="Copy" shortcut="⌘C" disabled={!menuEntry} onClick={() => putOnClipboard('copy')} />
               <ContextMenuAction label="Paste" shortcut="⌘V" disabled={!clipboard} onClick={pasteClipboard} />
               <ContextMenuSeparator />
               <ContextMenuAction
@@ -872,9 +1071,12 @@ interface TreeLevelProps {
   onDownloadFile: (entry: SelectedEntry) => void
   onSetDropTarget: (path: string | null) => void
   onDropFilesToFolder: (path: string, files: File[]) => void
-  onDropEntriesToFolder: (path: string, paths: string[]) => void
-  onDragStartEntry: (entry: SelectedEntry) => string[]
+  onDropEntriesToFolder: (row: DropRow, event: DragEvent<HTMLDivElement>) => void
+  onDragStartEntry: (entry: SelectedEntry, dataTransfer: DataTransfer) => string
   onDragEndEntry: () => void
+  onDragOverFolder: (path: string) => void
+  onLeaveFolder: () => void
+  dropEffectFor: (event: DragEvent<HTMLDivElement>) => 'move' | 'copy'
   deletePending: boolean
   downloadPending: boolean
   creating: { parentPath: string; kind: 'file' | 'folder' } | null
@@ -987,13 +1189,26 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
               draggable={!isRenaming}
               onDragStart={(event) => {
                 event.stopPropagation()
-                const paths = rest.onDragStartEntry(selectedEntry)
-                event.dataTransfer.effectAllowed = 'move'
-                event.dataTransfer.setData(ENTRY_DRAG_MIME, JSON.stringify(paths))
+                const payload = rest.onDragStartEntry(selectedEntry, event.dataTransfer)
+                // Both, so the cursor can show a copy badge when ⌥ is held —
+                // 'move' alone makes the browser refuse a copy dropEffect.
+                event.dataTransfer.effectAllowed = 'copyMove'
+                event.dataTransfer.setData(ENTRY_DRAG_MIME, payload)
               }}
               onDragEnd={(event) => {
                 event.stopPropagation()
                 rest.onDragEndEntry()
+              }}
+              // dragenter is cancelled alongside dragover because WebKit only
+              // accepts a drop on an element that cancelled both.
+              onDragEnter={(event) => {
+                if (!entry.isDir || isDragging) return
+                const internal = event.dataTransfer.types.includes(ENTRY_DRAG_MIME)
+                if (!internal && !event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                event.stopPropagation()
+                rest.onSetDropTarget(entry.path)
+                if (!isOpen) rest.onDragOverFolder(entry.path)
               }}
               onDragOver={(event) => {
                 if (!entry.isDir || isDragging) return
@@ -1001,21 +1216,24 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 if (!internal && !event.dataTransfer.types.includes('Files')) return
                 event.preventDefault()
                 event.stopPropagation()
-                event.dataTransfer.dropEffect = internal ? 'move' : 'copy'
+                event.dataTransfer.dropEffect = internal ? rest.dropEffectFor(event) : 'copy'
                 rest.onSetDropTarget(entry.path)
+                if (!isOpen) rest.onDragOverFolder(entry.path)
               }}
               onDragLeave={(event) => {
                 if (!entry.isDir) return
                 event.stopPropagation()
                 rest.onSetDropTarget(null)
+                rest.onLeaveFolder()
               }}
               onDrop={(event) => {
                 if (!entry.isDir) return
                 event.preventDefault()
                 event.stopPropagation()
                 rest.onSetDropTarget(null)
+                rest.onLeaveFolder()
                 if (event.dataTransfer.types.includes(ENTRY_DRAG_MIME)) {
-                  rest.onDropEntriesToFolder(entry.path, readDraggedPaths(event))
+                  rest.onDropEntriesToFolder({ path: entry.path, isDir: true }, event)
                   return
                 }
                 rest.onDropFilesToFolder(entry.path, Array.from(event.dataTransfer.files ?? []))
@@ -1024,7 +1242,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 'group flex h-[29px] items-center pr-1.5 hover:bg-devdeck-hover-wash',
                 isSelected && 'bg-devdeck-accent/10',
                 isDragging && 'opacity-40',
-                rest.dropTargetPath === entry.path && 'outline outline-2 outline-dashed outline-devdeck-accent -outline-offset-2',
+                rest.dropTargetPath === entry.path && 'bg-devdeck-accent/20 ring-1 ring-inset ring-devdeck-accent',
               )}
               style={{ paddingLeft: indent }}
             >

@@ -24,6 +24,7 @@ import {
   createGitContent,
   deserializeLayout,
   findPane,
+  firstLeafId,
   focusPane,
   moveTabInLayout,
   resizeSplitInLayout,
@@ -229,6 +230,34 @@ check('find/focus: focusPane updates focusedPaneId only for panes that exist', (
 
   const unchanged = focusPane(focused, 'does-not-exist')
   assert(unchanged === focused, 'focusing an unknown pane id is a no-op')
+})
+
+check('firstLeafId: a single leaf returns its own id', () => {
+  const layout = createDefaultLayout('w-1')
+  assertEqual(firstLeafId(layout.root), layout.root.id, 'single leaf is its own first leaf')
+})
+
+check('firstLeafId: a nested split returns the first leaf in document order', () => {
+  const layout = createDefaultLayout('w-1')
+  const rootId = layout.root.id
+  const git = createGitContent()
+  // root -> split(row)[ rootId(leaf, terminal), newLeaf(leaf, git) ]
+  const afterSplit = splitLeaf(layout, rootId, 'row', git)
+  const rowSplit = afterSplit.root as SplitPane
+  const gitLeaf = rowSplit.children[1] as LeafPane
+
+  const file = createFileContent('src/main.ts')
+  // nest one level deeper under the *second* child, so document order (not
+  // insertion order or tree depth) is what firstLeafId must follow:
+  // root -> split(row)[ rootId(leaf), split(column)[ gitLeaf(leaf), fileLeaf(leaf) ] ]
+  const nested = splitLeaf(afterSplit, gitLeaf.id, 'column', file)
+
+  assertEqual(firstLeafId(nested.root), rootId, 'first leaf is the original leftmost leaf, not the nested one')
+})
+
+check('firstLeafId: an empty split (defensive edge case) returns undefined', () => {
+  const emptySplit: SplitPane = { type: 'split', id: 'empty-split', direction: 'row', children: [], sizes: [] }
+  assertEqual(firstLeafId(emptySplit), undefined, 'no leaves anywhere returns undefined')
 })
 
 check('serialize/deserialize round-trips a valid layout and rejects garbage', () => {

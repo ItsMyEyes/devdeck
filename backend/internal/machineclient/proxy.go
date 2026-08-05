@@ -10,12 +10,37 @@ import (
 	"devdeck/backend/internal/domain"
 )
 
+// Compile-time assurance that this satisfies sshmgr.ProxyStarter without
+// importing sshmgr here (which would invert the dependency).
+var _ interface {
+	StartSOCKS(context.Context, domain.Machine) (string, error)
+} = SOCKSProxyStarter{}
+
 // ProxyStartResult is the bound address of a machine's on-demand forward
 // proxy, decoded from POST /api/proxy/start (see service.ProxyStartResult,
 // which this mirrors — not reused directly to avoid service importing back
 // into machineclient).
 type ProxyStartResult struct {
 	HTTPProxyAddr string `json:"httpProxyAddr"`
+	SOCKS5Addr    string `json:"socks5Addr"`
+}
+
+// SOCKSProxyStarter adapts StartProxy to sshmgr.ProxyStarter: it starts m's
+// forward proxy and returns just the SOCKS5 address, which is what routing an
+// arbitrary TCP dial (an SSH connection's ExecutorMachineID) needs. The HTTP
+// proxy in the same pair only fits HTTP traffic, which is why FaviconService
+// takes the other field off the same response.
+type SOCKSProxyStarter struct{}
+
+func (SOCKSProxyStarter) StartSOCKS(ctx context.Context, m domain.Machine) (string, error) {
+	result, err := StartProxy(ctx, m)
+	if err != nil {
+		return "", err
+	}
+	if result.SOCKS5Addr == "" {
+		return "", fmt.Errorf("machine %s: proxy/start returned no socks5Addr", m.ID)
+	}
+	return result.SOCKS5Addr, nil
 }
 
 // StartProxy idempotently starts m's forward proxy and returns its bound

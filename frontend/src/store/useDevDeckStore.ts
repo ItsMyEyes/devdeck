@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
-import type { WorktreeLayout } from '@/features/terminal/paneTree'
+import type { BrowserLoadError } from '@/features/browser/browserLoadError'
+import type { GitDiffTarget, WorktreeLayout } from '@/features/terminal/paneTree'
 import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
 import {
   closeTileTab,
@@ -172,6 +173,12 @@ export interface BrowserDocState {
   url: string | null
   title: string
   loading: boolean
+  /** Set when a load times out or fails; cleared when the next one starts or
+   *  when a late `on_page_load` proves the page arrived after all. While it is
+   *  set, `BrowserTile` keeps the native webview hidden so the DOM panel is
+   *  actually visible — a native child webview always composites above the
+   *  app's own DOM. */
+  loadError: BrowserLoadError | null
   history: string[]
   historyIndex: number
 }
@@ -188,13 +195,47 @@ function generateDocId(): string {
 }
 
 function createBrowserDoc(id: string, machineId: string | null = null, url: string | null = null): BrowserDocState {
-  return { id, machineId, proxy: null, url, title: 'New Tab', loading: false, history: [], historyIndex: -1 }
+  return { id, machineId, proxy: null, url, title: 'New Tab', loading: false, loadError: null, history: [], historyIndex: -1 }
 }
 
 function createBrowserTileState(machineId: string | null = null, url: string | null = null): BrowserTileState {
   const docId = generateDocId()
   return { fullscreen: false, activeDocId: docId, docs: [createBrowserDoc(docId, machineId, url)] }
 }
+
+/** Which panel a shell's own sidebar (§3 of the sidebar-shell-explorer design)
+ *  currently shows. SSH shells never offer 'git' in the rail, but the stored
+ *  panel value isn't restricted — see ShellSidebar for the rail gating. */
+export type ShellSidebarPanel = 'explorer' | 'git'
+
+/** One shell tab's sidebar: open/closed, which panel, and drag-resized width.
+ *  Keyed by `wt:<worktreeId>` / `ssh:<connectionId>` in `shellSidebars` below. */
+export interface ShellSidebarState {
+  open: boolean
+  panel: ShellSidebarPanel
+  width: number
+}
+
+export const SHELL_SIDEBAR_MIN_WIDTH = 200
+export const SHELL_SIDEBAR_MAX_WIDTH = 560
+const DEFAULT_SHELL_SIDEBAR: ShellSidebarState = { open: true, panel: 'explorer', width: 280 }
+
+function clampShellSidebarWidth(width: number): number {
+  return Math.min(SHELL_SIDEBAR_MAX_WIDTH, Math.max(SHELL_SIDEBAR_MIN_WIDTH, width))
+}
+
+/** Reads one shell's sidebar state with defaults applied, so consumers never
+ *  have to repeat the unseen-key fallback themselves. */
+export function shellSidebarState(shellSidebars: Record<string, ShellSidebarState>, shellKey: string): ShellSidebarState {
+  return shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR
+}
+
+/** The diff currently highlighted in a shell's git file list, keyed by
+ *  `wt:<worktreeId>` / `ssh:<connectionId>`. Only drives the list's selection
+ *  highlight — the diff itself is rendered by a `git-diff` pane tab that owns
+ *  its own target. Persisted so a reloaded shell restores the highlight.
+ *  The type lives in paneTree.ts, which is deliberately store-free. */
+export type { GitDiffTarget } from '@/features/terminal/paneTree'
 
 /**
  * Transient UI-only state.
@@ -255,6 +296,13 @@ interface DevDeckState {
   /** Same pane-tree layout shape, reused for an SSH shell tab's own
    *  Terminal/Explorer/File panes — keyed by connection id. */
   sshTileLayouts: Record<string, WorktreeLayout>
+  /** Per-shell sidebar (Explorer/Git rail, open state, drag-resized width) —
+   *  keyed by `wt:<worktreeId>` / `ssh:<connectionId>`. Unseen keys default
+   *  via `shellSidebarState`; read through that helper, not this map directly. */
+  shellSidebars: Record<string, ShellSidebarState>
+  /** Selected git diff per shell, shared between the compact sidebar GitPanel
+   *  and the full-width in-pane Git tab. See `GitDiffTarget` above. */
+  gitDiffs: Record<string, GitDiffTarget>
   /** Widens the sidebar from its default icon-only rail out to the full labeled width —
    *  applies globally, on every route. Independent of `sidebarOpen`, which is the mobile
    *  drawer's open/close — this is a small/big toggle for the rail's own width. */
@@ -306,6 +354,11 @@ interface DevDeckState {
   removeWorktreeLayout: (worktreeId: string) => void
   setSSHTileLayout: (connectionId: string, layout: WorktreeLayout) => void
   removeSSHTileLayout: (connectionId: string) => void
+  setShellSidebarOpen: (shellKey: string, open: boolean) => void
+  setShellSidebarPanel: (shellKey: string, panel: ShellSidebarPanel) => void
+  setShellSidebarWidth: (shellKey: string, width: number) => void
+  setGitDiff: (shellKey: string, target: GitDiffTarget) => void
+  clearGitDiff: (shellKey: string) => void
   openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
   closeWorktreeTab: (wsId: string, wtId: string) => void
   pruneWorktreeTabs: (wsId: string, liveWtIds: Set<string>) => void
@@ -543,6 +596,8 @@ export const useDevDeckStore = create<DevDeckState>()(
       dirtyFileCount: 0,
       worktreeLayouts: {},
       sshTileLayouts: {},
+      shellSidebars: {},
+      gitDiffs: {},
       railExpanded: false,
       sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
@@ -566,6 +621,20 @@ export const useDevDeckStore = create<DevDeckState>()(
       removeWorktreeLayout: (worktreeId) => set((s) => void delete s.worktreeLayouts[worktreeId]),
       setSSHTileLayout: (connectionId, layout) => set((s) => void (s.sshTileLayouts[connectionId] = layout)),
       removeSSHTileLayout: (connectionId) => set((s) => void delete s.sshTileLayouts[connectionId]),
+      setShellSidebarOpen: (shellKey, open) =>
+        set((s) => void (s.shellSidebars[shellKey] = { ...(s.shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR), open })),
+      setShellSidebarPanel: (shellKey, panel) =>
+        set((s) => void (s.shellSidebars[shellKey] = { ...(s.shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR), panel })),
+      setShellSidebarWidth: (shellKey, width) =>
+        set(
+          (s) =>
+            void (s.shellSidebars[shellKey] = {
+              ...(s.shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR),
+              width: clampShellSidebarWidth(width),
+            }),
+        ),
+      setGitDiff: (shellKey, target) => set((s) => void (s.gitDiffs[shellKey] = target)),
+      clearGitDiff: (shellKey) => set((s) => void delete s.gitDiffs[shellKey]),
       setWorkspaceTileLayout: (wsId, layout) => set((s) => void (s.workspaceTileLayouts[wsId] = layout)),
       selectAgentsTab: (wsId) =>
         set((s) => {
@@ -900,6 +969,8 @@ export const useDevDeckStore = create<DevDeckState>()(
         sidebarOpen: s.sidebarOpen,
         worktreeLayouts: s.worktreeLayouts,
         sshTileLayouts: s.sshTileLayouts,
+        shellSidebars: s.shellSidebars,
+        gitDiffs: s.gitDiffs,
         railExpanded: s.railExpanded,
         workspaceTileLayouts: s.workspaceTileLayouts,
         dbActiveConnectionId: s.dbActiveConnectionId,

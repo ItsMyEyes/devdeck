@@ -183,3 +183,26 @@ export function downloadSSHZipWithProgress(
     responseType: 'blob',
   })
 }
+
+/** POST .../files/extract — the inverse of downloadSSHZipWithProgress:
+ *  decompresses `archive` into `folderPath` server-side over SFTP. Field
+ *  names ("archive" file part, "path" form field) match
+ *  SSHFileHandler.Extract exactly, same multipart shape as
+ *  uploadSSHFileWithProgress. */
+export function extractSSHArchiveWithProgress(
+  connectionId: string,
+  folderPath: string,
+  archive: Blob,
+  onProgress: (progress: TransferProgress) => void,
+): Promise<SSHFileEntry[]> {
+  const form = new FormData()
+  form.append('archive', archive, 'archive.zip')
+  form.append('path', folderPath)
+  return apiXhr<SSHFileEntry[]>({
+    method: 'POST',
+    path: `/ssh/connections/${connectionId}/files/extract`,
+    body: form,
+    onUploadProgress: onProgress,
+    responseType: 'json',
+  })
+}

@@ -49,6 +49,22 @@ const (
 	// canceled, so a slow/stalled network request can't hang a request
 	// indefinitely.
 	rgInstallTimeout = 60 * time.Second
+
+	// maxExtractEntries caps how many entries an uploaded archive may
+	// contain. 5000 comfortably covers a real project tree (this repo,
+	// node_modules aside, is a small fraction of that) while keeping the
+	// pre-write validation pass — one stat-free loop over the central
+	// directory — cheap even for a hostile archive built purely to contain
+	// as many entries as possible.
+	maxExtractEntries = 5000
+
+	// maxExtractUncompressedBytes caps the sum of every entry's declared
+	// uncompressed size, checked against the zip's own metadata before a
+	// single byte is decompressed. 1 GiB is generous for the folder-drag
+	// transfers this endpoint exists for, while still bounding a "zip bomb"
+	// (a few KB of compressed input whose header claims a vastly larger
+	// decompressed size) to a fixed, sane amount of disk.
+	maxExtractUncompressedBytes = 1 << 30
 )
 
 var searchSkipDirs = map[string]bool{
@@ -479,6 +495,195 @@ func (svc *WorktreeFileService) Archive(worktreeID string, paths []string, dst i
 		return fmt.Errorf("zip selection failed")
 	}
 	return nil
+}
+
+// Extract decodes a zip archive read from r and writes its entries beneath
+// destFolder — the inverse of Archive. Every entry is validated against the
+// same path rules the rest of this service applies to user-supplied paths
+// (normalizeRelativePath, rejectReservedPath, ensureInside), plus a
+// symlink-entry check and entry-count/uncompressed-size budgets, entirely
+// before anything is written — so a rejected archive can never leave a
+// partially-extracted destFolder behind.
+func (svc *WorktreeFileService) Extract(ctx context.Context, worktreeID, destFolder string, r io.Reader) ([]WorktreeFileEntry, error) {
+	root, targetDir, cleanDir, err := svc.resolve(worktreeID, destFolder, true, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectReservedPath(cleanDir, true); err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(targetDir)
+	if err != nil {
+		return nil, fileOperationError("inspect extract folder", cleanDir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%q is not a folder: %w", cleanDir, ErrValidation)
+	}
+
+	// archive/zip.NewReader needs random access to find the central
+	// directory at the end of the stream, so the upload is spooled to a
+	// temp file rather than buffered in memory — mirroring Archive's
+	// handler, which spools its output to a temp file for http.ServeContent
+	// on the opposite side of this same transfer.
+	tmp, err := os.CreateTemp("", "devdeck-extract-*.zip")
+	if err != nil {
+		return nil, fmt.Errorf("read archive failed")
+	}
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+	size, err := io.Copy(tmp, r)
+	if err != nil {
+		return nil, fmt.Errorf("read archive failed")
+	}
+	zr, err := zip.NewReader(tmp, size)
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip archive: %w", ErrValidation)
+	}
+	if len(zr.File) > maxExtractEntries {
+		return nil, fmt.Errorf("archive has more than %d entries: %w", maxExtractEntries, ErrValidation)
+	}
+
+	plan, err := planExtraction(root, targetDir, cleanDir, zr.File)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]WorktreeFileEntry, 0, len(plan))
+	for _, item := range plan {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if item.isDir {
+			if err := os.MkdirAll(item.target, 0o755); err != nil {
+				return nil, fileOperationError("create folder", item.path, err)
+			}
+			entries = append(entries, WorktreeFileEntry{Name: path.Base(item.path), Path: item.path, IsDir: true})
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(item.target), 0o755); err != nil {
+			return nil, fileOperationError("create folder", path.Dir(item.path), err)
+		}
+		if err := extractZipEntry(item.zipFile, item.target); err != nil {
+			return nil, fileOperationError("write file", item.path, err)
+		}
+		written, err := os.Stat(item.target)
+		if err != nil {
+			return nil, fileOperationError("inspect extracted file", item.path, err)
+		}
+		entries = append(entries, WorktreeFileEntry{Name: path.Base(item.path), Path: item.path, IsDir: false, Size: written.Size()})
+	}
+	return entries, nil
+}
+
+// plannedExtractEntry is one already-validated zip entry, resolved to its
+// on-disk target and worktree-root-relative path, ready to write.
+type plannedExtractEntry struct {
+	zipFile *zip.File
+	target  string
+	path    string
+	isDir   bool
+}
+
+// planExtraction validates every entry in files before Extract writes any of
+// them, resolving each to an on-disk target inside the worktree root. The
+// entry-type and path-normalization checks are shared with the SSH path via
+// planZipExtraction (so hardening the one half can never leave the other
+// unprotected); what remains local here is the on-disk resolution each target
+// must add: rejecting reserved paths, joining onto the destination directory,
+// and verifying the joined target stays inside the root even through an
+// existing symlinked directory.
+func planExtraction(root, targetDir, cleanDir string, files []*zip.File) ([]plannedExtractEntry, error) {
+	planned, err := planZipExtraction(files)
+	if err != nil {
+		return nil, err
+	}
+	plan := make([]plannedExtractEntry, 0, len(planned))
+	for _, item := range planned {
+		if err := rejectReservedPath(item.relative, false); err != nil {
+			return nil, fmt.Errorf("archive entry %q: %w", item.zipFile.Name, err)
+		}
+		target := filepath.Join(targetDir, filepath.FromSlash(item.relative))
+		if err := resolveExtractTarget(root, target); err != nil {
+			return nil, fmt.Errorf("archive entry %q: %w", item.zipFile.Name, err)
+		}
+		plan = append(plan, plannedExtractEntry{
+			zipFile: item.zipFile,
+			target:  target,
+			path:    path.Join(cleanDir, item.relative),
+			isDir:   item.isDir,
+		})
+	}
+	return plan, nil
+}
+
+// resolveExtractTarget bounds the lexical target inside root after resolving
+// any symlinks that already exist on the destination path. ensureInside is
+// purely lexical, so without this step an entry like "link/authorized_keys"
+// would validate clean and then follow a pre-existing symlinked directory
+// (which a git checkout legitimately creates, since git tracks symlinks) out
+// of the worktree. It mirrors svc.resolve's allowMissing logic: resolve the
+// target itself when present, otherwise the deepest already-existing
+// ancestor (the missing tail will be created by Extract's MkdirAll).
+func resolveExtractTarget(root, target string) error {
+	resolved, err := filepath.EvalSymlinks(target)
+	if err == nil {
+		return ensureInside(root, resolved)
+	}
+	if os.IsNotExist(err) {
+		parentResolved, parentErr := filepath.EvalSymlinks(filepath.Dir(target))
+		if parentErr == nil {
+			return ensureInside(root, parentResolved)
+		}
+		if os.IsNotExist(parentErr) {
+			// Neither the target nor its immediate parent exists; walk up
+			// until we hit a path that does, then verify that anchor is
+			// inside the root.
+			ancestor := filepath.Dir(target)
+			for {
+				resolvedAncestor, ancErr := filepath.EvalSymlinks(ancestor)
+				if ancErr == nil {
+					return ensureInside(root, resolvedAncestor)
+				}
+				if !os.IsNotExist(ancErr) {
+					return ancErr
+				}
+				parent := filepath.Dir(ancestor)
+				if parent == ancestor {
+					return fmt.Errorf("path escapes the worktree: %w", ErrValidation)
+				}
+				ancestor = parent
+			}
+		}
+		return parentErr
+	}
+	return err
+}
+
+// extractZipEntry writes one non-directory zip entry's decompressed content
+// to target, preserving the entry's Unix permission bits when present and
+// falling back to the same 0o644 default Write and Upload use otherwise.
+func extractZipEntry(zf *zip.File, target string) error {
+	rc, err := zf.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	mode := zf.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, rc)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 // Search returns relative file paths matched by regex syntax or forgiving
@@ -958,7 +1163,23 @@ func newFilePathMatcher(pattern string) filePathMatcher {
 	return matcher
 }
 
+// looksLikeRegex reports whether query should be compiled as a regular
+// expression instead of being treated as a fuzzy token query.
+//
+// Whitespace vetoes regex interpretation. A space-separated query is the
+// multi-token "folder, then filename" form an operator reaches for when they
+// remember where a file lives but not the path between — "core secret.yml"
+// finding core/secret.yml and core/depo/secret.yml alike (tokenSequenceScore).
+// A regex containing a literal space is vanishingly rare in a path filter,
+// whereas *file names* carrying regex metacharacters are common — Next.js
+// dynamic segments like app/[id]/page.tsx being the obvious case. Without this
+// veto, "app [id] page" compiled cleanly to a regex that then matched nothing,
+// so a perfectly reasonable search silently returned zero results with no
+// indication that the query had been reinterpreted.
 func looksLikeRegex(query string) bool {
+	if strings.ContainsAny(query, " \t") {
+		return false
+	}
 	return strings.ContainsAny(query, `^$*+?()[]{}|`) || strings.Contains(query, `\.`)
 }
 
@@ -1138,7 +1359,12 @@ func rejectReservedPath(clean string, allowRoot bool) error {
 }
 
 func isReservedSegment(segment string) bool {
-	return segment == ".git" || segment == ".wt"
+	// Case-insensitive: on the macOS/Windows filesystems DevDeck runs on,
+	// ".GIT" and ".git" are the same directory, so an archive entry that
+	// smuggles a reserved path through a different case would otherwise
+	// resolve to the real repository on disk. This is the guard that keeps
+	// Extract's ".GIT/config" from overwriting a worktree's git config.
+	return strings.EqualFold(segment, ".git") || strings.EqualFold(segment, ".wt")
 }
 
 func addPathToZip(zw *zip.Writer, item resolvedWorktreePath, seen map[string]bool) error {

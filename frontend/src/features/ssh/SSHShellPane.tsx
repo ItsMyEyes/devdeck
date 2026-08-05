@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { FolderTree, TerminalSquare } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
-import { OverflowItem, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
+import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { OverflowItem, ShellSidebarToggle, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
 import { PaneCanvas } from '@/features/terminal/PaneCanvas'
 import type { PaneContentRendererMap } from '@/features/terminal/PaneCanvas'
@@ -28,10 +28,12 @@ import type { DropZone, FileContent, LeafPane, PaneContent, PaneNode, SplitDirec
 import { TerminalExplorer } from '@/features/terminal/TerminalExplorer'
 import { SSHFileEditor } from '@/features/terminal/SSHFileEditor'
 import type { SSHFileEditorHandle } from '@/features/terminal/SSHFileEditor'
+import type { FileLocation } from '@/features/terminal/fileLocation'
 import { FileQuickOpen } from '@/features/terminal/FileQuickOpen'
 import { ContentSearchPanel } from '@/features/terminal/ContentSearchPanel'
 import type { LineReveal } from '@/features/terminal/PlainCodeEditor'
 import { UnsavedChangesDialog } from '@/features/terminal/UnsavedChangesDialog'
+import { ShellSidebar } from '@/features/terminal/ShellSidebar'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
 
@@ -93,7 +95,11 @@ export function SSHShellPane({
 
   const setDirtyFileCount = useDevDeckStore((s) => s.setDirtyFileCount)
   const setSSHTileLayout = useDevDeckStore((s) => s.setSSHTileLayout)
+  const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
   const storedLayout = useDevDeckStore((s) => s.sshTileLayouts[connectionId])
+
+  // Per-shell sidebar (spec §1/§3) — keyed the same way for every SSH shell tab.
+  const shellKey = `ssh:${connectionId}`
 
   const layout = useMemo(
     () => deserializeLayout(storedLayout) ?? createDefaultLayout(connectionId),
@@ -185,6 +191,20 @@ export function SSHShellPane({
       openFile(path)
     },
     [openFile],
+  )
+
+  /** Quick-open's `path:line:column` entry point. The SSH reveal is already a
+   *  bare caret (PlainCodeEditor has no match-selection concept), so this is
+   *  `openAtLine` with a zero-length span. */
+  const openFileAt = useCallback(
+    (path: string, location?: FileLocation) => {
+      if (!location) {
+        openFile(path)
+        return
+      }
+      openAtLine(path, location.line, location.column ?? 1, 0)
+    },
+    [openFile, openAtLine],
   )
 
   const handleFilesDeleted = useCallback(
@@ -388,11 +408,17 @@ export function SSHShellPane({
         toggleExplorerInFocusedPane()
         return
       }
+      if (primary && key === 'b') {
+        event.preventDefault()
+        const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
+        setShellSidebarOpen(shellKey, !isOpen)
+        return
+      }
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, dirtyFiles, isFocused])
+  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
 
   function tabIcon(content: PaneContent): ReactNode {
     if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
@@ -437,6 +463,8 @@ export function SSHShellPane({
       )
     },
     git: () => null,
+    // No git over SSH, so neither the panel nor a diff tab can ever exist here.
+    'git-diff': () => null,
     // No SSH UI path creates an 'untitled' tab yet (only the worktree pane's
     // "+" menu has "New File") — this satisfies PaneContentRendererMap's
     // exhaustiveness without dead-wiring an editor no user action can reach.
@@ -460,6 +488,7 @@ export function SSHShellPane({
     },
     explorer: () => (
       <TerminalExplorer
+        shellKey={shellKey}
         target={{ kind: 'ssh', connectionId }}
         rootLabel={connection?.name ?? 'SSH'}
         onOpenFile={openFile}
@@ -470,47 +499,64 @@ export function SSHShellPane({
     ),
   }
 
+  // Only the tree's first leaf (document order) gets the toggle — a split
+  // shows exactly one, adjacent to the sidebar it controls (spec §4).
+  const firstPaneId = firstLeafId(layout.root)
+
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col bg-devdeck-terminal">
-      <PaneCanvas
-        root={layout.root}
-        focusedPaneId={layout.focusedPaneId}
-        renderers={renderers}
-        onTreeChange={handleTreeChange}
-        onFocusPane={handleFocusPane}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onSplitPane={handleSplitPane}
-        onClosePane={handleClosePane}
-        tabIcon={tabIcon}
-        isTabDirty={isTabDirty}
-        paneOverflowActions={renderOverflowActions}
-        paneNewTabActions={renderNewTabActions}
-        dragEnabled={isDesktop}
-      />
-
-      <FileQuickOpen
-        open={quickOpen}
+    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-terminal">
+      <ShellSidebar
+        shellKey={shellKey}
         target={{ kind: 'ssh', connectionId }}
-        onClose={() => setQuickOpen(false)}
+        rootLabel={connection?.name ?? 'SSH'}
         onOpenFile={openFile}
+        onFileDeleted={handleFilesDeleted}
+        onRequestQuickOpen={() => setQuickOpen(true)}
+        onRequestContentSearch={() => setContentSearch(true)}
       />
 
-      <ContentSearchPanel
-        open={contentSearch}
-        target={{ kind: 'ssh', connectionId }}
-        onClose={() => setContentSearch(false)}
-        onOpenMatch={openAtLine}
-      />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PaneCanvas
+          root={layout.root}
+          focusedPaneId={layout.focusedPaneId}
+          renderers={renderers}
+          onTreeChange={handleTreeChange}
+          onFocusPane={handleFocusPane}
+          onSelectTab={handleSelectTab}
+          onCloseTab={handleCloseTab}
+          onSplitPane={handleSplitPane}
+          onClosePane={handleClosePane}
+          tabIcon={tabIcon}
+          isTabDirty={isTabDirty}
+          paneLeadingContent={(pane) => (pane.id === firstPaneId ? <ShellSidebarToggle shellKey={shellKey} /> : null)}
+          paneOverflowActions={renderOverflowActions}
+          paneNewTabActions={renderNewTabActions}
+          dragEnabled={isDesktop}
+        />
 
-      <UnsavedChangesDialog
-        open={closeConfirm !== null}
-        names={closeConfirm ? closeConfirm.paths.map(basename) : []}
-        saving={closeConfirmSaving}
-        onSave={() => void handleCloseConfirmSave()}
-        onDiscard={handleCloseConfirmDiscard}
-        onCancel={handleCloseConfirmCancel}
-      />
+        <FileQuickOpen
+          open={quickOpen}
+          target={{ kind: 'ssh', connectionId }}
+          onClose={() => setQuickOpen(false)}
+          onOpenFile={openFileAt}
+        />
+
+        <ContentSearchPanel
+          open={contentSearch}
+          target={{ kind: 'ssh', connectionId }}
+          onClose={() => setContentSearch(false)}
+          onOpenMatch={openAtLine}
+        />
+
+        <UnsavedChangesDialog
+          open={closeConfirm !== null}
+          names={closeConfirm ? closeConfirm.paths.map(basename) : []}
+          saving={closeConfirmSaving}
+          onSave={() => void handleCloseConfirmSave()}
+          onDiscard={handleCloseConfirmDiscard}
+          onCancel={handleCloseConfirmCancel}
+        />
+      </div>
     </div>
   )
 }

@@ -219,6 +219,40 @@ func (h *WorktreeFileHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "selection.zip", info.ModTime(), tmp)
 }
 
+// Extract accepts a multipart/form-data request carrying an "archive" zip
+// file part and a "path" form field naming the destination folder — the
+// exact inverse of Archive, and the same multipart shape as Upload.
+func (h *WorktreeFileHandler) Extract(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxWorktreeUploadBytes)
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid multipart upload")
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+
+	headers := r.MultipartForm.File["archive"]
+	if len(headers) == 0 {
+		writeErr(w, http.StatusBadRequest, "archive is required")
+		return
+	}
+	file, err := headers[0].Open()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid uploaded archive")
+		return
+	}
+	defer file.Close()
+
+	entries, err := h.svc.Extract(r.Context(), r.PathValue("id"), r.FormValue("path"), file)
+	if handleStoreErr(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func (h *WorktreeFileHandler) Search(w http.ResponseWriter, r *http.Request) {
 	includeDirs := r.URL.Query().Get("includeDirs") == "1" || r.URL.Query().Get("includeDirs") == "true"
 	paths, err := h.svc.Search(r.PathValue("id"), r.URL.Query().Get("pattern"), includeDirs)

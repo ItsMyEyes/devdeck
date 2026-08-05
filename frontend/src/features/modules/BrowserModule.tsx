@@ -19,6 +19,9 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { BrowserErrorPanel } from '@/features/browser/BrowserErrorPanel'
+import type { BrowserLoadError } from '@/features/browser/browserLoadError'
+import { BROWSER_LOAD_TIMEOUT_MS, httpLoadError, timeoutLoadError } from '@/features/browser/browserLoadError'
 import { browserProxyUrl, fetchBrowserProxySession } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { ModuleHeader } from './ModuleHeader'
@@ -31,6 +34,8 @@ interface BrowserTab {
   history: string[]
   historyIndex: number
   loading: boolean
+  /** Set once a load fails or gives up; cleared when the next one starts. */
+  error: BrowserLoadError | null
   reloadKey: number
 }
 
@@ -86,7 +91,11 @@ function createTab(url = HOME_URL): BrowserTab {
     draft: url,
     history: [url],
     historyIndex: 0,
-    loading: false,
+    // A new tab starts loading the moment its frame gets a proxy token, so it
+    // has to start in that state — otherwise the very first load of a tab is
+    // the one load with no spinner and, more importantly, no timeout armed.
+    loading: true,
+    error: null,
     reloadKey: 0,
   }
 }
@@ -166,7 +175,13 @@ export function BrowserModule() {
         if (!cancelled) setProxyToken(session.token)
       })
       .catch((err) => {
-        if (!cancelled) setProxyError(err instanceof Error ? err.message : 'Could not start browser proxy')
+        if (cancelled) return
+        setProxyError(err instanceof Error ? err.message : 'Could not start browser proxy')
+        // No token means no frame, so no load will ever start or finish — and
+        // the load timer below never arms without a `frameSrc` to arm it for.
+        // Left alone, every tab keeps its opening spinner forever behind the
+        // proxy-unavailable panel.
+        setTabs((current) => current.map((tab) => ({ ...tab, loading: false })))
       })
     return () => {
       cancelled = true
@@ -194,7 +209,23 @@ export function BrowserModule() {
     function onMessage(event: MessageEvent) {
       if (event.source !== iframeRef.current?.contentWindow) return
       if (typeof event.data !== 'object' || event.data === null) return
-      const data = event.data as { type?: unknown; url?: unknown }
+      const data = event.data as { type?: unknown; url?: unknown; status?: unknown; error?: unknown }
+
+      // The frame reporting what it actually got. An iframe cannot read its own
+      // response headers, so this message is the only way the module learns
+      // that the "page" it just rendered is a 404, or DevDeck's own proxy
+      // failure page (see browserNavigationScript in browser_proxy.go).
+      if (data.type === 'devdeck-browser:loaded') {
+        const status = typeof data.status === 'number' ? data.status : 200
+        const proxyMessage = typeof data.error === 'string' ? data.error : undefined
+        updateTab(activeId, (tab) => ({
+          ...tab,
+          loading: false,
+          error: status >= 400 ? httpLoadError(status, proxyMessage) : null,
+        }))
+        return
+      }
+
       if (data.type !== 'devdeck-browser:navigate' || typeof data.url !== 'string' || !HTTP_SCHEME.test(data.url)) {
         return
       }
@@ -203,7 +234,7 @@ export function BrowserModule() {
         current.map((tab) => {
           if (tab.id !== activeId) return tab
           if (tab.url === nextUrl) {
-            return { ...tab, title: titleFor(nextUrl), draft: nextUrl, loading: true }
+            return { ...tab, title: titleFor(nextUrl), draft: nextUrl, loading: true, error: null }
           }
           const history = [...tab.history.slice(0, tab.historyIndex + 1), nextUrl]
           return {
@@ -214,6 +245,7 @@ export function BrowserModule() {
             history,
             historyIndex: history.length - 1,
             loading: true,
+            error: null,
           }
         }),
       )
@@ -222,6 +254,19 @@ export function BrowserModule() {
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [activeId])
+
+  // Nothing else ever ends a load that simply never arrives: `onLoad` only
+  // fires on success, and a request stuck behind a dead tunnel or a body that
+  // never finishes leaves the frame blank and the tab spinning forever. Keyed
+  // on the load's identity (tab, url, reload counter) so each navigation gets
+  // its own timer, and torn down by the cleanup as soon as `loading` clears.
+  useEffect(() => {
+    if (!active.loading || !frameSrc) return
+    const timer = window.setTimeout(() => {
+      updateTab(active.id, (tab) => (tab.loading ? { ...tab, loading: false, error: timeoutLoadError() } : tab))
+    }, BROWSER_LOAD_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [active.id, active.loading, active.url, active.reloadKey, frameSrc])
 
   function updateTab(tabId: string, patcher: (tab: BrowserTab) => BrowserTab) {
     setTabs((current) => current.map((tab) => (tab.id === tabId ? patcher(tab) : tab)))
@@ -239,6 +284,7 @@ export function BrowserModule() {
         history,
         historyIndex: history.length - 1,
         loading: true,
+        error: null,
       }
     })
   }
@@ -264,12 +310,16 @@ export function BrowserModule() {
         draft: url,
         historyIndex: nextIndex,
         loading: true,
+        error: null,
       }
     })
   }
 
+  /** Also the error panel's Retry — a failed load has nothing to recover but
+   *  the request itself, and bumping `reloadKey` remounts the frame so a page
+   *  that half-rendered before failing doesn't linger behind the next one. */
   function reload() {
-    updateTab(active.id, (tab) => ({ ...tab, loading: true, reloadKey: tab.reloadKey + 1 }))
+    updateTab(active.id, (tab) => ({ ...tab, loading: true, error: null, reloadKey: tab.reloadKey + 1 }))
   }
 
   function addTab(url?: string) {
@@ -565,6 +615,13 @@ export function BrowserModule() {
           <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-surface text-[12px] text-devdeck-muted">
             Preparing browser proxy session…
           </div>
+        ) : active.error ? (
+          <BrowserErrorPanel
+            error={active.error}
+            url={active.url}
+            onRetry={reload}
+            className={cn('border border-devdeck-border', focusMode ? 'rounded-none border-0' : 'rounded-lg')}
+          />
         ) : (
           <iframe
             ref={iframeRef}

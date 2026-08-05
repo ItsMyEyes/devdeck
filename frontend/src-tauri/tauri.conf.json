@@ -17,7 +17,8 @@
         "title": "DevDeck",
         "width": 1400,
         "height": 900,
-        "visible": true
+        "visible": true,
+        "dragDropEnabled": false
       }
     ],
     "security": { "csp": null }

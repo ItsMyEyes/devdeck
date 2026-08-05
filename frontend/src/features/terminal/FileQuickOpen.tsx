@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { FileSearch, Search, X } from 'lucide-react'
 import { ApiError } from '@/lib/api'
 import { useFileSearchTarget } from '@/features/data/queries'
@@ -6,13 +6,16 @@ import { DataLoading } from '@/features/screens/DataLoading'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { MaterialFileIcon } from './MaterialFileIcon'
 import { computeHighlight, type HighlightRange } from '@/lib/fuzzyHighlight'
+import { formatFileLocation, parseFileQuery, type FileLocation } from './fileLocation'
 import type { FilesTarget } from './filesTarget'
 
 interface FileQuickOpenProps {
   open: boolean
   target: FilesTarget
   onClose: () => void
-  onOpenFile: (path: string) => void
+  /** `location` is set when the query carried a `:line[:column]` suffix — the
+   *  caller opens the file and puts the caret there. */
+  onOpenFile: (path: string, location?: FileLocation) => void
 }
 
 function isDirectoryResult(path: string) {
@@ -63,7 +66,14 @@ export function FileQuickOpen({
   const [pattern, setPattern] = useState('')
   const [selected, setSelected] = useState(0)
   const deferredPattern = useDeferredValue(pattern)
-  const search = useFileSearchTarget(target, deferredPattern, open, { includeDirs: true })
+  // A pasted `src/App.tsx:123:23` has to search for `src/App.tsx` — the suffix
+  // is a caret target, not part of any filename — so every consumer of the
+  // typed text below (the query, the match highlighter) uses `searchPattern`.
+  const { query: searchPattern, location } = useMemo(
+    () => parseFileQuery(deferredPattern),
+    [deferredPattern],
+  )
+  const search = useFileSearchTarget(target, searchPattern, open, { includeDirs: true })
   const results = search.data ?? []
   useNativeOverlayBlocker(open)
 
@@ -87,7 +97,7 @@ export function FileQuickOpen({
       requestAnimationFrame(() => inputRef.current?.focus())
       return
     }
-    onOpenFile(path)
+    onOpenFile(path, location)
     onClose()
   }
 
@@ -127,9 +137,17 @@ export function FileQuickOpen({
             onChange={(event) => setPattern(event.target.value)}
             onKeyDown={handleKeydown}
             aria-label="File or folder search"
-            placeholder="Search files/folders: terminal file editor"
+            placeholder="Search files/folders — append :line:column to jump"
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-dim"
           />
+          {location ? (
+            <span
+              aria-label={`Opens at line ${location.line}${location.column === undefined ? '' : `, column ${location.column}`}`}
+              className="flex-none rounded border border-devdeck-accent/40 bg-devdeck-accent-tint px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-accent"
+            >
+              {formatFileLocation(location)}
+            </span>
+          ) : null}
           <span className="flex-none rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim">
             {target.kind === 'ssh' ? 'SSH' : 'Projects · Paths'}
           </span>
@@ -177,11 +195,11 @@ export function FileQuickOpen({
                 >
                   <MaterialFileIcon name={name} isDir={isDir} size={17} />
                   <span className="max-w-[52%] flex-none truncate font-mono text-[12px] text-devdeck-fg">
-                    <HighlightedText text={name} ranges={computeHighlight(name, deferredPattern)} />
+                    <HighlightedText text={name} ranges={computeHighlight(name, searchPattern)} />
                   </span>
                   {folder ? (
                     <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-devdeck-dim">
-                      <HighlightedText text={folder} ranges={computeHighlight(folder, deferredPattern)} />
+                      <HighlightedText text={folder} ranges={computeHighlight(folder, searchPattern)} />
                     </span>
                   ) : (
                     <span className="flex-1" />
@@ -201,7 +219,11 @@ export function FileQuickOpen({
           <span>↑↓ select</span>
           <span>Enter open / narrow folder</span>
           <span>Esc close</span>
-          <span className="ml-auto">Fuzzy path matching; regex still works</span>
+          <span className="ml-auto">
+            {location
+              ? `Opens at line ${location.line}${location.column === undefined ? '' : `, column ${location.column}`}`
+              : 'Fuzzy path matching; regex still works'}
+          </span>
         </div>
       </div>
     </div>

@@ -350,7 +350,11 @@ func main() {
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
 	sshH := handler.NewSSHHandler(st, sshSecrets)
-	sshDialer := sshmgr.NewDialer(st, sshSecrets)
+	// One dialer backs both the interactive shell and the SFTP file API, so
+	// enabling ExecutorMachineID routing here routes both: every file
+	// operation rides the same *ssh.Client the shell does.
+	sshDialer := sshmgr.NewDialer(st, sshSecrets).
+		WithExecutorRouting(st, machineclient.SOCKSProxyStarter{})
 	sshSrv := sshmgr.NewServer(sshDialer)
 	sshFileSvc := service.NewSSHFileService(sshmgr.NewFilePool(sshDialer))
 	sshFileH := handler.NewSSHFileHandler(sshFileSvc)
@@ -472,6 +476,7 @@ func main() {
 	mux.HandleFunc("POST /api/worktrees/{id}/files/upload", fileH.Upload)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/delete", fileH.DeleteMany)
 	mux.HandleFunc("POST /api/worktrees/{id}/files/zip", fileH.Archive)
+	mux.HandleFunc("POST /api/worktrees/{id}/files/extract", fileH.Extract)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/download", fileH.Download)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/search", fileH.Search)
 	mux.HandleFunc("GET /api/worktrees/{id}/files/grep", fileH.Grep)
@@ -608,8 +613,11 @@ func main() {
 		mux.HandleFunc("DELETE /api/ssh/connections/{id}", sshH.DeleteConnection)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/accept-hostkey", sshH.PostAcceptHostKey)
 
-		// Phase 1 executes every SSH session on the hub itself;
-		// ExecutorMachineID routing to runtimes is a later phase.
+		// The socket is served here, but the TCP dial underneath it originates
+		// from the connection's ExecutorMachineID when one is set — see
+		// sshmgr/executor.go. Terminal-style direct-first client routing is
+		// deliberately not used: the hub holds the credentials, so it stays the
+		// endpoint and only the outbound dial moves.
 		mux.HandleFunc("/ws/ssh", sshSrv.HandleWS)
 
 		// Remote file browser for a saved SSH connection, over SFTP — same
@@ -618,6 +626,7 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/upload", sshFileH.Upload)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/delete", sshFileH.DeleteMany)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/zip", sshFileH.Archive)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/files/extract", sshFileH.Extract)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/download", sshFileH.Download)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/search", sshFileH.Search)
 		mux.HandleFunc("GET /api/ssh/connections/{id}/files/grep", sshFileH.Grep)

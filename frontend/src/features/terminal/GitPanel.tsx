@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -19,6 +19,8 @@ import { ApiError } from '@/lib/api'
 import type { GitCommit, GitStatusFile } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
+import type { GitDiffTarget } from './paneTree'
 import {
   useGitCommit,
   useGitDiff,
@@ -38,12 +40,22 @@ interface GitPanelProps {
   worktreeId: string
   machine: Machine
   active: boolean
+  /** `wt:<worktreeId>` — keys the selected diff in the store so the compact
+   *  sidebar copy and the full-width in-pane copy share one selection. */
+  shellKey: string
+  /** List-only mode for the ~280px shell sidebar: renders the branch header,
+   *  Changes/History, the commit box and the file list, but NOT the diff
+   *  column — at that width a side-by-side diff is unreadable, and the
+   *  300px file list alone already overflows. Selecting a file instead calls
+   *  `onOpenDiff`, which opens the full-width Git tab (same pattern as
+   *  clicking a file in Explorer opening an editor tab). */
+  compact?: boolean
+  /** Opens the picked target as its own `git-diff` pane tab. Ignored when
+   *  `compact` is false, since a full panel renders the diff itself. */
+  onOpenDiff?: (target: GitDiffTarget) => void
 }
 
-type DiffTarget =
-  | { path: string; staged: boolean; untracked: boolean }
-  | { commit: string }
-  | null
+type DiffTarget = GitDiffTarget | null
 
 const STATUS_COLOR: Record<string, string> = {
   M: 'text-devdeck-yellow',
@@ -68,11 +80,24 @@ function dirname(path: string) {
   return index === -1 ? '' : path.slice(0, index)
 }
 
-export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
+export function GitPanel({ worktreeId, machine, active, shellKey, compact = false, onOpenDiff }: GitPanelProps) {
   const [view, setView] = useState<'changes' | 'history'>('changes')
   const [message, setMessage] = useState('')
-  const [target, setTarget] = useState<DiffTarget>(null)
   const [diffMode, setDiffMode] = useState<DiffMode>('split')
+  // The selected diff lives in the store, not local state: the compact sidebar
+  // copy writes it and the full-width in-pane copy reads it, so a file clicked
+  // in the sidebar shows its diff in the Git tab.
+  const target = useDevDeckStore((s) => s.gitDiffs[shellKey]) ?? null
+  const setGitDiff = useDevDeckStore((s) => s.setGitDiff)
+  const clearGitDiff = useDevDeckStore((s) => s.clearGitDiff)
+
+  const setTarget = useCallback(
+    (next: DiffTarget) => {
+      if (next === null) clearGitDiff(shellKey)
+      else setGitDiff(shellKey, next)
+    },
+    [shellKey, setGitDiff, clearGitDiff],
+  )
 
   const status = useGitStatus(machine, worktreeId, active)
   const log = useGitLog(machine, worktreeId, active && view === 'history')
@@ -119,8 +144,16 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
     pull.mutate(undefined, { onSuccess: () => toast.success('Pulled'), onError })
   }
 
+  /** Compact mode has no diff column of its own, so a selection opens the
+   *  target as its own pane tab. The store write stays either way — it drives
+   *  the list's own selection highlight. */
+  function selectTarget(next: GitDiffTarget) {
+    setTarget(next)
+    if (compact) onOpenDiff?.(next)
+  }
+
   function selectFile(file: GitStatusFile, staged: boolean) {
-    setTarget({ path: file.path, staged, untracked: !staged && file.worktree === '?' })
+    selectTarget({ path: file.path, staged, untracked: !staged && file.worktree === '?' })
   }
 
   const targetKey = useMemo(() => {
@@ -130,9 +163,16 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
   }, [target])
 
   return (
-    <div className="flex min-h-0 flex-1 max-md:flex-col md:flex-row">
-      <div className="flex min-h-0 flex-none flex-col border-devdeck-border max-md:max-h-[45%] max-md:border-b md:w-[300px] md:border-r">
-        <div className="flex h-9 flex-none items-center gap-2 border-b border-devdeck-border px-3">
+    <div className={cn('flex min-h-0 min-w-0 flex-1', compact ? 'flex-col' : 'max-md:flex-col md:flex-row')}>
+      {/* Compact fills the sidebar's whole width; full keeps the fixed 300px
+          list beside the diff column. */}
+      <div
+        className={cn(
+          'flex min-h-0 flex-col border-devdeck-border',
+          compact ? 'min-w-0 flex-1' : 'flex-none max-md:max-h-[45%] max-md:border-b md:w-[300px] md:border-r',
+        )}
+      >
+        <div className="flex h-9 min-w-0 flex-none items-center gap-2 border-b border-devdeck-border px-3">
           <GitBranch size={13} className="flex-none text-devdeck-accent" />
           <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg" title={status.data?.branch}>
             {status.data?.branch ?? '…'}
@@ -164,7 +204,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
           </button>
         </div>
 
-        <div className="flex flex-none items-center gap-1.5 border-b border-devdeck-border p-2">
+        <div className="flex min-w-0 flex-none items-center gap-1.5 border-b border-devdeck-border p-2">
           <SegButton active={view === 'changes'} onClick={() => setView('changes')}>
             Changes
             {files.length > 0 && <span className="font-mono text-[9.5px] text-devdeck-dim">{files.length}</span>}
@@ -173,15 +213,11 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
             <History size={11} />
             History
           </SegButton>
-          <span className="flex-1" />
-          <ActionButton onClick={doPull} pending={pull.isPending} title="git pull">
-            <ArrowDown size={11} />
-            Pull
-          </ActionButton>
-          <ActionButton onClick={doPush} pending={push.isPending} title="git push">
-            <ArrowUp size={11} />
-            Push
-          </ActionButton>
+          <span className="min-w-0 flex-1" />
+          {/* Icon-only in the sidebar: at ~280px the four labelled controls
+              overflow the row and push Pull/Push off its right edge. */}
+          <ActionButton onClick={doPull} pending={pull.isPending} title="git pull" icon={<ArrowDown size={11} />} label="Pull" compact={compact} />
+          <ActionButton onClick={doPush} pending={push.isPending} title="git push" icon={<ArrowUp size={11} />} label="Push" compact={compact} />
         </div>
 
         {view === 'changes' ? (
@@ -212,7 +248,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto pb-2">
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-2">
               {status.isLoading ? (
                 <div className="flex h-24 items-center justify-center">
                   <DataLoading compact />
@@ -255,7 +291,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
             </div>
           </>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto py-1">
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto py-1">
             {log.isLoading ? (
               <div className="flex h-24 items-center justify-center">
                 <DataLoading compact />
@@ -274,7 +310,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
                   key={entry.hash}
                   commit={entry}
                   selected={targetKey === `commit:${entry.hash}`}
-                  onSelect={() => setTarget({ commit: entry.hash })}
+                  onSelect={() => selectTarget({ commit: entry.hash })}
                 />
               ))
             )}
@@ -282,6 +318,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
         )}
       </div>
 
+      {compact ? null : (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal">
         {target === null ? (
           <div className="flex flex-1 items-center justify-center px-6 text-center font-mono text-[11px] text-devdeck-dim">
@@ -346,6 +383,7 @@ export function GitPanel({ worktreeId, machine, active }: GitPanelProps) {
           </>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -356,7 +394,7 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
       type="button"
       onClick={onClick}
       className={cn(
-        'flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors',
+        'flex h-6 flex-none cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors',
         active ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
       )}
     >
@@ -369,12 +407,17 @@ function ActionButton({
   onClick,
   pending,
   title,
-  children,
+  icon,
+  label,
+  compact = false,
 }: {
   onClick: () => void
   pending: boolean
   title: string
-  children: React.ReactNode
+  icon: React.ReactNode
+  label: string
+  /** Drops the text label, leaving the icon — `title` still names the action. */
+  compact?: boolean
 }) {
   return (
     <button
@@ -382,9 +425,14 @@ function ActionButton({
       onClick={onClick}
       disabled={pending}
       title={title}
-      className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-devdeck-border-strong px-2 text-[11px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash disabled:cursor-wait disabled:opacity-50"
+      aria-label={label}
+      className={cn(
+        'flex h-6 flex-none cursor-pointer items-center gap-1 rounded-md border border-devdeck-border-strong text-[11px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash disabled:cursor-wait disabled:opacity-50',
+        compact ? 'w-6 justify-center' : 'px-2',
+      )}
     >
-      {pending ? <Loader2 size={11} className="animate-spin" /> : children}
+      {pending ? <Loader2 size={11} className="animate-spin" /> : icon}
+      {compact ? null : label}
     </button>
   )
 }
@@ -418,11 +466,11 @@ function FileSection({
   if (files.length === 0) return null
   const allPaths = files.map((file) => file.path)
   return (
-    <div>
-      <div className="flex h-7 items-center gap-2 px-3 pt-1">
-        <span className="font-mono text-[9.5px] tracking-[0.14em] text-devdeck-dim">{label}</span>
-        <span className="font-mono text-[9.5px] text-devdeck-dim-2">{files.length}</span>
-        <span className="flex-1" />
+    <div className="min-w-0">
+      <div className="flex h-7 min-w-0 items-center gap-2 px-3 pt-1">
+        <span className="min-w-0 truncate font-mono text-[9.5px] tracking-[0.14em] text-devdeck-dim">{label}</span>
+        <span className="flex-none font-mono text-[9.5px] text-devdeck-dim-2">{files.length}</span>
+        <span className="min-w-0 flex-1" />
         {onDiscard && (
           <button
             type="button"
@@ -451,7 +499,7 @@ function FileSection({
           <div
             key={file.path}
             className={cn(
-              'group flex h-[27px] items-center pr-1.5',
+              'group flex h-[27px] min-w-0 items-center pr-1.5',
               selected ? 'bg-devdeck-accent/10' : 'hover:bg-devdeck-hover-wash',
             )}
           >
@@ -462,9 +510,9 @@ function FileSection({
               className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 pl-3 text-left"
             >
               <MaterialFileIcon name={basename(file.path)} size={14} />
-              <span className="truncate font-mono text-[11px] text-devdeck-fg-2">{basename(file.path)}</span>
+              <span className="min-w-0 flex-none truncate font-mono text-[11px] text-devdeck-fg-2">{basename(file.path)}</span>
               {dirname(file.path) && (
-                <span className="min-w-0 truncate font-mono text-[9.5px] text-devdeck-dim-2">{dirname(file.path)}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-devdeck-dim-2">{dirname(file.path)}</span>
               )}
             </button>
             {onDiscard && (
@@ -507,19 +555,26 @@ function CommitRow({ commit, selected, onSelect }: { commit: GitCommit; selected
       type="button"
       onClick={onSelect}
       className={cn(
-        'flex w-full cursor-pointer flex-col gap-0.5 px-3 py-1.5 text-left',
+        // min-w-0 on every level: a flex item defaults to min-width:auto and
+        // refuses to shrink below its content, which is what let long commit
+        // subjects and ref lists spill past the panel's right edge.
+        'flex w-full min-w-0 cursor-pointer flex-col gap-0.5 px-3 py-1.5 text-left',
         selected ? 'bg-devdeck-accent/10' : 'hover:bg-devdeck-hover-wash',
       )}
     >
-      <span className="flex items-center gap-1.5">
-        <span className="truncate text-[11.5px] text-devdeck-fg-2">{commit.subject}</span>
+      <span className="flex w-full min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-devdeck-fg-2" title={commit.subject}>
+          {commit.subject}
+        </span>
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 font-mono text-[9.5px] text-devdeck-dim">
-        <span className="text-devdeck-accent-soft">{commit.short}</span>
-        <span className="truncate">{commit.author}</span>
+      <span className="flex w-full min-w-0 items-center gap-1.5 font-mono text-[9.5px] text-devdeck-dim">
+        <span className="flex-none text-devdeck-accent-soft">{commit.short}</span>
+        <span className="min-w-0 flex-1 truncate">{commit.author}</span>
         <span className="flex-none">{when}</span>
         {commit.refs.length > 0 && (
-          <span className="truncate text-devdeck-purple">{commit.refs.join(' ')}</span>
+          <span className="min-w-0 flex-1 truncate text-devdeck-purple" title={commit.refs.join(' ')}>
+            {commit.refs.join(' ')}
+          </span>
         )}
       </span>
     </button>

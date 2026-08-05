@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -14,7 +15,9 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -177,6 +180,14 @@ func serveTestSSHFileSession(ch ssh.Channel, reqs <-chan *ssh.Request, homeDir, 
 	}
 }
 
+// testSSHExecCount counts every exec session the fixture server has served,
+// so a test can assert how many *remote commands* an operation costs — the
+// property that makes remote search fast or unusable. Tests that read it call
+// resetTestSSHExecCount first; none of them run in parallel.
+var testSSHExecCount atomic.Int64
+
+func resetTestSSHExecCount() { testSSHExecCount.Store(0) }
+
 // runTestSSHFileExec runs command through the local shell, wires its real
 // stdout/stderr to the channel, and sends a real exit-status back — this is
 // what makes the shell-metacharacter-safety tests below meaningful: a
@@ -186,6 +197,7 @@ func serveTestSSHFileSession(ch ssh.Channel, reqs <-chan *ssh.Request, homeDir, 
 // host running these tests.
 func runTestSSHFileExec(ch ssh.Channel, command, pathOverride string) {
 	defer ch.Close()
+	testSSHExecCount.Add(1)
 	cmd := exec.Command("sh", "-c", command)
 	if pathOverride != "" {
 		cmd.Env = []string{"PATH=" + pathOverride}
@@ -935,6 +947,310 @@ func TestSSHFileServiceSearchReportsCollectionFailure(t *testing.T) {
 	}
 }
 
+// TestSSHFileServiceSearchMatchesSpaceSeparatedFolderAndFileTokens pins the
+// multi-token behavior an operator actually reaches for on a remote host:
+// typing a folder and a filename separated by a space ("core secret.yml")
+// must find core/secret.yml *and* the same file nested arbitrarily deeper
+// (core/depo/secret.yml), without the operator having to know or type the
+// intermediate path segments.
+//
+// The matcher (filePathMatcher.tokens / tokenSequenceScore, shared with
+// worktree search) has always supported this; it is pinned here because on
+// SSH the capability was invisible for a different reason — the remote listing
+// was being silently truncated, so the file the tokens would have matched was
+// frequently not in the listing at all. This test proves the whole path works
+// end to end over a real SSH connection, not just the scoring function.
+func TestSSHFileServiceSearchMatchesSpaceSeparatedFolderAndFileTokens(t *testing.T) {
+	skipIfMissing(t, "find")
+	homeDir := t.TempDir()
+	for _, relPath := range []string{
+		"core/secret.yml",
+		"core/depo/secret.yml",
+		"core/depo/deep/secret.yml",
+		"core/readme.md",
+		"other/secret.yml",
+	} {
+		full := filepath.Join(homeDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSSHFileService(newTestSSHFilePool(t, startTestSSHFileServer(t, homeDir, "")))
+
+	results, err := svc.Search(context.Background(), "sc-test", "core secret.yml", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	for _, want := range []string{"core/secret.yml", "core/depo/secret.yml", "core/depo/deep/secret.yml"} {
+		if !got[want] {
+			t.Errorf("Search(%q) = %v, want it to include %q", "core secret.yml", results, want)
+		}
+	}
+	// Tokens must still be *discriminating*: a path missing the "core" token
+	// entirely, or missing the filename, is not a match.
+	for _, unwanted := range []string{"other/secret.yml", "core/readme.md"} {
+		if got[unwanted] {
+			t.Errorf("Search(%q) = %v, must not include %q", "core secret.yml", results, unwanted)
+		}
+	}
+	// Shallower matches outrank deeper ones, so the most likely intent is
+	// first in the list rather than buried under nested near-misses.
+	if len(results) > 0 && results[0] != "core/secret.yml" {
+		t.Errorf("Search(%q) ranked %q first, want the shallowest match core/secret.yml", "core secret.yml", results[0])
+	}
+}
+
+// TestSSHFileServiceSearchTokenizesQueriesContainingRegexMetacharacters
+// covers the case that made multi-token search look broken for whole classes
+// of real project: a query carrying a regex metacharacter used to be compiled
+// as a regex instead of tokenized, and then matched nothing at all. Next.js
+// dynamic segments (app/[id]/page.tsx) are the everyday example — "app [id]
+// page" returned zero results. Whitespace in the query now settles it in
+// favor of token matching (see looksLikeRegex).
+func TestSSHFileServiceSearchTokenizesQueriesContainingRegexMetacharacters(t *testing.T) {
+	skipIfMissing(t, "find")
+	homeDir := t.TempDir()
+	for _, relPath := range []string{"app/[id]/page.tsx", "app/about/page.tsx"} {
+		full := filepath.Join(homeDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSSHFileService(newTestSSHFilePool(t, startTestSSHFileServer(t, homeDir, "")))
+
+	results, err := svc.Search(context.Background(), "sc-test", "app [id] page", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	if !got["app/[id]/page.tsx"] {
+		t.Errorf("Search(%q) = %v, want app/[id]/page.tsx", "app [id] page", results)
+	}
+	if got["app/about/page.tsx"] {
+		t.Errorf("Search(%q) = %v, must not include app/about/page.tsx (the [id] token is discriminating)", "app [id] page", results)
+	}
+
+	// A single-token query with metacharacters and no whitespace keeps its
+	// regex meaning — this veto is scoped to multi-token queries only.
+	regexResults, err := svc.Search(context.Background(), "sc-test", `page\.tsx$`, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(regexResults) != 2 {
+		t.Errorf("Search(%q) = %v, want both page.tsx files via regex matching", `page\.tsx$`, regexResults)
+	}
+}
+
+// TestSSHFileServiceSearchMatchesFolderTokensForDirectories is the folder half
+// of the case above: the same space-separated token search must also surface
+// *directories* when includeDirs is set, so "core depo" jumps straight to the
+// folder rather than only to files inside it.
+func TestSSHFileServiceSearchMatchesFolderTokensForDirectories(t *testing.T) {
+	skipIfMissing(t, "find")
+	homeDir := t.TempDir()
+	for _, dir := range []string{"core/depo/deep", "other/depo"} {
+		if err := os.MkdirAll(filepath.Join(homeDir, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSSHFileService(newTestSSHFilePool(t, startTestSSHFileServer(t, homeDir, "")))
+
+	results, err := svc.Search(context.Background(), "sc-test", "core depo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	if !got["core/depo/"] {
+		t.Errorf("Search(%q, includeDirs) = %v, want the folder core/depo/", "core depo", results)
+	}
+	if got["other/depo/"] {
+		t.Errorf("Search(%q, includeDirs) = %v, must not include other/depo/", "core depo", results)
+	}
+}
+
+// TestSSHFileServiceSearchCollectsWholeListingInOneRemoteCommand guards the
+// single-traversal property that makes remote search affordable. The previous
+// implementation ran a `-type f` find and a `-type d` find concurrently — two
+// complete walks of the identical tree to produce two halves of one listing.
+// Collecting both from one walk is the difference this asserts: exactly one
+// remote command per cold collection, and none at all once cached.
+func TestSSHFileServiceSearchCollectsWholeListingInOneRemoteCommand(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, _ := newGrepTestSSHConnection(t, "")
+	resetTestSSHExecCount()
+
+	if _, err := svc.Search(context.Background(), "sc-test", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := testSSHExecCount.Load(); got != 1 {
+		t.Fatalf("cold Search ran %d remote commands, want exactly 1 (files and dirs must share one traversal)", got)
+	}
+
+	// The cached listing serves both a files-only and a with-dirs search
+	// without touching the remote host again.
+	if _, err := svc.Search(context.Background(), "sc-test", "main", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := testSSHExecCount.Load(); got != 1 {
+		t.Fatalf("warm Search ran %d remote commands total, want the cached listing to be reused", got)
+	}
+}
+
+// TestSSHFileServiceSearchPrunesHomeDirectoryCaches proves the SSH listing
+// prunes the toolchain/OS cache trees that dominate a real home directory.
+// This is the fix for remote search being unusable rather than merely slow:
+// rooted at $HOME with only the worktree-tuned prune set, the walk on a real
+// developer machine did not finish inside sshSearchBudget at all, so quick-open
+// returned whatever arbitrary prefix of the tree `find` had emitted before it
+// was killed — almost never the file the operator was looking for.
+func TestSSHFileServiceSearchPrunesHomeDirectoryCaches(t *testing.T) {
+	skipIfMissing(t, "find")
+	homeDir := t.TempDir()
+	// One real project file, and one file inside each cache tree that must
+	// never be walked. `go/pkg` stands in for the Go module cache, which is
+	// pruned by the `pkg` name.
+	fixture := map[string]string{
+		"work/app.go":             "package main\n",
+		".cache/huggingface/a.go": "cached\n",
+		"Library/Caches/b.go":     "cached\n",
+		".cargo/registry/c.go":    "cached\n",
+		".nvm/versions/d.go":      "cached\n",
+		"go/pkg/mod/e.go":         "cached\n",
+		".venv/lib/f.go":          "cached\n",
+		"__pycache__/g.go":        "cached\n",
+	}
+	for relPath, content := range fixture {
+		full := filepath.Join(homeDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSSHFileService(newTestSSHFilePool(t, startTestSSHFileServer(t, homeDir, "")))
+
+	results, err := svc.Search(context.Background(), "sc-test", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	if !got["work/app.go"] {
+		t.Errorf("Search results = %v, want the real project file work/app.go", results)
+	}
+	for _, pruned := range []string{
+		".cache/huggingface/a.go", "Library/Caches/b.go", ".cargo/registry/c.go",
+		".nvm/versions/d.go", "go/pkg/mod/e.go", ".venv/lib/f.go", "__pycache__/g.go",
+		".cache/", "Library/", ".cargo/", ".nvm/", "go/pkg/", ".venv/", "__pycache__/",
+	} {
+		if got[pruned] {
+			t.Errorf("Search results = %v, must not include pruned cache path %q", results, pruned)
+		}
+	}
+}
+
+// TestSSHFileServiceSearchHandlesNewlineInPathNames proves the listing is
+// parsed as NUL-delimited records rather than lines. With `-print`/newline
+// splitting, a single path containing a newline silently became two bogus
+// listing entries (neither of which is openable), corrupting every result
+// after it in that batch.
+func TestSSHFileServiceSearchHandlesNewlineInPathNames(t *testing.T) {
+	skipIfMissing(t, "find")
+	homeDir := t.TempDir()
+	awkward := "we\nird.go"
+	if err := os.WriteFile(filepath.Join(homeDir, awkward), []byte("package main\n"), 0o644); err != nil {
+		t.Skipf("filesystem rejects newlines in file names: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, "normal.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSSHFileService(newTestSSHFilePool(t, startTestSSHFileServer(t, homeDir, "")))
+
+	results, err := svc.Search(context.Background(), "sc-test", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r] = true
+	}
+	if !got[awkward] {
+		t.Errorf("Search results = %q, want the newline-containing path intact as one entry", results)
+	}
+	for _, fragment := range []string{"we", "ird.go"} {
+		if got[fragment] {
+			t.Errorf("Search results = %q, must not contain split fragment %q", results, fragment)
+		}
+	}
+	if !got["normal.go"] {
+		t.Errorf("Search results = %q, want normal.go", results)
+	}
+}
+
+// TestSSHFileServiceSearchFailsLoudlyWhenListingTimesOut is the regression
+// test for the most user-visible half of "remote search doesn't work". The old
+// code accepted a timed-out listing as long as `find` had printed *something*
+// before being killed, so an operator on a large remote home directory got a
+// silently truncated listing: they typed a filename they knew existed, the walk
+// had been cut off long before reaching it, and quick-open reported a clean
+// "no matching files" that was indistinguishable from the file not existing.
+// A timeout must surface as an actionable error instead.
+func TestSSHFileServiceSearchFailsLoudlyWhenListingTimesOut(t *testing.T) {
+	// A stub `find` that emits one complete record and then hangs, so the
+	// collection is guaranteed to time out holding partial-but-nonempty output
+	// — precisely the case the old code accepted as success. The stub runs
+	// under a PATH restricted to binDir, so every binary it and the pipeline
+	// need (`sleep` to hang, `head` for the byte cap) must be linked in
+	// explicitly rather than inherited.
+	binDir := t.TempDir()
+	stub := "#!/bin/sh\nprintf 'partial.go\\0'\nsleep 30\n"
+	if err := os.WriteFile(filepath.Join(binDir, "find"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"head", "sleep"} {
+		resolved, err := exec.LookPath(bin)
+		if err != nil {
+			t.Skipf("%s not available: %v", bin, err)
+		}
+		if err := os.Symlink(resolved, filepath.Join(binDir, bin)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	restore := sshSearchBudget
+	sshSearchBudget = 300 * time.Millisecond
+	t.Cleanup(func() { sshSearchBudget = restore })
+
+	svc, _ := newGrepTestSSHConnection(t, binDir)
+
+	results, err := svc.Search(context.Background(), "sc-test", "", false)
+	if err == nil {
+		t.Fatalf("Search = %v, want a timeout error rather than a silently truncated listing", results)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("Search error = %q, want it to name the timeout so the operator can act on it", err)
+	}
+}
+
 // TestSSHFileServiceReadReturnsWholeFile guards the switch from io.ReadAll to
 // io.Copy in Read. io.Copy takes sftp.File's WriteTo fast path (many read
 // requests pipelined concurrently) instead of ReadAll's serial 512-byte-and-
@@ -960,4 +1276,217 @@ func TestSSHFileServiceReadReturnsWholeFile(t *testing.T) {
 	if got.Content != want {
 		t.Fatalf("Read returned %d bytes, want %d (content mismatch)", len(got.Content), len(want))
 	}
+}
+
+// newExtractTestSSHConnection builds an SSH connection fixture for the
+// Extract tests: an existing "dest" folder to extract into (matching
+// Upload's contract that the destination folder must already exist), served
+// over the same in-process SSH server fixture the Grep/Search/Download tests
+// above use. buildTestZip/assertDirEmpty are worktree_file_test.go's
+// (same package, reused rather than redefined — identical fixture shape is
+// what makes the two Extract test suites comparable).
+func newExtractTestSSHConnection(t *testing.T) (svc *SSHFileService, homeDir string) {
+	t.Helper()
+	homeDir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(homeDir, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addr := startTestSSHFileServer(t, homeDir, "")
+	pool := newTestSSHFilePool(t, addr)
+	return NewSSHFileService(pool), homeDir
+}
+
+func TestSSHFileServiceExtractHappyPathNestedDirectories(t *testing.T) {
+	svc, homeDir := newExtractTestSSHConnection(t)
+	archive := buildTestZip(t, map[string]string{
+		"README.md":          "hello",
+		"src/":               "",
+		"src/nested/":        "",
+		"src/nested/main.go": "package main",
+	})
+
+	entries, err := svc.Extract(context.Background(), "sc-test", "dest", bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("Extract returned no entries")
+	}
+
+	wantContents := map[string]string{
+		"dest/README.md":          "hello",
+		"dest/src/nested/main.go": "package main",
+	}
+	for relPath, want := range wantContents {
+		data, err := os.ReadFile(filepath.Join(homeDir, filepath.FromSlash(relPath)))
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		if string(data) != want {
+			t.Errorf("%s content = %q, want %q", relPath, data, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(homeDir, "dest", "src", "nested")); err != nil || !info.IsDir() {
+		t.Fatalf("dest/src/nested not created as a folder: %v", err)
+	}
+}
+
+// TestSSHFileServiceExtractRejectsEscapingAndAbsolutePaths mirrors
+// WorktreeFileServiceExtract's zip-slip coverage exactly: a leading ".."
+// segment, an absolute path, and a path that only escapes after cleaning.
+func TestSSHFileServiceExtractRejectsEscapingAndAbsolutePaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{"parent traversal", "../x"},
+		{"absolute path", "/abs/x"},
+		{"nested traversal", "a/../../x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, homeDir := newExtractTestSSHConnection(t)
+			archive := buildTestZip(t, map[string]string{tt.entry: "malicious"})
+
+			if _, err := svc.Extract(context.Background(), "sc-test", "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+				t.Fatalf("Extract(%q) error = %v, want ErrValidation", tt.entry, err)
+			}
+			assertDirEmpty(t, filepath.Join(homeDir, "dest"))
+		})
+	}
+}
+
+// TestSSHFileServiceExtractRejectsSymlinkEntry mirrors
+// WorktreeFileServiceExtractRejectsSymlinkEntry: a symlink entry is rejected
+// rather than followed.
+func TestSSHFileServiceExtractRejectsSymlinkEntry(t *testing.T) {
+	svc, homeDir := newExtractTestSSHConnection(t)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	header := &zip.FileHeader{Name: "escape-link"}
+	header.SetMode(os.ModeSymlink | 0o777)
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("../../etc/passwd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, extractErr := svc.Extract(context.Background(), "sc-test", "dest", bytes.NewReader(buf.Bytes()))
+	if !errors.Is(extractErr, ErrValidation) {
+		t.Fatalf("symlink entry error = %v, want ErrValidation", extractErr)
+	}
+	if !strings.Contains(extractErr.Error(), "is a symlink") {
+		t.Fatalf("symlink error message = %q, want it to name the symlink", extractErr)
+	}
+	assertDirEmpty(t, filepath.Join(homeDir, "dest"))
+}
+
+// TestSSHFileServiceExtractInvalidatesCacheOnPartialFailure proves a
+// mid-write failure still drops the cached listing. A partial extraction
+// (one entry written, the next colliding with an existing directory) returns
+// an error with files already on the host; if the cache survived, Search
+// would keep serving the pre-extract set for up to sshListingTTL and hide
+// what actually landed. This pins Extract's unconditional invalidation.
+func TestSSHFileServiceExtractInvalidatesCacheOnPartialFailure(t *testing.T) {
+	skipIfMissing(t, "find")
+	svc, homeDir := newExtractTestSSHConnection(t)
+	ctx := context.Background()
+
+	// Seed the listing cache the way an operator's earlier quick-open would.
+	if _, err := svc.Search(ctx, "sc-test", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Extract to the home root. a.txt writes cleanly; the next entry, "dest",
+	// collides with the fixture's existing "dest" directory, so the SFTP
+	// Create fails and the whole Extract returns an error after a.txt landed.
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if w, err := zw.Create("a.txt"); err != nil {
+		t.Fatal(err)
+	} else if _, err := w.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if w, err := zw.Create("dest"); err != nil {
+		t.Fatal(err)
+	} else if _, err := w.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Extract(ctx, "sc-test", "", bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("expected a mid-write Extract to fail")
+	}
+	// a.txt really landed on the host.
+	if _, err := os.Stat(filepath.Join(homeDir, "a.txt")); err != nil {
+		t.Fatalf("a.txt was not written despite the partial failure: %v", err)
+	}
+
+	results, err := svc.Search(ctx, "sc-test", "a.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0] != "a.txt" {
+		t.Fatalf("Search after partial Extract = %v, want [a.txt]: the cache was not invalidated on failure", results)
+	}
+}
+
+// TestSSHFileServiceExtractRejectsTooManyEntries mirrors
+// WorktreeFileServiceExtractRejectsTooManyEntries: the entry-count budget
+// rejects the archive before writing a single remote file.
+func TestSSHFileServiceExtractRejectsTooManyEntries(t *testing.T) {
+	svc, homeDir := newExtractTestSSHConnection(t)
+
+	files := make(map[string]string, maxExtractEntries+1)
+	for i := 0; i < maxExtractEntries+1; i++ {
+		files[fmt.Sprintf("f%05d.txt", i)] = ""
+	}
+	archive := buildTestZip(t, files)
+
+	if _, err := svc.Extract(context.Background(), "sc-test", "dest", bytes.NewReader(archive)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("over-cap entry count error = %v, want ErrValidation", err)
+	}
+	assertDirEmpty(t, filepath.Join(homeDir, "dest"))
+}
+
+// TestSSHFileServiceExtractRejectsOversizeUncompressedTotal mirrors
+// WorktreeFileServiceExtractRejectsOversizeUncompressedTotal: the
+// uncompressed-size budget is enforced from the zip's declared metadata
+// before any entry is decompressed/written, via the same
+// zip.Writer.CreateRaw "declare a huge size, write one real byte" trick.
+func TestSSHFileServiceExtractRejectsOversizeUncompressedTotal(t *testing.T) {
+	svc, homeDir := newExtractTestSSHConnection(t)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	raw := []byte("x")
+	header := &zip.FileHeader{
+		Name:               "big.bin",
+		Method:             zip.Store,
+		UncompressedSize64: maxExtractUncompressedBytes + 1,
+		CompressedSize64:   uint64(len(raw)),
+	}
+	w, err := zw.CreateRaw(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Extract(context.Background(), "sc-test", "dest", bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrValidation) {
+		t.Fatalf("over-cap uncompressed size error = %v, want ErrValidation", err)
+	}
+	assertDirEmpty(t, filepath.Join(homeDir, "dest"))
 }

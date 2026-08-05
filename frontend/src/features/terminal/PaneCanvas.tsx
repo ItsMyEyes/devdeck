@@ -54,6 +54,8 @@ export interface PaneCanvasProps {
   /** Icon shown in a tab's header button, e.g. `TerminalSquare`/`GitBranch`/`MaterialFileIcon`. */
   tabIcon?: (content: PaneContent) => ReactNode
   isTabDirty?: (content: PaneContent) => boolean
+  /** Rendered flush-left in a pane's header, before the tab strip — e.g. the shell sidebar toggle. Caller decides which pane(s) get one (per spec, only the first leaf in document order). Omit to hide the slot entirely. */
+  paneLeadingContent?: (pane: LeafPane) => ReactNode
   /** Extra chrome appended to a pane's header, e.g. worktree status/branch/cost — caller decides when to show it (per spec, only when the pane's active tab is Terminal content). */
   paneTitleContent?: (pane: LeafPane) => ReactNode
   /** Rendered inside the "..." popover; only ever shown while the pane is focused. Omit to hide the overflow button. */
@@ -79,6 +81,7 @@ interface PaneRenderContext {
   onResizeSplit: (splitId: string, sizes: number[]) => void
   tabIcon?: (content: PaneContent) => ReactNode
   isTabDirty?: (content: PaneContent) => boolean
+  paneLeadingContent?: (pane: LeafPane) => ReactNode
   paneTitleContent?: (pane: LeafPane) => ReactNode
   paneOverflowActions?: (pane: LeafPane) => ReactNode
   paneNewTabActions?: (pane: LeafPane) => ReactNode
@@ -270,6 +273,7 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
           onSplitDown={() => ctx.onSplitPane(pane.id, 'column')}
           onClose={() => ctx.onClosePane(pane.id)}
           isFocused={isFocused}
+          leadingContent={ctx.paneLeadingContent?.(pane)}
           // Worktree status/cost is one fact about the whole worktree, not
           // per-pane — showing it on every split terminal pane just repeats
           // the same "project root running · ..." block, so only the
@@ -317,6 +321,7 @@ export function PaneCanvas({
   onClosePane,
   tabIcon,
   isTabDirty,
+  paneLeadingContent,
   paneTitleContent,
   paneOverflowActions,
   paneNewTabActions,
@@ -381,6 +386,7 @@ export function PaneCanvas({
     onResizeSplit: handleResizeSplit,
     tabIcon,
     isTabDirty,
+    paneLeadingContent,
     paneTitleContent,
     paneOverflowActions,
     paneNewTabActions,

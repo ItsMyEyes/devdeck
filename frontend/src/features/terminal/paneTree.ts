@@ -11,7 +11,20 @@
  * `WorktreeLayout` per worktree is a separate, later integration step.
  */
 
-export type PaneContentKind = 'terminal' | 'git' | 'file' | 'explorer' | 'untitled'
+export type PaneContentKind = 'terminal' | 'git' | 'git-diff' | 'file' | 'explorer' | 'untitled'
+
+/** What a git diff is taken against: a working-tree/index file, or a commit.
+ *  Defined here rather than in the store because this module is deliberately
+ *  store-free (see the file header) and `GitDiffContent` needs it. */
+export type GitDiffTarget =
+  | { path: string; staged: boolean; untracked: boolean }
+  | { commit: string }
+
+/** Stable identity for a diff target — doubles as the pane tab's id, which is
+ *  what makes re-picking the same file refocus instead of opening a second tab. */
+export function gitDiffTargetKey(target: GitDiffTarget): string {
+  return 'commit' in target ? `commit:${target.commit}` : `${target.staged ? 'staged' : 'work'}:${target.path}`
+}
 
 interface BasePaneContent {
   /** Globally unique within one worktree's tree — see id rules below. */
@@ -29,6 +42,15 @@ export interface TerminalContent extends BasePaneContent {
 
 export interface GitContent extends BasePaneContent {
   kind: 'git'
+}
+
+/** One file's (or commit's) git diff, opened from a git file list. Its `id`
+ *  is the target key, so re-picking the same file refocuses the existing tab
+ *  instead of stacking duplicates — the same "one instance per target" rule
+ *  FileContent enforces with its path. */
+export interface GitDiffContent extends BasePaneContent {
+  kind: 'git-diff'
+  target: GitDiffTarget
 }
 
 export interface FileContent extends BasePaneContent {
@@ -50,7 +72,7 @@ export interface UntitledContent extends BasePaneContent {
   kind: 'untitled'
 }
 
-export type PaneContent = TerminalContent | GitContent | FileContent | ExplorerContent | UntitledContent
+export type PaneContent = TerminalContent | GitContent | GitDiffContent | FileContent | ExplorerContent | UntitledContent
 
 export interface LeafPane {
   type: 'leaf'
@@ -137,6 +159,10 @@ export function allocateTerminalContent(
 
 export function createGitContent(): GitContent {
   return { kind: 'git', id: generateId(), label: 'Git' }
+}
+
+export function createGitDiffContent(target: GitDiffTarget, label: string): GitDiffContent {
+  return { kind: 'git-diff', id: gitDiffTargetKey(target), target, label }
 }
 
 export function createExplorerContent(): ExplorerContent {
