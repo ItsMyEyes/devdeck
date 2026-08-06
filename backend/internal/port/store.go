@@ -126,6 +126,14 @@ type Store interface {
 	UpsertSSHSecret(connectionID, kind, cipherText string) error
 	SSHSecret(connectionID, kind string) (domain.SSHSecret, error)
 
+	// SSH port-forwarding rules (hub-owned; the executor holds only live
+	// listeners, in memory).
+	SSHForwards(connectionID string) ([]domain.SSHForward, error)
+	SSHForwardByID(id string) (domain.SSHForward, error)
+	CreateSSHForward(connectionID, mode, bindHost string, bindPort int, targetHost string, targetPort int, label string) (domain.SSHForward, error)
+	UpdateSSHForward(id string, p SSHForwardPatch) (domain.SSHForward, error)
+	DeleteSSHForward(id string) error
+
 	// Database connections (Database module registry)
 	DBConnections() ([]domain.DBConnection, error)
 	DBConnectionByID(id string) (domain.DBConnection, error)
@@ -275,6 +283,17 @@ type SSHConnectionPatch struct {
 	// from an explicit null (clears back to hub-decides).
 	ExecutorMachineID    *string
 	HasExecutorMachineID bool
+}
+
+// SSHForwardPatch carries optional fields for a partial forwarding-rule
+// update. A nil pointer means "not provided" and leaves the column alone.
+type SSHForwardPatch struct {
+	Mode       *string
+	BindHost   *string
+	BindPort   *int
+	TargetHost *string
+	TargetPort *int
+	Label      *string
 }
 
 // DBConnectionPatch carries optional fields for a partial database-connection

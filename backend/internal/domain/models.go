@@ -361,6 +361,33 @@ type SSHSecret struct {
 	KeychainRef  *string `json:"-"`
 }
 
+// SSHForward is one saved port-forwarding rule on an SSH connection.
+// Mode is "local" (-L), "remote" (-R) or "dynamic" (-D).
+type SSHForward struct {
+	ID           string `json:"id"`
+	ConnectionID string `json:"connectionId"`
+	Mode         string `json:"mode"`
+	BindHost     string `json:"bindHost"`
+	BindPort     int    `json:"bindPort"`
+	// TargetHost/TargetPort are empty/zero for mode "dynamic", which has no
+	// single target — each proxied connection carries its own.
+	TargetHost string `json:"targetHost"`
+	TargetPort int    `json:"targetPort"`
+	Label      string `json:"label"`
+}
+
+// SSHForwardState is a forward's live status. In-memory only, never
+// persisted: a restart legitimately returns every forward to "off", since
+// forwards do not autostart.
+type SSHForwardState struct {
+	ForwardID string `json:"forwardId"`
+	// Status is "off" | "starting" | "running" | "reconnecting" | "failed".
+	Status    string `json:"status"`
+	BoundAddr string `json:"boundAddr,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Attempts  int    `json:"attempts"`
+}
+
 // DBConnection is a saved connection to an external SQL database — the
 // registry behind the Database module. Credentials live in DBSecret rows,
 // never on this struct, exactly like SSHConnection/SSHSecret.

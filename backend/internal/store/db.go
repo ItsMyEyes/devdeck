@@ -219,6 +219,20 @@ CREATE TABLE IF NOT EXISTS ssh_secrets (
   PRIMARY KEY (connection_id, kind)
 );
 
+-- Saved port-forwarding rules. The hub owns these; the executor holds only
+-- the live listeners, in memory. ON DELETE CASCADE mirrors ssh_secrets: a
+-- forwarding rule has no meaning without its connection.
+CREATE TABLE IF NOT EXISTS ssh_forwards (
+  id            TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES ssh_connections(id) ON DELETE CASCADE,
+  mode          TEXT NOT NULL DEFAULT 'local',
+  bind_host     TEXT NOT NULL DEFAULT '127.0.0.1',
+  bind_port     INTEGER NOT NULL DEFAULT 0,
+  target_host   TEXT NOT NULL DEFAULT '',
+  target_port   INTEGER NOT NULL DEFAULT 0,
+  label         TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS db_connections (
   id                      TEXT PRIMARY KEY,
   name                    TEXT NOT NULL DEFAULT '',

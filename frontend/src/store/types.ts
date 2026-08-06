@@ -214,6 +214,32 @@ export interface SSHConnection {
   hostKeyFingerprint: string | null
 }
 
+export type SSHForwardMode = 'local' | 'remote' | 'dynamic'
+
+/** Mirror of backend/internal/domain/SSHForward — one saved forwarding rule. */
+export interface SSHForward {
+  id: string
+  connectionId: string
+  mode: SSHForwardMode
+  bindHost: string
+  bindPort: number
+  /** Empty/zero for mode 'dynamic', which has no single target. */
+  targetHost: string
+  targetPort: number
+  label: string
+}
+
+export type SSHForwardStatus = 'off' | 'starting' | 'running' | 'reconnecting' | 'failed'
+
+/** Mirror of backend/internal/domain/SSHForwardState — live, never persisted. */
+export interface SSHForwardState {
+  forwardId: string
+  status: SSHForwardStatus
+  boundAddr?: string
+  error?: string
+  attempts: number
+}
+
 export type DBEngine = 'postgres' | 'mysql' | 'sqlite'
 
 /** Mirrors backend domain.DBConnection. Secrets are write-only: they ride on
