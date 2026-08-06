@@ -278,8 +278,7 @@ CREATE TABLE IF NOT EXISTS settings (
   -- "not set yet"; a runtime seeds a random one on first boot. Only the hash
   -- is ever stored, and it never leaves the process (domain.Settings has no
   -- field for it) — the API only reports whether one is configured.
-  signin_pin_hash     TEXT NOT NULL DEFAULT ''
-  ,
+  signin_pin_hash     TEXT NOT NULL DEFAULT '',
   -- Persistent SOCKS5 forward-proxy publication for THIS machine. Survives
   -- restart: enabled=1 re-binds on boot. See
   -- docs/superpowers/specs/2026-08-06-published-socks5-design.md
@@ -390,6 +389,7 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := migrateSettingsPublishedSOCKS(db); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return db, nil

@@ -3,11 +3,14 @@ package service
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 
 	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/netproxy"
@@ -21,6 +24,37 @@ const defaultPublishedSOCKSPort = 1080
 // SOCKS5 server accepts any username and checks only the password, but
 // clients must send something, so the UI advertises a fixed one.
 const publishedSOCKSUser = "devdeck"
+
+// socksBadRequest is an operator-input error: a port that is out of range or
+// already taken. It unwraps to ErrValidation so handleStoreErr maps it to
+// HTTP 400, but — unlike the repo's usual
+// fmt.Errorf("...: %w", ErrValidation) form — it keeps the message exactly as
+// written, because handleStoreErr echoes err.Error() straight into the
+// {"error":...} envelope and this feature's spec pins the wording of the
+// port-conflict message. See the Error handling table in
+// docs/superpowers/specs/2026-08-06-published-socks5-design.md.
+type socksBadRequest struct{ msg string }
+
+func (e socksBadRequest) Error() string { return e.msg }
+func (e socksBadRequest) Unwrap() error { return ErrValidation }
+
+func socksErrf(format string, args ...any) error {
+	return socksBadRequest{msg: fmt.Sprintf(format, args...)}
+}
+
+// isAddrInUse reports whether a listen failed because something else already
+// holds the port, as opposed to any other bind failure (a privileged port, an
+// unavailable interface). syscall.EADDRINUSE covers unix; Windows returns
+// WSAEADDRINUSE, which does not satisfy errors.Is against the POSIX constant,
+// so its message is matched as a fallback.
+func isAddrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "only one usage of each socket address")
+}
 
 // PublishedSOCKSStore is the narrow slice of port.Store this service needs,
 // following the sshmgr.ConnStore precedent rather than taking the whole
@@ -72,13 +106,18 @@ func generatePublishedSOCKSKey() string {
 }
 
 // Status reports stored intent plus what is actually bound right now.
+//
+// The store read happens under the mutex, not before it, so a concurrent
+// Apply can't swap the listener out between the read and the report and
+// hand back a config that never described the running listener. statusLocked
+// takes no lock of its own, so this is not re-entrant.
 func (s *PublishedSOCKSService) Status() (domain.PublishedSOCKSStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg, err := s.store.PublishedSOCKS()
 	if err != nil {
 		return domain.PublishedSOCKSStatus{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.statusLocked(cfg), nil
 }
 
@@ -106,7 +145,15 @@ func (s *PublishedSOCKSService) statusLocked(cfg domain.PublishedSOCKSConfig) do
 // persists — so a failed bind never leaves the DB claiming a live listener.
 //
 // port <= 0 means "keep the stored port".
+//
+// The whole read-modify-write runs under the mutex. Reading the stored config
+// before locking would let two concurrent PUTs load the same row, then both
+// write it back — last write wins, and the loser's port or rotated key is
+// silently discarded while its listener may still be the bound one.
 func (s *PublishedSOCKSService) Apply(enabled bool, port int, rotateKey bool) (domain.PublishedSOCKSStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	cfg, err := s.store.PublishedSOCKS()
 	if err != nil {
 		return domain.PublishedSOCKSStatus{}, err
@@ -118,7 +165,7 @@ func (s *PublishedSOCKSService) Apply(enabled bool, port int, rotateKey bool) (d
 		cfg.Port = defaultPublishedSOCKSPort
 	}
 	if cfg.Port > 65535 {
-		return domain.PublishedSOCKSStatus{}, fmt.Errorf("port %d is out of range (1-65535)", cfg.Port)
+		return domain.PublishedSOCKSStatus{}, socksErrf("port %d is out of range (1-65535)", cfg.Port)
 	}
 	// An empty stored key is treated as "rotate" rather than binding open:
 	// there is no reachable path to an unauthenticated published listener.
@@ -126,9 +173,6 @@ func (s *PublishedSOCKSService) Apply(enabled bool, port int, rotateKey bool) (d
 		cfg.Key = generatePublishedSOCKSKey()
 	}
 	cfg.Enabled = enabled
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if !enabled {
 		s.stopLocked()
@@ -161,6 +205,8 @@ func (s *PublishedSOCKSService) Apply(enabled bool, port int, rotateKey bool) (d
 // at launch), this config is replayed automatically, so a since-taken port
 // must not stop the server from starting.
 func (s *PublishedSOCKSService) StartIfEnabled() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg, err := s.store.PublishedSOCKS()
 	if err != nil {
 		return err
@@ -168,8 +214,6 @@ func (s *PublishedSOCKSService) StartIfEnabled() error {
 	if !cfg.Enabled || cfg.Key == "" {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.bindLocked(cfg)
 }
 
@@ -187,7 +231,14 @@ func (s *PublishedSOCKSService) bindLocked(cfg domain.PublishedSOCKSConfig) erro
 	}
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(cfg.Port))
 	if err != nil {
-		return fmt.Errorf("port %d unavailable: %w", cfg.Port, err)
+		if isAddrInUse(err) {
+			// The one bind failure an operator can act on, so it gets the
+			// wording the spec pins rather than the raw net error, which
+			// would otherwise reach the client verbatim through the
+			// {"error":...} envelope.
+			return socksErrf("port %d already in use", cfg.Port)
+		}
+		return socksErrf("port %d unavailable: %v", cfg.Port, err)
 	}
 	srv := netproxy.NewSOCKS5Server(cfg.Key)
 	go func() {

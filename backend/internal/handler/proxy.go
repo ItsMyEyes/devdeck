@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"devdeck/backend/internal/service"
@@ -51,8 +50,7 @@ func (h *PublishedSOCKSHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, err := h.svc.Status()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	if handleStoreErr(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
@@ -72,15 +70,16 @@ func (h *PublishedSOCKSHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body publishedSOCKSRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if _, err := decodeBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	status, err := h.svc.Apply(body.Enabled, body.Port, body.RotateKey)
-	if err != nil {
-		// A bind conflict or an out-of-range port is the caller's problem,
-		// not a server fault — and must never take the process down.
-		writeErr(w, http.StatusBadRequest, err.Error())
+	// Apply's operator-input failures (port out of range, port already in
+	// use) carry service.ErrValidation, so handleStoreErr renders them as
+	// 400 with their own wording, while a genuine store failure still
+	// surfaces as a 500 instead of being mislabelled a client error.
+	if handleStoreErr(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
