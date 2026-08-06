@@ -57,6 +57,9 @@ export const qk = {
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
   machineVersion: (id: string) => ['machines', id, 'version'] as const,
   publishedSocks: (id: string) => ['machines', id, 'publishedSocks'] as const,
+  /** This process's own publication (same-origin /api/proxy/publish), which
+   *  has no Machine record to key by — a hub never self-registers. */
+  publishedSocksLocal: ['self', 'publishedSocks'] as const,
   machineUpdateCheck: (id: string) => ['machines', id, 'updateCheck'] as const,
   /** Whether a runtime has a sign-in PIN set. id === '' means this process
    *  itself (a runtime looking at its own PIN), not a remote machine. */

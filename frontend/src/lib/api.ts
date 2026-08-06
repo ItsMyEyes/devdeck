@@ -2,6 +2,11 @@
 // The backend is the source of truth; these functions mirror the REST contract.
 
 import { parseContentDispositionFilename } from '@/lib/contentDisposition'
+// Type-only (erased at build time, so no import cycle with machineClient.ts,
+// which imports `request` from here): the PUT /proxy/publish body is the same
+// contract whether it is addressed to a remote machine or to this process, so
+// it is declared once, next to the per-machine calls.
+import type { PublishedSOCKSRequest } from '@/lib/machineApi'
 import type {
   Attachment,
   Bank,
@@ -21,6 +26,7 @@ import type {
   NewsItem,
   Priority,
   Project,
+  PublishedSOCKSStatus,
   RecurringInvoiceTemplate,
   Settings,
   SSHConnection,
@@ -805,6 +811,26 @@ export interface HubKeyStatus {
  *  backend/internal/handler/hubkey.go. */
 export function fetchHubKey(): Promise<HubKeyStatus> {
   return request<HubKeyStatus>('GET', '/self/hub-key')
+}
+
+// ---- Published SOCKS5 on THIS process ----
+//
+// The machine registry only holds *remote* runtimes: a --role hub never
+// self-registers (that path is gated on being a runtime with a hub URL), so
+// the process serving this page is usually absent from its own list. These
+// two hit /api/proxy/publish on the current origin — the route is registered
+// on every role — so the operator can publish a proxy on the machine they are
+// looking at. The per-machine equivalents (fetchPublishedSocks /
+// setPublishedSocks in machineApi.ts) go through machineRequest instead.
+
+/** Reads this process's own persistent SOCKS5 publication. */
+export function fetchLocalPublishedSocks(): Promise<PublishedSOCKSStatus> {
+  return request<PublishedSOCKSStatus>('GET', '/proxy/publish')
+}
+
+/** Applies publication state on this process and persists it. */
+export function setLocalPublishedSocks(body: PublishedSOCKSRequest): Promise<PublishedSOCKSStatus> {
+  return request<PublishedSOCKSStatus>('PUT', '/proxy/publish', body)
 }
 
 // ---- SSH connections (hub registry; secrets are write-only) ----

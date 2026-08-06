@@ -64,6 +64,7 @@ import {
   fetchDBTree,
   fetchHubKey,
   fetchIssueEvents,
+  fetchLocalPublishedSocks,
   fetchMachineHealth,
   fetchMachineUpdateCheck,
   fetchMachines,
@@ -80,6 +81,7 @@ import {
   restartMachine,
   seed,
   setDBSecret,
+  setLocalPublishedSocks,
   stopMachine,
   testDBConnection,
   uploadAttachment,
@@ -434,13 +436,17 @@ export function useTailscaleStatus(enabled: boolean) {
 
 /** One machine's SOCKS5 publication. `enabled` gates the fetch so the app
  *  never pulls a live proxy credential speculatively — it is requested only
- *  while the Settings network section is on screen. */
+ *  while the Settings network section is on screen. gcTime is 0 for the same
+ *  reason as useHubKey below: the response carries the proxy's access key, so
+ *  it is dropped the moment Settings closes rather than sitting in the cache
+ *  for the default five minutes. */
 export function usePublishedSocks(machine: Machine | undefined, enabled: boolean) {
   return useQuery({
     queryKey: qk.publishedSocks(machine?.id ?? ''),
     queryFn: () => fetchPublishedSocks(machine as Machine),
     enabled: enabled && !!machine,
     staleTime: 5_000,
+    gcTime: 0,
   })
 }
 
@@ -455,6 +461,34 @@ export function useSetPublishedSocks() {
       toast.error(err instanceof Error ? err.message : 'Failed to update the SOCKS5 proxy')
       // Resync: the machine may have applied part of the change before failing.
       void queryClient.invalidateQueries({ queryKey: qk.publishedSocks(machine.id) })
+    },
+  })
+}
+
+/** This process's own SOCKS5 publication, over the current origin rather than
+ *  through a Machine record — the machine serving this page is usually not in
+ *  the hub's registry of remote runtimes (a hub never self-registers), so it
+ *  would otherwise be the one machine the operator cannot publish from.
+ *  Same gcTime: 0 rationale as usePublishedSocks above. */
+export function useLocalPublishedSocks(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.publishedSocksLocal,
+    queryFn: fetchLocalPublishedSocks,
+    enabled,
+    staleTime: 5_000,
+    gcTime: 0,
+  })
+}
+
+export function useSetLocalPublishedSocks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: PublishedSOCKSRequest) => setLocalPublishedSocks(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.publishedSocksLocal }),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update the SOCKS5 proxy')
+      // Resync: part of the change may have applied before the failure.
+      void queryClient.invalidateQueries({ queryKey: qk.publishedSocksLocal })
     },
   })
 }
