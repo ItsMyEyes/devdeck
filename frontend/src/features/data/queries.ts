@@ -72,6 +72,7 @@ import {
   fetchSettings,
   fetchPinStatus,
   fetchSSHConnections,
+  fetchSSHStats,
   fetchTailscaleStatus,
   fetchWhoami,
   fetchWorkspaces,
@@ -197,6 +198,7 @@ import {
   writeWorktreeFile,
   createFsFolder,
   fetchMachinePinStatus,
+  fetchMachineStats,
   fetchPublishedSocks,
   setPublishedSocks,
   type AddMCPServerBody,
@@ -263,6 +265,19 @@ export function useSettings() {
  *  where /api/machines does not exist. */
 export function useMachines(enabled = true) {
   return useQuery({ queryKey: qk.machines, queryFn: fetchMachines, staleTime: 10_000, enabled })
+}
+
+/** Live host metrics poll. `enabled` is driven by pane visibility so a
+ *  backgrounded stats pane stops polling instead of sampling forever. */
+export function useMachineStats(machine: Machine | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.machineStats(machine?.id ?? ''),
+    queryFn: () => fetchMachineStats(machine as Machine),
+    enabled: enabled && !!machine,
+    refetchInterval: 2000,
+    // Metrics are worthless once stale; never serve a cached sample as fresh.
+    staleTime: 0,
+  })
 }
 
 export function useCreateMachine() {
@@ -533,6 +548,17 @@ export function useMachinesHealth(machines: Machine[]) {
 
 export function useSSHConnections() {
   return useQuery({ queryKey: qk.sshConnections, queryFn: fetchSSHConnections, staleTime: 10_000 })
+}
+
+/** Live host metrics poll for a saved SSH host, same shape as useMachineStats. */
+export function useSSHStats(connectionId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.sshStats(connectionId ?? ''),
+    queryFn: () => fetchSSHStats(connectionId as string),
+    enabled: enabled && !!connectionId,
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
 }
 
 export function useCreateSSHConnection() {

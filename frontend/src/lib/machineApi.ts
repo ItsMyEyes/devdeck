@@ -13,6 +13,7 @@ import type {
   EnvModelOption,
   EnvProfileSummary,
   FsEntry,
+  HostStats,
   MCPServer,
   Machine,
   PublishedSOCKSStatus,
@@ -759,4 +760,11 @@ export function fetchLspTrace(machine: Machine): Promise<{ entries: TraceEntry[]
 
 export function clearLspTrace(machine: Machine): Promise<{ entries: TraceEntry[] }> {
   return machineRequest<{ entries: TraceEntry[] }>(machine, 'DELETE', '/lsp/trace')
+}
+
+// ---- Host metrics ----
+
+/** One live CPU/memory/disk sample from this machine. */
+export function fetchMachineStats(machine: Machine): Promise<HostStats> {
+  return machineRequest<HostStats>(machine, 'GET', '/system/stats')
 }

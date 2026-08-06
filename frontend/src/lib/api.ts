@@ -16,6 +16,7 @@ import type {
   DBEngine,
   DBQueryHistoryEntry,
   DBSavedQuery,
+  HostStats,
   Invoice,
   InvoiceItem,
   InvoiceStatus,
@@ -874,6 +875,12 @@ export function deleteSSHConnection(id: string): Promise<void> {
  *  connect re-pins whatever key the host presents. */
 export function acceptSSHHostKey(id: string): Promise<void> {
   return request<void>('POST', `/ssh/connections/${id}/accept-hostkey`)
+}
+
+/** One live CPU/memory/disk sample from a saved SSH host. A hub route, not a
+ *  machine route — the hub holds this connection's credentials. */
+export function fetchSSHStats(connectionId: string): Promise<HostStats> {
+  return request<HostStats>('GET', `/ssh/connections/${connectionId}/stats`)
 }
 
 // ---- DB connections (hub registry; secrets are write-only) ----

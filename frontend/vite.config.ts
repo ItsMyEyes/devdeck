@@ -127,6 +127,7 @@ export default defineConfig({
       'src/features/ssh/SSHShellPane.test.tsx',
       'src/features/overlays/SocksPublishSection.test.tsx',
       'src/store/shellSidebars.test.ts',
+      'src/features/stats/useRollingSamples.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
