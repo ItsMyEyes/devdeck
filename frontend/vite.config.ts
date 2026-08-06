@@ -130,6 +130,7 @@ export default defineConfig({
       'src/store/shellSidebars.test.ts',
       'src/features/stats/useRollingSamples.test.ts',
       'src/features/stats/StatsPane.test.tsx',
+      'src/features/stats/StatsPane.tokens.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.

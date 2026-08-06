@@ -35,7 +35,13 @@ function MetricRow({ label, value, children }: { label: string; value: string; c
  *  information. */
 function DiskBar({ pct }: { pct: number }) {
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-devdeck-card-wash">
+    // The track uses `hover-wash` rather than the brief's `surface-2` or the
+    // in-flight retune's `card-wash`: those two tokens exist in only one of
+    // the two globals.css revisions each, and Tailwind v4 emits no rule at
+    // all for an unknown `--color-devdeck-*` key, so either choice renders
+    // the track fully transparent on one side of the retune. `hover-wash` is
+    // defined identically (rgba(255,255,255,0.035)) in both.
+    <div className="h-2 w-full overflow-hidden rounded-full bg-devdeck-hover-wash">
       <div className="h-full rounded-full bg-devdeck-accent" style={{ width: `${Math.min(pct, 100)}%` }} />
     </div>
   )
@@ -56,9 +62,13 @@ export function StatsPane({ target, visible }: { target: StatsTarget; visible: b
   if (query.isLoading && !stats) {
     return <div className="p-4 font-mono text-[11px] text-devdeck-fg-2">Loading metrics…</div>
   }
+  // `red`, not the brief's `red-soft` or the retune's `err`: same
+  // one-sided-token problem as DiskBar's track. `--color-devdeck-red` is
+  // defined in both revisions, and the retune aliases it straight to
+  // `--devdeck-err`, so this is the intended colour either way.
   if (query.error) {
     return (
-      <div className="p-4 font-mono text-[11px] text-devdeck-err">
+      <div className="p-4 font-mono text-[11px] text-devdeck-red">
         {query.error instanceof Error ? query.error.message : 'Failed to read host metrics'}
       </div>
     )
