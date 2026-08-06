@@ -165,6 +165,24 @@ export interface PublishedSOCKSStatus {
   key: string
 }
 
+/** Mirror of backend/internal/domain/Usage. */
+export interface Usage {
+  used: number
+  total: number
+}
+
+/** Mirror of backend/internal/domain/HostStats — one live CPU/mem/disk sample.
+ *  Identical for a machine and an SSH host by design. */
+export interface HostStats {
+  supported: boolean
+  reason?: string
+  /** null until a delta exists — see the Go doc comment. */
+  cpuPct: number | null
+  mem: Usage
+  disk: Usage
+  sampledAt: string
+}
+
 /** A saved page in the machine-proxied Browser tile. Server-side (not
  *  localStorage) so the same bookmarks show up whether you're on the desktop
  *  app or a phone hitting the same hub — see backend/internal/domain.Bookmark. */

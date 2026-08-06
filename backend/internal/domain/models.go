@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // TermLine is a single terminal-log line.
 type TermLine struct {
 	K string `json:"k"`
@@ -267,6 +269,31 @@ type Machine struct {
 	// "free": no new round trip, no bootstrap-ordering problem. Runtimes
 	// use it to verify hub-signed handover tokens (internal/handovertoken).
 	SigningPublicKey string `json:"signingPublicKey"`
+}
+
+// Usage is a used/total byte pair, for memory and disk.
+type Usage struct {
+	Used  uint64 `json:"used"`
+	Total uint64 `json:"total"`
+}
+
+// HostStats is one live CPU/memory/disk sample. Deliberately identical for a
+// runtime machine (measured in-process by internal/hoststats) and an SSH host
+// (measured by a batched /proc + df command), so the chart component never
+// branches on where the numbers came from.
+type HostStats struct {
+	// Supported is false when the target cannot be measured — e.g. an SSH
+	// host with no /proc. Reporting this beats approximating: wrong numbers
+	// on an ops readout are worse than no numbers.
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
+	// CPUPct is nil when no delta exists yet. /proc/stat reports cumulative
+	// jiffies, so the first sample after opening a pane genuinely has no
+	// answer — nil says "unknown" where 0 would wrongly read as "idle".
+	CPUPct    *float64  `json:"cpuPct"`
+	Mem       Usage     `json:"mem"`
+	Disk      Usage     `json:"disk"`
+	SampledAt time.Time `json:"sampledAt"`
 }
 
 // Bookmark is a saved page in the machine-proxied Browser tile. Bookmarks are
