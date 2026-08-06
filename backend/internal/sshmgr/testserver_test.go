@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"sync"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -78,13 +79,36 @@ type directTCPIPMsg struct {
 	OrigPort uint32
 }
 
+// tcpipForwardMsg mirrors RFC 4254 §7.1's "tcpip-forward" global request —
+// what ssh.Client.Listen sends to ask the server to listen on its side.
+type tcpipForwardMsg struct {
+	BindAddr string
+	BindPort uint32
+}
+
+// tcpipForwardReply is the port the server actually bound, returned when the
+// request asked for port 0.
+type tcpipForwardReply struct {
+	BoundPort uint32
+}
+
+// forwardedTCPIPMsg mirrors RFC 4254 §7.2's "forwarded-tcpip" channel-open
+// extra data — what the server sends for each connection it accepts on a
+// forwarded port.
+type forwardedTCPIPMsg struct {
+	DestAddr string
+	DestPort uint32
+	OrigAddr string
+	OrigPort uint32
+}
+
 func serveTestSSHConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
 	if err != nil {
 		return
 	}
 	defer sc.Close()
-	go ssh.DiscardRequests(reqs)
+	go serveTestGlobalRequests(sc, reqs)
 	for newCh := range chans {
 		switch newCh.ChannelType() {
 		case "session":
@@ -124,6 +148,99 @@ func serveTestSSHConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		default:
 			newCh.Reject(ssh.UnknownChannelType, "only session/direct-tcpip channels in tests")
 		}
+	}
+}
+
+// serveTestGlobalRequests honours "tcpip-forward" (what -R needs) by opening
+// a real listener on this process and pushing each accepted connection back
+// to the client as a "forwarded-tcpip" channel, the way a real sshd does. It
+// also honours "cancel-tcpip-forward" — what ssh.Client.Listen's returned
+// listener sends on Close — by closing the matching listener, so a stopped
+// remote forward actually releases its port instead of leaking it.
+func serveTestGlobalRequests(sc *ssh.ServerConn, reqs <-chan *ssh.Request) {
+	var mu sync.Mutex
+	listeners := map[string]net.Listener{}
+
+	for req := range reqs {
+		switch req.Type {
+		case "tcpip-forward":
+			var msg tcpipForwardMsg
+			if err := ssh.Unmarshal(req.Payload, &msg); err != nil {
+				if req.WantReply {
+					_ = req.Reply(false, nil)
+				}
+				continue
+			}
+			ln, err := net.Listen("tcp", net.JoinHostPort(msg.BindAddr, fmt.Sprint(msg.BindPort)))
+			if err != nil {
+				if req.WantReply {
+					_ = req.Reply(false, nil)
+				}
+				continue
+			}
+			bound := uint32(ln.Addr().(*net.TCPAddr).Port)
+			mu.Lock()
+			listeners[net.JoinHostPort(msg.BindAddr, fmt.Sprint(bound))] = ln
+			mu.Unlock()
+			if req.WantReply {
+				_ = req.Reply(true, ssh.Marshal(tcpipForwardReply{BoundPort: bound}))
+			}
+			go serveTestForwardedListener(sc, ln, msg.BindAddr, bound)
+		case "cancel-tcpip-forward":
+			var msg tcpipForwardMsg
+			ok := false
+			if err := ssh.Unmarshal(req.Payload, &msg); err == nil {
+				key := net.JoinHostPort(msg.BindAddr, fmt.Sprint(msg.BindPort))
+				mu.Lock()
+				if ln, found := listeners[key]; found {
+					delete(listeners, key)
+					_ = ln.Close()
+					ok = true
+				}
+				mu.Unlock()
+			}
+			if req.WantReply {
+				_ = req.Reply(ok, nil)
+			}
+		default:
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}
+}
+
+func serveTestForwardedListener(sc *ssh.ServerConn, ln net.Listener, bindAddr string, boundPort uint32) {
+	defer ln.Close()
+	for {
+		nc, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// A hardcoded OrigPort of 0 makes x/crypto/ssh's parseTCPAddr reject
+		// the channel-open on the client side — use the real accepted port.
+		var origPort uint32
+		if tcpAddr, ok := nc.RemoteAddr().(*net.TCPAddr); ok {
+			origPort = uint32(tcpAddr.Port)
+		}
+		payload := ssh.Marshal(forwardedTCPIPMsg{
+			DestAddr: bindAddr, DestPort: boundPort,
+			OrigAddr: "127.0.0.1", OrigPort: origPort,
+		})
+		ch, reqs, err := sc.OpenChannel("forwarded-tcpip", payload)
+		if err != nil {
+			nc.Close()
+			continue
+		}
+		go ssh.DiscardRequests(reqs)
+		go func() {
+			_, _ = io.Copy(ch, nc)
+			_ = ch.Close()
+		}()
+		go func() {
+			_, _ = io.Copy(nc, ch)
+			_ = nc.Close()
+		}()
 	}
 }
 
