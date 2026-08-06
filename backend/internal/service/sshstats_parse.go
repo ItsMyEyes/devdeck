@@ -20,9 +20,34 @@ type cpuSample struct {
 	idle  uint64
 }
 
+// Column offsets within the aggregate "cpu " line, after the leading label.
+const (
+	colUser = iota
+	colNice
+	_ // system
+	colIdle
+	colIOWait
+	_ // irq
+	_ // softirq
+	_ // steal
+	colGuest
+	colGuestNice
+)
+
+// minCPUColumns is user through softirq. steal, guest and guest_nice arrived
+// in later kernels and are read only when present.
+const minCPUColumns = 7
+
 // parseProcStat reads the aggregate "cpu " line. Idle counts idle+iowait:
 // a CPU waiting on disk is not doing work, and treating iowait as busy makes
 // an I/O-bound host look pegged.
+//
+// Guest time is subtracted back out of user and nice before summing. The
+// kernel's account_guest_time folds guest into user and guest_nice into nice
+// *and* publishes both in their own columns, so a naive sum of all ten counts
+// that time twice — inflating total while idle stands still, which drags a
+// hypervisor's busy% toward 100 (a box at a true 50% reads as 67%). procps and
+// htop do the same subtraction.
 func parseProcStat(text string) (cpuSample, error) {
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(line)
@@ -30,23 +55,44 @@ func parseProcStat(text string) (cpuSample, error) {
 			continue
 		}
 		// user nice system idle iowait irq softirq [steal guest guest_nice]
-		if len(fields) < 8 {
-			return cpuSample{}, fmt.Errorf("/proc/stat cpu line has %d fields, want at least 8", len(fields)-1)
+		values := fields[1:]
+		if len(values) < minCPUColumns {
+			return cpuSample{}, fmt.Errorf("/proc/stat cpu line has %d fields, want at least %d", len(values), minCPUColumns)
 		}
-		var sample cpuSample
-		for i, raw := range fields[1:] {
+		cols := make([]uint64, len(values))
+		for i, raw := range values {
 			v, err := strconv.ParseUint(raw, 10, 64)
 			if err != nil {
 				return cpuSample{}, fmt.Errorf("/proc/stat field %d: %w", i, err)
 			}
+			cols[i] = v
+		}
+		if len(cols) > colGuest {
+			cols[colUser] = subFloor(cols[colUser], cols[colGuest])
+		}
+		if len(cols) > colGuestNice {
+			cols[colNice] = subFloor(cols[colNice], cols[colGuestNice])
+		}
+
+		var sample cpuSample
+		for i, v := range cols {
 			sample.total += v
-			if i == 3 || i == 4 { // idle, iowait
+			if i == colIdle || i == colIOWait {
 				sample.idle += v
 			}
 		}
 		return sample, nil
 	}
 	return cpuSample{}, fmt.Errorf("/proc/stat has no aggregate cpu line")
+}
+
+// subFloor subtracts without wrapping. guest can only exceed user on a kernel
+// that is lying to us; 0 is the honest answer there, not 1.8e19.
+func subFloor(a, b uint64) uint64 {
+	if b > a {
+		return 0
+	}
+	return a - b
 }
 
 // cpuPercent returns busy percentage between two samples, or nil when the
@@ -92,14 +138,14 @@ func parseMeminfo(text string) (domain.Usage, error) {
 	if !ok || total == 0 {
 		return domain.Usage{}, fmt.Errorf("/proc/meminfo has no MemTotal")
 	}
+	// Both branches clamp: a container's synthesised /proc/meminfo (lxcfs) can
+	// report more available than total, and an unclamped subtraction wraps
+	// uint64 into "16.0 EB used".
 	if available, ok := vals["MemAvailable"]; ok {
-		return domain.Usage{Used: total - available, Total: total}, nil
+		return domain.Usage{Used: subFloor(total, available), Total: total}, nil
 	}
 	free := vals["MemFree"] + vals["Buffers"] + vals["Cached"]
-	if free > total {
-		free = total
-	}
-	return domain.Usage{Used: total - free, Total: total}, nil
+	return domain.Usage{Used: subFloor(total, free), Total: total}, nil
 }
 
 // parseDF reads `df -P /` output. -P forces POSIX single-line records, so a
@@ -127,8 +173,15 @@ func parseDF(text string) (domain.Usage, error) {
 }
 
 // splitStatsOutput cuts the batched command's stdout into its three payloads.
+//
+// Bounded at three parts, not split on every occurrence: the separator is a
+// bare "---" and df's Filesystem column is arbitrary remote text — LVM doubles
+// the hyphens in device-mapper names, so an ordinary root on a VG named "vg-"
+// prints "/dev/mapper/vg---root". df is the last section, so stopping the
+// split there puts every such occurrence harmlessly inside the df payload
+// instead of shattering the whole sample into "unsupported".
 func splitStatsOutput(out string) (procStat, meminfo, df string, err error) {
-	parts := strings.Split(out, statsSectionSep)
+	parts := strings.SplitN(out, statsSectionSep, 3)
 	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("stats output has %d sections, want 3", len(parts))
 	}

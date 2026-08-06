@@ -1,9 +1,13 @@
 package hoststats
 
 import (
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shirou/gopsutil/v4/disk"
 )
 
 func TestCollectReturnsPlausibleTotals(t *testing.T) {
@@ -27,6 +31,35 @@ func TestCollectReturnsPlausibleTotals(t *testing.T) {
 	}
 	if stats.SampledAt.IsZero() {
 		t.Error("SampledAt is zero")
+	}
+}
+
+// A root filesystem the platform will not report — most likely the Windows
+// runtime, where "/" is not a volume — must not sink CPU and memory. It must
+// not render as a confident "0 B / 0 B" either: an unexplained zero reads as a
+// bug in DevDeck rather than as a disk that could not be measured.
+func TestCollectSurfacesDiskFailureWithoutSinkingTheSample(t *testing.T) {
+	orig := diskUsage
+	diskUsage = func(string) (*disk.UsageStat, error) {
+		return nil, errors.New("permission denied")
+	}
+	t.Cleanup(func() { diskUsage = orig })
+
+	stats, err := NewCollector().Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if !stats.Supported {
+		t.Fatalf("Supported = false: a bad disk read must not sink the sample (%s)", stats.Reason)
+	}
+	if stats.Mem.Total == 0 {
+		t.Error("Mem.Total = 0; memory is still measurable")
+	}
+	if stats.Disk.Total != 0 || stats.Disk.Used != 0 {
+		t.Errorf("Disk = %+v, want zeroed", stats.Disk)
+	}
+	if !strings.Contains(stats.Reason, "permission denied") {
+		t.Errorf("Reason = %q, want the disk error surfaced in it", stats.Reason)
 	}
 }
 

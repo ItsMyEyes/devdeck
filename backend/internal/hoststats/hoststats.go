@@ -26,6 +26,12 @@ const cacheTTL = time.Second
 // multi-volume readout is explicitly out of scope.
 const rootPath = "/"
 
+// diskUsage is a seam for tests. The failure path is real — the Windows
+// runtime has no "/" volume — but it cannot be provoked on a host where the
+// call succeeds, and an unexercised error branch is how "0 B / 0 B with no
+// explanation" survives review.
+var diskUsage = disk.Usage
+
 // Collector serves cached host samples. Safe for concurrent use.
 type Collector struct {
 	mu     sync.Mutex
@@ -63,9 +69,13 @@ func (c *Collector) Collect() (domain.HostStats, error) {
 	stats.Mem = domain.Usage{Used: vm.Total - vm.Available, Total: vm.Total}
 
 	// A failed disk read must not sink the whole sample — CPU and memory are
-	// still worth showing.
-	if du, err := disk.Usage(rootPath); err == nil {
+	// still worth showing. It must not vanish either: the Disk figure stays
+	// zeroed, and Reason says why, so the pane explains the zeros instead of
+	// asserting them.
+	if du, err := diskUsage(rootPath); err == nil {
 		stats.Disk = domain.Usage{Used: du.Used, Total: du.Total}
+	} else {
+		stats.Reason = "disk usage unavailable: " + err.Error()
 	}
 
 	c.last = stats
