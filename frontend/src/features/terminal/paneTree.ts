@@ -11,7 +11,7 @@
  * `WorktreeLayout` per worktree is a separate, later integration step.
  */
 
-export type PaneContentKind = 'terminal' | 'git' | 'git-diff' | 'file' | 'explorer' | 'untitled'
+export type PaneContentKind = 'terminal' | 'git' | 'git-diff' | 'file' | 'explorer' | 'untitled' | 'stats'
 
 /** What a git diff is taken against: a working-tree/index file, or a commit.
  *  Defined here rather than in the store because this module is deliberately
@@ -24,6 +24,21 @@ export type GitDiffTarget =
  *  what makes re-picking the same file refocus instead of opening a second tab. */
 export function gitDiffTargetKey(target: GitDiffTarget): string {
   return 'commit' in target ? `commit:${target.commit}` : `${target.staged ? 'staged' : 'work'}:${target.path}`
+}
+
+/** What a stats pane measures. Declared here rather than in the store for the
+ *  same reason GitDiffTarget is: this module is deliberately store-free (see
+ *  the file header) and StatsContent needs it. */
+export type StatsTarget =
+  | { kind: 'machine'; machineId: string }
+  | { kind: 'ssh'; connectionId: string }
+
+/** Stable identity for a stats target — doubles as the pane tab's id, so
+ *  re-opening stats for the same target refocuses instead of stacking a
+ *  duplicate. The kind is part of the key because a machine id and an SSH
+ *  connection id could otherwise collide. */
+export function statsTargetKey(target: StatsTarget): string {
+  return target.kind === 'machine' ? `stats:machine:${target.machineId}` : `stats:ssh:${target.connectionId}`
 }
 
 interface BasePaneContent {
@@ -64,6 +79,14 @@ export interface ExplorerContent extends BasePaneContent {
   kind: 'explorer'
 }
 
+/** Live CPU/memory/disk for one machine or SSH host. Its `id` is the target
+ *  key — the same "one instance per target" rule FileContent enforces with
+ *  its path and GitDiffContent with its target. */
+export interface StatsContent extends BasePaneContent {
+  kind: 'stats'
+  target: StatsTarget
+}
+
 /** A not-yet-saved editor buffer (VS Code's "Untitled-1") — no worktree path
  *  backs it until the user picks one via Save As, unlike FileContent where
  *  id === path always. Its own generated id keeps it distinguishable from
@@ -72,7 +95,14 @@ export interface UntitledContent extends BasePaneContent {
   kind: 'untitled'
 }
 
-export type PaneContent = TerminalContent | GitContent | GitDiffContent | FileContent | ExplorerContent | UntitledContent
+export type PaneContent =
+  | TerminalContent
+  | GitContent
+  | GitDiffContent
+  | FileContent
+  | ExplorerContent
+  | UntitledContent
+  | StatsContent
 
 export interface LeafPane {
   type: 'leaf'
@@ -167,6 +197,10 @@ export function createGitDiffContent(target: GitDiffTarget, label: string): GitD
 
 export function createExplorerContent(): ExplorerContent {
   return { kind: 'explorer', id: generateId(), label: 'Explorer' }
+}
+
+export function createStatsContent(target: StatsTarget, label: string): StatsContent {
+  return { kind: 'stats', id: statsTargetKey(target), target, label }
 }
 
 export function createFileContent(path: string, label?: string): FileContent {

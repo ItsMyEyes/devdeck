@@ -124,6 +124,7 @@ export default defineConfig({
       'src/features/terminal/GitPanel.test.tsx',
       'src/features/terminal/PanelHeader.test.tsx',
       'src/features/terminal/ExpandedTerminal.test.tsx',
+      'src/features/terminal/paneTree.stats.test.ts',
       'src/features/ssh/SSHShellPane.test.tsx',
       'src/features/overlays/SocksPublishSection.test.tsx',
       'src/store/shellSidebars.test.ts',

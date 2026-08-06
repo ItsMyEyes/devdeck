@@ -421,8 +421,8 @@ export function SSHShellPane({
   }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-dim" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-dim" />
     if (content.kind === 'file') return <MaterialFileIcon name={basename(content.path)} size={13} />
     return null
   }
@@ -469,6 +469,9 @@ export function SSHShellPane({
     // "+" menu has "New File") — this satisfies PaneContentRendererMap's
     // exhaustiveness without dead-wiring an editor no user action can reach.
     untitled: () => null,
+    // Task 8 supplies the real stats renderer; no UI path opens a 'stats'
+    // tab here yet, so this satisfies PaneContentRendererMap's exhaustiveness.
+    stats: () => null,
     file: ({ content, isActive }) => {
       if (content.kind !== 'file') return null
       return (

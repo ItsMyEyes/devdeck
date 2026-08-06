@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import {
+  Activity,
   Check,
   FilePlus,
   FilePlus2,
@@ -734,11 +735,12 @@ function TerminalWorkspace({
   }
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
-    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-dim" />
+    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-dim" />
+    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-dim" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-dim" />
     if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-dim" />
+    if (content.kind === 'stats') return <Activity size={13} className="text-devdeck-dim" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />
   }
 
@@ -870,6 +872,9 @@ function TerminalWorkspace({
         />
       )
     },
+    // Task 8 supplies the real stats renderer; no UI path opens a 'stats' tab
+    // here yet, so this satisfies PaneContentRendererMap's exhaustiveness.
+    stats: () => null,
   }
 
   // Only the tree's first leaf (document order) gets the toggle — a split
