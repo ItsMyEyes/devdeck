@@ -84,8 +84,14 @@ export function StatsPane({ target, visible }: { target: StatsTarget; visible: b
     )
   }
 
-  const cpuData = cpuSeries.map((s) => ({ value: s.cpuPct ?? 0 }))
+  // An unknown CPU sample is plotted as a gap, not as 0. `?? 0` would fabricate
+  // an idle-looking floor: the buffer holds ~5 minutes, so the first sample's
+  // fake zero sits on the chart that whole time, and a mid-window reboot (which
+  // correctly yields null) would draw a cliff to 0 that reads as "the box went
+  // quiet" when it means "the box restarted".
+  const cpuData = cpuSeries.map((s) => ({ value: s.cpuPct }))
   const memData = cpuSeries.map((s) => ({ value: pctOf(s.mem) }))
+  const diskPct = pctOf(stats.disk)
 
   return (
     <div className="flex flex-col gap-4 overflow-y-auto p-4">
@@ -97,8 +103,16 @@ export function StatsPane({ target, visible }: { target: StatsTarget; visible: b
         <MetricChart data={memData} />
       </MetricRow>
 
-      <MetricRow label="DISK" value={`${fmtBytes(stats.disk.used)} / ${fmtBytes(stats.disk.total)}`}>
-        <DiskBar pct={pctOf(stats.disk)} />
+      <MetricRow
+        label="DISK"
+        value={`${fmtBytes(stats.disk.used)} / ${fmtBytes(stats.disk.total)} · ${Math.round(diskPct)}%`}
+      >
+        <DiskBar pct={diskPct} />
+        {/* A supported sample can still carry a reason: the collectors zero the
+            disk figure rather than fail the whole sample when the root
+            filesystem will not report (the Windows runtime has no "/"). Without
+            this line the pane asserts a confident "0 B / 0 B". */}
+        {stats.reason ? <span className="text-[10px] text-devdeck-fg-2">{stats.reason}</span> : null}
       </MetricRow>
     </div>
   )
