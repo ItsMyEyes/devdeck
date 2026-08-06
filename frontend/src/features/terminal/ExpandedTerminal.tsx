@@ -735,10 +735,10 @@ function TerminalWorkspace({
   }
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-dim" />
-    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-dim" />
-    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-dim" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-dim" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
+    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
+    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-accent" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
     if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-dim" />
     if (content.kind === 'stats') return <Activity size={13} className="text-devdeck-dim" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />

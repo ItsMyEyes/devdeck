@@ -421,8 +421,8 @@ export function SSHShellPane({
   }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-dim" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-dim" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
     if (content.kind === 'file') return <MaterialFileIcon name={basename(content.path)} size={13} />
     return null
   }
