@@ -17,6 +17,7 @@ function deps(overrides: Partial<CreateActionDeps> = {}): CreateActionDeps {
     openSSHConnection: vi.fn(),
     openSSHQuickAdd: vi.fn(),
     openSpawn: vi.fn(),
+    openSSHStats: vi.fn(),
     ...overrides,
   }
 }
@@ -45,6 +46,7 @@ describe('createActionItems', () => {
     expect(iconOf('create:browser')).toBe(MODULE_ICON.browser)
     expect(iconOf('create:ssh')).toBe(MODULE_ICON.ssh)
     expect(iconOf('create:agent')).toBe(MODULE_ICON.agents)
+    expect(iconOf('create:stats')).toBeDefined()
   })
 
   // The drill-in pages are the rows that used to render a blank icon slot:
@@ -75,5 +77,19 @@ describe('createActionItems', () => {
     const projectRows = items.find((i) => i.id === 'create:agent')!.drillInto!().items('', ctx)
     expect(projectRows.map((i) => i.id)).toEqual(['create-agent:p1'])
     expect(projectRows[0].disabled).toEqual({ reason: 'Machine is offline' })
+  })
+
+  // Machine stats have no standalone landing tab to attach to (see statsPage's
+  // doc comment), so "New Stats view…" only offers saved SSH hosts — each row
+  // runs through the same `openSSHStats` dependency the "+" menu's dedupe
+  // path relies on.
+  it('lists saved SSH hosts under "New Stats view…" and runs openSSHStats', () => {
+    const openSSHStats = vi.fn()
+    const items = createActionItems(deps({ openSSHStats }))
+    const statsRows = items.find((i) => i.id === 'create:stats')!.drillInto!().items('', ctx)
+    expect(statsRows.map((i) => i.id)).toEqual(['create-stats:c1'])
+    expect(statsRows[0].icon).toBe(MODULE_ICON.ssh)
+    statsRows[0].run?.(ctx)
+    expect(openSSHStats).toHaveBeenCalledWith('c1')
   })
 })

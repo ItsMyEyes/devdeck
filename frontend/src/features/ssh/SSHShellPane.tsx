@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { FolderTree, TerminalSquare } from 'lucide-react'
+import { Activity, FolderTree, TerminalSquare } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { OverflowItem, ShellSidebarToggle, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
@@ -14,6 +14,7 @@ import {
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
+  createStatsContent,
   deserializeLayout,
   findContent,
   findLeafForContent,
@@ -34,6 +35,7 @@ import { ContentSearchPanel } from '@/features/terminal/ContentSearchPanel'
 import type { LineReveal } from '@/features/terminal/PlainCodeEditor'
 import { UnsavedChangesDialog } from '@/features/terminal/UnsavedChangesDialog'
 import { ShellSidebar } from '@/features/terminal/ShellSidebar'
+import { StatsPane } from '@/features/stats/StatsPane'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
 
@@ -369,6 +371,28 @@ export function SSHShellPane({
     })
   }
 
+  /** "+" new-tab button's "Stats" action — `createStatsContent` ids by
+   *  target key (one instance per host, same dedupe rule `openFile` applies
+   *  by path), so a target already open elsewhere in the tree refocuses
+   *  instead of stacking a duplicate pane. */
+  function handleNewStatsTab(paneId: string) {
+    const content = createStatsContent({ kind: 'ssh', connectionId }, `${connection?.name ?? 'SSH'} stats`)
+    const existingLeaf = findLeafForContent(layout.root, content.id)
+    if (existingLeaf) {
+      commitLayout({
+        ...layout,
+        root: selectTabInTree(layout.root, existingLeaf.id, content.id),
+        focusedPaneId: existingLeaf.id,
+      })
+      return
+    }
+    commitLayout({
+      ...layout,
+      root: addContentToLeaf(layout.root, paneId, content),
+      focusedPaneId: paneId,
+    })
+  }
+
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
       // `isFocused` is false when another tile is the one the user's actually
@@ -449,6 +473,10 @@ export function SSHShellPane({
           <TerminalSquare size={13} />
           New Terminal
         </OverflowItem>
+        <OverflowItem onClick={() => handleNewStatsTab(pane.id)}>
+          <Activity size={13} />
+          Stats
+        </OverflowItem>
       </div>
     )
   }
@@ -469,9 +497,10 @@ export function SSHShellPane({
     // "+" menu has "New File") — this satisfies PaneContentRendererMap's
     // exhaustiveness without dead-wiring an editor no user action can reach.
     untitled: () => null,
-    // Task 8 supplies the real stats renderer; no UI path opens a 'stats'
-    // tab here yet, so this satisfies PaneContentRendererMap's exhaustiveness.
-    stats: () => null,
+    stats: ({ content, isActive }) => {
+      if (content.kind !== 'stats') return null
+      return <StatsPane target={content.target} visible={isActive} />
+    },
     file: ({ content, isActive }) => {
       if (content.kind !== 'file') return null
       return (

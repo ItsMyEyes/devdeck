@@ -21,6 +21,14 @@ import {
 import { MODULE_ICON } from '@/features/tabs/tabIcons'
 import { createDefaultTileLayout, findTileTab, focusTileLeaf, selectTileTab } from '@/features/tabs/tileTree'
 import type { TileNode, TileTab } from '@/features/tabs/tileTree'
+import {
+  addContentToLeaf,
+  createDefaultLayout,
+  createStatsContent,
+  deserializeLayout,
+  findLeafForContent,
+  selectTabInTree,
+} from '@/features/terminal/paneTree'
 import { worktreeLabel, worktreeTabLabel } from '@/lib/worktreeLabel'
 import { computeCompletion } from '@/features/palette/paletteComplete'
 import {
@@ -178,6 +186,7 @@ export function useCommandPalette({
   const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const selectAgentsTab = useDevDeckStore((s) => s.selectAgentsTab)
   const setWorkspaceTileLayout = useDevDeckStore((s) => s.setWorkspaceTileLayout)
+  const setSSHTileLayout = useDevDeckStore((s) => s.setSSHTileLayout)
   const storedLayout = useDevDeckStore((s) => s.workspaceTileLayouts[wsId])
   const layout = useMemo(() => storedLayout ?? createDefaultTileLayout(), [storedLayout])
 
@@ -417,6 +426,36 @@ export function useCommandPalette({
     [openSSHQuickAdd, wsId, leafId, closePalette],
   )
 
+  /** "New Stats view…"'s per-host row — ensures a Stats pane for this host
+   *  exists (or is refocused) in its shell tab's own pane tree, using the
+   *  same `createStatsContent` dedupe-by-target-key rule the "+" menu's
+   *  entry point relies on, then opens/focuses that shell tab. Reads the
+   *  live store directly (not the `sshTileLayouts` slice via a hook) because
+   *  this only ever runs from a `run()` callback, never a render. */
+  const openSSHStats = useCallback(
+    (connectionId: string) => {
+      const stored = useDevDeckStore.getState().sshTileLayouts[connectionId]
+      const sshLayout = deserializeLayout(stored) ?? createDefaultLayout(connectionId)
+      const content = createStatsContent({ kind: 'ssh', connectionId }, 'Stats')
+      const existingLeaf = findLeafForContent(sshLayout.root, content.id)
+      const nextLayout = existingLeaf
+        ? {
+            ...sshLayout,
+            root: selectTabInTree(sshLayout.root, existingLeaf.id, content.id),
+            focusedPaneId: existingLeaf.id,
+          }
+        : {
+            ...sshLayout,
+            root: addContentToLeaf(sshLayout.root, sshLayout.focusedPaneId, content),
+            focusedPaneId: sshLayout.focusedPaneId,
+          }
+      setSSHTileLayout(connectionId, nextLayout)
+      openSSHShellTab(wsId, connectionId)
+      navigate({ to: '/w/$wsId', params: { wsId } })
+    },
+    [setSSHTileLayout, openSSHShellTab, wsId, navigate],
+  )
+
   // ---- item assembly ----------------------------------------------------
 
   const openTabs = useMemo(
@@ -460,6 +499,7 @@ export function useCommandPalette({
       },
       openSSHQuickAdd: (prefillRaw) => openQuickAddForm(prefillRaw),
       openSpawn: (projectId) => openSpawn(projectId),
+      openSSHStats: (connectionId) => openSSHStats(connectionId),
     }),
     [
       deferredQuery,
@@ -471,6 +511,7 @@ export function useCommandPalette({
       openSSHShellTab,
       openQuickAddForm,
       openSpawn,
+      openSSHStats,
       navigate,
       wsId,
     ],

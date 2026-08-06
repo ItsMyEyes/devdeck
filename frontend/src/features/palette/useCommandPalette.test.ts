@@ -73,6 +73,7 @@ describe('agentProjectRows piped through rankPaletteItems with the verb arg', ()
       openSSHConnection: vi.fn(),
       openSSHQuickAdd: vi.fn(),
       openSpawn: vi.fn(),
+      openSSHStats: vi.fn(),
     }
   }
 

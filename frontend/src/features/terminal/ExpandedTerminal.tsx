@@ -42,6 +42,7 @@ import {
   createFileContent,
   createGitContent,
   createGitDiffContent,
+  createStatsContent,
   createUntitledContent,
   deserializeLayout,
   findContent,
@@ -69,6 +70,7 @@ import { Terminal, type TerminalHandle } from './Terminal'
 import { TerminalExplorer } from './TerminalExplorer'
 import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 import { UntitledFileEditor } from './UntitledFileEditor'
+import { StatsPane } from '@/features/stats/StatsPane'
 
 interface Props {
   worktree: Worktree
@@ -655,6 +657,28 @@ function TerminalWorkspace({
     })
   }
 
+  /** "+" new-tab button's "Stats" action — `createStatsContent` ids by target
+   *  key (one instance per machine, same rule as `openGitDiff`'s per-target
+   *  GitDiffContent), so a target already open elsewhere in the tree
+   *  refocuses instead of stacking a duplicate pane. */
+  function handleNewStatsTab(paneId: string) {
+    const content = createStatsContent({ kind: 'machine', machineId: machine.id }, `${machine.name} stats`)
+    const existingLeaf = findLeafForContent(layout.root, content.id)
+    if (existingLeaf) {
+      commitLayout({
+        ...layout,
+        root: selectTabInTree(layout.root, existingLeaf.id, content.id),
+        focusedPaneId: existingLeaf.id,
+      })
+      return
+    }
+    commitLayout({
+      ...layout,
+      root: addContentToLeaf(layout.root, paneId, content),
+      focusedPaneId: paneId,
+    })
+  }
+
   function approve(ok: boolean) {
     updateWorktree.mutate({
       machine,
@@ -797,6 +821,10 @@ function TerminalWorkspace({
           <FilePlus size={13} />
           Open File…
         </OverflowItem>
+        <OverflowItem onClick={() => handleNewStatsTab(pane.id)}>
+          <Activity size={13} />
+          Stats
+        </OverflowItem>
       </div>
     )
   }
@@ -872,9 +900,10 @@ function TerminalWorkspace({
         />
       )
     },
-    // Task 8 supplies the real stats renderer; no UI path opens a 'stats' tab
-    // here yet, so this satisfies PaneContentRendererMap's exhaustiveness.
-    stats: () => null,
+    stats: ({ content, isActive }) => {
+      if (content.kind !== 'stats') return null
+      return <StatsPane target={content.target} visible={isActive} />
+    },
   }
 
   // Only the tree's first leaf (document order) gets the toggle — a split

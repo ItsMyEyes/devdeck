@@ -1,3 +1,4 @@
+import { Activity } from 'lucide-react'
 import { MODULE_ICON, PROJECT_ICON } from '@/features/tabs/tabIcons'
 import { projectFacets } from '@/features/palette/providers/projectFacets'
 import type { PaletteItem, PalettePage } from '@/features/palette/paletteTypes'
@@ -12,6 +13,9 @@ export interface CreateActionDeps {
   openSSHConnection: (connectionId: string) => void
   openSSHQuickAdd: (prefillRaw: string) => void
   openSpawn: (projectId: string) => void
+  /** Opens (or refocuses) that host's shell tab with a Stats pane in it —
+   *  distinct from `openSSHConnection`, which just opens the shell itself. */
+  openSSHStats: (connectionId: string) => void
 }
 
 /** The project rows behind both "New Agent…" (the drill-down page) and the
@@ -82,6 +86,30 @@ function sshPage(deps: CreateActionDeps): PalettePage {
   }
 }
 
+/** Machine stats live inside a worktree's own pane tree, which has no
+ *  standalone "pick a machine" landing spot the way an SSH shell tab does
+ *  (see `entityItems`'s `machine:` row — it only opens the Machines page).
+ *  SSH hosts don't have that gap: every host already has exactly one shell
+ *  tab to attach a Stats pane to, so this page only offers those. */
+function statsPage(deps: CreateActionDeps): PalettePage {
+  return {
+    id: 'create-stats',
+    breadcrumb: 'New Stats view',
+    placeholder: 'Search saved hosts…',
+    items: () =>
+      deps.sshConnections.map<PaletteItem>((connection) => ({
+        id: `create-stats:${connection.id}`,
+        kind: 'ssh-host',
+        group: 'results',
+        title: connection.name,
+        subtitle: `${connection.user}@${connection.host}`,
+        keywords: [connection.host, connection.user],
+        icon: MODULE_ICON.ssh,
+        run: () => deps.openSSHStats(connection.id),
+      })),
+  }
+}
+
 function spawnPage(deps: CreateActionDeps): PalettePage {
   return {
     id: 'create-agent',
@@ -123,6 +151,14 @@ export function createActionItems(deps: CreateActionDeps): PaletteItem[] {
       title: 'New Agent…',
       icon: MODULE_ICON.agents,
       drillInto: () => spawnPage(deps),
+    },
+    {
+      id: 'create:stats',
+      kind: 'create',
+      group: 'create',
+      title: 'New Stats view…',
+      icon: Activity,
+      drillInto: () => statsPage(deps),
     },
   ]
 }
