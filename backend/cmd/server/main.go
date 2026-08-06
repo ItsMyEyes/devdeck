@@ -357,8 +357,13 @@ func main() {
 	sshDialer := sshmgr.NewDialer(st, sshSecrets).
 		WithExecutorRouting(st, machineclient.SOCKSProxyStarter{})
 	sshSrv := sshmgr.NewServer(sshDialer)
-	sshFileSvc := service.NewSSHFileService(sshmgr.NewFilePool(sshDialer))
+	// One FilePool backs both SFTP file ops and stats polling, so a saved
+	// connection's SSH client is cached once instead of dialed twice.
+	sshFilePool := sshmgr.NewFilePool(sshDialer)
+	sshFileSvc := service.NewSSHFileService(sshFilePool)
 	sshFileH := handler.NewSSHFileHandler(sshFileSvc)
+	sshStatsSvc := service.NewSSHStatsService(sshFilePool)
+	sshStatsH := handler.NewSSHStatsHandler(sshStatsSvc)
 
 	dbSecrets := service.NewDBSecretService(st, authKey)
 	dbH := handler.NewDBHandler(st, dbSecrets)
@@ -641,6 +646,10 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/mkdir", sshFileH.Mkdir)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/move", sshFileH.Move)
 		mux.HandleFunc("POST /api/ssh/connections/{id}/files/copy", sshFileH.Copy)
+
+		// Live CPU/memory/disk for a saved SSH connection, polled the same way
+		// the local host stats route is.
+		mux.HandleFunc("GET /api/ssh/connections/{id}/stats", sshStatsH.Get)
 
 		// Database connection registry — hub-scoped like the SSH registry.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
