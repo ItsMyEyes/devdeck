@@ -26,6 +26,7 @@ import (
 	"devdeck/backend/internal/dbdriver/sqlitedrv"
 	"devdeck/backend/internal/detect"
 	"devdeck/backend/internal/handler"
+	"devdeck/backend/internal/hoststats"
 	"devdeck/backend/internal/lsp"
 	"devdeck/backend/internal/machineclient"
 	"devdeck/backend/internal/netproxy"
@@ -394,6 +395,7 @@ func main() {
 	proxyH := handler.NewProxyHandler(proxySvc)
 	publishedSOCKSSvc := service.NewPublishedSOCKSService(st, advertiseURL.Hostname())
 	publishedSOCKSH := handler.NewPublishedSOCKSHandler(publishedSOCKSSvc)
+	systemStatsH := handler.NewSystemStatsHandler(hoststats.NewCollector())
 
 	mux := http.NewServeMux()
 
@@ -697,6 +699,9 @@ func main() {
 	}
 
 	mux.HandleFunc("POST /api/proxy/start", proxyH.PostStart)
+
+	// Every role: this is how a runtime reports its own load.
+	mux.HandleFunc("GET /api/system/stats", systemStatsH.Get)
 
 	// Registered on every role: publishing a proxy from a runtime (to reach
 	// that machine's network from elsewhere) is the primary use case.
