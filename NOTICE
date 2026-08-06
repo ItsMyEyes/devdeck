@@ -13,5 +13,11 @@ BSD-3-Clause, and Apache-2.0). Consult the module's source repository or its
 package registry entry (pkg.go.dev, npmjs.com, crates.io) for the exact
 license text of a given dependency.
 
+Individually acknowledged:
+
+github.com/shirou/gopsutil/v4
+Copyright (c) 2014, WAKAYAMA Shirou
+Licensed under the BSD 3-Clause License.
+
 This file does not itself grant any rights; see LICENSE for DevDeck's own
 license terms.
