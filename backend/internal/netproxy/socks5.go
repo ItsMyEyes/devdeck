@@ -7,6 +7,7 @@ package netproxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -47,6 +48,11 @@ const (
 type SOCKS5Server struct {
 	authKey string
 	dialer  net.Dialer
+	// DialContext, when set, establishes every proxied connection instead of
+	// the default net.Dialer. SSH dynamic forwarding (-D) sets it to dial
+	// through an ssh.Client, reusing this file's protocol codec without its
+	// direct-dial activation model.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 func NewSOCKS5Server(authKey string) *SOCKS5Server {
@@ -89,7 +95,11 @@ func (s *SOCKS5Server) handleConn(conn net.Conn) {
 
 	_ = conn.SetDeadline(time.Time{})
 
-	upstream, dialErr := s.dialer.Dial("tcp", target)
+	dial := s.DialContext
+	if dial == nil {
+		dial = s.dialer.DialContext
+	}
+	upstream, dialErr := dial(context.Background(), "tcp", target)
 	if dialErr != nil {
 		_ = writeSocksReply(conn, socksReplyCodeFor(dialErr))
 		return
@@ -100,7 +110,7 @@ func (s *SOCKS5Server) handleConn(conn net.Conn) {
 		return
 	}
 
-	relay(conn, upstream)
+	Relay(conn, upstream)
 }
 
 func (s *SOCKS5Server) negotiate(r *bufio.Reader, w io.Writer) error {
@@ -255,10 +265,14 @@ func socksReplyCodeFor(err error) byte {
 	}
 }
 
-// relay pipes data between two established connections until either side
-// closes, half-closing the write side of each so a one-directional EOF
-// (e.g. an HTTP client done sending) doesn't stall the other direction.
-func relay(a, b net.Conn) {
+// Relay pipes data between two established connections until either side
+// closes, half-closing the write side of each so a one-directional EOF (e.g.
+// an HTTP client done sending) doesn't stall the other direction.
+//
+// Exported because SSH port forwarding needs exactly this behaviour for all
+// three of its modes; a second copy of it in sshmgr would be a second copy of
+// subtle code that has already been gotten right once.
+func Relay(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	pipe := func(dst, src net.Conn) {
 		_, _ = io.Copy(dst, src)

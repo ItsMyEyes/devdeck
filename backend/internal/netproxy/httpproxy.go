@@ -91,7 +91,7 @@ func (h *HTTPProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request)
 	if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
 		return
 	}
-	relay(client, upstream)
+	Relay(client, upstream)
 }
 
 func (h *HTTPProxyHandler) handleForward(w http.ResponseWriter, r *http.Request) {
