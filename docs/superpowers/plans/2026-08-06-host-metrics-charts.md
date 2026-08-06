@@ -24,6 +24,37 @@
 - **Convergence files:** `backend/internal/domain/models.go`, `backend/cmd/server/main.go`, `frontend/src/store/types.ts`. This plan is sequential.
 - Verify with `npm run typecheck` (frontend) and `go vet ./...` (backend).
 
+## Error handling (from the spec — binding on every task)
+
+Reproduced verbatim from the spec rather than referenced, because a per-task
+brief is the only thing a reviewer checks the code against: a requirement that
+lives only in the spec is a requirement no per-task review can enforce. The
+first version of this plan omitted this table, and the SSH collector shipped
+turning *every* transport failure into `200 {"supported":false}` — which made
+the handler's error path unreachable and the pane's error state dead code —
+through three rounds of review, because no brief ever said otherwise.
+
+All REST errors use the mandatory `{"error":"message"}` envelope.
+
+| Condition | Behaviour |
+|---|---|
+| SSH host has no `/proc` | `200` with `supported:false` + reason. Pane renders an explanatory empty state. |
+| SSH connection unreachable / auth failure | Normal handler error envelope; pane renders its error state and keeps retrying on the poll interval. |
+| First SSH sample | `cpuPct: null`; chart shows mem/disk immediately, CPU from the second tick. |
+| Counter goes backwards (reboot) | Sample discarded, `cpuPct: null`, previous sample replaced. |
+| `disk.Usage("/")` fails on a machine | Zeroed `Disk` with the error surfaced; CPU/mem still render. |
+| Machine offline | Existing machine-transport error path; pane error state. |
+
+Two consequences worth stating outright, since both were got wrong:
+
+- **"Cannot be measured" and "could not be reached" are different answers.**
+  The first is a fact about the host and is a `200`. The second is a failure of
+  the request and must reach the client as an error envelope. Collapsing them
+  loses the second one entirely.
+- **`cpuPct: null` is never rendered as `0`.** Not in the headline number and
+  not in the chart series — a fabricated zero reads as "idle", which is a
+  claim the collector did not make.
+
 ---
 
 ### Task 1: Domain types and frontend mirror
@@ -297,9 +328,13 @@ func (c *Collector) Collect() (domain.HostStats, error) {
 	stats.Mem = domain.Usage{Used: vm.Total - vm.Available, Total: vm.Total}
 
 	// A failed disk read must not sink the whole sample — CPU and memory are
-	// still worth showing.
-	if du, err := disk.Usage(rootPath); err == nil {
+	// still worth showing. It must not vanish either: the Disk figure stays
+	// zeroed, and Reason says why, so the pane explains the zeros instead of
+	// asserting them (the error-handling table's "disk.Usage fails" row).
+	if du, err := diskUsage(rootPath); err == nil {
 		stats.Disk = domain.Usage{Used: du.Used, Total: du.Total}
+	} else {
+		stats.Reason = "disk usage unavailable: " + err.Error()
 	}
 
 	c.last = stats
@@ -307,6 +342,11 @@ func (c *Collector) Collect() (domain.HostStats, error) {
 	return stats, nil
 }
 ```
+
+`diskUsage` is a package-level `var diskUsage = disk.Usage`, purely as a test
+seam: the failure branch is real — the Windows runtime has no `/` volume — but
+it cannot be provoked on a host where the call succeeds, and an unexercised
+error branch is how "0 B / 0 B with no explanation" survives review.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -473,6 +513,20 @@ git commit -m "feat(stats): serve local host stats at GET /api/system/stats"
 ### Task 4: `/proc` and `df` parsers
 
 Pure functions, no I/O — the whole SSH correctness surface lives here, so it gets its own task and its own table-driven tests.
+
+Four of these functions shipped with a wrong-numbers bug that a
+happy-path fixture cannot catch, so the fixtures must include the awkward
+cases explicitly. Beyond the fixtures listed below, cover:
+
+- a `/proc/stat` line with **non-zero `guest` and `guest_nice`** — a fixture
+  with those columns at 0 cannot distinguish a correct parser from one that
+  double-counts guest time, which is why the bug survived;
+- a `/proc/meminfo` with **`MemAvailable` greater than `MemTotal`** (lxcfs
+  fakes this per-container), asserting a clamp rather than a uint64 underflow;
+- a `df` data row whose **Filesystem column contains `---`**
+  (`/dev/mapper/vg---root`), asserting the sample still parses;
+- `statsCommand` running **`df -Pk /`**, since `parseDF` hard-codes a 1024
+  block size that plain `-P` does not guarantee.
 
 **Files:**
 - Create: `backend/internal/service/sshstats_parse.go`
@@ -722,9 +776,35 @@ type cpuSample struct {
 	idle  uint64
 }
 
+// Column offsets within the aggregate "cpu " line, after the leading label.
+const (
+	colUser = iota
+	colNice
+	_ // system
+	colIdle
+	colIOWait
+	_ // irq
+	_ // softirq
+	_ // steal
+	colGuest
+	colGuestNice
+)
+
+// minCPUColumns is user through softirq. steal, guest and guest_nice arrived
+// in later kernels and are read only when present.
+const minCPUColumns = 7
+
 // parseProcStat reads the aggregate "cpu " line. Idle counts idle+iowait:
 // a CPU waiting on disk is not doing work, and treating iowait as busy makes
 // an I/O-bound host look pegged.
+//
+// Guest time is subtracted back out of user and nice before summing. The
+// kernel's account_guest_time folds guest into user and guest_nice into nice
+// *and* publishes both in their own columns, so a naive sum of all ten counts
+// that time twice — inflating total while idle stands still, which drags a
+// hypervisor's busy% toward 100 (a box at a true 50% reads as 67%). procps and
+// htop do the same subtraction. Test it with non-zero guest columns: a fixture
+// with guest at 0 cannot tell the two implementations apart.
 func parseProcStat(text string) (cpuSample, error) {
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(line)
@@ -732,23 +812,44 @@ func parseProcStat(text string) (cpuSample, error) {
 			continue
 		}
 		// user nice system idle iowait irq softirq [steal guest guest_nice]
-		if len(fields) < 8 {
-			return cpuSample{}, fmt.Errorf("/proc/stat cpu line has %d fields, want at least 8", len(fields)-1)
+		values := fields[1:]
+		if len(values) < minCPUColumns {
+			return cpuSample{}, fmt.Errorf("/proc/stat cpu line has %d fields, want at least %d", len(values), minCPUColumns)
 		}
-		var sample cpuSample
-		for i, raw := range fields[1:] {
+		cols := make([]uint64, len(values))
+		for i, raw := range values {
 			v, err := strconv.ParseUint(raw, 10, 64)
 			if err != nil {
 				return cpuSample{}, fmt.Errorf("/proc/stat field %d: %w", i, err)
 			}
+			cols[i] = v
+		}
+		if len(cols) > colGuest {
+			cols[colUser] = subFloor(cols[colUser], cols[colGuest])
+		}
+		if len(cols) > colGuestNice {
+			cols[colNice] = subFloor(cols[colNice], cols[colGuestNice])
+		}
+
+		var sample cpuSample
+		for i, v := range cols {
 			sample.total += v
-			if i == 3 || i == 4 { // idle, iowait
+			if i == colIdle || i == colIOWait {
 				sample.idle += v
 			}
 		}
 		return sample, nil
 	}
 	return cpuSample{}, fmt.Errorf("/proc/stat has no aggregate cpu line")
+}
+
+// subFloor subtracts without wrapping. guest can only exceed user on a kernel
+// that is lying to us; 0 is the honest answer there, not 1.8e19.
+func subFloor(a, b uint64) uint64 {
+	if b > a {
+		return 0
+	}
+	return a - b
 }
 
 // cpuPercent returns busy percentage between two samples, or nil when the
@@ -794,18 +895,19 @@ func parseMeminfo(text string) (domain.Usage, error) {
 	if !ok || total == 0 {
 		return domain.Usage{}, fmt.Errorf("/proc/meminfo has no MemTotal")
 	}
+	// Both branches clamp: a container's synthesised /proc/meminfo (lxcfs) can
+	// report more available than total, and an unclamped subtraction wraps
+	// uint64 into "16.0 EB used".
 	if available, ok := vals["MemAvailable"]; ok {
-		return domain.Usage{Used: total - available, Total: total}, nil
+		return domain.Usage{Used: subFloor(total, available), Total: total}, nil
 	}
 	free := vals["MemFree"] + vals["Buffers"] + vals["Cached"]
-	if free > total {
-		free = total
-	}
-	return domain.Usage{Used: total - free, Total: total}, nil
+	return domain.Usage{Used: subFloor(total, free), Total: total}, nil
 }
 
-// parseDF reads `df -P /` output. -P forces POSIX single-line records, so a
-// long device name cannot wrap and shift the columns.
+// parseDF reads `df -Pk /` output. -P forces POSIX single-line records, so a
+// long device name cannot wrap and shift the columns; -k pins the block size
+// this function hard-codes (see statsCommand).
 func parseDF(text string) (domain.Usage, error) {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	if len(lines) < 2 {
@@ -829,8 +931,15 @@ func parseDF(text string) (domain.Usage, error) {
 }
 
 // splitStatsOutput cuts the batched command's stdout into its three payloads.
+//
+// Bounded at three parts, not split on every occurrence: the separator is a
+// bare "---" and df's Filesystem column is arbitrary remote text — LVM doubles
+// the hyphens in device-mapper names, so an ordinary root on a VG named "vg-"
+// prints "/dev/mapper/vg---root". df is the last section, so stopping the
+// split there puts every such occurrence harmlessly inside the df payload
+// instead of shattering the whole sample into "unsupported".
 func splitStatsOutput(out string) (procStat, meminfo, df string, err error) {
-	parts := strings.Split(out, statsSectionSep)
+	parts := strings.SplitN(out, statsSectionSep, 3)
 	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("stats output has %d sections, want 3", len(parts))
 	}
@@ -858,6 +967,11 @@ git commit -m "feat(stats): add /proc and df parsers for SSH host metrics"
 - Create: `backend/internal/service/sshstats.go`
 - Test: `backend/internal/service/sshstats_test.go` (create)
 - Create: `backend/internal/handler/sshstats.go`
+- Test: `backend/internal/handler/sshstats_test.go` (create) — the success
+  shape, the unsupported `200`, and the `{"error":...}` envelope. The envelope
+  case is not optional: without a test that asserts a non-200, "the service can
+  never return an error" is invisible, and the handler's error path is dead
+  code that reads as live.
 - Modify: `backend/cmd/server/main.go`
 
 **Interfaces:**
@@ -866,21 +980,32 @@ git commit -m "feat(stats): add /proc and df parsers for SSH host metrics"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `backend/internal/service/sshstats_test.go`. These exercise the delta state machine through an injectable runner, so no SSH server is needed:
+Create `backend/internal/service/sshstats_test.go`. These exercise the delta
+state machine through an injectable runner, so no SSH server is needed. The
+runner is `func(ctx, connectionID) (stdout, stderr string, err error)`: `err`
+means *transport*, and the third return is what keeps the error-handling
+table's first two rows apart.
 
 ```go
 package service
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
+var fullSample = sampleProcStat + "---\n" + sampleMeminfo + "---\n" + sampleDF
+
+func okRunner(out string) statsRunner {
+	return func(context.Context, string) (string, string, error) { return out, "", nil }
+}
+
 func TestSSHStatsFirstSampleHasNilCPU(t *testing.T) {
-	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, error) {
-		return sampleProcStat + "---\n" + sampleMeminfo + "---\n" + sampleDF, nil
-	})
+	svc := newSSHStatsServiceWithRunner(okRunner(fullSample))
 
 	stats, err := svc.Collect(context.Background(), "conn-1")
 	if err != nil {
@@ -904,10 +1029,10 @@ func TestSSHStatsSecondSampleComputesCPU(t *testing.T) {
 		"cpu  200 40 60 1300 0 0 400 0 0 0\n" + "---\n" + sampleMeminfo + "---\n" + sampleDF,
 	}
 	i := 0
-	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, error) {
+	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, string, error) {
 		out := outputs[i]
 		i++
-		return out, nil
+		return out, "", nil
 	})
 	ctx := context.Background()
 
@@ -927,9 +1052,7 @@ func TestSSHStatsSecondSampleComputesCPU(t *testing.T) {
 }
 
 func TestSSHStatsPerConnectionDeltaIsolation(t *testing.T) {
-	svc := newSSHStatsServiceWithRunner(func(_ context.Context, _ string) (string, error) {
-		return sampleProcStat + "---\n" + sampleMeminfo + "---\n" + sampleDF, nil
-	})
+	svc := newSSHStatsServiceWithRunner(okRunner(fullSample))
 	ctx := context.Background()
 
 	if _, err := svc.Collect(ctx, "conn-a"); err != nil {
@@ -945,34 +1068,103 @@ func TestSSHStatsPerConnectionDeltaIsolation(t *testing.T) {
 	}
 }
 
-func TestSSHStatsUnsupportedWhenNoProc(t *testing.T) {
-	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, error) {
-		return "", fmt.Errorf("cat: /proc/stat: No such file or directory")
-	})
+// The two rows of the error-handling table, in one table-driven test. This is
+// the case the first version of this plan got wrong: it asserted that *any*
+// runner error must come back as Supported:false, which is true of a `cat`
+// that found no /proc and false of a host that was never reached.
+func TestSSHStatsSeparatesTransportFailureFromUnmeasurableHost(t *testing.T) {
+	tests := []struct {
+		name           string
+		stdout, stderr string
+		runErr         error
+		wantErr        string // substring; empty means "no error"
+		wantSupported  bool
+		wantReason     string // substring
+	}{
+		{name: "auth failure", runErr: errors.New("ssh: handshake failed: unable to authenticate"), wantErr: "unable to authenticate"},
+		{name: "connection refused", runErr: errors.New("connect: connection refused"), wantErr: "connection refused"},
+		{name: "host key rejected", runErr: errors.New("ssh: host key mismatch"), wantErr: "host key mismatch"},
+		{name: "poll timed out", runErr: context.DeadlineExceeded, wantErr: context.DeadlineExceeded.Error()},
+		{
+			// The command ran: sh printed the separators and df's output, and
+			// cat complained. Reachable, unmeasurable.
+			name:       "ran but the host has no /proc",
+			stdout:     "---\n---\n" + sampleDF,
+			stderr:     "cat: /proc/stat: No such file or directory\n",
+			wantReason: "/proc/stat: No such file or directory",
+		},
+		{name: "ran and printed nothing usable", stdout: "not remotely a proc dump", wantReason: "Linux only"},
+		{name: "healthy host", stdout: fullSample, wantSupported: true},
+	}
 
-	stats, err := svc.Collect(context.Background(), "conn-1")
-	if err != nil {
-		t.Fatalf("Collect should report unsupported, not error: %v", err)
-	}
-	if stats.Supported {
-		t.Error("Supported = true for a host without /proc")
-	}
-	if stats.Reason == "" {
-		t.Error("Reason is empty; the UI needs something to show")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, string, error) {
+				return tc.stdout, tc.stderr, tc.runErr
+			})
+
+			stats, err := svc.Collect(context.Background(), "conn-1")
+
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Collect returned nil error; the handler can never surface an envelope. stats = %+v", stats)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %q, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Collect: %v", err)
+			}
+			if stats.Supported != tc.wantSupported {
+				t.Fatalf("Supported = %v, want %v (reason %q)", stats.Supported, tc.wantSupported, stats.Reason)
+			}
+			if tc.wantReason != "" && !strings.Contains(stats.Reason, tc.wantReason) {
+				t.Errorf("Reason = %q, want it to contain %q", stats.Reason, tc.wantReason)
+			}
+		})
 	}
 }
 
-func TestSSHStatsUnsupportedWhenOutputUnparseable(t *testing.T) {
-	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, error) {
-		return "not remotely a proc dump", nil
-	})
+// ranAndFailed is what keeps the branches apart in production, where the
+// runner is sshmgr.RunCommand rather than a closure.
+func TestRanAndFailedOnlyMatchesARemoteExitStatus(t *testing.T) {
+	if !ranAndFailed(&ssh.ExitError{}) {
+		t.Error("a remote nonzero exit is a command that ran; want true")
+	}
+	if ranAndFailed(errors.New("dial tcp: connection refused")) {
+		t.Error("a dial failure never ran anything; want false")
+	}
+}
 
-	stats, err := svc.Collect(context.Background(), "conn-1")
+// An unreadable df must not sink CPU and memory — and must not render as a
+// confident "0 B / 0 B" either.
+func TestSSHStatsSurfacesDiskFailureWithoutSinkingTheSample(t *testing.T) {
+	out := sampleProcStat + "---\n" + sampleMeminfo + "---\n" + "df: /: Permission denied\n"
+	svc := newSSHStatsServiceWithRunner(okRunner(out))
+
+	stats, err := svc.Collect(context.Background(), "c")
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if stats.Supported {
-		t.Error("Supported = true for unparseable output")
+	if !stats.Supported || stats.Mem.Total == 0 {
+		t.Fatalf("a bad df must not sink the sample: %+v", stats)
+	}
+	if stats.Disk.Total != 0 {
+		t.Errorf("Disk.Total = %d, want 0", stats.Disk.Total)
+	}
+	if !strings.Contains(strings.ToLower(stats.Reason), "disk") {
+		t.Errorf("Reason = %q, want it to explain the empty disk figure", stats.Reason)
+	}
+}
+
+// GNU df's default block size is 1024 — except under POSIXLY_CORRECT, where it
+// is 512. parseDF hard-codes 1024, so the command must pin it; getting this
+// wrong reports every disk at exactly twice its size, confidently.
+func TestStatsCommandPinsDFBlockSize(t *testing.T) {
+	if joined := strings.Join(statsCommand, " "); !strings.Contains(joined, "df -Pk /") {
+		t.Errorf("statsCommand = %q, want it to run `df -Pk /`", joined)
 	}
 }
 
@@ -983,10 +1175,10 @@ func TestSSHStatsRebootResetsToNil(t *testing.T) {
 		"cpu  10 0 0 90 0 0 0 0 0 0\n" + "---\n" + sampleMeminfo + "---\n" + sampleDF,
 	}
 	i := 0
-	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, error) {
+	svc := newSSHStatsServiceWithRunner(func(context.Context, string) (string, string, error) {
 		out := outputs[i]
 		i++
-		return out, nil
+		return out, "", nil
 	})
 	ctx := context.Background()
 
@@ -1028,14 +1220,25 @@ import (
 
 // statsCommand reads all three sources in one round trip. Deliberately a
 // single command: a 2s poll over a high-latency link cannot afford three.
+//
+// -k pins df's block size to 1024 to match parseDF. -P alone is not enough:
+// GNU df defaults to 1024 blocks *except* under POSIXLY_CORRECT, where it
+// switches to 512 and every disk would be reported at exactly twice its size.
 var statsCommand = []string{
 	"sh", "-c",
-	"cat /proc/stat; echo " + statsSectionSep + "; cat /proc/meminfo; echo " + statsSectionSep + "; df -P /",
+	"cat /proc/stat; echo " + statsSectionSep + "; cat /proc/meminfo; echo " + statsSectionSep + "; df -Pk /",
 }
 
-// statsRunner runs the batched command for a connection and returns stdout.
-// Injectable so the delta state machine is testable without a live host.
-type statsRunner func(ctx context.Context, connectionID string) (string, error)
+// statsRunner runs the batched command for a connection. stdout and stderr
+// come back separately, and err is reserved for *transport* failures — a host
+// that could not be reached, authenticated to, or answered within the poll.
+// A command that ran and exited nonzero is not an error here: it is a
+// measurement result (this host has no /proc), and arrives as whatever the
+// remote printed with a nil error.
+//
+// Injectable so the delta state machine and this split are both testable
+// without a live host.
+type statsRunner func(ctx context.Context, connectionID string) (stdout, stderr string, err error)
 
 // SSHStatsService measures a saved SSH host's CPU, memory and root disk,
 // producing the same domain.HostStats that hoststats produces locally.
@@ -1051,49 +1254,66 @@ type SSHStatsService struct {
 }
 
 func NewSSHStatsService(pool *sshmgr.FilePool) *SSHStatsService {
-	return newSSHStatsServiceWithRunner(func(ctx context.Context, connectionID string) (string, error) {
+	return newSSHStatsServiceWithRunner(func(ctx context.Context, connectionID string) (string, string, error) {
 		stdout, stderr, err := sshmgr.RunCommand(ctx, pool, connectionID, statsCommand)
-		if err != nil {
-			if msg := strings.TrimSpace(string(stderr)); msg != "" {
-				return "", fmt.Errorf("%s", msg)
-			}
-			return "", err
+		if err != nil && !ranAndFailed(err) {
+			return "", "", err
 		}
-		return string(stdout), nil
+		return string(stdout), string(stderr), nil
 	})
+}
+
+// ranAndFailed reports whether err means the remote command executed and
+// exited nonzero — a `cat` that found no /proc, a `df` that could not stat / —
+// as opposed to never reaching the host at all (dial, auth, host key, a
+// dropped connection, a cancelled context). Only the first is a measurement;
+// the second is a request failure and must reach the client as one.
+func ranAndFailed(err error) bool {
+	var exitErr *ssh.ExitError
+	return errors.As(err, &exitErr)
 }
 
 func newSSHStatsServiceWithRunner(run statsRunner) *SSHStatsService {
 	return &SSHStatsService{run: run, prev: map[string]cpuSample{}}
 }
 
-// Collect samples the host. A host that cannot be measured comes back as
-// Supported:false with a reason rather than an error — an unmeasurable host
-// is a fact to display, not a request failure. Genuine transport failures
-// (unreachable, auth) still return an error for the handler to surface.
+// Collect samples the host.
+//
+// The two failure modes are deliberately kept apart, per the plan's
+// error-handling table. A host that answered but cannot be measured — no
+// /proc, so not Linux — comes back as Supported:false with a reason and a nil
+// error: that is a fact to display, not a request failure, and the pane says
+// so calmly. A host that could not be reached or authenticated to was never
+// measured at all; that returns an error, so the handler emits the
+// {"error":...} envelope and the pane shows its error state and keeps retrying
+// on the poll interval.
 func (s *SSHStatsService) Collect(ctx context.Context, connectionID string) (domain.HostStats, error) {
-	out, err := s.run(ctx, connectionID)
+	out, stderr, err := s.run(ctx, connectionID)
 	if err != nil {
-		return unsupportedStats(err.Error()), nil
+		return domain.HostStats{}, err
 	}
 
 	procStat, meminfo, df, err := splitStatsOutput(out)
 	if err != nil {
-		return unsupportedStats("this host did not return readable /proc output — Linux only"), nil
+		return unsupportedStats(remoteReason(stderr, "this host did not return readable /proc output — Linux only")), nil
 	}
 	sample, err := parseProcStat(procStat)
 	if err != nil {
-		return unsupportedStats("this host has no readable /proc/stat — Linux only"), nil
+		return unsupportedStats(remoteReason(stderr, "this host has no readable /proc/stat — Linux only")), nil
 	}
 	memUsage, err := parseMeminfo(meminfo)
 	if err != nil {
-		return unsupportedStats("this host has no readable /proc/meminfo — Linux only"), nil
+		return unsupportedStats(remoteReason(stderr, "this host has no readable /proc/meminfo — Linux only")), nil
 	}
 
 	stats := domain.HostStats{Supported: true, Mem: memUsage, SampledAt: time.Now()}
-	// A df failure must not sink the sample; CPU and memory still matter.
+	// A df failure must not sink the sample; CPU and memory still matter. It
+	// must not pass silently either: an unexplained "0 B / 0 B" reads as a bug
+	// in DevDeck rather than a filesystem the host would not report.
 	if diskUsage, err := parseDF(df); err == nil {
 		stats.Disk = diskUsage
+	} else {
+		stats.Reason = "disk usage unavailable: " + remoteReason(stderr, err.Error())
 	}
 
 	s.mu.Lock()
@@ -1106,17 +1326,26 @@ func (s *SSHStatsService) Collect(ctx context.Context, connectionID string) (dom
 	return stats, nil
 }
 
-// Forget drops a connection's delta state, so a reconnect starts clean.
-func (s *SSHStatsService) Forget(connectionID string) {
-	s.mu.Lock()
-	delete(s.prev, connectionID)
-	s.mu.Unlock()
+// remoteReason prefers what the remote actually printed — "cat: /proc/stat: No
+// such file or directory" tells an operator more than anything this process
+// can invent — and falls back when the command failed silently. First line
+// only: sh runs three commands and all three may have complained.
+func remoteReason(stderr, fallback string) string {
+	if msg, _, _ := strings.Cut(strings.TrimSpace(stderr), "\n"); msg != "" {
+		return strings.TrimSpace(msg)
+	}
+	return fallback
 }
 
 func unsupportedStats(reason string) domain.HostStats {
 	return domain.HostStats{Supported: false, Reason: reason, SampledAt: time.Now()}
 }
 ```
+
+Do **not** add a `Forget(connectionID)` to drop a connection's delta state: it
+reads as obviously useful and has no caller — nothing in this feature observes
+a disconnect, and a stale `cpuSample` is already handled by `cpuPercent`'s
+counter-went-backwards branch.
 
 - [ ] **Step 4: Write the handler**
 
@@ -1126,16 +1355,27 @@ Create `backend/internal/handler/sshstats.go`:
 package handler
 
 import (
+	"context"
 	"net/http"
 
+	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/service"
 )
+
+// sshStatsCollector is the one method this handler needs. Declared as an
+// interface so both response shapes — the 200 carrying a sample and the
+// {"error":...} envelope a transport failure produces — are testable without
+// a live SSH host. The constructor still takes the concrete service, so the
+// main.go wiring is unchanged.
+type sshStatsCollector interface {
+	Collect(ctx context.Context, connectionID string) (domain.HostStats, error)
+}
 
 // SSHStatsHandler serves live CPU/memory/disk for a saved SSH connection.
 // Hub-scoped like the rest of the SSH API: the hub holds the credentials, and
 // only the outbound dial moves to the connection's executor machine.
 type SSHStatsHandler struct {
-	svc *service.SSHStatsService
+	svc sshStatsCollector
 }
 
 func NewSSHStatsHandler(svc *service.SSHStatsService) *SSHStatsHandler {
@@ -1689,14 +1929,22 @@ const config: ChartConfig = { value: { label: 'Value', color: 'var(--devdeck-acc
 
 /** A compact filled sparkline over the rolling window. No X axis: the window
  *  is always "the last few minutes", and a timestamp axis in a pane this
- *  short costs more room than it repays. */
-export function MetricChart({ data }: { data: { value: number }[] }) {
+ *  short costs more room than it repays.
+ *
+ *  `value` is nullable because "unknown" is a real reading here: the first CPU
+ *  sample after a pane opens has no delta to measure, and so does the sample
+ *  after a host reboots. Those points are plotted as gaps, never as zeros. */
+export function MetricChart({ data }: { data: { value: number | null }[] }) {
   return (
     <ChartContainer config={config} className="h-[52px] w-full">
       <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
         {/* Fixed 0-100 domain: an auto domain rescales every tick and makes a
             flat 2% line look like a dramatic spike. */}
         <YAxis domain={[0, 100]} hide />
+        {/* Explicitly not connecting nulls: a bridged gap is a line drawn
+            through data that does not exist, and here it would draw straight
+            across a reboot. Stated rather than left to the library default so
+            it survives a recharts upgrade. */}
         <Area
           type="monotone"
           dataKey="value"
@@ -1705,6 +1953,7 @@ export function MetricChart({ data }: { data: { value: number }[] }) {
           fillOpacity={0.18}
           strokeWidth={1.5}
           dot={false}
+          connectNulls={false}
           isAnimationActive={false}
         />
       </AreaChart>
@@ -1794,8 +2043,16 @@ export function StatsPane({ target, visible }: { target: StatsTarget; visible: b
     )
   }
 
-  const cpuData = cpuSeries.map((s) => ({ value: s.cpuPct ?? 0 }))
+  // An unknown CPU sample is plotted as a gap, not as 0. `?? 0` would fabricate
+  // an idle-looking floor: the buffer holds ~5 minutes, so the first sample's
+  // fake zero sits on the chart that whole time, and a mid-window reboot (which
+  // correctly yields null) would draw a cliff to 0 that reads as "the box went
+  // quiet" when it means "the box restarted". MetricChart's data prop is
+  // therefore `{ value: number | null }[]`, with `connectNulls={false}` on the
+  // Area so recharts breaks the line rather than bridging the gap.
+  const cpuData = cpuSeries.map((s) => ({ value: s.cpuPct }))
   const memData = cpuSeries.map((s) => ({ value: pctOf(s.mem) }))
+  const diskPct = pctOf(stats.disk)
 
   return (
     <div className="flex flex-col gap-4 overflow-y-auto p-4">
@@ -1807,8 +2064,17 @@ export function StatsPane({ target, visible }: { target: StatsTarget; visible: b
         <MetricChart data={memData} />
       </MetricRow>
 
-      <MetricRow label="DISK" value={`${fmtBytes(stats.disk.used)} / ${fmtBytes(stats.disk.total)}`}>
-        <DiskBar pct={pctOf(stats.disk)} />
+      {/* The spec asks for used/total *with a percentage* — computing pctOf only
+          to size the bar leaves the number the operator actually reads off. */}
+      <MetricRow
+        label="DISK"
+        value={`${fmtBytes(stats.disk.used)} / ${fmtBytes(stats.disk.total)} · ${Math.round(diskPct)}%`}
+      >
+        <DiskBar pct={diskPct} />
+        {/* A supported sample can still carry a reason: both collectors zero the
+            disk figure rather than fail the sample when the root filesystem will
+            not report. Without this the pane asserts a confident "0 B / 0 B". */}
+        {stats.reason ? <span className="text-[10px] text-devdeck-fg-2">{stats.reason}</span> : null}
       </MetricRow>
     </div>
   )
