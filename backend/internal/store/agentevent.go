@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"devdeck/backend/internal/agentcore/orchestration"
+	"devdeck/backend/internal/domain"
 )
 
 // CommitAgentEvents appends events, assigns each a global Seq, and writes the
@@ -24,6 +26,10 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 	defer tx.Rollback()
 
 	out := make([]orchestration.Event, len(evts))
+	// touched tracks, per thread, the latest CreatedAt seen in this batch —
+	// used below to bump agent_thread.updated_at once per thread rather than
+	// once per event.
+	touched := make(map[string]int64, len(evts))
 	for i, e := range evts {
 		payload := string(e.Payload)
 		if payload == "" {
@@ -44,6 +50,37 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 		e.Seq = uint64(seq)
 		e.CommandID = commandID
 		out[i] = e
+
+		if e.CreatedAt > touched[e.ThreadID] {
+			touched[e.ThreadID] = e.CreatedAt
+		}
+
+		// A projection into a read table, in the same transaction as the
+		// append (spec 1's atomicity contract): the sessions sidebar can
+		// list a thread without replaying its whole event log. INSERT OR
+		// IGNORE makes this idempotent — a reconnect that resends the same
+		// derived CommandID must not fail on a duplicate row.
+		if e.Type == orchestration.EvtThreadCreated {
+			instanceID := threadCreatedInstanceID(e.Payload)
+			if _, err := tx.Exec(
+				`INSERT OR IGNORE INTO agent_thread
+					(id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at)
+				 VALUES (?, ?, ?, '', ?, '', ?, ?, ?)`,
+				e.ThreadID, worktreeIDFromThreadID(e.ThreadID), instanceID,
+				agentIDFromInstanceID(instanceID), string(orchestration.ThreadIdle),
+				e.CreatedAt, e.CreatedAt,
+			); err != nil {
+				return nil, fmt.Errorf("insert agent thread %s: %w", e.ThreadID, err)
+			}
+		}
+	}
+
+	for threadID, ts := range touched {
+		if _, err := tx.Exec(
+			`UPDATE agent_thread SET updated_at = ? WHERE id = ?`, ts, threadID,
+		); err != nil {
+			return nil, fmt.Errorf("touch agent thread %s: %w", threadID, err)
+		}
 	}
 
 	if _, err := tx.Exec(
@@ -57,6 +94,37 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 		return nil, err
 	}
 	return out, nil
+}
+
+// threadCreatedInstanceID extracts instanceId from an EvtThreadCreated
+// payload. Best-effort: an unparseable payload yields "" rather than failing
+// the commit — the event itself is still durable and correct either way,
+// this only feeds the read-model projection.
+func threadCreatedInstanceID(payload json.RawMessage) string {
+	var p struct {
+		InstanceID string `json:"instanceId"`
+	}
+	_ = json.Unmarshal(payload, &p)
+	return p.InstanceID
+}
+
+// worktreeIDFromThreadID mirrors handler.AgentWSHandler.resolveInstanceID and
+// main.go's Reactor.InstanceFor: a threadID is either a bare worktree id or
+// "<worktreeId>::chat-N" for extra split chat panes, both naming the same
+// worktree.
+func worktreeIDFromThreadID(threadID string) string {
+	if i := strings.Index(threadID, "::"); i >= 0 {
+		return threadID[:i]
+	}
+	return threadID
+}
+
+// agentIDFromInstanceID recovers the agent id from an InstanceID of the form
+// "<agent>:default" (see provider.InstanceID / Reactor.InstanceFor). Best
+// effort, same reasoning as threadCreatedInstanceID.
+func agentIDFromInstanceID(instanceID string) string {
+	agentID, _, _ := strings.Cut(instanceID, ":")
+	return agentID
 }
 
 // SeenAgentCommand reports whether this command was already processed and, if
@@ -106,23 +174,29 @@ func (s *Store) AgentEventsSince(threadID string, seq uint64) ([]orchestration.E
 	return scanAgentEvents(rows)
 }
 
-// AgentThreadIDs lists the threads belonging to a worktree.
-func (s *Store) AgentThreadIDs(worktreeID string) ([]string, error) {
+// AgentThreads lists a worktree's chat threads for the sessions sidebar,
+// newest-touched first. A thread with no events beyond its own creation still
+// appears — the row is written on EvtThreadCreated, not on first message.
+func (s *Store) AgentThreads(worktreeID string) ([]domain.AgentThread, error) {
 	rows, err := s.db.Query(
-		`SELECT id FROM agent_thread WHERE worktree_id = ? ORDER BY created_at`, worktreeID,
+		`SELECT id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at
+		 FROM agent_thread WHERE worktree_id = ? ORDER BY updated_at DESC`, worktreeID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []string
+	var out []domain.AgentThread
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var t domain.AgentThread
+		if err := rows.Scan(
+			&t.ID, &t.WorktreeID, &t.InstanceID, &t.Title, &t.AgentID, &t.Model,
+			&t.Status, &t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
-		out = append(out, id)
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }

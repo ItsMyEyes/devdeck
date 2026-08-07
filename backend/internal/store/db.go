@@ -432,6 +432,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateAgentThreadColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -464,6 +468,32 @@ func migrateSettingsPublishedSOCKS(db *sql.DB) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// migrateAgentThreadColumns adds title, agent_id, model, updated_at, and
+// status (introduced when the sessions sidebar needed to render a thread
+// without replaying its whole event log) to pre-existing databases.
+// updated_at backfills to created_at so rows written before this migration
+// still sort sensibly by recency instead of all tying at zero.
+func migrateAgentThreadColumns(db *sql.DB) error {
+	cols := []string{
+		"title TEXT NOT NULL DEFAULT ''",
+		"agent_id TEXT NOT NULL DEFAULT ''",
+		"model TEXT NOT NULL DEFAULT ''",
+		"updated_at INTEGER NOT NULL DEFAULT 0",
+		"status TEXT NOT NULL DEFAULT ''",
+	}
+	for _, col := range cols {
+		if _, err := db.Exec("ALTER TABLE agent_thread ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	if _, err := db.Exec("UPDATE agent_thread SET updated_at = created_at WHERE updated_at = 0"); err != nil {
+		return err
 	}
 	return nil
 }

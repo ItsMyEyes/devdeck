@@ -130,6 +130,132 @@ func TestAgentEventsSinceFiltersByThreadAndSeq(t *testing.T) {
 	}
 }
 
+// evtCreated builds an EvtThreadCreated event carrying a real create payload
+// (instanceId), unlike the placeholder {"k":"v"} the other tests use — the
+// agent_thread projection reads this field.
+func evtCreated(id, threadID, cmdID string, createdAt int64, instanceID string) orchestration.Event {
+	payload, _ := json.Marshal(map[string]string{"instanceId": instanceID})
+	return orchestration.Event{
+		EventID:   id,
+		Type:      orchestration.EvtThreadCreated,
+		ThreadID:  threadID,
+		CommandID: cmdID,
+		CreatedAt: createdAt,
+		Payload:   payload,
+	}
+}
+
+// Committing an EvtThreadCreated event must project a row into agent_thread,
+// in the same transaction as the event append — this is the write side
+// session history reads from, so a thread can be listed without replaying
+// its whole event log.
+func TestCommitAgentEventsWritesAgentThreadRow(t *testing.T) {
+	st := NewTestStore(t)
+
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evtCreated("ae-1", "w-abc", "ac-1", 1000, "claude:default"),
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	threads, err := st.AgentThreads("w-abc")
+	if err != nil {
+		t.Fatalf("agent threads: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("got %d agent_thread rows, want exactly 1", len(threads))
+	}
+	th := threads[0]
+	if th.ID != "w-abc" || th.WorktreeID != "w-abc" || th.InstanceID != "claude:default" {
+		t.Fatalf("thread row = %+v, want id/worktreeId w-abc, instanceId claude:default", th)
+	}
+	if th.CreatedAt != 1000 || th.UpdatedAt != 1000 {
+		t.Fatalf("thread row = %+v, want created/updated at 1000", th)
+	}
+}
+
+// The atomicity guarantee extends to the agent_thread projection: a batch
+// that fails partway must leave no row behind, exactly like agent_event.
+func TestCommitAgentEventsRollbackLeavesNoThreadRow(t *testing.T) {
+	st := NewTestStore(t)
+
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-other", "ac-1", orchestration.EvtThreadMessageSent),
+	}); err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+
+	// ae-1 collides with the seeded event above, so this whole batch —
+	// including its EvtThreadCreated for w-new — must roll back together.
+	_, err := st.CommitAgentEvents("ac-2", []orchestration.Event{
+		evtCreated("ae-2", "w-new", "ac-2", 2000, "claude:default"),
+		evt("ae-1", "w-other", "ac-2", orchestration.EvtThreadMessageSent),
+	})
+	if err == nil {
+		t.Fatal("duplicate event id must fail the commit")
+	}
+
+	threads, err := st.AgentThreads("w-new")
+	if err != nil {
+		t.Fatalf("agent threads: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("got %d agent_thread rows after a rolled-back commit, want 0", len(threads))
+	}
+}
+
+// AgentThreads filters by worktree (a "<worktreeId>::chat-N" thread still
+// belongs to its worktree), orders by updated_at descending, and includes a
+// thread that has no events beyond its own creation.
+func TestAgentThreadsFiltersOrdersAndIncludesEventlessThreads(t *testing.T) {
+	st := NewTestStore(t)
+
+	mustCreate := func(cmdID, threadID string, createdAt int64) {
+		t.Helper()
+		if _, err := st.CommitAgentEvents(cmdID, []orchestration.Event{
+			evtCreated("ae-"+cmdID, threadID, cmdID, createdAt, "claude:default"),
+		}); err != nil {
+			t.Fatalf("create %s: %v", threadID, err)
+		}
+	}
+
+	mustCreate("ac-1", "w-abc", 1000)
+	mustCreate("ac-2", "w-abc::chat-2", 2000)
+	mustCreate("ac-3", "w-other", 1500)
+
+	threads, err := st.AgentThreads("w-abc")
+	if err != nil {
+		t.Fatalf("agent threads: %v", err)
+	}
+	if len(threads) != 2 {
+		t.Fatalf("got %d threads for w-abc, want 2 (w-other must be excluded)", len(threads))
+	}
+	// Newest-touched first; w-abc itself has had no event since its own
+	// creation and must still appear.
+	if threads[0].ID != "w-abc::chat-2" || threads[1].ID != "w-abc" {
+		t.Fatalf("threads = %+v, want [w-abc::chat-2, w-abc] ordered by updated_at DESC", threads)
+	}
+
+	// A later commit on the older thread must bump it back to the front.
+	// CreatedAt (3000) is after both threads' creation, unlike evt()'s fixed
+	// 1000, or the bump wouldn't actually move w-abc ahead of w-abc::chat-2.
+	if _, err := st.CommitAgentEvents("ac-4", []orchestration.Event{
+		{
+			EventID: "ae-4", Type: orchestration.EvtThreadMessageSent, ThreadID: "w-abc",
+			CommandID: "ac-4", CreatedAt: 3000, Payload: json.RawMessage(`{"k":"v"}`),
+		},
+	}); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	threads, err = st.AgentThreads("w-abc")
+	if err != nil {
+		t.Fatalf("agent threads after touch: %v", err)
+	}
+	if threads[0].ID != "w-abc" {
+		t.Fatalf("threads = %+v, want w-abc first after a later commit touched it", threads)
+	}
+}
+
 func TestPayloadSurvivesRoundTrip(t *testing.T) {
 	st := NewTestStore(t)
 	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{

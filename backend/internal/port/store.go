@@ -194,7 +194,7 @@ type Store interface {
 	CommitAgentEvents(commandID string, evts []orchestration.Event) ([]orchestration.Event, error)
 	SeenAgentCommand(commandID string) ([]orchestration.Event, bool, error)
 	AgentEventsSince(threadID string, seq uint64) ([]orchestration.Event, error)
-	AgentThreadIDs(worktreeID string) ([]string, error)
+	AgentThreads(worktreeID string) ([]domain.AgentThread, error)
 }
 
 // SettingsPatch carries optional fields for a partial settings update.

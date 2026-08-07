@@ -119,3 +119,22 @@ type EnvProfileSummary struct {
 type EnvModelOption struct {
 	ID string `json:"id"`
 }
+
+// AgentThread is a chat thread's read-model row for the sessions sidebar —
+// title, status, and recency without replaying the thread's whole event log.
+// Written by store.CommitAgentEvents when it commits an EvtThreadCreated
+// event (a projection into a read table, inside the same transaction as the
+// append), and touched again (UpdatedAt only) on every later commit for the
+// thread. CreatedAt/UpdatedAt are epoch milliseconds, matching
+// orchestration.Event.CreatedAt — the source these are derived from.
+type AgentThread struct {
+	ID         string `json:"id"`
+	WorktreeID string `json:"worktreeId"`
+	InstanceID string `json:"instanceId"`
+	Title      string `json:"title"`
+	AgentID    string `json:"agentId"`
+	Model      string `json:"model"`
+	Status     string `json:"status"`
+	CreatedAt  int64  `json:"createdAt"`
+	UpdatedAt  int64  `json:"updatedAt"`
+}

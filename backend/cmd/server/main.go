@@ -427,6 +427,7 @@ func main() {
 	go agentReactor.Run(context.Background())
 
 	agentWS := handler.NewAgentWSHandler(agentEngine, st, agentChatSvc)
+	agentThreadH := handler.NewAgentThreadHandler(st)
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
@@ -777,6 +778,7 @@ func main() {
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/agent", agentWS.HandleWS)
+	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
