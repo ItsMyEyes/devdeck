@@ -99,9 +99,18 @@ export interface UseAgentChatSocketResult {
 /** WS URL for one agent-chat thread, direct-first with hub-proxy fallback —
  *  same routing `terminalWsUrl`/`openLspTransport` use, no query params of
  *  its own since the protocol negotiates the thread over the `hello` frame
- *  rather than the URL. */
+ *  rather than the URL.
+ *
+ *  The path is `/agent`, NOT `/ws/agent`: `machineWsUrl` already appends `/ws`
+ *  to both the direct and proxy bases, so passing `/ws/agent` here produces
+ *  `wss://host/ws/ws/agent` and every connection dies with a 400. Same
+ *  convention as its two siblings — `terminalClient.ts` passes `/terminal`
+ *  and `lspTransport.ts` passes `/lsp`, both reaching `/ws/...` on the
+ *  runtime. */
+export const AGENT_WS_PATH = '/agent'
+
 function agentChatWsUrl(machine: Machine): Promise<string> {
-  return machineWsUrl(machine, '/ws/agent', {})
+  return machineWsUrl(machine, AGENT_WS_PATH, {})
 }
 
 export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOptions): UseAgentChatSocketResult {

@@ -76,6 +76,7 @@ export default defineConfig({
       'src/features/tabs/tileTree.ssh.test.ts',
       'src/features/tabs/WorkspaceTileCanvas.focus.test.tsx',
       'src/lib/fuzzyHighlight.test.ts',
+      'src/lib/machineWsUrl.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
       'src/features/browser/BrowserTabStrip.test.tsx',
       'src/components/ui/progress-line.test.tsx',
@@ -142,6 +143,7 @@ export default defineConfig({
       'src/features/agent-chat/timeline.test.ts',
       'src/features/agent-chat/scrollAnchoring.test.ts',
       'src/features/terminal/paneTree.agentChat.test.ts',
+      'src/features/agent-chat/AgentChatPane.test.tsx',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
