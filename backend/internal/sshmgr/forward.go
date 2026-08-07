@@ -290,6 +290,8 @@ func (f *Forwarder) listenFor(rule domain.SSHForward, client *ssh.Client) (net.L
 	switch rule.Mode {
 	case "local":
 		return net.Listen("tcp", net.JoinHostPort(rule.BindHost, strconv.Itoa(rule.BindPort)))
+	case "remote":
+		return client.Listen("tcp", net.JoinHostPort(rule.BindHost, strconv.Itoa(rule.BindPort)))
 	case "dynamic":
 		ln, err := net.Listen("tcp", net.JoinHostPort(rule.BindHost, strconv.Itoa(rule.BindPort)))
 		if err != nil {
@@ -306,34 +308,66 @@ func (f *Forwarder) listenFor(rule domain.SSHForward, client *ssh.Client) (net.L
 	}
 }
 
-// serve runs the accept loop for modes that need one of their own — "local"
-// dials the target through the SSH client per accepted connection, closing
-// both ends when the proxied copy finishes (netproxy.Relay only half-closes;
-// its callers own Close()). "dynamic" already has its own accept loop
-// running inside the SOCKS5Server that listenFor started, so this returns
-// immediately for it.
+// serve runs the accept loop for modes that need one of their own. "local"
+// dials the target through the SSH client per accepted connection; "remote"
+// dials the target locally (the SSH client already delivered the connection
+// from the far end). Both close both ends when the proxied copy finishes
+// (netproxy.Relay only half-closes; its callers own Close()). "dynamic"
+// already has its own accept loop running inside the SOCKS5Server that
+// listenFor started, so this returns immediately for it.
 func (f *Forwarder) serve(rule domain.SSHForward, client *ssh.Client, ln net.Listener) {
-	if rule.Mode != "local" {
-		return
-	}
-	for {
-		accepted, err := ln.Accept()
-		if err != nil {
-			// ln.Close() — from Stop, or from runOnce's cleanup goroutine
-			// when the transport dies — ends the loop this way. Expected,
-			// not a failure to report anywhere.
-			return
-		}
-		go func() {
-			remote, err := client.Dial("tcp", net.JoinHostPort(rule.TargetHost, strconv.Itoa(rule.TargetPort)))
+	switch rule.Mode {
+	case "local":
+		for {
+			accepted, err := ln.Accept()
 			if err != nil {
-				// One dead target must not tear the forward down.
-				_ = accepted.Close()
+				// ln.Close() — from Stop, or from runOnce's cleanup goroutine
+				// when the transport dies — ends the loop this way. Expected,
+				// not a failure to report anywhere.
 				return
 			}
-			netproxy.Relay(accepted, remote)
-			_ = accepted.Close()
-			_ = remote.Close()
-		}()
+			go func() {
+				remote, err := client.Dial("tcp", net.JoinHostPort(rule.TargetHost, strconv.Itoa(rule.TargetPort)))
+				if err != nil {
+					// One dead target must not tear the forward down.
+					_ = accepted.Close()
+					return
+				}
+				netproxy.Relay(accepted, remote)
+				_ = accepted.Close()
+				_ = remote.Close()
+			}()
+		}
+	case "remote":
+		for {
+			accepted, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				local, err := net.DialTimeout("tcp", net.JoinHostPort(rule.TargetHost, strconv.Itoa(rule.TargetPort)), 10*time.Second)
+				if err != nil {
+					_ = accepted.Close()
+					return
+				}
+				netproxy.Relay(accepted, local)
+				_ = accepted.Close()
+				_ = local.Close()
+			}()
+		}
+	default:
+		// "dynamic": its accept loop already runs inside the SOCKS5Server
+		// that listenFor started — a second loop here would race it.
+		return
+	}
+}
+
+// closeClientForTest kills a forward's transport so the reconnect path can be
+// exercised. Test-only; not part of the public surface.
+func (f *Forwarder) closeClientForTest(forwardID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if a, ok := f.active[forwardID]; ok && a.client != nil {
+		_ = a.client.Close()
 	}
 }
