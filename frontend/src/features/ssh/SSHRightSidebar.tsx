@@ -124,11 +124,17 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
           onKeyDown={handleKeyDown}
         />
         <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-card-wash" style={{ width }}>
-          {panel === 'forwards' ? (
-            <SSHForwardsPanel connectionId={connectionId} visible={open} />
-          ) : (
-            <StatsPane target={{ kind: 'ssh', connectionId }} visible={open} />
-          )}
+          {/* Both panels stay mounted (hidden, not torn down) so switching
+           *  between Stats and Port Forwarding doesn't wipe StatsPane's
+           *  component-local sparkline history — the same hide-not-unmount
+           *  reasoning ShellSidebar already applies to Explorer/Git. `visible`
+           *  drives each panel's own polling pause independently. */}
+          <div className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'forwards' ? 'flex' : 'hidden')}>
+            <SSHForwardsPanel connectionId={connectionId} visible={open && panel === 'forwards'} />
+          </div>
+          <div className={cn('min-h-0 min-w-0 flex-1', panel === 'stats' ? 'flex' : 'hidden')}>
+            <StatsPane target={{ kind: 'ssh', connectionId }} visible={open && panel === 'stats'} />
+          </div>
         </div>
       </div>
 
