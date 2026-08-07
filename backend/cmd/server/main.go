@@ -365,6 +365,9 @@ func main() {
 	sshStatsSvc := service.NewSSHStatsService(sshFilePool)
 	sshStatsH := handler.NewSSHStatsHandler(sshStatsSvc)
 
+	sshForwarder := sshmgr.NewForwarder(sshDialer)
+	sshForwardH := handler.NewSSHForwardHandler(st, sshForwarder)
+
 	dbSecrets := service.NewDBSecretService(st, authKey)
 	dbH := handler.NewDBHandler(st, dbSecrets)
 
@@ -651,6 +654,18 @@ func main() {
 		// the local host stats route is.
 		mux.HandleFunc("GET /api/ssh/connections/{id}/stats", sshStatsH.Get)
 
+		// Forwarding rule CRUD and lifecycle. All seven routes are hub-only:
+		// the listener always opens on the hub, and the SSH client dial
+		// (Forwarder.runOnce) already routes through the connection's
+		// ExecutorMachineID SOCKS5 proxy when needed — same as shell/SFTP/exec.
+		mux.HandleFunc("GET /api/ssh/connections/{id}/forwards", sshForwardH.GetForConnection)
+		mux.HandleFunc("POST /api/ssh/connections/{id}/forwards", sshForwardH.Post)
+		mux.HandleFunc("PATCH /api/ssh/forwards/{id}", sshForwardH.Patch)
+		mux.HandleFunc("DELETE /api/ssh/forwards/{id}", sshForwardH.Delete)
+		mux.HandleFunc("POST /api/ssh/forwards/start", sshForwardH.PostStart)
+		mux.HandleFunc("POST /api/ssh/forwards/{id}/stop", sshForwardH.PostStop)
+		mux.HandleFunc("GET /api/ssh/forwards/states", sshForwardH.GetStates)
+
 		// Database connection registry — hub-scoped like the SSH registry.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
 		mux.HandleFunc("POST /api/db/connections", dbH.PostConnection)
@@ -770,6 +785,9 @@ func main() {
 	// NOTE: the desktop shell (frontend/src-tauri/src/sidecar.rs) parses this
 	// exact line to discover the bound port when launched with --addr 127.0.0.1:0.
 	log.Printf("devdeck listening on %s (db: %s)", uiURL, *dbPath)
+	if _, listenPort, err := net.SplitHostPort(listener.Addr().String()); err == nil {
+		tailscaleStatusH.SetPort(listenPort)
+	}
 	if *tailscaleServe {
 		if err := startTailscaleServe(listener.Addr()); err != nil {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
