@@ -371,3 +371,42 @@ func mustJSON(v any) json.RawMessage {
 	}
 	return b
 }
+
+// ---------------------------------------------------------------------------
+// ThreadDirectory: the in-memory binding of thread -> instance
+// ---------------------------------------------------------------------------
+
+// threadDirectory is a mutex-guarded map implementing provider.ThreadDirectory.
+// It is intentionally in-memory only: nothing in spec 1 binds a thread to an
+// instance yet (that lands with the provider-start flow in a later task), so
+// there is nothing here that needs to survive a restart on its own.
+type threadDirectory struct {
+	mu   sync.Mutex
+	byID map[string]provider.InstanceID
+}
+
+// NewThreadDirectory returns a fresh, empty provider.ThreadDirectory.
+func NewThreadDirectory() provider.ThreadDirectory {
+	return &threadDirectory{byID: make(map[string]provider.InstanceID)}
+}
+
+func (d *threadDirectory) InstanceFor(threadID string) (provider.InstanceID, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	id, ok := d.byID[threadID]
+	return id, ok
+}
+
+func (d *threadDirectory) Bind(threadID string, id provider.InstanceID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.byID[threadID] = id
+}
+
+func (d *threadDirectory) Unbind(threadID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.byID, threadID)
+}
+
+var _ provider.ThreadDirectory = (*threadDirectory)(nil)

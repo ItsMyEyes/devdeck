@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +20,10 @@ import (
 	"strings"
 	"time"
 
+	"devdeck/backend/internal/agentcore/approval"
+	"devdeck/backend/internal/agentcore/orchestration"
+	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/agentcore/provider/claude"
 	"devdeck/backend/internal/config"
 	"devdeck/backend/internal/dbdriver"
 	"devdeck/backend/internal/dbdriver/mysqldrv"
@@ -385,6 +390,26 @@ func main() {
 	termH := handler.NewTerminalHandler()
 	fsH := handler.NewFsHandler()
 
+	// Agent chat harness. Runs on every role, but only a runtime ever has
+	// worktrees to chat about; the hub simply proxies the WebSocket like it
+	// does for /ws/terminal and /ws/ssh.
+	agentRegistry := provider.NewRegistry(claude.NewDriver())
+	agentEngine := orchestration.NewEngine(orchestration.EngineOptions{
+		Store:     orchestration.NewPortStore(st),
+		NewID:     func() string { return "ae-" + randomHex(8) },
+		QueueSize: 64,
+	})
+	go agentEngine.Run(context.Background())
+
+	agentDir := orchestration.NewThreadDirectory()
+	agentChatSvc := &provider.Service{Registry: agentRegistry, Dir: agentDir}
+	agentReactor := &orchestration.Reactor{
+		Engine: agentEngine, Provider: agentChatSvc, Broker: approval.NoopBroker{},
+	}
+	go agentReactor.Run(context.Background())
+
+	agentWS := handler.NewAgentWSHandler(agentEngine, st, agentChatSvc)
+
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
 		PandocBin: *pandocBin,
@@ -733,6 +758,7 @@ func main() {
 	mux.HandleFunc("PUT /api/proxy/publish", publishedSOCKSH.Put)
 
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
+	mux.HandleFunc("/ws/agent", agentWS.HandleWS)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 	mux.Handle("/", webui.Handler())
@@ -1126,6 +1152,18 @@ func defaultPythonBin() string {
 		}
 	}
 	return "python3"
+}
+
+// randomHex returns n bytes of crypto/rand as a lowercase hex string, e.g.
+// randomHex(8) -> "1a2b3c4d5e6f7a8b". Mirrors the type-prefixed hex ids used
+// throughout the store (internal/store.idGen); agent event/command ids reuse
+// the same shape ("ae-"/"ac-" prefixes) rather than inventing a new scheme.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return strings.Repeat("0", n*2)
+	}
+	return hex.EncodeToString(b)
 }
 
 // loadOrCreateAuthKey resolves the AES-256 key used to encrypt TOTP secrets
