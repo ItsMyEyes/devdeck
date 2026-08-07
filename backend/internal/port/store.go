@@ -3,6 +3,7 @@ package port
 import (
 	"time"
 
+	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/domain"
 )
 
@@ -186,6 +187,14 @@ type Store interface {
 	CreatePendingLogin(userID, tokenHash string, expiresAt time.Time) error
 	PendingLoginUserID(tokenHash string, now time.Time) (string, error)
 	DeletePendingLogin(tokenHash string) error
+
+	// Agent chat event log. CommitAgentEvents MUST be one transaction —
+	// append + Seq assignment + receipt — or a crash can leave the read
+	// model permanently disagreeing with the log.
+	CommitAgentEvents(commandID string, evts []orchestration.Event) ([]orchestration.Event, error)
+	SeenAgentCommand(commandID string) ([]orchestration.Event, bool, error)
+	AgentEventsSince(threadID string, seq uint64) ([]orchestration.Event, error)
+	AgentThreadIDs(worktreeID string) ([]string, error)
 }
 
 // SettingsPatch carries optional fields for a partial settings update.

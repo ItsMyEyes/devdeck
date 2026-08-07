@@ -341,6 +341,32 @@ CREATE TABLE IF NOT EXISTS pending_logins (
   expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_thread (
+  id           TEXT PRIMARY KEY,
+  worktree_id  TEXT NOT NULL,
+  instance_id  TEXT NOT NULL,
+  created_at   INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_event (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id   TEXT NOT NULL UNIQUE,
+  thread_id  TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  payload    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_event_thread_seq
+  ON agent_event(thread_id, seq);
+
+CREATE TABLE IF NOT EXISTS agent_command_receipt (
+  command_id TEXT PRIMARY KEY,
+  thread_id  TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 INSERT OR IGNORE INTO settings (id, active_workspace_id, default_model)
 VALUES (1, NULL, 'claude-sonnet-5');
 `
