@@ -1,9 +1,12 @@
 package orchestration
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"devdeck/backend/internal/agentcore/provider"
 )
@@ -251,5 +254,221 @@ func applyOne(s *State, e Event) {
 			t.Deleted = true
 			t.Status = ThreadStopped
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+// Store must execute append + projection + receipt in a SINGLE transaction.
+// Otherwise the read model can diverge permanently from the event log after
+// a crash.
+type Store interface {
+	// SeenCommand returns the events produced by this command if it has
+	// already been processed (idempotency).
+	SeenCommand(ctx context.Context, commandID string) ([]Event, bool, error)
+
+	// Commit runs one transaction: assign Seq, append the event, write the
+	// receipt, run side effects (projection into read tables) — all
+	// atomically. Returns the events with Seq assigned.
+	Commit(ctx context.Context, commandID string, evts []Event) ([]Event, error)
+
+	// EventsSince is used for reconciliation after a dispatch failure.
+	EventsSince(ctx context.Context, seq uint64) ([]Event, error)
+}
+
+// ---------------------------------------------------------------------------
+// Engine
+// ---------------------------------------------------------------------------
+
+type envelope struct {
+	ctx   context.Context
+	cmd   Command
+	reply chan result
+}
+
+type result struct {
+	events []Event
+	err    error
+}
+
+// Engine serialises all command processing through a SINGLE goroutine. This
+// looks like a bottleneck and is not: the decider is pure and fast; the slow
+// part (calling out to the provider) happens in the reactor, outside this
+// loop.
+//
+// Total serialisation is exactly what lets the decider treat its state as
+// stable while it computes. Without it you would need per-thread locking and
+// every invariant becomes fragile.
+type Engine struct {
+	store Store
+	queue chan envelope
+	newID func() string
+	now   func() int64
+
+	mu    sync.RWMutex
+	state *State
+
+	subsMu sync.RWMutex
+	subs   map[int]chan []Event
+	nextID int
+
+	closeOnce sync.Once
+	done      chan struct{}
+}
+
+type EngineOptions struct {
+	Store   Store
+	Initial *State
+	NewID   func() string
+	Now     func() int64
+	// QueueSize: 0 = unbuffered. Buffered is better so the reactor does not
+	// block while the engine is busy, but keep it small — a long queue hides
+	// throughput problems instead of surfacing them.
+	QueueSize int
+}
+
+func NewEngine(o EngineOptions) *Engine {
+	if o.Initial == nil {
+		o.Initial = NewState()
+	}
+	if o.Now == nil {
+		o.Now = func() int64 { return time.Now().UnixMilli() }
+	}
+	return &Engine{
+		store: o.Store,
+		queue: make(chan envelope, o.QueueSize),
+		newID: o.NewID,
+		now:   o.Now,
+		state: o.Initial,
+		subs:  make(map[int]chan []Event),
+		done:  make(chan struct{}),
+	}
+}
+
+// Run drives the worker. Call it in its own goroutine; it blocks until ctx
+// is done.
+func (e *Engine) Run(ctx context.Context) {
+	defer e.closeSubs()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case env := <-e.queue:
+			evts, err := e.process(env.ctx, env.cmd)
+			env.reply <- result{events: evts, err: err}
+		}
+	}
+}
+
+// Dispatch enqueues a command and waits for its result.
+func (e *Engine) Dispatch(ctx context.Context, cmd Command) ([]Event, error) {
+	if cmd.CommandID == "" {
+		return nil, errors.New("engine: CommandID is required (used for idempotency)")
+	}
+	reply := make(chan result, 1)
+	select {
+	case e.queue <- envelope{ctx: ctx, cmd: cmd, reply: reply}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-e.done:
+		return nil, errors.New("engine: already stopped")
+	}
+	select {
+	case r := <-reply:
+		return r.events, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (e *Engine) process(ctx context.Context, cmd Command) ([]Event, error) {
+	// 1. Idempotency.
+	if prior, seen, err := e.store.SeenCommand(ctx, cmd.CommandID); err != nil {
+		return nil, err
+	} else if seen {
+		return prior, nil
+	}
+
+	// 2. Decide (pure).
+	e.mu.RLock()
+	cur := e.state
+	e.mu.RUnlock()
+
+	evts, err := Decide(cur, cmd, e.now(), e.newID)
+	if err != nil {
+		return nil, err
+	}
+	if len(evts) == 0 {
+		return nil, nil
+	}
+
+	// 3. Commit atomically.
+	committed, err := e.store.Commit(ctx, cmd.CommandID, evts)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Swap state AFTER the commit succeeds. This order matters: if you
+	//    swap first and the commit then fails, the in-memory read model holds
+	//    facts that never made it into the log.
+	e.mu.Lock()
+	e.state = Apply(e.state, committed)
+	e.mu.Unlock()
+
+	// 5. Publish to subscribers (reactor + client). Always after commit.
+	e.publish(committed)
+	return committed, nil
+}
+
+func (e *Engine) State() *State {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.state
+}
+
+// Subscribe returns a channel of committed events, plus an unsubscribe
+// function. The channel is buffered; a slow subscriber will lose events (see
+// the drop note in publish) — so subscribers that need guarantees must be
+// fast, or replay their own queue.
+func (e *Engine) Subscribe(buf int) (<-chan []Event, func()) {
+	e.subsMu.Lock()
+	defer e.subsMu.Unlock()
+	id := e.nextID
+	e.nextID++
+	ch := make(chan []Event, buf)
+	e.subs[id] = ch
+	return ch, func() {
+		e.subsMu.Lock()
+		defer e.subsMu.Unlock()
+		if c, ok := e.subs[id]; ok {
+			delete(e.subs, id)
+			close(c)
+		}
+	}
+}
+
+func (e *Engine) publish(evts []Event) {
+	e.subsMu.RLock()
+	defer e.subsMu.RUnlock()
+	for _, ch := range e.subs {
+		select {
+		case ch <- evts:
+		default:
+			// Deliberately dropped rather than blocking the command loop.
+			// Subscribers that need a guarantee must replay via
+			// Store.EventsSince(seq) using the last Seq they saw.
+		}
+	}
+}
+
+func (e *Engine) closeSubs() {
+	e.closeOnce.Do(func() { close(e.done) })
+	e.subsMu.Lock()
+	defer e.subsMu.Unlock()
+	for id, ch := range e.subs {
+		delete(e.subs, id)
+		close(ch)
 	}
 }
