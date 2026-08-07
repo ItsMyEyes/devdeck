@@ -230,6 +230,35 @@ export function shellSidebarState(shellSidebars: Record<string, ShellSidebarStat
   return shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR
 }
 
+export type SSHRightSidebarPanel = 'forwards' | 'stats'
+
+/** The SSH pane's right sidebar: Port Forwarding + Stats, mirroring
+ *  ShellSidebar's left-side Explorer/Git sidebar. Keyed by the same
+ *  `ssh:<connectionId>` shellKey ShellSidebar already uses for this pane —
+ *  SSH-only, there is no worktree-pane equivalent. */
+export interface SSHRightSidebarState {
+  open: boolean
+  panel: SSHRightSidebarPanel
+  width: number
+}
+
+export const SSH_RIGHT_SIDEBAR_MIN_WIDTH = 240
+export const SSH_RIGHT_SIDEBAR_MAX_WIDTH = 480
+// Closed by default so existing SSH tabs don't suddenly lose horizontal
+// space on first load after this ships.
+const DEFAULT_SSH_RIGHT_SIDEBAR: SSHRightSidebarState = { open: false, panel: 'stats', width: 300 }
+
+function clampSSHRightSidebarWidth(width: number): number {
+  return Math.min(SSH_RIGHT_SIDEBAR_MAX_WIDTH, Math.max(SSH_RIGHT_SIDEBAR_MIN_WIDTH, width))
+}
+
+export function sshRightSidebarState(
+  sidebars: Record<string, SSHRightSidebarState>,
+  shellKey: string,
+): SSHRightSidebarState {
+  return sidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR
+}
+
 /** The diff currently highlighted in a shell's git file list, keyed by
  *  `wt:<worktreeId>` / `ssh:<connectionId>`. Only drives the list's selection
  *  highlight — the diff itself is rendered by a `git-diff` pane tab that owns
@@ -300,6 +329,9 @@ interface DevDeckState {
    *  keyed by `wt:<worktreeId>` / `ssh:<connectionId>`. Unseen keys default
    *  via `shellSidebarState`; read through that helper, not this map directly. */
   shellSidebars: Record<string, ShellSidebarState>
+  /** The SSH pane's right sidebar (Port Forwarding + Stats) — keyed the
+   *  same way as `shellSidebars`. See `sshRightSidebarState`. */
+  sshRightSidebars: Record<string, SSHRightSidebarState>
   /** Selected git diff per shell, shared between the compact sidebar GitPanel
    *  and the full-width in-pane Git tab. See `GitDiffTarget` above. */
   gitDiffs: Record<string, GitDiffTarget>
@@ -357,6 +389,9 @@ interface DevDeckState {
   setShellSidebarOpen: (shellKey: string, open: boolean) => void
   setShellSidebarPanel: (shellKey: string, panel: ShellSidebarPanel) => void
   setShellSidebarWidth: (shellKey: string, width: number) => void
+  setSSHRightSidebarOpen: (shellKey: string, open: boolean) => void
+  setSSHRightSidebarPanel: (shellKey: string, panel: SSHRightSidebarPanel) => void
+  setSSHRightSidebarWidth: (shellKey: string, width: number) => void
   setGitDiff: (shellKey: string, target: GitDiffTarget) => void
   clearGitDiff: (shellKey: string) => void
   openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
@@ -597,6 +632,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       worktreeLayouts: {},
       sshTileLayouts: {},
       shellSidebars: {},
+      sshRightSidebars: {},
       gitDiffs: {},
       railExpanded: false,
       sshActiveGroup: ALL_SSH_GROUPS,
@@ -631,6 +667,30 @@ export const useDevDeckStore = create<DevDeckState>()(
             void (s.shellSidebars[shellKey] = {
               ...(s.shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR),
               width: clampShellSidebarWidth(width),
+            }),
+        ),
+      setSSHRightSidebarOpen: (shellKey, open) =>
+        set(
+          (s) =>
+            void (s.sshRightSidebars[shellKey] = {
+              ...(s.sshRightSidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR),
+              open,
+            }),
+        ),
+      setSSHRightSidebarPanel: (shellKey, panel) =>
+        set(
+          (s) =>
+            void (s.sshRightSidebars[shellKey] = {
+              ...(s.sshRightSidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR),
+              panel,
+            }),
+        ),
+      setSSHRightSidebarWidth: (shellKey, width) =>
+        set(
+          (s) =>
+            void (s.sshRightSidebars[shellKey] = {
+              ...(s.sshRightSidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR),
+              width: clampSSHRightSidebarWidth(width),
             }),
         ),
       setGitDiff: (shellKey, target) => set((s) => void (s.gitDiffs[shellKey] = target)),
@@ -970,6 +1030,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         worktreeLayouts: s.worktreeLayouts,
         sshTileLayouts: s.sshTileLayouts,
         shellSidebars: s.shellSidebars,
+        sshRightSidebars: s.sshRightSidebars,
         gitDiffs: s.gitDiffs,
         railExpanded: s.railExpanded,
         workspaceTileLayouts: s.workspaceTileLayouts,

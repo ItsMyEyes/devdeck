@@ -38,6 +38,7 @@ import { ShellSidebar } from '@/features/terminal/ShellSidebar'
 import { StatsPane } from '@/features/stats/StatsPane'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
+import { SSHRightSidebar } from './SSHRightSidebar'
 
 function basename(path: string) {
   return path.split('/').pop() ?? path
@@ -589,6 +590,8 @@ export function SSHShellPane({
           onCancel={handleCloseConfirmCancel}
         />
       </div>
+
+      <SSHRightSidebar shellKey={shellKey} connectionId={connectionId} />
     </div>
   )
 }
