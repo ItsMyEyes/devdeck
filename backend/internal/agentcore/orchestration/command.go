@@ -1,0 +1,148 @@
+// Package orchestration is the event-sourced engine. The server never
+// mutates state directly: the client sends a Command, the engine turns it
+// into a persisted Event, and a projector derives the read model from Events.
+//
+// t3code equivalents:
+//   - contract  -> packages/contracts/src/orchestration.ts
+//   - engine    -> apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+//   - decider   -> apps/server/src/orchestration/decider.ts
+//   - projector -> apps/server/src/orchestration/projector.ts
+package orchestration
+
+import (
+	"encoding/json"
+
+	"devdeck/backend/internal/agentcore/event"
+	"devdeck/backend/internal/agentcore/provider"
+)
+
+// NAMING CONVENTION — follow this with discipline, it is what keeps the
+// system readable. Command is imperative and dotted; Event is past-tense and
+// hyphenated. "thread.turn.start" (command) -> "thread.turn-start-requested"
+// (fact). Mix the two once and you will not be able to tell intent from
+// occurrence when reading the log.
+
+type CommandType string
+
+const (
+	// --- The client may send these ---
+	CmdThreadCreate             CommandType = "thread.create"
+	CmdThreadTurnStart          CommandType = "thread.turn.start"
+	CmdThreadTurnInterrupt      CommandType = "thread.turn.interrupt"
+	CmdThreadApprovalRespond    CommandType = "thread.approval.respond"
+	CmdThreadUserInputRespond   CommandType = "thread.user-input.respond"
+	CmdThreadSessionStop        CommandType = "thread.session.stop"
+	CmdThreadRuntimeModeSet     CommandType = "thread.runtime-mode.set"
+	CmdThreadInteractionModeSet CommandType = "thread.interaction-mode.set"
+	CmdThreadDelete             CommandType = "thread.delete"
+
+	// --- Only the server-side reactor may send these ---
+	// This separation matters: if a client could send assistant.delta, it
+	// could forge agent output.
+	CmdThreadAssistantDelta    CommandType = "thread.message.assistant.delta"
+	CmdThreadAssistantComplete CommandType = "thread.message.assistant.complete"
+	CmdThreadSessionSet        CommandType = "thread.session.set"
+	CmdThreadActivityAppend    CommandType = "thread.activity.append"
+	CmdThreadTurnDiffComplete  CommandType = "thread.turn.diff.complete"
+)
+
+// ClientDispatchable is the authorization allowlist. Check this at the RPC
+// boundary, not inside the decider.
+var ClientDispatchable = map[CommandType]bool{
+	CmdThreadCreate:             true,
+	CmdThreadTurnStart:          true,
+	CmdThreadTurnInterrupt:      true,
+	CmdThreadApprovalRespond:    true,
+	CmdThreadUserInputRespond:   true,
+	CmdThreadSessionStop:        true,
+	CmdThreadRuntimeModeSet:     true,
+	CmdThreadInteractionModeSet: true,
+	CmdThreadDelete:             true,
+}
+
+// Command is an intent. It has not necessarily happened yet — the decider
+// may reject it.
+type Command struct {
+	// CommandID doubles as a correlation id. The engine uses it for
+	// idempotency: a retry with the same CommandID does not produce a second
+	// event. This is what saves you when a WebSocket drops and the client
+	// resends.
+	CommandID string          `json:"commandId"`
+	Type      CommandType     `json:"type"`
+	ThreadID  string          `json:"threadId,omitempty"`
+	IssuedAt  int64           `json:"issuedAt"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+}
+
+// --- Command payloads ---
+
+type TurnStartPayload struct {
+	Text        string                  `json:"text"`
+	Attachments []provider.Attachment   `json:"attachments,omitempty"`
+	Model       provider.ModelSelection `json:"model"`
+}
+
+type ApprovalRespondPayload struct {
+	RequestID string         `json:"requestId"`
+	Decision  event.Decision `json:"decision"`
+}
+
+type RuntimeModeSetPayload struct {
+	Mode provider.RuntimeMode `json:"mode"`
+}
+
+type AssistantDeltaPayload struct {
+	TurnID   string           `json:"turnId"`
+	ItemID   string           `json:"itemId"`
+	Stream   event.StreamKind `json:"stream"`
+	Text     string           `json:"text"`
+	Sequence uint64           `json:"sequence"`
+}
+
+// ---------------------------------------------------------------------------
+// Event (persisted fact)
+// ---------------------------------------------------------------------------
+
+type EventType string
+
+const (
+	EvtThreadCreated                    EventType = "thread.created"
+	EvtThreadTurnStartRequested         EventType = "thread.turn-start-requested"
+	EvtThreadTurnInterruptRequested     EventType = "thread.turn-interrupt-requested"
+	EvtThreadApprovalResponseRequested  EventType = "thread.approval-response-requested"
+	EvtThreadUserInputResponseRequested EventType = "thread.user-input-response-requested"
+	EvtThreadSessionStopRequested       EventType = "thread.session-stop-requested"
+	EvtThreadRuntimeModeSet             EventType = "thread.runtime-mode-set"
+	EvtThreadInteractionModeSet         EventType = "thread.interaction-mode-set"
+	EvtThreadSessionSet                 EventType = "thread.session-set"
+	EvtThreadMessageSent                EventType = "thread.message-sent"
+	EvtThreadActivityAppended           EventType = "thread.activity-appended"
+	EvtThreadTurnDiffCompleted          EventType = "thread.turn-diff-completed"
+	EvtThreadSettled                    EventType = "thread.settled"
+	EvtThreadDeleted                    EventType = "thread.deleted"
+)
+
+// IntentEvents are events that trigger provider work. ProviderCommandReactor
+// only reacts to this set.
+var IntentEvents = map[EventType]bool{
+	EvtThreadTurnStartRequested:         true,
+	EvtThreadTurnInterruptRequested:     true,
+	EvtThreadApprovalResponseRequested:  true,
+	EvtThreadUserInputResponseRequested: true,
+	EvtThreadSessionStopRequested:       true,
+	EvtThreadRuntimeModeSet:             true,
+	EvtThreadInteractionModeSet:         true,
+}
+
+// Event is a fact. Once appended, it never changes.
+type Event struct {
+	// Seq is the global sequence number, assigned by the event store at
+	// commit time.
+	Seq       uint64          `json:"seq"`
+	EventID   string          `json:"eventId"`
+	Type      EventType       `json:"type"`
+	ThreadID  string          `json:"threadId,omitempty"`
+	CommandID string          `json:"commandId"`
+	CreatedAt int64           `json:"createdAt"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+}
