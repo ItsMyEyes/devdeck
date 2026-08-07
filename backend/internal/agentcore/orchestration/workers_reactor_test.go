@@ -55,7 +55,7 @@ type fakeDriver struct {
 	adapter *fakeAdapter
 }
 
-func (d *fakeDriver) Kind() provider.Kind           { return fakeKind }
+func (d *fakeDriver) Kind() provider.Kind            { return fakeKind }
 func (d *fakeDriver) DefaultConfig() json.RawMessage { return json.RawMessage(`{}`) }
 func (d *fakeDriver) DecodeConfig(json.RawMessage) (provider.Config, error) {
 	return fakeConfig{}, nil
