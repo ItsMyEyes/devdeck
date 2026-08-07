@@ -133,6 +133,9 @@ export default defineConfig({
       'src/features/stats/StatsPane.tokens.test.ts',
       'src/features/ssh/SSHForwardsPanel.test.tsx',
       'src/features/ssh/SSHRightSidebar.test.tsx',
+      'src/features/agent-chat/eventReducer.test.ts',
+      'src/features/agent-chat/timeline.test.ts',
+      'src/features/agent-chat/scrollAnchoring.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.
