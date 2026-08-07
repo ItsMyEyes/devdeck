@@ -4,7 +4,7 @@
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import type { Machine, Workspace } from '@/store/types'
+import type { Machine, SSHForward, Workspace } from '@/store/types'
 import {
   acceptSSHHostKey,
   applyDBDDL,
@@ -25,6 +25,7 @@ import {
   createProject,
   createRecurringTemplate,
   createSSHConnection,
+  createSSHForward,
   createTodo,
   createWorkspace,
   deleteAttachment,
@@ -41,6 +42,7 @@ import {
   deleteProject,
   deleteRecurringTemplate,
   deleteSSHConnection,
+  deleteSSHForward,
   deleteTodo,
   deleteWorkspace,
   exportDBTable,
@@ -72,6 +74,8 @@ import {
   fetchSettings,
   fetchPinStatus,
   fetchSSHConnections,
+  fetchSSHForwards,
+  fetchSSHForwardStates,
   fetchSSHStats,
   fetchTailscaleStatus,
   fetchWhoami,
@@ -83,7 +87,9 @@ import {
   seed,
   setDBSecret,
   setLocalPublishedSocks,
+  startSSHForward,
   stopMachine,
+  stopSSHForward,
   testDBConnection,
   uploadAttachment,
   updateBank,
@@ -101,6 +107,7 @@ import {
   updateRecurringTemplate,
   updateSettings,
   updateSSHConnection,
+  updateSSHForward,
   updateTodo,
   updateWorkspace,
 } from '@/lib/api'
@@ -590,6 +597,110 @@ export function useAcceptSSHHostKey() {
   return useMutation({
     mutationFn: (id: string) => acceptSSHHostKey(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.sshConnections }),
+  })
+}
+
+// ---- SSH port-forwarding rules ----
+
+export function useSSHForwards(connectionId: string) {
+  return useQuery({ queryKey: qk.sshForwards(connectionId), queryFn: () => fetchSSHForwards(connectionId) })
+}
+
+/** Live status of every active forward on this machine. `enabled` is driven
+ *  by panel visibility (mirrors useMachineStats/useSSHStats) so a
+ *  backgrounded forwards panel stops polling instead of sampling forever. */
+export function useSSHForwardStates(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.sshForwardStates,
+    queryFn: fetchSSHForwardStates,
+    enabled,
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
+}
+
+export function useCreateSSHForward(connectionId: string) {
+  const queryClient = useQueryClient()
+  const resync = () => {
+    queryClient.invalidateQueries({ queryKey: qk.sshForwards(connectionId) })
+    queryClient.invalidateQueries({ queryKey: qk.sshForwardStates })
+  }
+  return useMutation({
+    mutationFn: (body: Omit<SSHForward, 'id' | 'connectionId'>) => createSSHForward(connectionId, body),
+    onSuccess: resync,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to create the forwarding rule')
+      resync()
+    },
+  })
+}
+
+/** mutate takes `{ id, body }` — a partial patch of one existing rule. */
+export function useUpdateSSHForward(connectionId: string) {
+  const queryClient = useQueryClient()
+  const resync = () => {
+    queryClient.invalidateQueries({ queryKey: qk.sshForwards(connectionId) })
+    queryClient.invalidateQueries({ queryKey: qk.sshForwardStates })
+  }
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<Omit<SSHForward, 'id' | 'connectionId'>> }) =>
+      updateSSHForward(id, body),
+    onSuccess: resync,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update the forwarding rule')
+      resync()
+    },
+  })
+}
+
+export function useDeleteSSHForward(connectionId: string) {
+  const queryClient = useQueryClient()
+  const resync = () => {
+    queryClient.invalidateQueries({ queryKey: qk.sshForwards(connectionId) })
+    queryClient.invalidateQueries({ queryKey: qk.sshForwardStates })
+  }
+  return useMutation({
+    mutationFn: (id: string) => deleteSSHForward(id),
+    onSuccess: resync,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete the forwarding rule')
+      resync()
+    },
+  })
+}
+
+/** mutate takes the whole rule, not just its id — see startSSHForward's doc
+ *  comment in lib/api.ts for why. The rule carries its own connectionId, so
+ *  this hook (unlike the others in this section) needs no connectionId arg. */
+export function useStartSSHForward() {
+  const queryClient = useQueryClient()
+  const resync = (connectionId: string) => {
+    queryClient.invalidateQueries({ queryKey: qk.sshForwards(connectionId) })
+    queryClient.invalidateQueries({ queryKey: qk.sshForwardStates })
+  }
+  return useMutation({
+    mutationFn: (rule: SSHForward) => startSSHForward(rule),
+    onSuccess: (_data, rule) => resync(rule.connectionId),
+    onError: (err, rule) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to start the forward')
+      resync(rule.connectionId)
+    },
+  })
+}
+
+export function useStopSSHForward(connectionId: string) {
+  const queryClient = useQueryClient()
+  const resync = () => {
+    queryClient.invalidateQueries({ queryKey: qk.sshForwards(connectionId) })
+    queryClient.invalidateQueries({ queryKey: qk.sshForwardStates })
+  }
+  return useMutation({
+    mutationFn: (id: string) => stopSSHForward(id),
+    onSuccess: resync,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to stop the forward')
+      resync()
+    },
   })
 }
 

@@ -78,6 +78,8 @@ export const qk = {
   sshGrep: (connectionId: string, query: string) => ['ssh', connectionId, 'grep', query] as const,
   /** Prefix of sshGrep — see worktreeGrepRoot's comment above. */
   sshGrepRoot: (connectionId: string) => ['ssh', connectionId, 'grep'] as const,
+  sshForwards: (connectionId: string) => ['ssh', connectionId, 'forwards'] as const,
+  sshForwardStates: ['ssh', 'forwardStates'] as const,
   dbConnections: ['dbConnections'] as const,
   dbEngines: ['dbEngines'] as const,
   dbSavedQueries: (connectionId: string) => ['db', connectionId, 'queries'] as const,

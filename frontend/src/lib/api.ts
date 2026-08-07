@@ -31,6 +31,8 @@ import type {
   RecurringInvoiceTemplate,
   Settings,
   SSHConnection,
+  SSHForward,
+  SSHForwardState,
   Todo,
   User,
   Whoami,
@@ -881,6 +883,46 @@ export function acceptSSHHostKey(id: string): Promise<void> {
  *  machine route — the hub holds this connection's credentials. */
 export function fetchSSHStats(connectionId: string): Promise<HostStats> {
   return request<HostStats>('GET', `/ssh/connections/${connectionId}/stats`)
+}
+
+// ---- SSH port-forwarding rules (hub-owned; the executor holds only live
+// listeners, in memory — see backend/internal/sshmgr) ----
+
+export function fetchSSHForwards(connectionId: string): Promise<SSHForward[]> {
+  return request<SSHForward[]>('GET', `/ssh/connections/${connectionId}/forwards`)
+}
+
+export function createSSHForward(
+  connectionId: string,
+  body: Omit<SSHForward, 'id' | 'connectionId'>,
+): Promise<SSHForward> {
+  return request<SSHForward>('POST', `/ssh/connections/${connectionId}/forwards`, body)
+}
+
+export function updateSSHForward(
+  id: string,
+  body: Partial<Omit<SSHForward, 'id' | 'connectionId'>>,
+): Promise<SSHForward> {
+  return request<SSHForward>('PATCH', `/ssh/forwards/${id}`, body)
+}
+
+export function deleteSSHForward(id: string): Promise<void> {
+  return request<void>('DELETE', `/ssh/forwards/${id}`)
+}
+
+/** Starts a forward by pushing the whole rule, not just its id: the
+ *  Forwarder never re-reads a persisted copy between creating a rule and
+ *  starting it, which is what keeps forwarding out of catalog sync. */
+export function startSSHForward(rule: SSHForward): Promise<SSHForwardState> {
+  return request<SSHForwardState>('POST', '/ssh/forwards/start', rule)
+}
+
+export function stopSSHForward(id: string): Promise<SSHForwardState> {
+  return request<SSHForwardState>('POST', `/ssh/forwards/${id}/stop`)
+}
+
+export function fetchSSHForwardStates(): Promise<SSHForwardState[]> {
+  return request<SSHForwardState[]>('GET', '/ssh/forwards/states')
 }
 
 // ---- DB connections (hub registry; secrets are write-only) ----
