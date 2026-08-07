@@ -117,7 +117,11 @@ function ForwardRow({ rule, state, onEdit, onDelete, onStart, onStop }: ForwardR
       ) : null}
 
       {nonLoopback ? (
-        <p className="mt-2 font-mono text-[10.5px] text-devdeck-wait">Reachable by anything that can route to the hub.</p>
+        <p className="mt-2 font-mono text-[10.5px] text-devdeck-wait">
+          {rule.mode === 'remote'
+            ? 'Reachable by anything that can route to the remote host.'
+            : 'Reachable by anything that can route to the hub.'}
+        </p>
       ) : null}
       {nonLoopback && rule.mode === 'remote' ? (
         <p className="mt-1 font-mono text-[10.5px] text-devdeck-fg-2">Requires `GatewayPorts yes` on the remote sshd.</p>

@@ -153,6 +153,20 @@ describe('SSHForwardsPanel', () => {
     expect(screen.getByText(/reachable by anything/i)).toBeTruthy()
   })
 
+  it('warns about the remote host, not the hub, for a non-loopback remote forward', () => {
+    mockUseSSHForwards.mockReturnValue({
+      data: [{ ...localRule, mode: 'remote' as const, bindHost: '0.0.0.0' }],
+      isLoading: false,
+      error: null,
+    })
+    mockUseSSHForwardStates.mockReturnValue({ data: [state()] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+
+    expect(screen.getByText(/reachable by anything that can route to the remote host/i)).toBeTruthy()
+    expect(screen.queryByText(/route to the hub/i)).toBeNull()
+  })
+
   it('adds the GatewayPorts note for a non-loopback remote forward', () => {
     mockUseSSHForwards.mockReturnValue({
       data: [{ ...localRule, mode: 'remote' as const, bindHost: '0.0.0.0' }],
