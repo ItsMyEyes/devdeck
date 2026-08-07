@@ -5,6 +5,11 @@ import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } f
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import type { Machine, SSHForward, Workspace } from '@/store/types'
+// Sessions sidebar's read side (`GET /api/agent/threads`) has no wrapper in
+// machineApi.ts — that file isn't in Task 8's file list, for any task in the
+// plan, so `fetchAgentThreads` below calls `machineRequest` directly rather
+// than adding one there. See this task's `deviationsFromPlan`.
+import { machineRequest } from '@/lib/machineClient'
 import {
   acceptSSHHostKey,
   applyDBDDL,
@@ -1330,6 +1335,44 @@ export function useSeed() {
         queryClient.invalidateQueries({ queryKey: qk.workspaces }),
         queryClient.invalidateQueries({ queryKey: qk.settings }),
       ]),
+  })
+}
+
+// ---- Agent chat threads (sessions sidebar) ----
+
+/** Mirrors `domain.AgentThread` (`backend/internal/domain/agent.go`) — a chat
+ *  thread's read-model row for the sessions sidebar. Defined here rather
+ *  than `store/types.ts`: that file is a convergence file (CLAUDE.md,
+ *  ORCHESTRATION.md) serialized across the whole plan, and no task in this
+ *  plan's file list touches it. `CreatedAt`/`UpdatedAt` are epoch
+ *  milliseconds, matching the backend's own doc comment. */
+export interface AgentThread {
+  id: string
+  worktreeId: string
+  instanceId: string
+  title: string
+  agentId: string
+  model: string
+  status: string
+  createdAt: number
+  updatedAt: number
+}
+
+function fetchAgentThreads(machine: Machine, worktreeId: string): Promise<AgentThread[]> {
+  return machineRequest<AgentThread[]>(machine, 'GET', `/agent/threads?worktree=${encodeURIComponent(worktreeId)}`)
+}
+
+/** A worktree's chat threads, newest-touched first — backs the sessions
+ *  sidebar tab. Threads live on the runtime that owns the worktree, so this
+ *  goes through `machineRequest`/`machineClient`, same as every other
+ *  worktree-scoped query. */
+export function useAgentThreads(machine: Machine | undefined, worktreeId: string | undefined) {
+  return useQuery({
+    queryKey: qk.agentThreads(machine?.id ?? '', worktreeId ?? ''),
+    queryFn: () => fetchAgentThreads(machine!, worktreeId!),
+    enabled: !!machine && !!worktreeId,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
   })
 }
 

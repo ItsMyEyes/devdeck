@@ -13,6 +13,12 @@ export const qk = {
     ['machines', machineId, 'agents', id, 'skills', skillName, 'content'] as const,
   agentMCPServers: (machineId: string, id: string) =>
     ['machines', machineId, 'agents', id, 'mcp-servers'] as const,
+  /** Chat threads for the sessions sidebar tab — one worktree's thread list
+   *  on one machine. Not in Task 8's own file list (the plan never mentions
+   *  keys.ts for any task), but every `qk`-keyed query needs an entry here;
+   *  see this task's `deviationsFromPlan`. */
+  agentThreads: (machineId: string, worktreeId: string) =>
+    ['machines', machineId, 'worktrees', worktreeId, 'agent-threads'] as const,
   agentEnvProfiles: (machineId: string, id: string) =>
     ['machines', machineId, 'agents', id, 'env-profiles'] as const,
   agentSettingsFile: (machineId: string, id: string) =>

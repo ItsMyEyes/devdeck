@@ -206,9 +206,10 @@ function createBrowserTileState(machineId: string | null = null, url: string | n
 }
 
 /** Which panel a shell's own sidebar (§3 of the sidebar-shell-explorer design)
- *  currently shows. SSH shells never offer 'git' in the rail, but the stored
- *  panel value isn't restricted — see ShellSidebar for the rail gating. */
-export type ShellSidebarPanel = 'explorer' | 'git'
+ *  currently shows. SSH shells never offer 'git' or 'sessions' in the rail,
+ *  but the stored panel value isn't restricted — see ShellSidebar for the
+ *  rail gating. */
+export type ShellSidebarPanel = 'explorer' | 'git' | 'sessions'
 
 /** One shell tab's sidebar: open/closed, which panel, and drag-resized width.
  *  Keyed by `wt:<worktreeId>` / `ssh:<connectionId>` in `shellSidebars` below. */

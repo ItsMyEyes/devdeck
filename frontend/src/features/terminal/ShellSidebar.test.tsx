@@ -38,6 +38,21 @@ vi.mock('./GitPanel', () => ({
   ),
 }))
 
+// SessionsPanel calls useAgentThreads (react-query) internally — stub it the
+// same way GitPanel is stubbed above, since this file has no
+// QueryClientProvider in its render tree.
+vi.mock('@/features/agent-chat/SessionsPanel', () => ({
+  SessionsPanel: (props: {
+    worktreeId: string
+    activeThreadKey?: string
+    onSelectThread?: (threadKey: string) => void
+  }) => (
+    <div data-testid="mock-sessions" data-active-thread={props.activeThreadKey ?? ''} onClick={() => props.onSelectThread?.('wt-1::chat-2')}>
+      {props.worktreeId}
+    </div>
+  ),
+}))
+
 // jsdom has no PointerEvent / pointer-capture implementation at all — stub
 // both so the drag strip's pointerdown/move/up handlers don't throw.
 if (typeof window.PointerEvent === 'undefined') {
@@ -95,14 +110,16 @@ describe('ShellSidebar panel switcher', () => {
 
     expect(screen.queryByRole('button', { name: 'Explorer' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Git' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sessions' })).toBeNull()
     expect(screen.getByTestId('mock-explorer')).toBeInTheDocument()
   })
 
-  it('shows both entries when a git prop is given', () => {
+  it('shows all three entries when a git prop is given', () => {
     render(<ShellSidebar {...baseProps} git={{ worktreeId: 'wt-1', machine }} />)
 
     expect(screen.getByRole('button', { name: 'Explorer' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Git' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sessions' })).toBeInTheDocument()
   })
 
   // The sidebar is ~280px; a side-by-side diff there is unreadable, so its
@@ -117,6 +134,35 @@ describe('ShellSidebar panel switcher', () => {
 
     fireEvent.click(git)
     expect(onOpenGitDiff).toHaveBeenCalledWith({ path: 'src/root.go', staged: false, untracked: false })
+  })
+
+  it('mounts SessionsPanel and forwards activeThreadKey / onOpenThread', () => {
+    const onOpenThread = vi.fn()
+    useDevDeckStore.setState({ shellSidebars: { 'wt:worktree-1': { open: true, panel: 'sessions', width: 280 } } })
+    render(
+      <ShellSidebar
+        {...baseProps}
+        git={{ worktreeId: 'wt-1', machine }}
+        activeThreadKey="wt-1"
+        onOpenThread={onOpenThread}
+      />,
+    )
+
+    const sessions = screen.getByTestId('mock-sessions')
+    expect(sessions).toHaveAttribute('data-active-thread', 'wt-1')
+
+    fireEvent.click(sessions)
+    expect(onOpenThread).toHaveBeenCalledWith('wt-1::chat-2')
+  })
+
+  // A shell with no git support (or a stale persisted 'sessions' value) has
+  // nowhere to fetch sessions from — same fallback as the existing 'git' guard.
+  it('falls back to explorer when the panel is sessions but there is no git prop', () => {
+    useDevDeckStore.setState({ shellSidebars: { 'wt:worktree-1': { open: true, panel: 'sessions', width: 280 } } })
+    render(<ShellSidebar {...baseProps} />)
+
+    expect(screen.queryByTestId('mock-sessions')).toBeNull()
+    expect(screen.getByTestId('mock-explorer')).toBeInTheDocument()
   })
 })
 

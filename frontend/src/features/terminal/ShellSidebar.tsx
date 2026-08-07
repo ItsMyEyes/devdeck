@@ -1,10 +1,11 @@
 import { useCallback, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { Files, GitBranch } from 'lucide-react'
+import { Files, GitBranch, MessagesSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
 import type { ShellSidebarPanel } from '@/store/useDevDeckStore'
 import { SHELL_SIDEBAR_MAX_WIDTH, SHELL_SIDEBAR_MIN_WIDTH, shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { SessionsPanel } from '@/features/agent-chat/SessionsPanel'
 import type { FilesTarget } from './filesTarget'
 import type { GitDiffTarget } from './paneTree'
 import { GitPanel } from './GitPanel'
@@ -29,6 +30,14 @@ export interface ShellSidebarProps {
    *  row is picked in the sidebar's list-only GitPanel, which has no diff
    *  column — mirrors how picking a file in Explorer opens an editor tab. */
   onOpenGitDiff?: (target: GitDiffTarget) => void
+  /** The threadKey of the chat pane currently open for this worktree, if
+   *  any — highlights the matching row in the Sessions tab. */
+  activeThreadKey?: string
+  /** Opens a session's thread in a chat pane when its row is picked in the
+   *  Sessions tab. Optional: `ExpandedTerminal.tsx` (pane management) isn't
+   *  in Task 8's file list, so nothing calls this yet — see
+   *  `SessionsPanel.tsx`'s doc comment and this task's `deviationsFromPlan`. */
+  onOpenThread?: (threadKey: string) => void
   onOpenFile: (path: string) => void
   onFileDeleted: (paths: string[]) => void
   onRequestQuickOpen: () => void
@@ -58,6 +67,8 @@ export function ShellSidebar({
   rootLabel,
   git,
   onOpenGitDiff,
+  activeThreadKey,
+  onOpenThread,
   onOpenFile,
   onFileDeleted,
   onRequestQuickOpen,
@@ -69,10 +80,12 @@ export function ShellSidebar({
   const setShellSidebarWidth = useDevDeckStore((s) => s.setShellSidebarWidth)
 
   const { open, panel, width } = shellSidebarState(shellSidebars, shellKey)
-  // A shell with no git support can still carry a stale 'git' panel value
-  // (persisted from before, or hand-edited) — fall back to explorer rather
-  // than mounting a GitPanel with no worktree/machine to give it.
-  const effectivePanel: ShellSidebarPanel = panel === 'git' && git ? 'git' : 'explorer'
+  // A shell with no git support can still carry a stale 'git'/'sessions'
+  // panel value (persisted from before, or hand-edited) — fall back to
+  // explorer rather than mounting a GitPanel/SessionsPanel with no
+  // worktree/machine to give it. Sessions is gated on `git` the same way
+  // Git is: both need the worktree/machine pair an SSH shell doesn't have.
+  const effectivePanel: ShellSidebarPanel = (panel === 'git' || panel === 'sessions') && git ? panel : 'explorer'
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -120,11 +133,11 @@ export function ShellSidebar({
 
   return (
     <div className="flex min-h-0 flex-none" style={open ? undefined : { display: 'none' }}>
-      <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-surface-2" style={{ width }}>
+      <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-card-wash" style={{ width }}>
         {/* Only worth a switcher when there is something to switch between —
             an SSH shell has Explorer alone, so its header would be dead chrome. */}
         {git ? (
-          <div className="flex h-8 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-surface px-1.5">
+          <div className="flex h-8 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-pane px-1.5">
             <PanelButton
               label="Explorer"
               icon={<Files size={13} />}
@@ -136,6 +149,12 @@ export function ShellSidebar({
               icon={<GitBranch size={13} />}
               active={effectivePanel === 'git'}
               onClick={() => setShellSidebarPanel(shellKey, 'git')}
+            />
+            <PanelButton
+              label="Sessions"
+              icon={<MessagesSquare size={13} />}
+              active={effectivePanel === 'sessions'}
+              onClick={() => setShellSidebarPanel(shellKey, 'sessions')}
             />
           </div>
         ) : null}
@@ -164,6 +183,16 @@ export function ShellSidebar({
             />
           </div>
         ) : null}
+        {git ? (
+          <div className={cn('min-h-0 min-w-0 flex-1 flex-col', effectivePanel === 'sessions' ? 'flex' : 'hidden')}>
+            <SessionsPanel
+              worktreeId={git.worktreeId}
+              machine={git.machine}
+              activeThreadKey={activeThreadKey}
+              onSelectThread={onOpenThread}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -174,7 +203,7 @@ export function ShellSidebar({
         aria-valuemin={SHELL_SIDEBAR_MIN_WIDTH}
         aria-valuemax={SHELL_SIDEBAR_MAX_WIDTH}
         tabIndex={0}
-        className="w-1 flex-none cursor-col-resize touch-none bg-devdeck-border transition-colors hover:bg-devdeck-accent active:bg-devdeck-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="w-1 flex-none cursor-col-resize touch-none bg-devdeck-border transition-colors hover:bg-devdeck-line active:bg-devdeck-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -196,8 +225,8 @@ function PanelButton({ label, icon, active, onClick }: { label: string; icon: Re
       className={cn(
         'flex h-6 flex-none cursor-pointer items-center gap-1.5 rounded px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         active
-          ? 'bg-devdeck-accent-tint text-devdeck-accent-soft'
-          : 'text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+          ? 'bg-devdeck-on text-devdeck-fg'
+          : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
       )}
     >
       {icon}
