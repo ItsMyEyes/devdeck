@@ -52,6 +52,14 @@ vi.mock('./SSHTerminal', () => ({
   SSHTerminal: () => <div data-testid="ssh-terminal-stub" />,
 }))
 
+// SSHRightSidebar (Task 8) always mounts StatsPane/SSHForwardsPanel — both
+// pull in react-query hooks this file doesn't mock. Out of scope for this
+// file's own coverage (ShellSidebar mount site, sidebar toggle, Ctrl+B), so
+// stub it like every other heavy child below.
+vi.mock('./SSHRightSidebar', () => ({
+  SSHRightSidebar: () => <div data-testid="ssh-right-sidebar-stub" />,
+}))
+
 let terminalExplorerCalls: Array<Record<string, unknown>> = []
 vi.mock('@/features/terminal/TerminalExplorer', () => ({
   TerminalExplorer: (props: Record<string, unknown>) => {
