@@ -132,7 +132,7 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
           <div className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'forwards' ? 'flex' : 'hidden')}>
             <SSHForwardsPanel connectionId={connectionId} visible={open && panel === 'forwards'} />
           </div>
-          <div className={cn('min-h-0 min-w-0 flex-1', panel === 'stats' ? 'flex' : 'hidden')}>
+          <div className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'stats' ? 'flex' : 'hidden')}>
             <StatsPane target={{ kind: 'ssh', connectionId }} visible={open && panel === 'stats'} />
           </div>
         </div>
