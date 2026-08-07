@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"devdeck/backend/internal/agentcore/approval"
 	"devdeck/backend/internal/agentcore/event"
@@ -179,6 +180,17 @@ type reactorHarness struct {
 
 	cmdSeq int
 	idSeq  int
+
+	// consumed records every adapter OnInstanceStarted fired for, so a test
+	// can assert Ingestion is started exactly once per instance.
+	mu       sync.Mutex
+	consumed []provider.InstanceID
+}
+
+func (h *reactorHarness) consumedSnapshot() []provider.InstanceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]provider.InstanceID(nil), h.consumed...)
 }
 
 // newReactorHarness wires everything through one shared callRecorder so
@@ -204,6 +216,11 @@ func newReactorHarness(t *testing.T, brokerFn func(rec *callRecorder) approval.B
 		Engine: h.engine, Provider: svc, Broker: brokerFn(rec),
 		InstanceFor: func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
 			return "fake:default", provider.SessionStartInput{ThreadID: threadID, Cwd: "/tmp/w-abc"}, nil
+		},
+		OnInstanceStarted: func(_ context.Context, a provider.Adapter) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.consumed = append(h.consumed, a.InstanceID())
 		},
 	}
 
@@ -349,5 +366,34 @@ func TestReactorCancelsApprovalsBeforeInterrupting(t *testing.T) {
 	}
 	if cancelIdx == -1 || interruptIdx == -1 || cancelIdx > interruptIdx {
 		t.Fatalf("call order = %v, want CancelThread before InterruptTurn", calls)
+	}
+}
+
+// Regression: main.go started the engine and the Reactor but never an
+// Ingestion, so nothing drained Adapter.Events(). The provider -> engine
+// direction had no consumer at all: the adapter's buffered channel filled and
+// then silently dropped every delta and tool call, leaving a chat that echoed
+// the user's own message and then went quiet. All backend tests were green.
+func TestReactorStartsIngestionOncePerFreshInstance(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	waitFor(t, func() bool { return len(h.consumedSnapshot()) == 1 })
+	if got := h.consumedSnapshot(); got[0] != "fake:default" {
+		t.Fatalf("consumed %v, want [fake:default]", got)
+	}
+
+	// A second thread shares the same instance. Starting a second Consume loop
+	// on one adapter would make two goroutines race for the same channel, so
+	// each would see only some of the events.
+	h.dispatch(t, "w-def", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "Bind")
+
+	time.Sleep(100 * time.Millisecond)
+	if got := h.consumedSnapshot(); len(got) != 1 {
+		t.Fatalf("consumed %v, want exactly one — a shared instance must not be consumed twice", got)
 	}
 }

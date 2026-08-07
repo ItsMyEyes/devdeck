@@ -250,3 +250,53 @@ func TestInteractionModeSetAppliesToState(t *testing.T) {
 		t.Fatalf("interact = %s, want plan", th.Interact)
 	}
 }
+
+// Regression: Decide's CmdThreadUserInputRespond case rejects a response whose
+// request is no longer pending, but that guard reads state the projector owns.
+// Without an applyOne case for EvtThreadUserInputResponseRequested the request
+// never clears, so the guard never fires and Status sticks at waiting forever.
+func TestUserInputResponseClearsPendingAndRejectsDoubleTap(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+
+	evts, err := Decide(s, Command{
+		CommandID: "ac-open", Type: CmdThreadSessionSet, ThreadID: "w-abc",
+		Payload: mustRaw(t, map[string]any{
+			"status": string(ThreadWaiting), "pendingRequestAdd": "req-1",
+		}),
+	}, 4000, seqIDs())
+	if err != nil {
+		t.Fatalf("open request: %v", err)
+	}
+	s = Apply(s, evts)
+
+	respond := func(commandID string) Command {
+		return Command{
+			CommandID: commandID, Type: CmdThreadUserInputRespond, ThreadID: "w-abc",
+			Payload: mustRaw(t, map[string]any{
+				"requestId": "req-1",
+				"answers":   map[string]any{"choice": "yes"},
+			}),
+		}
+	}
+
+	first, err := Decide(s, respond("ac-resp-1"), 5000, seqIDs())
+	if err != nil {
+		t.Fatalf("first response: %v", err)
+	}
+	s = Apply(s, first)
+
+	th, _ := s.Thread("w-abc")
+	if th.PendingRequests["req-1"] {
+		t.Fatal("req-1 still pending after being answered")
+	}
+	if th.Status != ThreadRunning {
+		t.Fatalf("status = %s, want running once nothing is pending", th.Status)
+	}
+
+	// A second device answering the same request carries a DIFFERENT
+	// CommandID, so SeenCommand cannot catch it — the pending check is the
+	// only defence.
+	if _, err := Decide(s, respond("ac-resp-2"), 5001, seqIDs()); err == nil {
+		t.Fatal("answering an already-resolved request should be rejected")
+	}
+}

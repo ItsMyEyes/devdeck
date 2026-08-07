@@ -250,6 +250,18 @@ type Reactor struct {
 	// cwd, and the instance that should run it. Injected so the Reactor stays
 	// testable without a real worktree — main.go builds this from port.Store.
 	InstanceFor func(threadID string) (provider.InstanceID, provider.SessionStartInput, error)
+
+	// OnInstanceStarted fires exactly once per FRESHLY started instance, with
+	// the adapter just created. main.go uses it to start the Ingestion loop
+	// that drains Adapter.Events() back into the engine.
+	//
+	// Reactor and Ingestion are deliberately separate components running in
+	// opposite directions, but only the Reactor ever learns that an adapter
+	// was born — so this is the one place that can start its consumer. Without
+	// it nothing reads Adapter.Events(): the 256-slot buffer fills and then
+	// silently drops every delta and tool call, leaving a chat that echoes the
+	// user's own message and never shows a reply.
+	OnInstanceStarted func(ctx context.Context, a provider.Adapter)
 }
 
 func (r *Reactor) Run(ctx context.Context) {
@@ -419,16 +431,26 @@ func (r *Reactor) ensureInstanceStarted(ctx context.Context, id provider.Instanc
 	if err != nil {
 		return err
 	}
-	_, err = r.Provider.Registry.StartInstance(ctx, kind, provider.InstanceSpec{
+	a, err := r.Provider.Registry.StartInstance(ctx, kind, provider.InstanceSpec{
 		InstanceID:  id,
 		DisplayName: string(id),
 		Config:      cfg,
 		Enabled:     true,
 	})
-	if err != nil && strings.Contains(err.Error(), "already running") {
-		return nil
+	if err != nil {
+		if strings.Contains(err.Error(), "already running") {
+			// Someone else started it; its consumer is already running too.
+			return nil
+		}
+		return err
 	}
-	return err
+	// Fresh instance — start draining its events. Exactly once per adapter:
+	// the Adapter(id) pre-check above plus the Reactor's single-goroutine loop
+	// mean two Consume loops can never be started for one adapter.
+	if r.OnInstanceStarted != nil {
+		r.OnInstanceStarted(ctx, a)
+	}
+	return nil
 }
 
 // instanceKind extracts the driver Kind from an InstanceID of the form

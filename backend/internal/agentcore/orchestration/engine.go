@@ -255,6 +255,26 @@ func applyOne(s *State, e Event) {
 			t.UpdatedAt = e.CreatedAt
 		}
 
+	// The sibling of the case above, and it must exist for the same reason.
+	// Decide's CmdThreadUserInputRespond case rejects a response whose request
+	// is no longer pending — but that check reads state this projector owns.
+	// Without this case PendingRequests never clears, so the "not pending"
+	// guard never fires (a second device answering the same request with a
+	// different CommandID slips past SeenCommand too), and Status stays
+	// ThreadWaiting for the rest of the thread's life.
+	case EvtThreadUserInputResponseRequested:
+		if t, ok := s.Threads[e.ThreadID]; ok {
+			var p struct {
+				RequestID string `json:"requestId"`
+			}
+			_ = json.Unmarshal(e.Payload, &p)
+			delete(t.PendingRequests, p.RequestID)
+			if len(t.PendingRequests) == 0 && t.Status == ThreadWaiting {
+				t.Status = ThreadRunning
+			}
+			t.UpdatedAt = e.CreatedAt
+		}
+
 	case EvtThreadRuntimeModeSet:
 		if t, ok := s.Threads[e.ThreadID]; ok {
 			var p RuntimeModeSetPayload

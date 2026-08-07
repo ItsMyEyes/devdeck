@@ -85,3 +85,55 @@ func TestTailscaleStatusReady(t *testing.T) {
 		t.Fatalf("got %+v, want ready with trimmed https URL", resp)
 	}
 }
+
+// fakeTailscaleWithServe branches on subcommand: "status --self --json"
+// reports a logged-in tailnet, "serve status --json" reports a `tailscale
+// serve` config proxying to serveTargetPort.
+func fakeTailscaleWithServe(t *testing.T, serveTargetPort string) {
+	t.Helper()
+	writeFakeTailscale(t, `
+if [ "$1" = "serve" ]; then
+  echo '{"Web":{"my-mac.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:`+serveTargetPort+`"}}}}}'
+else
+  echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'
+fi
+`)
+}
+
+func TestTailscaleStatusServeTargetMismatch(t *testing.T) {
+	fakeTailscaleWithServe(t, "5173")
+	h := NewTailscaleStatusHandler(true)
+	h.SetPort("60635")
+	resp := getTailscaleStatus(t, h)
+	if resp.Ready || resp.Reason != "serve_target_mismatch" {
+		t.Fatalf("got %+v, want reason=serve_target_mismatch", resp)
+	}
+}
+
+func TestTailscaleStatusServeTargetMatches(t *testing.T) {
+	fakeTailscaleWithServe(t, "60635")
+	h := NewTailscaleStatusHandler(true)
+	h.SetPort("60635")
+	resp := getTailscaleStatus(t, h)
+	if !resp.Ready || resp.URL != "https://my-mac.tail1234.ts.net" {
+		t.Fatalf("got %+v, want ready with trimmed https URL", resp)
+	}
+}
+
+func TestTailscaleStatusServeTargetUnknownIgnored(t *testing.T) {
+	// "serve status --json" fails outright (e.g. older tailscale CLI) — the
+	// endpoint must fall back to pre-mismatch-check behavior rather than
+	// treat "can't verify" as "mismatch".
+	writeFakeTailscale(t, `
+if [ "$1" = "serve" ]; then
+  exit 1
+fi
+echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'
+`)
+	h := NewTailscaleStatusHandler(true)
+	h.SetPort("60635")
+	resp := getTailscaleStatus(t, h)
+	if !resp.Ready || resp.URL != "https://my-mac.tail1234.ts.net" {
+		t.Fatalf("got %+v, want ready despite unknown serve target", resp)
+	}
+}

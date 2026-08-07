@@ -403,8 +403,23 @@ func main() {
 
 	agentDir := orchestration.NewThreadDirectory()
 	agentChatSvc := &provider.Service{Registry: agentRegistry, Dir: agentDir}
+
+	// Ingestion is the provider -> engine direction; the Reactor below is
+	// engine -> provider. Both are required: without Ingestion nothing reads
+	// Adapter.Events(), so the agent's replies and tool calls never reach the
+	// engine, never get persisted, and never reach the client — the chat
+	// echoes the user's own message and then goes quiet.
+	agentIngestion := orchestration.NewIngestion(
+		agentEngine, approval.NoopBroker{}, func() string { return "ac-" + randomHex(8) },
+	)
+
 	agentReactor := &orchestration.Reactor{
 		Engine: agentEngine, Provider: agentChatSvc, Broker: approval.NoopBroker{},
+		// The Reactor is the only component that learns an adapter was just
+		// created, so it is what starts that adapter's Ingestion loop.
+		OnInstanceStarted: func(ctx context.Context, a provider.Adapter) {
+			go agentIngestion.Consume(ctx, a)
+		},
 		// InstanceFor resolves a thread to the worktree's configured agent.
 		// A threadID is either a bare worktree id or "<worktreeId>::chat-N"
 		// for extra split chat panes (see paneTree.ts) — both name the same

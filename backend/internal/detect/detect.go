@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,6 +246,53 @@ func TailscaleSelfURLWith(resolve func() (string, error)) (url string, reason st
 		return "", "not_ready"
 	}
 	return "https://" + dns, ""
+}
+
+// tailscaleServeStatus is the subset of `tailscale serve status --json` that
+// TailscaleServeTargetPort reads: each served host's "/" handler proxy
+// target.
+type tailscaleServeStatus struct {
+	Web map[string]struct {
+		Handlers map[string]struct {
+			Proxy string `json:"Proxy"`
+		} `json:"Handlers"`
+	} `json:"Web"`
+}
+
+// TailscaleServeTargetPort runs `tailscale serve status --json` and returns
+// the port its "/" handler currently proxies to. ok is false whenever the
+// target can't be determined (serve unconfigured, CLI error, unparseable
+// output) — callers must treat that as "unknown", not "mismatch", since a
+// stale `tailscale serve` config left by an unrelated process is exactly
+// the drift this exists to catch, not to be confused with "nothing to
+// compare against".
+func TailscaleServeTargetPort(resolve func() (string, error)) (port string, ok bool) {
+	bin, err := resolve()
+	if err != nil {
+		return "", false
+	}
+	out, err := exec.Command(bin, "serve", "status", "--json").Output()
+	if err != nil {
+		return "", false
+	}
+	var status tailscaleServeStatus
+	if err := json.Unmarshal(out, &status); err != nil {
+		return "", false
+	}
+	for _, host := range status.Web {
+		h, ok := host.Handlers["/"]
+		if !ok {
+			continue
+		}
+		u, err := url.Parse(h.Proxy)
+		if err != nil {
+			continue
+		}
+		if p := u.Port(); p != "" {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // projectLanguageMarkers maps a project-root marker filename to the LSP
