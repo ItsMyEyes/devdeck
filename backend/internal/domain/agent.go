@@ -40,6 +40,15 @@ type MCPServer struct {
 }
 
 // AgentSummary is a lightweight agent listing (no nested models/skills).
+//
+// Version, BinaryPath, and Detail come from a per-machine CLI probe (see
+// AgentService.ListAgents): Version and BinaryPath describe what is actually
+// installed on THIS process's machine, and Detail explains why an agent is
+// unavailable when Installed is false. A missing binary is a status the chat
+// header renders (disabled entry + tooltip), not an entry the list omits —
+// the runtime a worktree lives on is not necessarily the hub the operator's
+// browser talks to, so this must reflect the runtime's own probe, never a
+// cached hub-side assumption.
 type AgentSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -48,6 +57,9 @@ type AgentSummary struct {
 	Installed   bool   `json:"installed"`
 	ModelCount  int    `json:"modelCount"`
 	SkillCount  int    `json:"skillCount"`
+	Version     string `json:"version,omitempty"`
+	BinaryPath  string `json:"binaryPath,omitempty"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // EnvProfile is a saved LLM-provider profile: the `env` block of an agent's

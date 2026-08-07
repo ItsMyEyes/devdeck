@@ -1,12 +1,18 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
+	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/agentcore/provider/claude"
+	"devdeck/backend/internal/detect"
 	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/port"
 )
@@ -37,6 +43,14 @@ type AgentSkillContent struct {
 // AgentService resolves agent, model, and skill information.
 type AgentService struct {
 	registry port.AgentRegistry
+
+	// probeOnce/probeResult cache the per-machine CLI probe for the life of
+	// this service, mirroring detect.ProbeAll's "call once at startup"
+	// contract: Probe must stay cheap (never spawn a session), so paying
+	// its cost once and reusing the result on every ListAgents call is both
+	// safe and the whole point of that contract.
+	probeOnce   sync.Once
+	probeResult map[string]agentProbe
 }
 
 // NewAgentService creates an agent service backed by the given registry.
@@ -44,9 +58,99 @@ func NewAgentService(r port.AgentRegistry) *AgentService {
 	return &AgentService{registry: r}
 }
 
-// ListAgents returns summaries of all available agents.
+// ListAgents returns summaries of all available agents, enriched with what
+// is actually installed on THIS machine — the runtime that owns whatever
+// worktree is asking, not the hub the browser happens to be talking to. A
+// missing binary is a status the chat header renders (disabled entry, with
+// Detail as the tooltip), never an entry the list silently drops.
 func (svc *AgentService) ListAgents() ([]domain.AgentSummary, error) {
-	return svc.registry.ListAgents()
+	agents, err := svc.registry.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		p, ok := svc.probe(agents[i].ID)
+		if !ok {
+			continue
+		}
+		agents[i].Installed = p.Installed
+		agents[i].Version = p.Version
+		agents[i].BinaryPath = p.BinaryPath
+		agents[i].Detail = p.Detail
+	}
+	return agents, nil
+}
+
+// agentProbe is what a per-machine CLI check reports about one agent.
+// Mirrors agentcore/provider.Snapshot's Available/Version/BinaryPath/Detail
+// fields deliberately — this is the same status shape, told about an agent
+// catalog entry instead of a live orchestration driver instance.
+type agentProbe struct {
+	Installed  bool
+	Version    string
+	BinaryPath string
+	Detail     string
+}
+
+// probeDrivers maps an agent ID to its agentcore provider.Driver, for the
+// agents that already have one. Driver.Probe reports the exact CLI version
+// and resolved binary path in one cheap call — richer than a bare installed
+// boolean. Agents without a live agentcore driver yet (codex, pi, opencode,
+// gemini — their Driver ports have not landed) fall back to the plain
+// binary-resolution probe below; they are still real entries the UI must
+// render, just with less detail until their turn comes.
+var probeDrivers = map[string]provider.Driver{
+	string(claude.Kind): claude.NewDriver(),
+}
+
+// probe returns the cached per-machine probe for agentID, populating the
+// cache on first use. ok is false only when agentID is not one detect knows
+// how to locate at all (e.g. a Jadi-only remote agent type) — callers should
+// leave the registry's own values untouched in that case rather than
+// clobbering them with a zero-value probe.
+func (svc *AgentService) probe(agentID string) (agentProbe, bool) {
+	svc.probeOnce.Do(func() {
+		svc.probeResult = make(map[string]agentProbe, len(detect.AgentBinary))
+		for id := range detect.AgentBinary {
+			svc.probeResult[id] = probeOneAgent(id)
+		}
+	})
+	p, ok := svc.probeResult[agentID]
+	return p, ok
+}
+
+// probeOneAgent checks a single agent's CLI: through its agentcore
+// provider.Driver when one is registered, otherwise through a plain
+// detect.ResolveBinary lookup. Either path is cheap (bounded exec with a
+// timeout, or a filesystem/PATH scan) and never spawns an agent session, so
+// it is safe to call once at startup and cache for the process lifetime.
+func probeOneAgent(agentID string) agentProbe {
+	if driver, ok := probeDrivers[agentID]; ok {
+		cfg, err := driver.DecodeConfig(driver.DefaultConfig())
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			snap, probeErr := driver.Probe(ctx, cfg)
+			cancel()
+			if probeErr == nil {
+				return agentProbe{
+					Installed:  snap.Available,
+					Version:    snap.Version,
+					BinaryPath: snap.BinaryPath,
+					Detail:     snap.Detail,
+				}
+			}
+		}
+	}
+
+	bin, ok := detect.AgentBinary[agentID]
+	if !ok {
+		return agentProbe{}
+	}
+	path, err := detect.ResolveBinary(bin)
+	if err != nil {
+		return agentProbe{Detail: err.Error()}
+	}
+	return agentProbe{Installed: true, BinaryPath: path}
 }
 
 // GetAgent returns the full agent definition.
