@@ -785,9 +785,6 @@ func main() {
 	// NOTE: the desktop shell (frontend/src-tauri/src/sidecar.rs) parses this
 	// exact line to discover the bound port when launched with --addr 127.0.0.1:0.
 	log.Printf("devdeck listening on %s (db: %s)", uiURL, *dbPath)
-	if _, listenPort, err := net.SplitHostPort(listener.Addr().String()); err == nil {
-		tailscaleStatusH.SetPort(listenPort)
-	}
 	if *tailscaleServe {
 		if err := startTailscaleServe(listener.Addr()); err != nil {
 			log.Fatalf("--enable-tailscale-serve: %v", err)
