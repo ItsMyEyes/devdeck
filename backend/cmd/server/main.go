@@ -405,6 +405,24 @@ func main() {
 	agentChatSvc := &provider.Service{Registry: agentRegistry, Dir: agentDir}
 	agentReactor := &orchestration.Reactor{
 		Engine: agentEngine, Provider: agentChatSvc, Broker: approval.NoopBroker{},
+		// InstanceFor resolves a thread to the worktree's configured agent.
+		// A threadID is either a bare worktree id or "<worktreeId>::chat-N"
+		// for extra split chat panes (see paneTree.ts) — both name the same
+		// worktree, so only the prefix before "::" is looked up.
+		InstanceFor: func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
+			worktreeID := threadID
+			if i := strings.Index(threadID, "::"); i >= 0 {
+				worktreeID = threadID[:i]
+			}
+			wt, err := st.WorktreeByID(worktreeID)
+			if err != nil {
+				return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
+			}
+			return provider.InstanceID(wt.Agent + ":default"), provider.SessionStartInput{
+				ThreadID: threadID,
+				Cwd:      wt.Path,
+			}, nil
+		},
 	}
 	go agentReactor.Run(context.Background())
 

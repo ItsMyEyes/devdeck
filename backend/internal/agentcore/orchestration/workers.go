@@ -3,7 +3,9 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"devdeck/backend/internal/agentcore/approval"
@@ -243,6 +245,11 @@ type Reactor struct {
 	Engine   *Engine
 	Provider *provider.Service
 	Broker   approval.Broker
+
+	// InstanceFor resolves a thread to the worktree's configured agent, its
+	// cwd, and the instance that should run it. Injected so the Reactor stays
+	// testable without a real worktree — main.go builds this from port.Store.
+	InstanceFor func(threadID string) (provider.InstanceID, provider.SessionStartInput, error)
 }
 
 func (r *Reactor) Run(ctx context.Context) {
@@ -296,6 +303,34 @@ func (r *Reactor) reportError(ctx context.Context, e Event, cause error) {
 
 func (r *Reactor) react(ctx context.Context, e Event) error {
 	switch e.Type {
+	case EvtThreadCreated:
+		// This is the first place a committed event triggers a long-running
+		// side effect (spawning a CLI process). The commit already happened —
+		// EvtThreadCreated is durable — so a failure here is a visible error
+		// via reportError, never a lost thread.
+		id, sessionIn, err := r.InstanceFor(e.ThreadID)
+		if err != nil {
+			return err
+		}
+		if err := r.ensureInstanceStarted(ctx, id); err != nil {
+			return err
+		}
+		// StartInstance -> Bind -> StartSession, in that order: the instance
+		// must exist before anything is bound to it, and it must be bound
+		// before a session is started against it.
+		r.Provider.Dir.Bind(e.ThreadID, id)
+		a, err := r.Provider.Registry.Adapter(id)
+		if err != nil {
+			return err
+		}
+		sessionIn.ThreadID = e.ThreadID
+		if t, ok := r.Engine.State().Thread(e.ThreadID); ok {
+			sessionIn.Mode = t.Mode
+			sessionIn.Interact = t.Interact
+		}
+		_, err = a.StartSession(ctx, sessionIn)
+		return err
+
 	case EvtThreadTurnStartRequested:
 		var p TurnStartPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -348,7 +383,16 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 
 	case EvtThreadSessionStopRequested:
 		r.Broker.CancelThread(e.ThreadID)
-		a, err := r.Provider.Registry.Adapter(mustInstance(r.Engine, e.ThreadID))
+		// Routed through r.Provider.Dir like every other case, instead of
+		// reaching into Engine state for a separately-tracked InstanceID.
+		// Two thread->instance lookup mechanisms in one switch is a latent
+		// divergence: this one, Dir, is the one EvtThreadCreated actually
+		// binds above.
+		id, ok := r.Provider.Dir.InstanceFor(e.ThreadID)
+		if !ok {
+			return fmt.Errorf("provider: thread %s is not bound to an instance", e.ThreadID)
+		}
+		a, err := r.Provider.Registry.Adapter(id)
 		if err != nil {
 			return err
 		}
@@ -357,11 +401,45 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 	return nil
 }
 
-func mustInstance(e *Engine, threadID string) provider.InstanceID {
-	if t, ok := e.State().Thread(threadID); ok {
-		return t.InstanceID
+// ensureInstanceStarted starts the instance if it is not already running.
+// StartInstance is keyed by InstanceID and shared across threads — the
+// Reactor's single-goroutine command loop means the check and the start are
+// not racing each other, and the "already running" fallback below is a
+// defensive backstop, not the primary guard.
+func (r *Reactor) ensureInstanceStarted(ctx context.Context, id provider.InstanceID) error {
+	if _, err := r.Provider.Registry.Adapter(id); err == nil {
+		return nil
 	}
-	return ""
+	kind := instanceKind(id)
+	d, ok := r.Provider.Registry.Driver(kind)
+	if !ok {
+		return fmt.Errorf("agentcore: no driver registered for %s", kind)
+	}
+	cfg, err := d.DecodeConfig(d.DefaultConfig())
+	if err != nil {
+		return err
+	}
+	_, err = r.Provider.Registry.StartInstance(ctx, kind, provider.InstanceSpec{
+		InstanceID:  id,
+		DisplayName: string(id),
+		Config:      cfg,
+		Enabled:     true,
+	})
+	if err != nil && strings.Contains(err.Error(), "already running") {
+		return nil
+	}
+	return err
+}
+
+// instanceKind extracts the driver Kind from an InstanceID of the form
+// "<kind>:<name>", e.g. "claude:default" -> "claude". Routing itself still
+// happens on InstanceID everywhere else — this is only used to find which
+// Driver builds a not-yet-running instance.
+func instanceKind(id provider.InstanceID) provider.Kind {
+	if i := strings.Index(string(id), ":"); i >= 0 {
+		return provider.Kind(id[:i])
+	}
+	return provider.Kind(id)
 }
 
 func mustJSON(v any) json.RawMessage {

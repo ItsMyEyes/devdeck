@@ -129,6 +129,7 @@ const (
 // IntentEvents are events that trigger provider work. ProviderCommandReactor
 // only reacts to this set.
 var IntentEvents = map[EventType]bool{
+	EvtThreadCreated:                    true,
 	EvtThreadTurnStartRequested:         true,
 	EvtThreadTurnInterruptRequested:     true,
 	EvtThreadApprovalResponseRequested:  true,
