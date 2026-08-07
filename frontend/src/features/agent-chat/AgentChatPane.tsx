@@ -6,14 +6,19 @@
  * connecting (loading), a thread error, and no-messages-yet (empty) —
  * before falling through to the real timeline.
  */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
 import { ChatHeader } from '@/features/agent-chat/ChatHeader'
+import { EFFORT_OPTIONS, MODEL_OPTIONS } from '@/features/agent-chat/ComposerControls'
 import { MessagesTimeline } from '@/features/agent-chat/MessagesTimeline'
 import { shouldFollow } from '@/features/agent-chat/scrollAnchoring'
 import { useAgentChatSocket } from '@/features/agent-chat/useAgentChatSocket'
+import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
 import type { Machine } from '@/store/types'
+
+const DEFAULT_MODEL = MODEL_OPTIONS[0].value
+const DEFAULT_EFFORT = EFFORT_OPTIONS[0].value
 
 export interface AgentChatPaneProps {
   worktreeId: string
@@ -36,7 +41,39 @@ function PaneMessage({ tone = 'neutral', children }: { tone?: 'neutral' | 'error
 }
 
 export function AgentChatPane({ worktreeId, threadKey, machine }: AgentChatPaneProps) {
-  const { view, status, sendTurn, abortTurn } = useAgentChatSocket({ machine, threadKey })
+  const { view, status, sendTurn, abortTurn, setRuntimeMode, setInteractionMode } =
+    useAgentChatSocket({ machine, threadKey })
+
+  // Model and effort ride the next `thread.turn.start` payload, so they are
+  // local until a turn is sent. Runtime and interaction mode dispatch
+  // immediately — they change how the agent behaves for the whole thread, not
+  // just the next message — so the pill's displayed value is optimistic and
+  // `ComposerControls` reverts it if an error frame arrives.
+  const [model, setModel] = useState(DEFAULT_MODEL)
+  const [effort, setEffort] = useState(DEFAULT_EFFORT)
+  const [runtimeMode, setRuntimeModeValue] = useState<RuntimeMode>('approval-required')
+  const [interactionMode, setInteractionModeValue] = useState<InteractionMode>('default')
+
+  const controls = useMemo(
+    () => ({
+      model,
+      onModelChange: setModel,
+      effort,
+      onEffortChange: setEffort,
+      interactionMode,
+      setInteractionMode: (mode: InteractionMode) => {
+        setInteractionModeValue(mode)
+        setInteractionMode(mode)
+      },
+      runtimeMode,
+      setRuntimeMode: (mode: RuntimeMode) => {
+        setRuntimeModeValue(mode)
+        setRuntimeMode(mode)
+      },
+      error: view.error,
+    }),
+    [model, effort, interactionMode, runtimeMode, view.error, setInteractionMode, setRuntimeMode],
+  )
 
   // Follow-mode: sticks the timeline to the bottom as deltas stream in,
   // unless the user has scrolled up to read history past the re-arm band
@@ -88,7 +125,7 @@ export function AgentChatPane({ worktreeId, threadKey, machine }: AgentChatPaneP
         )}
       </div>
 
-      <ChatComposer status={view.status} onSend={sendTurn} onAbort={abortTurn} />
+      <ChatComposer status={view.status} onSend={sendTurn} onAbort={abortTurn} controls={controls} />
     </div>
   )
 }
