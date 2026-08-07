@@ -35,10 +35,16 @@ const MAX_BACKOFF_MS = 8_000
 
 /** Mirrors `orchestration.Command` (`backend/internal/agentcore/orchestration/command.go`)
  *  — field names match its `json` tags exactly, one shape on both sides of
- *  the wire. Only the two commands this hook issues are named here; the
- *  server rejects anything else a client tries to send via
- *  `ClientDispatchable`. */
-type AgentCommandType = 'thread.turn.start' | 'thread.turn.interrupt'
+ *  the wire. Only the commands this hook issues are named here; the server
+ *  rejects anything else a client tries to send via `ClientDispatchable`. */
+type AgentCommandType = 'thread.turn.start' | 'thread.turn.interrupt' | 'thread.runtime-mode.set' | 'thread.interaction-mode.set'
+
+/** Mirrors `provider.RuntimeMode` (`backend/internal/agentcore/provider/provider.go`)
+ *  — string values match exactly, one enum on both sides of the wire. */
+export type RuntimeMode = 'approval-required' | 'auto-accept-edits' | 'auto' | 'full-access'
+
+/** Mirrors `provider.InteractionMode`. */
+export type InteractionMode = 'default' | 'plan'
 
 interface AgentCommand {
   commandId: string
@@ -94,6 +100,14 @@ export interface UseAgentChatSocketResult {
   sendTurn: (text: string) => void
   /** Dispatches `thread.turn.interrupt` for the thread's in-flight turn. */
   abortTurn: () => void
+  /** Dispatches `thread.runtime-mode.set` — the composer's runtime-mode
+   *  pill (`ComposerControls.tsx`). Fire-and-forget like `sendTurn`: a
+   *  rejection comes back as an `error` frame, never a return value, so the
+   *  pill that dispatched it is the one that decides how to revert. */
+  setRuntimeMode: (mode: RuntimeMode) => void
+  /** Dispatches `thread.interaction-mode.set` — the composer's
+   *  interaction-mode pill (Build/Plan). */
+  setInteractionMode: (mode: InteractionMode) => void
 }
 
 /** WS URL for one agent-chat thread, direct-first with hub-proxy fallback —
@@ -268,8 +282,10 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
 
   const sendTurn = useCallback((text: string) => dispatch('thread.turn.start', { text }), [dispatch])
   const abortTurn = useCallback(() => dispatch('thread.turn.interrupt'), [dispatch])
+  const setRuntimeMode = useCallback((mode: RuntimeMode) => dispatch('thread.runtime-mode.set', { mode }), [dispatch])
+  const setInteractionMode = useCallback((mode: InteractionMode) => dispatch('thread.interaction-mode.set', { mode }), [dispatch])
 
   const mergedView: AgentThreadView = transportError ? { ...view, error: transportError } : view
 
-  return { view: mergedView, status, sendTurn, abortTurn }
+  return { view: mergedView, status, sendTurn, abortTurn, setRuntimeMode, setInteractionMode }
 }
