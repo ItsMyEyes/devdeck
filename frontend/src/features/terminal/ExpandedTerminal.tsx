@@ -26,6 +26,7 @@ import { isDocumentPath } from '@/features/documents/documentKind'
 import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
@@ -43,6 +44,7 @@ import {
   allocateTerminalContent,
   closeTab,
   countUntitledContents,
+  createAgentChatPane,
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
@@ -57,6 +59,7 @@ import {
   findPane,
   firstLeafId,
   focusPane,
+  generateId,
   moveTab,
   selectTabInTree,
   splitLeaf,
@@ -93,6 +96,25 @@ interface Props {
 
 function basename(path: string) {
   return path.split('/').pop() ?? path
+}
+
+/** A brand-new worktree's default layout: agent-chat as the primary pane
+ *  (spec decision 1 — chat is the default, the terminal is still one split
+ *  away via "+" New Terminal / the split action, and every existing
+ *  persisted layout with a Terminal primary keeps rendering unchanged).
+ *  Deliberately not `paneTree.ts`'s own `createDefaultLayout` — that shared
+ *  helper also backs `SSHShellPane` and the command palette's SSH stats
+ *  tab, neither of which has an agent to chat with; defaulting it to chat
+ *  would give every SSH connection a dead-end pane. */
+function createDefaultWorktreeLayout(worktreeId: string): WorktreeLayout {
+  const rootId = generateId()
+  const chat = createAgentChatPane(worktreeId)
+  return {
+    version: 1,
+    nextTerminalSeq: 1,
+    focusedPaneId: rootId,
+    root: { type: 'leaf', id: rootId, tabs: [chat], activeTabId: chat.id },
+  }
 }
 
 /** Safely larger than any real line's length — see openAtLine's doc comment. */
@@ -274,7 +296,7 @@ function TerminalWorkspace({
   const shellKey = `wt:${worktree.id}`
 
   const layout = useMemo(
-    () => deserializeLayout(storedLayout) ?? createDefaultLayout(worktree.id),
+    () => deserializeLayout(storedLayout) ?? createDefaultWorktreeLayout(worktree.id),
     [storedLayout, worktree.id],
   )
   // `layout` gets a fresh reference on essentially any pane/tab action in this
@@ -987,11 +1009,10 @@ function TerminalWorkspace({
       if (content.kind !== 'stats') return null
       return <StatsPane target={content.target} visible={isActive} />
     },
-    // Placeholder to keep PaneContentRendererMap exhaustive — the real
-    // <AgentChatPane> wiring lands in the task that adds the chat
-    // components (docs/superpowers/plans/2026-08-07-agent-chat-pane.md,
-    // "Chat components and worktree wiring").
-    'agent-chat': () => null,
+    'agent-chat': ({ content }) => {
+      if (content.kind !== 'agent-chat') return null
+      return <AgentChatPane worktreeId={worktree.id} threadKey={content.threadKey} machine={machine} />
+    },
   }
 
   // Only the tree's first leaf (document order) gets the toggle — a split

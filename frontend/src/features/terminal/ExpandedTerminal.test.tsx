@@ -55,6 +55,16 @@ vi.mock('./Terminal', () => ({
   Terminal: forwardRef((_props: unknown, _ref: unknown) => <div data-testid="terminal-stub" />),
 }))
 
+// A fresh worktree now defaults to an agent-chat primary pane (spec decision
+// 1), so every test in this file renders one whether it cares or not. Stub
+// it the same way Terminal/GitPanel/TerminalExplorer are stubbed below —
+// this file is about ExpandedTerminal's own pane/tab wiring, not the chat
+// pane's internals (covered by AgentChatPane.test.tsx), and the real
+// component would otherwise open a live WebSocket via useAgentChatSocket.
+vi.mock('@/features/agent-chat/AgentChatPane', () => ({
+  AgentChatPane: () => <div data-testid="agent-chat-stub" />,
+}))
+
 vi.mock('./GitPanel', () => ({
   GitPanel: () => <div data-testid="git-panel-stub" />,
 }))
@@ -166,7 +176,7 @@ afterEach(() => {
   resetStore()
 })
 
-describe('ExpandedTerminal — ShellSidebar mount site (spec §2)', () => {
+describe('ExpandedTerminal - ShellSidebar mount site (spec §2)', () => {
   it('mounts ShellSidebar with the worktree shell key, files target, git target, and content-search shortcut', () => {
     render(<ExpandedTerminal worktree={worktree} wsId="ws1" projectId="p1" isFocused />)
 
@@ -204,7 +214,7 @@ describe('ExpandedTerminal — ShellSidebar mount site (spec §2)', () => {
   })
 })
 
-describe('ExpandedTerminal — sidebar toggle button (spec §4)', () => {
+describe('ExpandedTerminal - sidebar toggle button (spec §4)', () => {
   it('renders exactly one sidebar toggle on a single-leaf layout', () => {
     render(<ExpandedTerminal worktree={worktree} wsId="ws1" projectId="p1" isFocused />)
     expect(screen.getAllByRole('button', { name: 'Toggle sidebar' })).toHaveLength(1)
@@ -221,7 +231,7 @@ describe('ExpandedTerminal — sidebar toggle button (spec §4)', () => {
   })
 })
 
-describe('ExpandedTerminal — Cmd/Ctrl+B (spec §5)', () => {
+describe('ExpandedTerminal - Cmd/Ctrl+B (spec §5)', () => {
   it('toggles this shell sidebar when focused and prevents the key reaching xterm', () => {
     render(<ExpandedTerminal worktree={worktree} wsId="ws1" projectId="p1" isFocused />)
     expect(useDevDeckStore.getState().shellSidebars['wt:wt-1']?.open ?? true).toBe(true)
@@ -253,7 +263,7 @@ describe('ExpandedTerminal — Cmd/Ctrl+B (spec §5)', () => {
   })
 })
 
-describe('ExpandedTerminal — regression: in-pane explorer/git tabs', () => {
+describe('ExpandedTerminal - regression: in-pane explorer/git tabs', () => {
   it('still opens the explorer and git tabs via Ctrl+E / Ctrl+G', () => {
     render(<ExpandedTerminal worktree={worktree} wsId="ws1" projectId="p1" isFocused />)
 
