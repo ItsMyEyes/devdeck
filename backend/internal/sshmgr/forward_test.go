@@ -2,8 +2,11 @@ package sshmgr
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -544,6 +547,224 @@ func TestRemoteForwardStopClosesTheListener(t *testing.T) {
 	}
 	if got := f.StateOf("r2").Status; got != "off" {
 		t.Errorf("status after Stop = %q, want \"off\"", got)
+	}
+}
+
+// freePort reserves a port and immediately releases it, so a test can bind
+// it deliberately. A FIXED bind port is the whole point for the restart test
+// below: with BindPort 0 every supervisor run picks a fresh port, so a
+// listener left behind by a superseded run could never collide with its
+// successor and the bug would be invisible.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portStr, err := net.SplitHostPort(ln.Addr().String())
+	_ = ln.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+// waitForRunningAndSettle waits for a forward to reach "running" and then
+// holds for settle, failing the moment it sees "failed". "failed" is terminal
+// — the supervisor has already returned — so catching it at all is enough;
+// the settle window exists only because the losing supervisor can write
+// "running" microseconds before the winning one writes "failed", which a
+// plain waitForStatus would race past.
+func waitForRunningAndSettle(t *testing.T, f *Forwarder, id string, settle time.Duration) domain.SSHForwardState {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last domain.SSHForwardState
+	for time.Now().Before(deadline) {
+		last = f.StateOf(id)
+		if last.Status == "failed" {
+			t.Fatalf("forward %s wedged at failed: %s", id, last.Error)
+		}
+		if last.Status == "running" {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if last.Status != "running" {
+		t.Fatalf("forward %s status = %q (err %q), want \"running\"", id, last.Status, last.Error)
+	}
+	for settleDeadline := time.Now().Add(settle); time.Now().Before(settleDeadline); {
+		if s := f.StateOf(id); s.Status == "failed" {
+			t.Fatalf("forward %s fell to failed after reaching running: %s", id, s.Error)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return last
+}
+
+// Stop-then-Start while the first supervisor is still inside runOnce (status
+// "starting") must not wedge the rule at a spurious "address already in use"
+// on a port nothing else is using. That is exactly the sequence
+// handler.Patch runs when a *running* rule is edited, and it used to lose:
+// Stop found entry.ln == nil (the old supervisor had not bound yet) and so
+// closed nothing, the old supervisor then wrote its listener into the map
+// entry the new Start had already replaced, and the new supervisor's own
+// net.Listen hit EADDRINUSE — which isTerminalForwardErr correctly, but
+// uselessly, treats as permanent.
+func TestRestartWhileStartingConvergesToRunning(t *testing.T) {
+	dialer, connID := newForwardTestDialer(t)
+	target := echoServer(t)
+	targetHost, targetPortStr, _ := net.SplitHostPort(target.Addr().String())
+	targetPort, err := strconv.Atoi(targetPortStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindPort := freePort(t)
+
+	f := NewForwarder(dialer)
+
+	// Calibrate: time one clean start. The race window is "the supervisor has
+	// finished dialing but has not bound yet", which lives inside that
+	// interval, so sweeping the Stop delay across it finds the window on a
+	// fast laptop and under -race alike — where a hard-coded microsecond
+	// count would only ever land on the machine it was written on. A delay of
+	// exactly 0 does NOT reproduce: the supervisor is still inside a
+	// ctx-aware DialContext, which the cancel aborts cleanly.
+	warmup := domain.SSHForward{
+		ID: "rr-warmup", ConnectionID: connID, Mode: "local",
+		BindHost: "127.0.0.1", BindPort: bindPort,
+		TargetHost: targetHost, TargetPort: targetPort,
+	}
+	begun := time.Now()
+	if _, err := f.Start(warmup); err != nil {
+		t.Fatalf("warmup Start: %v", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); f.StateOf("rr-warmup").Status != "running"; {
+		if time.Now().After(deadline) {
+			t.Fatalf("warmup never reached running (status %q)", f.StateOf("rr-warmup").Status)
+		}
+		time.Sleep(50 * time.Microsecond)
+	}
+	window := time.Since(begun)
+	if err := f.Stop("rr-warmup"); err != nil {
+		t.Fatalf("warmup Stop: %v", err)
+	}
+
+	// A fresh id per iteration keeps each round independent; the shared fixed
+	// bind port is what carries the collision between them.
+	const iterations = 24
+	for i := 0; i < iterations; i++ {
+		id := fmt.Sprintf("rr-%d", i)
+		rule := domain.SSHForward{
+			ID: id, ConnectionID: connID, Mode: "local",
+			BindHost: "127.0.0.1", BindPort: bindPort,
+			TargetHost: targetHost, TargetPort: targetPort,
+		}
+		if _, err := f.Start(rule); err != nil {
+			t.Fatalf("iteration %d: first Start: %v", i, err)
+		}
+		// Deliberately no wait for "running": Stop must land while the first
+		// supervisor is still mid-runOnce, which is the window.
+		time.Sleep(time.Duration(int64(window) * int64(i) / int64(iterations)))
+		if err := f.Stop(id); err != nil {
+			t.Fatalf("iteration %d: Stop: %v", i, err)
+		}
+		if _, err := f.Start(rule); err != nil {
+			t.Fatalf("iteration %d: restart: %v", i, err)
+		}
+		state := waitForRunningAndSettle(t, f, id, 50*time.Millisecond)
+		if state.BoundAddr == "" {
+			t.Fatalf("iteration %d: running with an empty BoundAddr", i)
+		}
+		if err := f.Stop(id); err != nil {
+			t.Fatalf("iteration %d: final Stop: %v", i, err)
+		}
+	}
+}
+
+// A host that briefly stops resolving (laptop sleep, Wi-Fi/VPN switch) is the
+// canonical blip the reconnect loop exists for, so it must never be terminal.
+// Go reports it as "no such host", which the terminal-substring list used to
+// match on "no such" — meant for a deleted saved connection, but catching DNS
+// too and stranding the forward at "failed" until a manual re-toggle.
+func TestUnresolvableHostStaysRetryable(t *testing.T) {
+	fp := "SHA256:never-reached"
+	// .invalid is reserved by RFC 2606 and never resolves. Should a hijacking
+	// resolver answer anyway, the dial fails with "connection refused"
+	// instead — also non-terminal, so the assertion below still holds.
+	store := &fakeConnStore{conn: domain.SSHConnection{
+		ID: "c1", Host: "devdeck-no-such-host.invalid", Port: 22,
+		Username: "tester", AuthType: "password", HostKeyFingerprint: &fp,
+	}}
+	dialer := NewDialer(store, fakeSecrets{"password": "secret"})
+
+	f := NewForwarder(dialer)
+	t.Cleanup(func() { _ = f.Stop("dns") })
+
+	rule := domain.SSHForward{
+		ID: "dns", ConnectionID: "c1", Mode: "dynamic",
+		BindHost: "127.0.0.1", BindPort: 0,
+	}
+	if _, err := f.Start(rule); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	state := waitForStatus(t, f, "dns", "reconnecting")
+	if state.Error == "" {
+		t.Error("reconnecting state carries no error message")
+	}
+	// And it must STAY retryable — the backoff sleep is ~1s, so a supervisor
+	// that reclassified the next attempt as terminal would show up here.
+	time.Sleep(200 * time.Millisecond)
+	if got := f.StateOf("dns").Status; got == "failed" {
+		t.Errorf("status = %q; a DNS blip must stay retryable, not fail terminally", got)
+	}
+}
+
+// The terminal-substring list has to separate "this will never work" from
+// "the network blipped" — pinned here because the two live one line apart.
+func TestIsTerminalForwardErrClassification(t *testing.T) {
+	// A missing saved connection: store.ErrNotFound ("not found") and
+	// fakeMultiConnStore's "connection %s not found" both spell it this way.
+	for _, msg := range []string{
+		"not found",
+		"connection sc-gone not found",
+		"unable to authenticate, attempted methods [none]",
+		"listen tcp 127.0.0.1:8080: bind: address already in use",
+	} {
+		if !isTerminalForwardErr(fmt.Errorf("%s", msg)) {
+			t.Errorf("isTerminalForwardErr(%q) = false, want true", msg)
+		}
+	}
+
+	// A DNS failure, both as the resolver's own type and as the resolver
+	// really produces it through a dial.
+	dnsErr := &net.DNSError{Err: "no such host", Name: "devdeck-no-such-host.invalid", IsNotFound: true}
+	if isTerminalForwardErr(dnsErr) {
+		t.Errorf("isTerminalForwardErr(%v) = true; a DNS blip must stay retryable", dnsErr)
+	}
+	if _, err := net.LookupHost("devdeck-no-such-host.invalid"); err != nil {
+		wrapped := fmt.Errorf("dial devdeck-no-such-host.invalid:22: %w", err)
+		if !strings.Contains(wrapped.Error(), "no such host") {
+			t.Skipf("resolver reported %v, not a name error; nothing to assert", err)
+		}
+		if isTerminalForwardErr(wrapped) {
+			t.Errorf("isTerminalForwardErr(%v) = true; a DNS blip must stay retryable", wrapped)
+		}
+	}
+
+	// And the plain blips, which were never terminal and must stay that way.
+	for _, msg := range []string{
+		"dial tcp 10.0.0.5:22: connect: connection refused",
+		"dial tcp 10.0.0.5:22: i/o timeout",
+		"ssh: disconnect, reason 11: bye",
+	} {
+		if isTerminalForwardErr(fmt.Errorf("%s", msg)) {
+			t.Errorf("isTerminalForwardErr(%q) = true, want false", msg)
+		}
 	}
 }
 

@@ -30,13 +30,30 @@ type Forwarder struct {
 	active map[string]*activeForward
 }
 
+// activeForward is one supervisor run. The pointer itself is that run's
+// identity: Start mints a fresh one per call, so comparing f.active[id] to
+// this pointer answers "am I still the current supervisor for this id?" —
+// which an id lookup alone cannot, since a stop-then-restart reuses the id.
 type activeForward struct {
 	rule   domain.SSHForward
 	state  domain.SSHForwardState
 	client *ssh.Client
 	ln     net.Listener
 	cancel context.CancelFunc
+	// done closes when this run's supervise goroutine has fully exited,
+	// including the "superseded, bailing out" path. Stop waits on it so a
+	// stop-then-restart (handler.Patch's edit path) can never leave the
+	// previous supervisor still mid-runOnce, about to bind the very port the
+	// next one is about to bind.
+	done chan struct{}
 }
+
+// errSupervisorSuperseded means this run's entry is no longer the current one
+// for its id — Stop removed it, or a later Start replaced it. Whatever the
+// run had just built is already closed; there is nothing to report and
+// nothing to retry, so supervise exits on it immediately rather than sleeping
+// out a backoff nobody is waiting for.
+var errSupervisorSuperseded = errors.New("forward supervisor superseded")
 
 func NewForwarder(dialer *Dialer) *Forwarder {
 	return &Forwarder{dialer: dialer, active: map[string]*activeForward{}}
@@ -44,7 +61,9 @@ func NewForwarder(dialer *Dialer) *Forwarder {
 
 // Start validates the rule and launches its supervisor. Starting an id that
 // is already active stops the old one first, so editing a running rule never
-// leaves two listeners fighting over a port.
+// leaves two listeners fighting over a port. That stop is synchronous: the
+// previous supervisor has fully exited before the new one is launched, so it
+// cannot still be mid-dial and about to bind the port this run wants.
 func (f *Forwarder) Start(rule domain.SSHForward) (domain.SSHForwardState, error) {
 	if err := validateForward(rule); err != nil {
 		return domain.SSHForwardState{}, err
@@ -55,6 +74,7 @@ func (f *Forwarder) Start(rule domain.SSHForward) (domain.SSHForwardState, error
 	entry := &activeForward{
 		rule:   rule,
 		cancel: cancel,
+		done:   make(chan struct{}),
 		state:  domain.SSHForwardState{ForwardID: rule.ID, Status: "starting"},
 	}
 
@@ -66,7 +86,7 @@ func (f *Forwarder) Start(rule domain.SSHForward) (domain.SSHForwardState, error
 	initial := entry.state
 	f.mu.Unlock()
 
-	go f.supervise(ctx, rule)
+	go f.supervise(ctx, entry)
 	return initial, nil
 }
 
@@ -97,6 +117,15 @@ func (f *Forwarder) Stop(forwardID string) error {
 	if client != nil {
 		_ = client.Close()
 	}
+	// Wait — with the mutex released — for the supervisor to actually exit,
+	// which is what makes Stop synchronous. Without it, Stop can return while
+	// the supervisor is still inside runOnce with nothing bound yet (ln was
+	// nil above, so the close was a no-op); it would then bind the port the
+	// caller's very next Start is about to bind, and the new supervisor would
+	// fail terminally on a spurious "address already in use". Bounded by the
+	// dial: cancel aborts the ctx-aware TCP connect, and the handshake past
+	// it carries ssh.ClientConfig.Timeout.
+	<-entry.done
 	return nil
 }
 
@@ -121,41 +150,47 @@ func (f *Forwarder) States() []domain.SSHForwardState {
 	return out
 }
 
-func (f *Forwarder) setState(forwardID string, mutate func(*domain.SSHForwardState)) {
+// setState mutates one run's own state, and only while that run is still the
+// current one for its id. Taking the entry rather than the id is the point: a
+// superseded supervisor must not write its verdict into the newer run that
+// has since taken over the id — which is how a stale "address already in use"
+// used to land on a rule that was in fact starting cleanly.
+func (f *Forwarder) setState(entry *activeForward, mutate func(*domain.SSHForwardState)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if entry, ok := f.active[forwardID]; ok {
+	if f.active[entry.rule.ID] == entry {
 		mutate(&entry.state)
 	}
 }
 
 // supervise runs one forward's whole lifetime: dial, bind, serve, and — when
 // the transport dies — back off and do it again. It exits only on Stop
-// (ctx cancelled) or a terminal error.
-func (f *Forwarder) supervise(ctx context.Context, rule domain.SSHForward) {
+// (ctx cancelled), a terminal error, or being superseded by a later Start.
+func (f *Forwarder) supervise(ctx context.Context, entry *activeForward) {
+	defer close(entry.done) // Stop blocks on this; every exit path must reach it
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		dead, err := f.runOnce(ctx, rule)
+		dead, err := f.runOnce(ctx, entry)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, errSupervisorSuperseded) {
 				return // Stop raced us; not a failure worth reporting
 			}
 			if isTerminalForwardErr(err) {
 				// A revoked key or a taken port will never fix itself.
 				// Retrying would hide a dead rule behind a hopeful
 				// "reconnecting" forever.
-				f.setState(rule.ID, func(s *domain.SSHForwardState) {
+				f.setState(entry, func(s *domain.SSHForwardState) {
 					s.Status = "failed"
 					s.Error = err.Error()
 					s.Attempts = attempt
 				})
 				return
 			}
-			f.setState(rule.ID, func(s *domain.SSHForwardState) {
+			f.setState(entry, func(s *domain.SSHForwardState) {
 				s.Status = "reconnecting"
 				s.Error = err.Error()
 				s.Attempts = attempt
@@ -176,7 +211,7 @@ func (f *Forwarder) supervise(ctx context.Context, rule domain.SSHForward) {
 		case <-ctx.Done():
 			return
 		case <-dead:
-			f.setState(rule.ID, func(s *domain.SSHForwardState) {
+			f.setState(entry, func(s *domain.SSHForwardState) {
 				s.Status = "reconnecting"
 				s.BoundAddr = ""
 			})
@@ -204,7 +239,8 @@ func backoffFor(attempt int) time.Duration {
 
 // runOnce dials, binds, and starts serving. It returns a channel closed when
 // the transport dies, so the supervisor can wait without polling.
-func (f *Forwarder) runOnce(ctx context.Context, rule domain.SSHForward) (<-chan struct{}, error) {
+func (f *Forwarder) runOnce(ctx context.Context, entry *activeForward) (<-chan struct{}, error) {
+	rule := entry.rule
 	client, err := f.dialer.Dial(ctx, rule.ConnectionID)
 	if err != nil {
 		return nil, err
@@ -217,14 +253,20 @@ func (f *Forwarder) runOnce(ctx context.Context, rule domain.SSHForward) (<-chan
 	}
 
 	f.mu.Lock()
-	entry, ok := f.active[rule.ID]
-	if !ok {
-		// Stopped while we were dialing — drop what we just built rather
-		// than leaking a listener nothing will ever close.
+	// Identity, not id: Stop may have removed this entry, or a later Start
+	// replaced it with a fresh one, while we were dialing and binding.
+	// Publishing our listener into whatever entry now holds this id would
+	// hand the NEXT supervisor a listener it never opened while leaving our
+	// own port bound — so its net.Listen fails with a spurious "address
+	// already in use", which isTerminalForwardErr then correctly (but
+	// uselessly) treats as permanent, wedging a healthy rule at "failed".
+	if f.active[rule.ID] != entry {
+		// Stopped or superseded while we were dialing — drop what we just
+		// built rather than leaking a listener nothing will ever close.
 		f.mu.Unlock()
 		_ = ln.Close()
 		_ = client.Close()
-		return nil, context.Canceled
+		return nil, errSupervisorSuperseded
 	}
 	entry.client = client
 	entry.ln = ln
@@ -251,10 +293,16 @@ func isTerminalForwardErr(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
+	// "not found" is the deleted-saved-connection case (store.ErrNotFound is
+	// literally "not found"). It deliberately does NOT list "no such": that
+	// was meant for the same case, but it is redundant there and matches Go's
+	// DNS error "no such host" too — stranding a running forward at "failed"
+	// the first time its host stops resolving over a sleep or a VPN switch,
+	// which is precisely the blip the reconnect loop exists to ride out.
 	for _, terminal := range []string{
 		"unable to authenticate", "no stored password", "no stored private key",
 		"parse private key", "unsupported auth type", "address already in use",
-		"not found", "no such",
+		"not found",
 	} {
 		if strings.Contains(msg, terminal) {
 			return true
