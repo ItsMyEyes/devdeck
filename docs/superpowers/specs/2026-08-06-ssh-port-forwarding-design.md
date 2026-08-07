@@ -42,9 +42,17 @@ The two halves live in different places, deliberately:
 `ssh_connections` with `ON DELETE CASCADE`, mirroring how `ssh_secrets` already
 hangs off a connection.
 
-**The executor owns the live listeners**, in memory, keyed by rule id. Starting a
-forward pushes the *whole rule* in the request body, so the executor never needs
-a persisted copy of it.
+**The hub owns the live listeners too**, in memory, keyed by rule id — a
+separate map from the table, never persisted. The listener always opens on the
+hub, because that is where the operator's browser is: a `-L` port you cannot
+reach from the machine you are sitting at forwards nothing useful. A connection
+with an `ExecutorMachineID` still originates its SSH dial from that runtime, but
+only the dial: `Forwarder.runOnce` routes the underlying TCP connection through
+the runtime's SOCKS5 forward proxy, exactly as shell/SFTP/exec already do, and
+the listener stays local.
+
+Starting a forward pushes the *whole rule* in the request body rather than an
+id, so the forwarding layer never reads it back out of the store.
 
 That choice avoids syncing forwards through `CatalogSnapshot`. Two reasons:
 `CatalogSnapshot` and the store interface around it are convergence surfaces the
@@ -53,7 +61,7 @@ sync would create a "created a rule, can't start it yet" window while the
 replica catches up — latency bought for no benefit, since the caller already
 holds the rule it wants to start.
 
-The cost is that an executor restart drops live forwards. Given the no-autostart
+The cost is that a hub restart drops live forwards. Given the no-autostart
 decision above, that is already the specified behaviour: they come back as
 `off`, which is exactly what the UI would show anyway.
 
@@ -146,9 +154,9 @@ revoked key or a typo'd host would retry forever while the UI showed a hopeful
 
 | Mode | Listener | Per accepted connection |
 |---|---|---|
-| `local` (`-L`) | `net.Listen` on the executor | `client.Dial("tcp", target)` |
-| `remote` (`-R`) | `client.Listen("tcp", bind)` on the remote host | `net.Dial(target)` from the executor |
-| `dynamic` (`-D`) | `net.Listen` on the executor | SOCKS5 codec; each CONNECT dials via `client.Dial` |
+| `local` (`-L`) | `net.Listen` on the hub | `client.Dial("tcp", target)` |
+| `remote` (`-R`) | `client.Listen("tcp", bind)` on the remote host | `net.Dial(target)` from the hub |
+| `dynamic` (`-D`) | `net.Listen` on the hub | SOCKS5 codec; each CONNECT dials via `client.Dial` |
 
 ## Changes to `internal/netproxy`
 
@@ -172,8 +180,9 @@ codec with it and nothing else.
 
 ## API
 
-Rule CRUD on the hub; lifecycle on the executor. Lifecycle routes register on
-**every** role, since the executor is usually a runtime.
+Rule CRUD *and* lifecycle on the hub. All seven routes register inside the
+single `!isRuntime` block in `main.go` — a runtime serves none of them, since it
+never holds a listener (see "Rules vs. runtime" above).
 
 ```
 GET    /api/ssh/connections/{id}/forwards   → []SSHForward
@@ -200,13 +209,14 @@ Enforced on write, and again at start (a rule can be edited between the two):
 
 ## Reachability warnings
 
-A forward's listener is only reachable from wherever it is opened — the
-executor. The connection's `ExecutorMachineID` therefore decides who can use the
-tunnel, which the SSH management spec already flagged as practical guidance
-(lines 119-122). The UI surfaces it rather than leaving it to be rediscovered:
+A forward's listener is only reachable from wherever it is opened — the hub. The
+connection's `ExecutorMachineID` changes which network the tunnel's *far* end is
+dialed from, not who can reach its near end, which the SSH management spec
+already flagged as practical guidance (lines 119-122). The UI surfaces it rather
+than leaving it to be rediscovered:
 
 - Binding `0.0.0.0` shows an inline warning that the forward becomes reachable
-  by anything that can route to the executor.
+  by anything that can route to the hub.
 - For `-R`, a non-loopback bind additionally requires `GatewayPorts yes` on the
   remote sshd. Without it the remote bind silently collapses to loopback and the
   forward *appears* to work while being unreachable — worth pre-empting in the
@@ -224,7 +234,7 @@ All REST errors use the mandatory `{"error":"message"}` envelope.
 | Remote sshd refuses the remote bind (`-R`) | `failed` with the remote's reason. |
 | Target unreachable on an accepted connection | That connection is closed; the forward stays `running`. One bad target must not tear down the tunnel. |
 | Stop on an unknown/already-stopped id | Idempotent success. |
-| Executor restart | All forwards return as `off` (no autostart). |
+| Hub restart | All forwards return as `off` (no autostart). |
 
 ## Frontend
 
