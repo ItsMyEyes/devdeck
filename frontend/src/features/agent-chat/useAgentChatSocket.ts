@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { machineWsUrl } from '@/lib/machineClient'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
-import { emptyThreadView } from '@/features/agent-chat/eventReducer'
+import { EMPTY_THREAD_VIEW } from '@/features/agent-chat/eventReducer'
 import type { AgentEvent, AgentThreadView } from '@/features/agent-chat/types'
 import type { Machine } from '@/store/types'
 
@@ -105,7 +105,10 @@ function agentChatWsUrl(machine: Machine): Promise<string> {
 }
 
 export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOptions): UseAgentChatSocketResult {
-  const view = useDevDeckStore((s) => s.agentThreads[threadKey] ?? emptyThreadView())
+  // Select the raw slot and fall back OUTSIDE the selector: returning a fresh
+  // object from inside it re-renders forever (see EMPTY_THREAD_VIEW's comment).
+  const storedView = useDevDeckStore((s) => s.agentThreads[threadKey])
+  const view = storedView ?? EMPTY_THREAD_VIEW
   const applyAgentEvents = useDevDeckStore((s) => s.applyAgentEvents)
   const [status, setStatus] = useState<AgentSocketStatus>('connecting')
   /** Transport-level error (an `error` frame, or a socket that never opened)

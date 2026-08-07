@@ -17,6 +17,20 @@ export function emptyThreadView(): AgentThreadView {
   }
 }
 
+/** The stable, shared empty view — use this (never a fresh `emptyThreadView()`)
+ *  as the fallback inside a zustand selector.
+ *
+ *  zustand compares a selector's result with `Object.is`, so a selector like
+ *  `(s) => s.agentThreads[key] ?? emptyThreadView()` returns a brand-new object
+ *  on every store read while the thread is absent, which reads as "changed"
+ *  every time and re-renders forever (React error #185, "Maximum update depth
+ *  exceeded"). That fires on *every* mount of a thread that has no events yet,
+ *  which is the normal case for a freshly opened chat pane.
+ *
+ *  Safe to share because `reduceAgentEvents` is pure — it always returns a new
+ *  object and never mutates the view it is given. */
+export const EMPTY_THREAD_VIEW: AgentThreadView = Object.freeze(emptyThreadView())
+
 /** Shape of the payload carried by `thread.activity-appended` — the only
  *  event type this reducer folds into item text so far. Other event types
  *  pass through untouched in this spec; later specs extend this switch. */

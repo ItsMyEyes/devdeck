@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyThreadView, reduceAgentEvents } from '@/features/agent-chat/eventReducer'
+import { EMPTY_THREAD_VIEW, emptyThreadView, reduceAgentEvents } from '@/features/agent-chat/eventReducer'
 import type { AgentEvent } from '@/features/agent-chat/types'
 
 function delta(seq: number, itemId: string, text: string, sequence: number, stream = 'text'): AgentEvent {
@@ -56,5 +56,32 @@ describe('reduceAgentEvents', () => {
     reduceAgentEvents(before, [delta(1, 'i1', 'Hello', 1)])
     expect(before.items).toHaveLength(0)
     expect(before.lastSeq).toBe(0)
+  })
+})
+
+// Regression: `emptyThreadView()` was used as the fallback INSIDE a zustand
+// selector, which returns a new object on every store read while the thread is
+// absent. zustand compares with Object.is, so that reads as "changed" every
+// time and re-renders forever — React error #185, on every mount of a chat
+// pane with no events yet. The fallback must be a stable shared reference.
+describe('EMPTY_THREAD_VIEW', () => {
+  it('is referentially stable across reads', () => {
+    expect(EMPTY_THREAD_VIEW).toBe(EMPTY_THREAD_VIEW)
+  })
+
+  it('is NOT the same reference emptyThreadView() returns', () => {
+    expect(emptyThreadView()).not.toBe(EMPTY_THREAD_VIEW)
+    expect(emptyThreadView()).toEqual(EMPTY_THREAD_VIEW)
+  })
+
+  it('is frozen, so a stray mutation fails loudly instead of corrupting every thread', () => {
+    expect(Object.isFrozen(EMPTY_THREAD_VIEW)).toBe(true)
+  })
+
+  it('survives being reduced against without being mutated', () => {
+    const next = reduceAgentEvents(EMPTY_THREAD_VIEW, [delta(1, 'i1', 'Hello', 1)])
+    expect(next).not.toBe(EMPTY_THREAD_VIEW)
+    expect(EMPTY_THREAD_VIEW.items).toHaveLength(0)
+    expect(EMPTY_THREAD_VIEW.lastSeq).toBe(0)
   })
 })
