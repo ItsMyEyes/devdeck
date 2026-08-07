@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"devdeck/backend/internal/agentcore/orchestration"
@@ -93,9 +94,19 @@ func (h *AgentWSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 	threadID := hello.ThreadID
 	log.Printf("agent: thread %s connect", threadID)
 
-	// Replay BEFORE subscribing to live events. Reversing that order would
-	// let a live event race ahead of the tail of the replay and arrive out
-	// of Seq order on the wire.
+	// Subscribe BEFORE snapshotting, not after. Snapshotting first left a
+	// window between "read the log up to here" and "start listening for
+	// what comes next" during which a commit was durably logged and
+	// delivered to neither — permanently invisible, because the client's
+	// cursor had already advanced past it. Subscribing first closes that
+	// window: a commit landing in the now-harmless gap between subscribe and
+	// snapshot instead arrives twice, once in the snapshot and once live, as
+	// a duplicate Seq the frontend reducer already discards
+	// (event.seq <= view.lastSeq). A silent permanent loss becomes an
+	// already-handled duplicate.
+	sub, unsub := h.engine.Subscribe(256)
+	defer unsub()
+
 	missed, err := h.store.AgentEventsSince(threadID, hello.SinceSeq)
 	if err != nil {
 		log.Printf("agent: thread %s replay: %v", threadID, err)
@@ -108,10 +119,16 @@ func (h *AgentWSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		if err := h.writeEvents(ctx, conn, missed); err != nil {
 			return
 		}
+	} else if err := h.autoCreateThread(ctx, threadID); err != nil {
+		// Non-fatal: the thread may in fact already exist under the same
+		// derived CommandID (SeenCommand absorbs that silently and this
+		// branch is never reached), so a genuine failure here is almost
+		// always an unresolvable worktree/agent. Surface it and keep the
+		// socket open rather than kill a connection that might still be
+		// useful for retries.
+		log.Printf("agent: thread %s auto-create: %v", threadID, err)
+		h.writeError(ctx, conn, "failed to initialize thread")
 	}
-
-	sub, unsub := h.engine.Subscribe(256)
-	defer unsub()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -207,6 +224,49 @@ func (h *AgentWSHandler) handleCommand(ctx context.Context, conn *websocket.Conn
 	if _, err := h.engine.Dispatch(ctx, c); err != nil {
 		h.writeError(ctx, conn, err.Error())
 	}
+}
+
+// autoCreateThread provisions a thread the first time a client says hello to
+// it — hello for a thread with no durable events is the only signal the
+// engine gets that nothing has created it yet. The CommandID is derived from
+// threadID, not random, so a reconnect that finds the thread already there
+// resends an identical command and is absorbed by SeenCommand rather than
+// failing with "thread already exists".
+func (h *AgentWSHandler) autoCreateThread(ctx context.Context, threadID string) error {
+	instanceID, err := h.resolveInstanceID(threadID)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(struct {
+		InstanceID string `json:"instanceId"`
+	}{InstanceID: instanceID})
+	if err != nil {
+		return err
+	}
+	_, err = h.engine.Dispatch(ctx, orchestration.Command{
+		CommandID: "ac-create-" + threadID,
+		Type:      orchestration.CmdThreadCreate,
+		ThreadID:  threadID,
+		Payload:   payload,
+	})
+	return err
+}
+
+// resolveInstanceID maps a thread to the InstanceID of its worktree's
+// configured agent, mirroring main.go's Reactor.InstanceFor. A threadID is
+// either a bare worktree id or "<worktreeId>::chat-N" for extra split chat
+// panes (see paneTree.ts) — both name the same worktree, so only the prefix
+// before "::" is looked up.
+func (h *AgentWSHandler) resolveInstanceID(threadID string) (string, error) {
+	worktreeID := threadID
+	if i := strings.Index(threadID, "::"); i >= 0 {
+		worktreeID = threadID[:i]
+	}
+	wt, err := h.store.WorktreeByID(worktreeID)
+	if err != nil {
+		return "", fmt.Errorf("agent thread %s: %w", threadID, err)
+	}
+	return wt.Agent + ":default", nil
 }
 
 func (h *AgentWSHandler) writeEvents(ctx context.Context, conn *websocket.Conn, evts []orchestration.Event) error {
