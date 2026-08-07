@@ -141,6 +141,25 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		}
 		return []Event{mk(EvtThreadApprovalResponseRequested, p)}, nil
 
+	case CmdThreadUserInputRespond:
+		t, ok := s.Threads[cmd.ThreadID]
+		if !ok {
+			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
+		}
+		var p struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, err
+		}
+		// Mirrors CmdThreadApprovalRespond: rejecting a request that is not
+		// pending is what keeps a double-tap from two devices from producing
+		// two events.
+		if !t.PendingRequests[p.RequestID] {
+			return nil, fmt.Errorf("request %s is not pending", p.RequestID)
+		}
+		return []Event{mk(EvtThreadUserInputResponseRequested, json.RawMessage(cmd.Payload))}, nil
+
 	case CmdThreadTurnInterrupt:
 		return []Event{mk(EvtThreadTurnInterruptRequested, nil)}, nil
 
@@ -154,11 +173,27 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		}
 		return []Event{mk(EvtThreadRuntimeModeSet, p)}, nil
 
+	case CmdThreadInteractionModeSet:
+		var p InteractionModeSetPayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, err
+		}
+		return []Event{mk(EvtThreadInteractionModeSet, p)}, nil
+
 	case CmdThreadAssistantDelta:
 		return []Event{mk(EvtThreadActivityAppended, json.RawMessage(cmd.Payload))}, nil
 
+	case CmdThreadAssistantComplete:
+		return []Event{mk(EvtThreadMessageSent, json.RawMessage(cmd.Payload))}, nil
+
 	case CmdThreadSessionSet:
 		return []Event{mk(EvtThreadSessionSet, json.RawMessage(cmd.Payload))}, nil
+
+	case CmdThreadActivityAppend:
+		return []Event{mk(EvtThreadActivityAppended, json.RawMessage(cmd.Payload))}, nil
+
+	case CmdThreadTurnDiffComplete:
+		return []Event{mk(EvtThreadTurnDiffCompleted, json.RawMessage(cmd.Payload))}, nil
 
 	case CmdThreadDelete:
 		return []Event{mk(EvtThreadDeleted, nil)}, nil
@@ -225,6 +260,14 @@ func applyOne(s *State, e Event) {
 			var p RuntimeModeSetPayload
 			_ = json.Unmarshal(e.Payload, &p)
 			t.Mode = p.Mode
+			t.UpdatedAt = e.CreatedAt
+		}
+
+	case EvtThreadInteractionModeSet:
+		if t, ok := s.Threads[e.ThreadID]; ok {
+			var p InteractionModeSetPayload
+			_ = json.Unmarshal(e.Payload, &p)
+			t.Interact = p.Mode
 			t.UpdatedAt = e.CreatedAt
 		}
 

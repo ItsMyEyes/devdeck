@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"devdeck/backend/internal/agentcore/event"
@@ -189,5 +190,63 @@ func TestClientDispatchableExcludesServerOnlyCommands(t *testing.T) {
 	}
 	if !ClientDispatchable[CmdThreadTurnStart] {
 		t.Error("thread.turn.start must be client-dispatchable")
+	}
+}
+
+// Every CommandType must have an explicit decider rule. The generic
+// "unrecognized command" fallthrough is how five commands silently shipped
+// broken, including the one Ingestion uses for every tool call.
+func TestEveryCommandTypeHasADeciderRule(t *testing.T) {
+	all := []CommandType{
+		CmdThreadCreate, CmdThreadTurnStart, CmdThreadTurnInterrupt,
+		CmdThreadApprovalRespond, CmdThreadUserInputRespond, CmdThreadSessionStop,
+		CmdThreadRuntimeModeSet, CmdThreadInteractionModeSet, CmdThreadDelete,
+		CmdThreadAssistantDelta, CmdThreadAssistantComplete, CmdThreadSessionSet,
+		CmdThreadActivityAppend, CmdThreadTurnDiffComplete,
+	}
+
+	for _, ct := range all {
+		s := createThread(t, NewState(), "w-abc")
+		_, err := Decide(s, Command{
+			CommandID: "ac-x", Type: ct, ThreadID: "w-abc",
+			Payload: mustRaw(t, map[string]any{}),
+		}, 1000, seqIDs())
+
+		// A rule may legitimately reject bad input, but it must never report
+		// the command as unknown.
+		if err != nil && strings.Contains(err.Error(), "unrecognized command") {
+			t.Errorf("%s has no decider rule", ct)
+		}
+	}
+}
+
+// Ingestion's fallback dispatches ActivityAppend for every provider event it
+// doesn't explicitly handle — which is exactly what tool calls are.
+func TestActivityAppendProducesAnEvent(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+	evts, err := Decide(s, Command{
+		CommandID: "ac-act", Type: CmdThreadActivityAppend, ThreadID: "w-abc",
+		Payload: mustRaw(t, map[string]any{"itemType": "tool_call", "title": "Read"}),
+	}, 2000, seqIDs())
+	if err != nil {
+		t.Fatalf("activity append: %v", err)
+	}
+	if len(evts) != 1 || evts[0].Type != EvtThreadActivityAppended {
+		t.Fatalf("got %+v, want one thread.activity-appended", evts)
+	}
+}
+
+func TestInteractionModeSetAppliesToState(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+	evts, err := Decide(s, Command{
+		CommandID: "ac-im", Type: CmdThreadInteractionModeSet, ThreadID: "w-abc",
+		Payload: mustRaw(t, InteractionModeSetPayload{Mode: provider.InteractionPlan}),
+	}, 3000, seqIDs())
+	if err != nil {
+		t.Fatalf("interaction mode: %v", err)
+	}
+	s = Apply(s, evts)
+	if th, _ := s.Thread("w-abc"); th.Interact != provider.InteractionPlan {
+		t.Fatalf("interact = %s, want plan", th.Interact)
 	}
 }

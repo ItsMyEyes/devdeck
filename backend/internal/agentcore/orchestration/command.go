@@ -91,6 +91,10 @@ type RuntimeModeSetPayload struct {
 	Mode provider.RuntimeMode `json:"mode"`
 }
 
+type InteractionModeSetPayload struct {
+	Mode provider.InteractionMode `json:"mode"`
+}
+
 type AssistantDeltaPayload struct {
 	TurnID   string           `json:"turnId"`
 	ItemID   string           `json:"itemId"`
