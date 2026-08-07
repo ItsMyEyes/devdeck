@@ -4,20 +4,25 @@ import { Popover } from '@base-ui/react/popover'
 import {
   Activity,
   Check,
+  Eye,
   FilePlus,
   FilePlus2,
   FileText,
   FolderTree,
   GitBranch,
   GitCompare,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
+  Save,
   Settings2,
   TerminalSquare,
   Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
+import { isDocumentPath } from '@/features/documents/documentKind'
 import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
@@ -29,6 +34,7 @@ import type { FileLocation } from './fileLocation'
 import { FileQuickOpen } from './FileQuickOpen'
 import { GitPanel } from './GitPanel'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import { MarkdownPreviewPane } from './MarkdownPreviewPane'
 import { MobileKeyToolbar } from './MobileKeyToolbar'
 import { PaneCanvas } from './PaneCanvas'
 import type { PaneContentRendererMap } from './PaneCanvas'
@@ -42,6 +48,7 @@ import {
   createFileContent,
   createGitContent,
   createGitDiffContent,
+  createMarkdownPreviewContent,
   createStatsContent,
   createUntitledContent,
   deserializeLayout,
@@ -98,11 +105,23 @@ function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
 }
 
-function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string[]): string[] {
+/** One open tab (file editor or markdown preview) whose path sits under a
+ *  deleted path. `id` is the tab's own pane-tree id — equal to `path` for a
+ *  `file` tab, but not for a `markdown-preview` tab (see
+ *  `markdownPreviewTargetKey`) — while `path` is always the raw file path,
+ *  which is what `cleanupFileBookkeeping`'s dirty/reveal maps are keyed by. */
+interface DeletedFileTab {
+  id: string
+  path: string
+}
+
+function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string[]): DeletedFileTab[] {
   if (node.type === 'leaf') {
     return node.tabs.flatMap((tab) => {
-      if (tab.kind !== 'file') return []
-      return deletedPaths.some((deletedPath) => isDeletedPath(tab.path, deletedPath)) ? [tab.path] : []
+      if (tab.kind !== 'file' && tab.kind !== 'markdown-preview') return []
+      return deletedPaths.some((deletedPath) => isDeletedPath(tab.path, deletedPath))
+        ? [{ id: tab.id, path: tab.path }]
+        : []
     })
   }
   return node.children.flatMap((child) => fileTabsUnderDeletedPaths(child, deletedPaths))
@@ -139,7 +158,7 @@ export function ShellSidebarToggle({ shellKey }: { shellKey: string }) {
         onClick={() => setShellSidebarOpen(shellKey, !open)}
         title={`Toggle sidebar (${shortcut})`}
         aria-label="Toggle sidebar"
-        className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         {open ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
       </button>
@@ -162,7 +181,7 @@ export function OverflowItem({
   return (
     <Popover.Close
       onClick={onClick}
-      className={cn(overflowItemClass, danger && 'text-devdeck-red-soft hover:bg-devdeck-red-tint-hover')}
+      className={cn(overflowItemClass, danger && 'text-devdeck-err hover:bg-devdeck-red-tint-hover')}
     >
       {children}
     </Popover.Close>
@@ -176,8 +195,8 @@ export function ExpandedTerminal({ worktree: w, wsId, projectId, isFocused, onPr
 
   if (!machine) {
     return (
-      <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-dim">
-        no machine assigned to this project — add one from the Machines page
+      <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-fg-2">
+        no machine assigned to this project - add one from the Machines page
       </div>
     )
   }
@@ -406,14 +425,14 @@ function TerminalWorkspace({
 
   const handleFilesDeleted = useCallback(
     (paths: string[]) => {
-      const filePaths = fileTabsUnderDeletedPaths(layout.root, paths)
+      const tabs = fileTabsUnderDeletedPaths(layout.root, paths)
       let nextLayout = layout
       let changed = false
-      for (const path of filePaths) {
-        cleanupFileBookkeeping(path)
-        const leaf = findLeafForContent(nextLayout.root, path)
+      for (const tab of tabs) {
+        cleanupFileBookkeeping(tab.path)
+        const leaf = findLeafForContent(nextLayout.root, tab.id)
         if (!leaf) continue
-        nextLayout = closeTab(nextLayout, leaf.id, path)
+        nextLayout = closeTab(nextLayout, leaf.id, tab.id)
         changed = true
       }
       if (changed) setWorktreeLayout(worktree.id, nextLayout)
@@ -612,6 +631,34 @@ function TerminalWorkspace({
     [worktree.id, setWorktreeLayout],
   )
 
+  /** MarkdownFileEditor's edit-mode "open preview in new tab" button — opens
+   *  (or refocuses) `path`'s rendered preview as its own tab, alongside
+   *  whatever pane the editing `FileContent` tab for the same path lives in.
+   *  Mirrors `openGitDiff`'s "one instance per target, refocus if already
+   *  open" dedup, keyed by `markdownPreviewTargetKey` instead of a diff
+   *  target. */
+  const openMarkdownPreviewTab = useCallback(
+    (path: string) => {
+      const current = layoutRef.current
+      const content = createMarkdownPreviewContent(path)
+      const existingLeaf = findLeafForContent(current.root, content.id)
+      if (existingLeaf) {
+        setWorktreeLayout(worktree.id, {
+          ...current,
+          root: selectTabInTree(current.root, existingLeaf.id, content.id),
+          focusedPaneId: existingLeaf.id,
+        })
+        return
+      }
+      setWorktreeLayout(worktree.id, {
+        ...current,
+        root: addContentToLeaf(current.root, current.focusedPaneId, content),
+        focusedPaneId: current.focusedPaneId,
+      })
+    },
+    [worktree.id, setWorktreeLayout],
+  )
+
   /** Cmd/Ctrl+G / Cmd/Ctrl+E — opens (or refocuses) the Git/Explorer tab in the
    *  focused pane, or closes it if it's already the focused pane's active tab. */
   function toggleKindInFocusedPane(kind: 'git' | 'explorer') {
@@ -684,8 +731,8 @@ function TerminalWorkspace({
       machine,
       id: worktree.id,
       patch: ok
-        ? { state: 'running', pending: null, appendLine: { k: 'ok', t: '✓ approved — continuing' } }
-        : { state: 'idle', pending: null, appendLine: { k: 'err', t: '✗ rejected by user — halted' } },
+        ? { state: 'running', pending: null, appendLine: { k: 'ok', t: '✓ approved - continuing' } }
+        : { state: 'idle', pending: null, appendLine: { k: 'err', t: '✗ rejected by user - halted' } },
     })
   }
 
@@ -759,12 +806,14 @@ function TerminalWorkspace({
   }
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-accent" />
-    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
-    if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-dim" />
-    if (content.kind === 'stats') return <Activity size={13} className="text-devdeck-dim" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'git') return <GitBranch size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'git-diff') return <GitCompare size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'untitled') return <FileText size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'stats') return <Activity size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'markdown-preview') return <Eye size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'agent-chat') return <MessageSquare size={13} className="text-devdeck-fg-2" />
     return <MaterialFileIcon name={basename(content.path)} size={13} />
   }
 
@@ -775,6 +824,15 @@ function TerminalWorkspace({
   }
 
 
+  /** The active file tab's imperative handle, when the focused pane's active
+   *  tab is an editable (non-document) file — powers the overflow menu's
+   *  Save/Revert/Delete entries, the new home for what used to be
+   *  FileEditor/SSHFileEditor's own per-tab header buttons. */
+  const activeFileHandle =
+    focusedActiveContent?.kind === 'file' && !isDocumentPath(focusedActiveContent.path)
+      ? fileHandles.current.get(focusedActiveContent.path)
+      : undefined
+
   function renderOverflowActions() {
     return (
       <div className="flex min-w-[168px] flex-col gap-0.5">
@@ -783,6 +841,26 @@ function TerminalWorkspace({
             <Check size={13} />
             Approve
           </OverflowItem>
+        ) : null}
+        {activeFileHandle ? (
+          <>
+            <OverflowItem onClick={() => void activeFileHandle.save()}>
+              <Save size={13} />
+              Save file
+            </OverflowItem>
+            {activeFileHandle.revert ? (
+              <OverflowItem onClick={() => activeFileHandle.revert?.()}>
+                <RotateCcw size={13} />
+                Revert file
+              </OverflowItem>
+            ) : null}
+            {activeFileHandle.remove ? (
+              <OverflowItem danger onClick={() => activeFileHandle.remove?.()}>
+                <Trash2 size={13} />
+                Delete file
+              </OverflowItem>
+            ) : null}
+          </>
         ) : null}
         <OverflowItem onClick={() => openKindInFocusedPane('git')}>
           <GitBranch size={13} />
@@ -834,7 +912,7 @@ function TerminalWorkspace({
       if (content.kind !== 'terminal') return null
       const isFocusedTerminal = content.sessionKey === focusedTerminalSessionKey
       return (
-        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-terminal px-3 py-2">
+        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-pane px-3 py-2">
           <Terminal
             key={content.sessionKey}
             ref={(handle) => {
@@ -872,8 +950,13 @@ function TerminalWorkspace({
           onOpenDefinition={openDefinition}
           isPathDirty={isPathDirty}
           reveal={definitionReveals[content.path]}
+          onOpenPreviewTab={openMarkdownPreviewTab}
         />
       )
+    },
+    'markdown-preview': ({ content }) => {
+      if (content.kind !== 'markdown-preview') return null
+      return <MarkdownPreviewPane target={{ kind: 'worktree', machine, worktreeId: worktree.id }} path={content.path} />
     },
     explorer: () => (
       <TerminalExplorer
@@ -904,6 +987,11 @@ function TerminalWorkspace({
       if (content.kind !== 'stats') return null
       return <StatsPane target={content.target} visible={isActive} />
     },
+    // Placeholder to keep PaneContentRendererMap exhaustive — the real
+    // <AgentChatPane> wiring lands in the task that adds the chat
+    // components (docs/superpowers/plans/2026-08-07-agent-chat-pane.md,
+    // "Chat components and worktree wiring").
+    'agent-chat': () => null,
   }
 
   // Only the tree's first leaf (document order) gets the toggle — a split
@@ -911,7 +999,7 @@ function TerminalWorkspace({
   const firstPaneId = firstLeafId(layout.root)
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-terminal">
+    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-pane">
       <ShellSidebar
         shellKey={shellKey}
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}

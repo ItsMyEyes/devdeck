@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
 import type { BrowserLoadError } from '@/features/browser/browserLoadError'
+import { emptyThreadView, reduceAgentEvents } from '@/features/agent-chat/eventReducer'
+import type { AgentEvent, AgentThreadView } from '@/features/agent-chat/types'
 import type { GitDiffTarget, WorktreeLayout } from '@/features/terminal/paneTree'
 import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
 import {
@@ -353,6 +355,13 @@ interface DevDeckState {
    *  below) — a restored `browser` tab reopens to its blank/bookmarks home
    *  state, same as `ensureBrowserTile` lazily re-creating a missing entry. */
   browserTiles: Record<string, BrowserTileState>
+  /** Streamed view model for every open agent-chat thread, keyed by
+   *  `threadKey` (== the backend's ThreadID). Deliberately NOT persisted
+   *  (see the `partialize` config below) — this is rebuilt from the
+   *  server's event log on every reconnect via `useAgentChatSocket`, and
+   *  persisting it would resurrect stale half-written messages across a
+   *  reload. */
+  agentThreads: Record<string, AgentThreadView>
   /** Currently-open DOM overlays that must render above the entire app DOM
    *  (command palettes, dialogs, dropdowns) — Tauri's native child webviews
    *  (Browser tiles) are separate OS-composited surfaces the window manager
@@ -416,6 +425,15 @@ interface DevDeckState {
   selectBrowserDoc: (tabId: string, docId: string) => void
   setBrowserTileFullscreen: (tabId: string, fullscreen: boolean) => void
   removeBrowserTile: (tabId: string) => void
+
+  // agent-chat threads (streamed view model, driven by useAgentChatSocket)
+  /** Folds `events` into `threadKey`'s view via `reduceAgentEvents`, seeding
+   *  an `emptyThreadView()` if this is the thread's first batch. */
+  applyAgentEvents: (threadKey: string, events: AgentEvent[]) => void
+  /** Drops a thread's view model entirely — used when a chat pane closes for
+   *  good (not on a mere reconnect, which replays instead of resetting). */
+  resetAgentThread: (threadKey: string) => void
+
   pushNativeOverlayBlocker: (id: string, region: OverlayBlockerRegion) => void
   popNativeOverlayBlocker: (id: string) => void
   setTileDragActive: (active: boolean) => void
@@ -638,6 +656,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
       browserTiles: {},
+      agentThreads: {},
       nativeOverlayBlockers: {},
       tileDragActive: false,
 
@@ -784,6 +803,13 @@ export const useDevDeckStore = create<DevDeckState>()(
           if (tile) tile.fullscreen = fullscreen
         }),
       removeBrowserTile: (tabId) => set((s) => void delete s.browserTiles[tabId]),
+      applyAgentEvents: (threadKey, events) =>
+        set((s) => {
+          const current = s.agentThreads[threadKey] ?? emptyThreadView()
+          const next = reduceAgentEvents(current, events)
+          if (next !== current) s.agentThreads[threadKey] = next
+        }),
+      resetAgentThread: (threadKey) => set((s) => void delete s.agentThreads[threadKey]),
       pushNativeOverlayBlocker: (id, region) => set((s) => void (s.nativeOverlayBlockers[id] = region)),
       popNativeOverlayBlocker: (id) => set((s) => void delete s.nativeOverlayBlockers[id]),
       setTileDragActive: (active) => set((s) => void (s.tileDragActive = active)),

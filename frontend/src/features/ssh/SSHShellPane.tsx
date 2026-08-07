@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Activity, FolderTree, TerminalSquare } from 'lucide-react'
+import { Activity, Eye, FolderTree, RotateCcw, Save, TerminalSquare, Trash2 } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { isDocumentPath } from '@/features/documents/documentKind'
 import { OverflowItem, ShellSidebarToggle, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
+import { MarkdownPreviewPane } from '@/features/terminal/MarkdownPreviewPane'
 import { PaneCanvas } from '@/features/terminal/PaneCanvas'
 import type { PaneContentRendererMap } from '@/features/terminal/PaneCanvas'
 import {
@@ -14,6 +16,7 @@ import {
   createDefaultLayout,
   createExplorerContent,
   createFileContent,
+  createMarkdownPreviewContent,
   createStatsContent,
   deserializeLayout,
   findContent,
@@ -36,9 +39,9 @@ import type { LineReveal } from '@/features/terminal/PlainCodeEditor'
 import { UnsavedChangesDialog } from '@/features/terminal/UnsavedChangesDialog'
 import { ShellSidebar } from '@/features/terminal/ShellSidebar'
 import { StatsPane } from '@/features/stats/StatsPane'
+import { SSHRightSidebar } from './SSHRightSidebar'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
-import { SSHRightSidebar } from './SSHRightSidebar'
 
 function basename(path: string) {
   return path.split('/').pop() ?? path
@@ -48,11 +51,21 @@ function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
 }
 
-function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string[]): string[] {
+/** One open tab (file editor or markdown preview) whose path sits under a
+ *  deleted path — see ExpandedTerminal.tsx's `DeletedFileTab` doc comment
+ *  for why `id` and `path` differ for a `markdown-preview` tab. */
+interface DeletedFileTab {
+  id: string
+  path: string
+}
+
+function fileTabsUnderDeletedPaths(node: PaneNode, deletedPaths: readonly string[]): DeletedFileTab[] {
   if (node.type === 'leaf') {
     return node.tabs.flatMap((tab) => {
-      if (tab.kind !== 'file') return []
-      return deletedPaths.some((deletedPath) => isDeletedPath(tab.path, deletedPath)) ? [tab.path] : []
+      if (tab.kind !== 'file' && tab.kind !== 'markdown-preview') return []
+      return deletedPaths.some((deletedPath) => isDeletedPath(tab.path, deletedPath))
+        ? [{ id: tab.id, path: tab.path }]
+        : []
     })
   }
   return node.children.flatMap((child) => fileTabsUnderDeletedPaths(child, deletedPaths))
@@ -212,14 +225,14 @@ export function SSHShellPane({
 
   const handleFilesDeleted = useCallback(
     (paths: string[]) => {
-      const filePaths = fileTabsUnderDeletedPaths(layout.root, paths)
+      const tabs = fileTabsUnderDeletedPaths(layout.root, paths)
       let nextLayout = layout
       let changed = false
-      for (const path of filePaths) {
-        cleanupFileBookkeeping(path)
-        const leaf = findLeafForContent(nextLayout.root, path)
+      for (const tab of tabs) {
+        cleanupFileBookkeeping(tab.path)
+        const leaf = findLeafForContent(nextLayout.root, tab.id)
         if (!leaf) continue
-        nextLayout = closeTab(nextLayout, leaf.id, path)
+        nextLayout = closeTab(nextLayout, leaf.id, tab.id)
         changed = true
       }
       if (changed) commitLayout(nextLayout)
@@ -394,6 +407,31 @@ export function SSHShellPane({
     })
   }
 
+  /** MarkdownFileEditor's edit-mode "open preview in new tab" button — see
+   *  ExpandedTerminal.tsx's `openMarkdownPreviewTab` doc comment; identical
+   *  dedup rule, just committed through this pane's own layout state. */
+  const openMarkdownPreviewTab = useCallback(
+    (path: string) => {
+      const content = createMarkdownPreviewContent(path)
+      const existingLeaf = findLeafForContent(layout.root, content.id)
+      if (existingLeaf) {
+        commitLayout({
+          ...layout,
+          root: selectTabInTree(layout.root, existingLeaf.id, content.id),
+          focusedPaneId: existingLeaf.id,
+        })
+        return
+      }
+      commitLayout({
+        ...layout,
+        root: addContentToLeaf(layout.root, layout.focusedPaneId, content),
+        focusedPaneId: layout.focusedPaneId,
+      })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layout, connectionId],
+  )
+
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
       // `isFocused` is false when another tile is the one the user's actually
@@ -446,8 +484,9 @@ export function SSHShellPane({
   }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
 
   function tabIcon(content: PaneContent): ReactNode {
-    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-accent" />
-    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-accent" />
+    if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'explorer') return <FolderTree size={13} className="text-devdeck-fg-2" />
+    if (content.kind === 'markdown-preview') return <Eye size={13} className="text-devdeck-fg-2" />
     if (content.kind === 'file') return <MaterialFileIcon name={basename(content.path)} size={13} />
     return null
   }
@@ -456,9 +495,44 @@ export function SSHShellPane({
     return content.kind === 'file' && dirtyFiles.has(content.path)
   }
 
+  const focusedPane = findPane(layout.root, layout.focusedPaneId)
+  const focusedActiveContent =
+    focusedPane && focusedPane.type === 'leaf'
+      ? focusedPane.tabs.find((t) => t.id === focusedPane.activeTabId)
+      : undefined
+
+  /** The active file tab's imperative handle, when the focused pane's active
+   *  tab is an editable (non-document) file — powers the overflow menu's
+   *  Save/Revert/Delete entries, the new home for what used to be
+   *  SSHFileEditor's own per-tab header buttons. */
+  const activeFileHandle =
+    focusedActiveContent?.kind === 'file' && !isDocumentPath(focusedActiveContent.path)
+      ? fileHandles.current.get(focusedActiveContent.path)
+      : undefined
+
   function renderOverflowActions() {
     return (
       <div className="flex min-w-[168px] flex-col gap-0.5">
+        {activeFileHandle ? (
+          <>
+            <OverflowItem onClick={() => void activeFileHandle.save()}>
+              <Save size={13} />
+              Save file
+            </OverflowItem>
+            {activeFileHandle.revert ? (
+              <OverflowItem onClick={() => activeFileHandle.revert?.()}>
+                <RotateCcw size={13} />
+                Revert file
+              </OverflowItem>
+            ) : null}
+            {activeFileHandle.remove ? (
+              <OverflowItem danger onClick={() => activeFileHandle.remove?.()}>
+                <Trash2 size={13} />
+                Delete file
+              </OverflowItem>
+            ) : null}
+          </>
+        ) : null}
         <OverflowItem onClick={openExplorerInFocusedPane}>
           <FolderTree size={13} />
           Open file explorer
@@ -486,7 +560,7 @@ export function SSHShellPane({
     terminal: ({ content }) => {
       if (content.kind !== 'terminal') return null
       return (
-        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-terminal px-3 py-2">
+        <div className="h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-devdeck-pane px-3 py-2">
           <SSHTerminal key={content.sessionKey} connectionId={connectionId} sessionKey={content.sessionKey} />
         </div>
       )
@@ -494,6 +568,10 @@ export function SSHShellPane({
     git: () => null,
     // No git over SSH, so neither the panel nor a diff tab can ever exist here.
     'git-diff': () => null,
+    // Agent chat threads belong to a worktree's configured agent, which an
+    // SSH host has no notion of — no UI path here ever creates one; this
+    // only satisfies PaneContentRendererMap's exhaustiveness.
+    'agent-chat': () => null,
     // No SSH UI path creates an 'untitled' tab yet (only the worktree pane's
     // "+" menu has "New File") — this satisfies PaneContentRendererMap's
     // exhaustiveness without dead-wiring an editor no user action can reach.
@@ -516,8 +594,13 @@ export function SSHShellPane({
           onDirtyChange={handleDirtyChange}
           onDeleted={(path) => handleFilesDeleted([path])}
           reveal={lineReveals[content.path]}
+          onOpenPreviewTab={openMarkdownPreviewTab}
         />
       )
+    },
+    'markdown-preview': ({ content }) => {
+      if (content.kind !== 'markdown-preview') return null
+      return <MarkdownPreviewPane target={{ kind: 'ssh', connectionId }} path={content.path} />
     },
     explorer: () => (
       <TerminalExplorer
@@ -537,7 +620,7 @@ export function SSHShellPane({
   const firstPaneId = firstLeafId(layout.root)
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-terminal">
+    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-pane">
       <ShellSidebar
         shellKey={shellKey}
         target={{ kind: 'ssh', connectionId }}

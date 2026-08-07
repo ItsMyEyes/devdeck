@@ -69,9 +69,12 @@ export default defineConfig({
     // on all of them. They are tracked as explicit debt in COMMANDS.md; add
     // each one here as it gets migrated.
     include: [
+      'src/styles/globals.tokens.test.ts',
+      'src/features/useReducedTransparency.test.ts',
       'src/features/palette/**/*.test.{ts,tsx}',
       'src/features/ssh/{sshCommand,sshQuickAdd,jumpHostDraft}.test.ts',
       'src/features/tabs/tileTree.ssh.test.ts',
+      'src/features/tabs/WorkspaceTileCanvas.focus.test.tsx',
       'src/lib/fuzzyHighlight.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
       'src/features/browser/BrowserTabStrip.test.tsx',
@@ -88,6 +91,7 @@ export default defineConfig({
       'src/features/browser/useNativeOverlayBlocker.test.tsx',
       'src/features/browser/BrowserTile.activeTab.test.tsx',
       'src/features/browser/BrowserTile.loadTimeout.test.tsx',
+      'src/features/browser/BrowserTile.scroll.test.tsx',
       'src/features/browser/browserLoadError.test.ts',
       'src/features/modules/BrowserModule.loadError.test.tsx',
       'src/features/browser/BrowserOmnibox.test.tsx',
@@ -124,6 +128,7 @@ export default defineConfig({
       'src/features/terminal/GitPanel.test.tsx',
       'src/features/terminal/PanelHeader.test.tsx',
       'src/features/terminal/ExpandedTerminal.test.tsx',
+      'src/features/terminal/terminalTheme.test.ts',
       'src/features/terminal/paneTree.stats.test.ts',
       'src/features/ssh/SSHShellPane.test.tsx',
       'src/features/overlays/SocksPublishSection.test.tsx',
@@ -136,6 +141,7 @@ export default defineConfig({
       'src/features/agent-chat/eventReducer.test.ts',
       'src/features/agent-chat/timeline.test.ts',
       'src/features/agent-chat/scrollAnchoring.test.ts',
+      'src/features/terminal/paneTree.agentChat.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.

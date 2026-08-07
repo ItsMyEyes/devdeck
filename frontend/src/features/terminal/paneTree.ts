@@ -11,7 +11,7 @@
  * `WorktreeLayout` per worktree is a separate, later integration step.
  */
 
-export type PaneContentKind = 'terminal' | 'git' | 'git-diff' | 'file' | 'explorer' | 'untitled' | 'stats'
+export type PaneContentKind = 'terminal' | 'git' | 'git-diff' | 'file' | 'explorer' | 'untitled' | 'stats' | 'markdown-preview' | 'agent-chat'
 
 /** What a git diff is taken against: a working-tree/index file, or a commit.
  *  Defined here rather than in the store because this module is deliberately
@@ -55,6 +55,15 @@ export interface TerminalContent extends BasePaneContent {
   sessionKey: string
 }
 
+/** A chat thread against the worktree's configured agent. Its `threadKey` is
+ *  the backend's ThreadID verbatim. The primary pane uses the bare worktree
+ *  id; additional chat panes use `${worktreeId}::chat-${n}` — the same
+ *  scheme TerminalContent uses for extra shells. */
+export interface AgentChatContent extends BasePaneContent {
+  kind: 'agent-chat'
+  threadKey: string
+}
+
 export interface GitContent extends BasePaneContent {
   kind: 'git'
 }
@@ -72,6 +81,17 @@ export interface FileContent extends BasePaneContent {
   kind: 'file'
   /** Also this content's `id` — enforces "one instance per open path"
    *  across the whole tree. */
+  path: string
+}
+
+/** A markdown file's rendered preview, opened as its own tab alongside (or
+ *  instead of) the editing `FileContent` for the same path — MarkdownFileEditor's
+ *  edit-mode "open preview in new tab" action. Its `id` is derived from the
+ *  path via `markdownPreviewTargetKey` rather than equal to it, since a
+ *  `FileContent` for the same path may already own that id (the "one
+ *  instance per open path" rule only applies within a single kind). */
+export interface MarkdownPreviewContent extends BasePaneContent {
+  kind: 'markdown-preview'
   path: string
 }
 
@@ -103,6 +123,8 @@ export type PaneContent =
   | ExplorerContent
   | UntitledContent
   | StatsContent
+  | MarkdownPreviewContent
+  | AgentChatContent
 
 export interface LeafPane {
   type: 'leaf'
@@ -207,8 +229,34 @@ export function createFileContent(path: string, label?: string): FileContent {
   return { kind: 'file', id: path, path, label: label ?? path.split('/').pop() ?? path }
 }
 
+/** Stable identity for a markdown preview target — doubles as the pane tab's
+ *  id, so re-opening the same file's preview refocuses instead of stacking a
+ *  duplicate (the same rule `gitDiffTargetKey`/`statsTargetKey` apply). */
+export function markdownPreviewTargetKey(path: string): string {
+  return `md-preview:${path}`
+}
+
+export function createMarkdownPreviewContent(path: string, label?: string): MarkdownPreviewContent {
+  return {
+    kind: 'markdown-preview',
+    id: markdownPreviewTargetKey(path),
+    path,
+    label: label ?? path.split('/').pop() ?? path,
+  }
+}
+
 export function createUntitledContent(label: string): UntitledContent {
   return { kind: 'untitled', id: generateId(), label }
+}
+
+/** `seq` undefined => the primary chat pane, keyed by the bare worktree id
+ *  (mirrors `createPrimaryTerminalContent`). A defined `seq` produces an
+ *  additional chat thread, keyed `${worktreeId}::chat-${seq}` — the same
+ *  suffix scheme `createTerminalContent` uses for extra shells. */
+export function createAgentChatPane(worktreeId: string, seq?: number): AgentChatContent {
+  const threadKey = seq === undefined ? worktreeId : `${worktreeId}::chat-${seq}`
+  const label = seq === undefined ? 'Chat' : `Chat ${seq + 1}`
+  return { kind: 'agent-chat', id: threadKey, threadKey, label }
 }
 
 /** Counts every open Untitled tab anywhere in the tree — used to label a
