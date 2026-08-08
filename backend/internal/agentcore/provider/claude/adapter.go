@@ -36,6 +36,43 @@ type session struct {
 	cancel    context.CancelFunc
 	startedAt int64
 	model     string
+	// stderr holds what the process wrote to stderr, so a fatal startup error
+	// can be reported instead of surfacing only as "no active session" later.
+	stderr *boundedBuffer
+}
+
+// stderrCaptureBytes bounds per-session stderr retention. Only the head is
+// kept: a fatal argument or auth error is printed first, and a chatty process
+// should not be able to grow this for the life of a long session.
+const stderrCaptureBytes = 8 << 10
+
+// boundedBuffer is an io.Writer that keeps at most the first `limit` bytes and
+// silently discards the rest. Safe for concurrent use because exec writes to
+// cmd.Stderr from its own goroutine while readLoop may read String() at exit.
+type boundedBuffer struct {
+	limit int
+	mu    sync.Mutex
+	buf   bytes.Buffer
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if room := b.limit - b.buf.Len(); room > 0 {
+		if len(p) > room {
+			p = p[:room]
+		}
+		b.buf.Write(p)
+	}
+	// Always report a full write: reporting short would make exec treat a
+	// deliberate truncation as an I/O error and tear the process down.
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // adapter is the claude provider.Adapter. It is created once per configured
@@ -107,6 +144,13 @@ func buildArgs(cfg Config, in provider.SessionStartInput) []string {
 		"--print",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
+		// Required, not optional. Without it the CLI refuses to start —
+		// "When using --print, --output-format=stream-json requires
+		// --verbose" — and exits immediately, so every session died the
+		// instant it spawned. The only symptom that reached the user was a
+		// later "thread has no active session" from SendTurn, because the
+		// process's stderr was going nowhere (see startProcess).
+		"--verbose",
 		"--include-partial-messages",
 	}
 
@@ -212,6 +256,12 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		cancel()
 		return provider.Session{}, fmt.Errorf("claude: stdout pipe: %w", err)
 	}
+	// Capture stderr. The CLI reports fatal argument errors there and then
+	// exits, so discarding it turns "wrong flags" into a silent instant death
+	// whose only visible symptom is a later "thread has no active session".
+	// Bounded because this is held for the process's whole life.
+	stderr := &boundedBuffer{limit: stderrCaptureBytes}
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -221,6 +271,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 	sess := &session{
 		threadID:  in.ThreadID,
 		cmd:       cmd,
+		stderr:    stderr,
 		stdinEnc:  json.NewEncoder(stdin),
 		state:     newParseState(in.ThreadID, a.instanceID),
 		cancel:    cancel,
@@ -271,6 +322,14 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 	detail := ""
 	if waitErr != nil {
 		detail = waitErr.Error()
+	}
+	// Prefer what the process actually said over Go's generic "exit status 1".
+	if msg := strings.TrimSpace(sess.stderr.String()); msg != "" {
+		if detail == "" {
+			detail = msg
+		} else {
+			detail = detail + ": " + msg
+		}
 	}
 
 	a.emit(event.Event{

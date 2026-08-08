@@ -425,11 +425,7 @@ func main() {
 		// for extra split chat panes (see paneTree.ts) — both name the same
 		// worktree, so only the prefix before "::" is looked up.
 		InstanceFor: func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
-			worktreeID := threadID
-			if i := strings.Index(threadID, "::"); i >= 0 {
-				worktreeID = threadID[:i]
-			}
-			wt, err := st.WorktreeByID(worktreeID)
+			wt, err := st.WorktreeByID(orchestration.WorktreeIDForThread(threadID))
 			if err != nil {
 				return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
 			}
@@ -439,12 +435,10 @@ func main() {
 			// name an agent or nothing can run. Without this, InstanceID came
 			// out as ":default", whose empty Kind matched no driver and left
 			// every turn failing with "thread is not bound to an instance".
-			agentID := wt.Agent
-			if agentID == "" {
-				agentID = defaultChatAgent
-				log.Printf("agent: worktree %s has no agent configured; defaulting to %q", worktreeID, agentID)
+			if wt.Agent == "" {
+				log.Printf("agent: worktree %s has no agent configured; defaulting to %q", wt.ID, orchestration.DefaultAgent)
 			}
-			return provider.InstanceID(agentID + ":default"), provider.SessionStartInput{
+			return orchestration.InstanceIDForAgent(wt.Agent), provider.SessionStartInput{
 				ThreadID: threadID,
 				Cwd:      wt.Path,
 			}, nil
@@ -807,6 +801,14 @@ func main() {
 	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
+
+	// Backstop for /api/ paths no route above claimed — most notably the
+	// hub-only block, which a --role runtime skips while still serving this
+	// web UI. Without it those fall through to the SPA catch-all below and
+	// come back as index.html with a 200, which the frontend then tries to
+	// parse as JSON. Most specific pattern wins, so registered routes are
+	// unaffected.
+	mux.Handle("/api/", handler.NewAPINotFoundHandler())
 	mux.Handle("/", webui.Handler())
 
 	var authMW func(http.Handler) http.Handler
@@ -1273,9 +1275,3 @@ func loadOrCreateSigningKey(dbPath string) (ed25519.PrivateKey, error) {
 	}
 	return priv, nil
 }
-
-// defaultChatAgent is used when a worktree has no Agent set. It is the only
-// agent with a ported agentcore Driver today, and settings' default_model is
-// a Claude model, so this matches what the composer's model picker already
-// shows. Adding drivers should turn this into a probe-aware choice.
-const defaultChatAgent = "claude"

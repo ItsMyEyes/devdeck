@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 
 	"devdeck/backend/internal/agentcore/orchestration"
@@ -258,15 +257,11 @@ func (h *AgentWSHandler) autoCreateThread(ctx context.Context, threadID string) 
 // panes (see paneTree.ts) — both name the same worktree, so only the prefix
 // before "::" is looked up.
 func (h *AgentWSHandler) resolveInstanceID(threadID string) (string, error) {
-	worktreeID := threadID
-	if i := strings.Index(threadID, "::"); i >= 0 {
-		worktreeID = threadID[:i]
-	}
-	wt, err := h.store.WorktreeByID(worktreeID)
+	wt, err := h.store.WorktreeByID(orchestration.WorktreeIDForThread(threadID))
 	if err != nil {
 		return "", fmt.Errorf("agent thread %s: %w", threadID, err)
 	}
-	return wt.Agent + ":default", nil
+	return string(orchestration.InstanceIDForAgent(wt.Agent)), nil
 }
 
 func (h *AgentWSHandler) writeEvents(ctx context.Context, conn *websocket.Conn, evts []orchestration.Event) error {

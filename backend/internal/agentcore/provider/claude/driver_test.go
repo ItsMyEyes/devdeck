@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"devdeck/backend/internal/agentcore/provider"
@@ -52,3 +53,45 @@ func TestDecodeConfigRejectsGarbage(t *testing.T) {
 }
 
 var _ provider.Driver = NewDriver()
+
+// Regression: buildArgs omitted --verbose, and the CLI refuses to start
+// without it ("When using --print, --output-format=stream-json requires
+// --verbose"). Every session died the instant it spawned; the only symptom
+// the user ever saw was a later "thread has no active session" from SendTurn,
+// because stderr was going nowhere. Six sent messages produced silence.
+func TestBuildArgsCarriesTheFlagsTheCLIDemands(t *testing.T) {
+	args := buildArgs(Config{}, provider.SessionStartInput{})
+
+	joined := strings.Join(args, " ")
+	for _, required := range []string{
+		"--print",
+		"--output-format stream-json",
+		"--input-format stream-json",
+		"--verbose",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("buildArgs missing %q; got: %s", required, joined)
+		}
+	}
+}
+
+func TestBuildArgsMapsModesToASinglePermissionFlag(t *testing.T) {
+	// Plan mode is itself a --permission-mode value, so it must not stack a
+	// second flag on top of the RuntimeMode mapping.
+	args := buildArgs(Config{}, provider.SessionStartInput{
+		Interact: provider.InteractionPlan,
+		Mode:     provider.ModeFullAccess,
+	})
+	count := 0
+	for _, a := range args {
+		if a == "--permission-mode" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("--permission-mode appeared %d times, want exactly 1: %v", count, args)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--permission-mode plan") {
+		t.Fatalf("plan mode should win over runtime mode; got: %v", args)
+	}
+}
