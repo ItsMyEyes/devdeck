@@ -211,11 +211,11 @@ function Breadcrumbs({ path }: { path: string }) {
   const segments = path.split('/').filter(Boolean)
   if (segments.length === 0) return null
   return (
-    <div className="flex flex-none items-center gap-1 overflow-hidden border-b border-devdeck-border bg-devdeck-surface-2 px-3 py-1 font-mono text-[10.5px] text-devdeck-dim">
+    <div className="flex flex-none items-center gap-1 overflow-hidden border-b border-devdeck-border bg-devdeck-card-wash px-3 py-1 font-mono text-[10.5px] text-devdeck-fg-2">
       {segments.map((segment, index) => (
         <span key={`${segment}-${index}`} className="flex min-w-0 items-center gap-1">
-          {index > 0 ? <span className="text-devdeck-muted-2">›</span> : null}
-          <span className={cn('truncate', index === segments.length - 1 && 'text-devdeck-muted')}>
+          {index > 0 ? <span className="text-devdeck-fg-2">›</span> : null}
+          <span className={cn('truncate', index === segments.length - 1 && 'text-devdeck-fg-2')}>
             {segment}
           </span>
         </span>

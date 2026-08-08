@@ -70,7 +70,7 @@ check('clears the legacy key so a second call returns []', () => {
   const first = takeLegacyBrowserTileBookmarks()
   assertEqual(first.length, 1, 'first call sees the saved bookmark')
   const second = takeLegacyBrowserTileBookmarks()
-  assertEqual(second, [], 'second call sees nothing — already migrated and cleared')
+  assertEqual(second, [], 'second call sees nothing - already migrated and cleared')
 })
 
 check('malformed JSON in the legacy key is treated as no bookmarks, not a crash', () => {

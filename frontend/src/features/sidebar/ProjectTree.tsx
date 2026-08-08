@@ -14,8 +14,6 @@ import type { Project, Worktree } from '@/store/types'
 import { NeverSyncedNotice } from './NeverSyncedNotice'
 import { ProjectSyncBadge } from './ProjectSyncBadge'
 
-const GROUP_COLORS = ['#ff6978', '#4aa8ff', '#a578ff', '#5ed69a', '#f5c451', '#c7a3ff']
-
 export function ProjectTree() {
   const navigate = useNavigate()
   const { wsId, projectId, wtId, view } = useScope()
@@ -61,12 +59,12 @@ export function ProjectTree() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-4">
       <div className="mb-2.5 flex items-center justify-between px-2">
-        <span className="font-mono text-[10.5px] font-semibold tracking-[0.16em] text-devdeck-dim">Projects</span>
+        <span className="font-mono text-[10.5px] font-semibold tracking-[0.16em] text-devdeck-fg-2">Projects</span>
         <button
           type="button"
           onClick={openNewProject}
           title="New project"
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <Plus size={15} />
         </button>
@@ -78,10 +76,10 @@ export function ProjectTree() {
           onClick={goAllHosts}
           aria-current={allSelected ? 'page' : undefined}
           className={cn(
-            'mb-2.5 flex h-11 w-full cursor-pointer items-center gap-3 rounded-[11px] px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+            'mb-2.5 flex h-11 w-full cursor-pointer items-center gap-3 rounded-control px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             allSelected
-              ? 'bg-devdeck-accent-tint text-devdeck-accent-soft ring-1 ring-inset ring-devdeck-border-accent'
-              : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+              ? 'bg-devdeck-on text-devdeck-fg'
+              : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
           )}
         >
           <LayoutGrid size={17} className="flex-none" />
@@ -90,11 +88,10 @@ export function ProjectTree() {
         </button>
 
         <div className="flex flex-col gap-1">
-          {projects.map((project, index) => (
+          {projects.map((project) => (
             <ProjectRow
               key={project.id}
               project={project}
-              color={GROUP_COLORS[index % GROUP_COLORS.length]}
               selected={view === 'agents' && projectId === project.id && !wtId}
               wtId={wtId}
               onGoProject={() => goProject(project)}
@@ -111,11 +108,11 @@ export function ProjectTree() {
             <NeverSyncedNotice lastSyncedAt={null} />
           ) : (
             <div className="px-3 py-8 text-center">
-              <div className="font-mono text-[11.5px] text-devdeck-dim">no groups yet</div>
+              <div className="font-mono text-[11.5px] text-devdeck-fg-2">no groups yet</div>
               <button
                 type="button"
                 onClick={openNewProject}
-                className="mt-3 h-8 cursor-pointer rounded-md border border-devdeck-border-menu bg-devdeck-elevated px-3 text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="mt-3 h-8 cursor-pointer rounded-md border border-devdeck-border-menu bg-devdeck-glass-solid px-3 text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 + Add project
               </button>
@@ -129,7 +126,6 @@ export function ProjectTree() {
 
 function ProjectRow({
   project,
-  color,
   selected,
   wtId,
   onGoProject,
@@ -139,7 +135,6 @@ function ProjectRow({
   onDelete,
 }: {
   project: Project
-  color: string
   selected: boolean
   wtId?: string
   onGoProject: () => void
@@ -156,23 +151,23 @@ function ProjectRow({
   // or the assigned machine is confirmed offline — either way navigating in
   // would just hang on a dead connection, so opening the project is blocked.
   const unreachable = !machine || health.data?.status === 'offline'
-  const unreachableReason = machine ? `${machine.name} is offline — can't connect.` : 'No machine assigned to this project — can’t connect.'
+  const unreachableReason = machine ? `${machine.name} is offline - can't connect.` : 'No machine assigned to this project - can’t connect.'
 
   return (
     <div>
       <div
         className={cn(
-          'group relative flex h-10 items-center rounded-[10px] transition-colors',
+          'group relative flex h-10 items-center rounded-control transition-colors',
           selected || containsActiveWorktree
             ? 'bg-devdeck-hover-wash text-devdeck-fg'
-            : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+            : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
         )}
       >
         <button
           type="button"
           onClick={onToggle}
           aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
-          className="ml-1 flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-surface-2 hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="ml-1 flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-card-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <ChevronRight size={14} className={cn('transition-transform', expanded && 'rotate-90')} />
         </button>
@@ -183,17 +178,17 @@ function ProjectRow({
             aria-current={selected ? 'page' : undefined}
             onClick={() => !unreachable && onGoProject()}
             className={cn(
-              'flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-[10px] pr-14 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              'flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-control pr-14 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               unreachable ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
           >
-            <Folder size={17} strokeWidth={2.1} className="flex-none" style={{ color }} />
+            <Folder size={17} strokeWidth={2.1} className="flex-none" />
             <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{project.name}</span>
             <ProjectSyncBadge project={project} />
             {unreachable ? (
-              <StatusDot color="#f87171" size={7} />
+              <StatusDot color="var(--devdeck-err)" size={7} />
             ) : (
-              <span className="font-mono text-[11.5px] font-semibold text-devdeck-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+              <span className="font-mono text-[11.5px] font-semibold text-devdeck-fg-2 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
                 {project.worktrees.length}
               </span>
             )}
@@ -205,7 +200,7 @@ function ProjectRow({
             title={`Edit project ${project.name}`}
             aria-label={`Edit project ${project.name}`}
             onClick={onEdit}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-accent-tint hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <Settings2 size={13} />
           </button>
@@ -214,7 +209,7 @@ function ProjectRow({
             title={`Delete project ${project.name}`}
             aria-label={`Delete project ${project.name}`}
             onClick={onDelete}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <Trash2 size={13} />
           </button>
@@ -224,7 +219,7 @@ function ProjectRow({
       {expanded ? (
         <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-devdeck-border-menu pl-2">
           {project.worktrees.length === 0 ? (
-            <div className="px-2 py-1.5 font-mono text-[10.5px] text-devdeck-dim">no terminals yet</div>
+            <div className="px-2 py-1.5 font-mono text-[10.5px] text-devdeck-fg-2">no terminals yet</div>
           ) : (
             project.worktrees.map((worktree) => (
               <WorktreeRow
@@ -272,13 +267,13 @@ function WorktreeRow({
         className={cn(
           'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
           unreachable ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-          active ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+          active ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
         )}
       >
-        <StatusDot color={unreachable ? '#f87171' : state.color} size={6} />
+        <StatusDot color={unreachable ? 'var(--devdeck-err)' : state.color} size={6} />
         <WorktreeGlyph root={worktree.root} size={12} />
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{label}</span>
-        <span className="font-mono text-[9.5px] text-devdeck-dim">{state.label}</span>
+        <span className="font-mono text-[9.5px] text-devdeck-fg-2">{state.label}</span>
       </button>
     </Tooltip>
   )

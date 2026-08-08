@@ -74,20 +74,20 @@ export function UntitledFileEditor({ target, contentId, label, active, onDirtyCh
   return (
     <div
       className={cn(
-        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal',
+        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane',
         active ? 'flex' : 'hidden',
       )}
     >
-      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface px-3">
-        <FileText size={16} className="text-devdeck-dim" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-muted">{label}</span>
+      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-pane px-3">
+        <FileText size={16} className="text-devdeck-fg-2" />
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-fg-2">{label}</span>
         {dirty ? <span className="font-mono text-[9.5px] text-devdeck-yellow">Unsaved</span> : null}
         <button
           type="button"
           onClick={requestSave}
           disabled={writeFile.isPending}
           title="Save (Ctrl+S)"
-          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-elevated px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent-soft disabled:cursor-default disabled:opacity-40"
+          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-glass-solid px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent disabled:cursor-default disabled:opacity-40"
         >
           {writeFile.isPending ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           Save
@@ -97,7 +97,7 @@ export function UntitledFileEditor({ target, contentId, label, active, onDirtyCh
       <Suspense
         fallback={
           <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
-            <Loader2 size={16} className="animate-spin text-devdeck-dim" />
+            <Loader2 size={16} className="animate-spin text-devdeck-fg-2" />
           </div>
         }
       >

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import type { Issue } from '@/store/types'
 
 const cardClass =
-  'flex cursor-pointer flex-col gap-1.5 rounded-[11px] border border-devdeck-border-card bg-devdeck-card px-2.5 py-2 text-left hover:border-devdeck-border-accent'
+  'flex cursor-pointer flex-col gap-1.5 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-2.5 py-2 text-left hover:border-devdeck-border-accent'
 
 function CardBody({ issue }: { issue: Issue }) {
   const pri = PRI[issue.priority]
@@ -17,7 +17,7 @@ function CardBody({ issue }: { issue: Issue }) {
       <div className="flex items-center gap-1.5">
         <Pill color={pri.color}>{pri.label}</Pill>
         {issue.assignee ? (
-          <span className="truncate font-mono text-[10.5px] text-devdeck-dim">{issue.assignee}</span>
+          <span className="truncate font-mono text-[10.5px] text-devdeck-fg-2">{issue.assignee}</span>
         ) : null}
       </div>
     </>

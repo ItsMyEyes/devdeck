@@ -44,7 +44,7 @@ export function BrowserTabStrip({ docs, activeDocId, onSelect, onClose }: Browse
   }, [docs])
 
   return (
-    <div className="flex h-8 min-w-0 flex-none items-center justify-start gap-1 overflow-hidden border-b border-devdeck-border bg-devdeck-bg px-2">
+    <div className="flex h-8 min-w-0 flex-none items-center justify-start gap-1 overflow-hidden border-b border-devdeck-border bg-devdeck-pane px-2">
       {pills.map((pill) => (
         <TabPill
           key={pill.id}
@@ -103,11 +103,11 @@ function TabPill({
       className={cn(
         'group flex h-7 flex-none items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full px-3',
         'transition-[width] duration-200 ease-out',
-        active && !single ? 'bg-devdeck-elevated' : 'hover:bg-devdeck-hover-wash',
+        active && !single ? 'bg-devdeck-glass-solid' : 'hover:bg-devdeck-hover-wash',
       )}
     >
       <BrowserFaviconChip seed={doc.id} title={doc.title} size={16} />
-      <span className={cn('min-w-0 flex-1 truncate text-left text-[11px]', active ? 'text-devdeck-fg' : 'text-devdeck-muted')}>
+      <span className={cn('min-w-0 flex-1 truncate text-left text-[11px]', active ? 'text-devdeck-fg' : 'text-devdeck-fg-2')}>
         {label}
       </span>
       <span

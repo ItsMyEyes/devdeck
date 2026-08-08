@@ -43,7 +43,7 @@ function RootComponent() {
         position="top-center"
         toastOptions={{
           style: {
-            background: 'var(--devdeck-elevated)',
+            background: 'var(--devdeck-glass-solid)',
             border: '1px solid var(--devdeck-border-accent)',
             color: 'var(--devdeck-fg-2)',
             fontSize: '12.5px',

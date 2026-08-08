@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
@@ -117,12 +117,12 @@ function TabDot({ active, focused, loading = false }: { active: boolean; focused
         // Loading outranks active/focused: a background tile that is fetching
         // is the one thing the strip can tell you that nothing else can.
         loading
-          ? 'animate-dot-pulse bg-devdeck-accent shadow-[0_0_0_2px_rgba(57,198,189,0.16)]'
+          ? 'animate-dot-pulse bg-devdeck-wait shadow-[0_0_0_2px_rgba(201,168,106,0.16)]'
           : active
             ? focused
               ? 'bg-devdeck-green shadow-[0_0_0_2px_rgba(86,213,138,0.14),0_0_7px_rgba(86,213,138,0.22)]'
               : 'bg-devdeck-green/40'
-            : 'bg-devdeck-dim-3',
+            : 'bg-devdeck-fg-2',
       )}
     />
   )
@@ -251,7 +251,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
               role="separator"
               aria-orientation={isRow ? 'vertical' : 'horizontal'}
               className={cn(
-                'flex-none touch-none bg-devdeck-border transition-colors hover:bg-devdeck-accent active:bg-devdeck-accent',
+                'flex-none touch-none bg-devdeck-border transition-colors hover:bg-devdeck-line active:bg-devdeck-line',
                 isRow ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
               )}
               onPointerDown={(event) => {
@@ -287,7 +287,7 @@ function TileSplitView({ node, ctx }: { node: TileSplit; ctx: TileRenderContext 
   )
 }
 
-function TileTabButton({
+export function TileTabButton({
   leafId,
   tab,
   active,
@@ -336,29 +336,38 @@ function TileTabButton({
   // them on the strip they currently control.
   const shortcut = shortcutNumber && focused ? primaryShortcutLabel(shortcutNumber) : null
   const selectButtonClass =
-    'flex min-w-0 flex-1 items-center gap-1.5 rounded-[7px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60'
+    'flex min-w-0 flex-1 items-center gap-1.5 rounded-control focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60'
 
+  /** One vocabulary for state, on every surface (DESIGN.md "State").
+   *
+   *  The wash is relative: it adds light to whatever sits behind it, so a
+   *  single value reads the same over glass (#5e5f5f) and inside a pane
+   *  (#49494a). An earlier revision used a darker fill on glass and a
+   *  lighter fill in the pane, which meant two opposite rules for one
+   *  concept.
+   *
+   *  No separate focus bar on top of the wash: the tab strip now carries
+   *  selection through the wash alone (operator call — a bottom accent bar
+   *  read as a stray underline rather than a focus signal). Which pane
+   *  receives keystrokes is no longer distinguished at the tab-strip level. */
   const wrapperClass = (dragging: boolean) =>
     cn(
-      'group flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-[9px] border',
-      'transition-[background-color,border-color,color,opacity] duration-150 active:cursor-grabbing',
+      'group relative flex flex-none touch-none cursor-grab items-center gap-1.5 rounded-control',
+      'transition-colors duration-150 active:cursor-grabbing',
       // Wider than the old label-only pills: a worktree tab now carries a
       // "<project>/<machine> · " origin prefix ahead of its session name.
-      compact
-        ? 'h-6 max-w-[200px] rounded-[7px] pl-2 pr-1 text-[11px]'
-        : 'h-8 max-w-[270px] pl-2.5 pr-1.5 text-[12px]',
-      // Two affordances for "active", not five: fill plus the dot. The border
-      // and the two shadows this used to stack read as a *button*, not a tab —
-      // and the hover border cost a 1px reflow on every pointer pass.
-      active && focused
-        ? 'border-transparent bg-devdeck-elevated text-devdeck-fg'
-        : active
-          ? 'border-transparent bg-devdeck-surface-2 text-devdeck-fg-2'
-          : 'border-transparent bg-transparent text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
-      dragging && 'opacity-40',
+      compact ? 'h-6 max-w-[200px] pl-2 pr-1 text-[11px]' : 'h-8 max-w-[270px] pl-2.5 pr-1.5 text-[12px]',
+      active ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash',
+      dragging && 'opacity-50',
     )
 
-  const titleWithShortcut = (title: string) => (shortcut ? `${title} — ${shortcut}` : title)
+  const titleWithShortcut = (title: string) => (shortcut ? `${title} - ${shortcut}` : title)
+
+  // Rendered as the first child of every tab-kind wrapper below.
+  // `data-selected` is a plain marker (no visual output of its own — the
+  // wash is the `wrapperClass` background) so tests can assert "selected"
+  // independently of "focused".
+  const stateMarkers = active ? <span data-selected="true" hidden /> : null
 
   const closeButton = (label: string, className?: string) =>
     onClose ? (
@@ -370,7 +379,7 @@ function TileTabButton({
         }}
         aria-label={`Close ${label}`}
         className={cn(
-          'pointer-events-none flex-none rounded p-0.5 text-devdeck-dim opacity-0 transition-[background-color,color,opacity]',
+          'pointer-events-none flex-none rounded p-0.5 text-devdeck-fg-2 opacity-0 transition-[background-color,color,opacity]',
           'hover:bg-devdeck-hover-wash-menu hover:text-devdeck-fg group-hover:pointer-events-auto group-hover:opacity-100',
           'focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
           className,
@@ -387,8 +396,8 @@ function TileTabButton({
         <kbd
           aria-label={`Shortcut ${shortcut}`}
           className={cn(
-            'flex h-[17px] flex-none items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
-            'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity',
+            'flex h-[17px] flex-none items-center rounded-micro border border-devdeck-border-card bg-devdeck-pane px-1',
+            'font-mono text-[8.5px] leading-none text-devdeck-fg-2 transition-opacity',
             active ? 'opacity-75' : 'opacity-0 group-hover:opacity-60',
           )}
         >
@@ -401,8 +410,8 @@ function TileTabButton({
         <kbd
           aria-label={`Shortcut ${shortcut}`}
           className={cn(
-            'flex h-[17px] items-center rounded-[5px] border border-devdeck-border-card bg-devdeck-surface px-1',
-            'font-mono text-[8.5px] leading-none text-devdeck-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            'flex h-[17px] items-center rounded-micro border border-devdeck-border-card bg-devdeck-pane px-1',
+            'font-mono text-[8.5px] leading-none text-devdeck-fg-2 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
             active ? 'opacity-75' : 'opacity-0 group-hover:opacity-60',
           )}
         >
@@ -425,6 +434,7 @@ function TileTabButton({
         title={titleWithShortcut(info.title)}
         className={wrapperClass(isDragging)}
       >
+        {stateMarkers}
         <button type="button" onClick={onSelect} className={selectButtonClass}>
           <TabDot active={active} focused={focused} />
           {/* The origin prefix carries almost all of the shrink (`shrink-[0.02]`
@@ -432,8 +442,8 @@ function TileTabButton({
               cramped pill degrades to "devd… · shell 3" — never to a row of
               identical "devdeck/kal…" stubs with the session name cut off. */}
           <span className="flex min-w-0 items-center gap-1">
-            <span className="min-w-0 shrink truncate text-devdeck-dim">{info.prefix}</span>
-            <span className="flex-none text-devdeck-dim-3">·</span>
+            <span className="min-w-0 shrink truncate text-devdeck-fg-2">{info.prefix}</span>
+            <span className="flex-none text-devdeck-fg-2">·</span>
             <span className="min-w-0 shrink-[0.02] truncate">{info.name}</span>
           </span>
         </button>
@@ -454,6 +464,7 @@ function TileTabButton({
         title={titleWithShortcut(info.label)}
         className={wrapperClass(isDragging)}
       >
+        {stateMarkers}
         <button type="button" onClick={onSelect} className={selectButtonClass}>
           <TabDot active={active} focused={focused} />
           <TabKindIcon kind="ssh-shell" />
@@ -476,6 +487,7 @@ function TileTabButton({
         title={titleWithShortcut(info.label)}
         className={wrapperClass(isDragging)}
       >
+        {stateMarkers}
         <button type="button" onClick={onSelect} className={selectButtonClass}>
           <TabDot active={active} focused={focused} loading={browserLoading} />
           <TabKindIcon kind="browser" />
@@ -495,6 +507,7 @@ function TileTabButton({
       title={titleWithShortcut('Agents')}
       className={wrapperClass(isDragging)}
     >
+      {stateMarkers}
       <button type="button" onClick={onSelect} className={selectButtonClass}>
         <TabDot active={active} focused={focused} />
         <TabKindIcon kind="agents" />
@@ -570,7 +583,7 @@ function ScrollableTabStrip({
   }
 
   const scrollButtonClass =
-    'flex h-full w-7 flex-none items-center justify-center border-devdeck-border text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-devdeck-dim'
+    'flex h-full w-7 flex-none items-center justify-center border-devdeck-border text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-devdeck-fg-2'
 
   return (
     <div ref={containerRef} className="flex min-w-0 flex-1 self-stretch">
@@ -608,6 +621,72 @@ function ScrollableTabStrip({
       ) : null}
     </div>
   )
+}
+
+export type PaneControl = 'split-h' | 'split-v' | 'more' | 'close'
+
+/** Below this width the split buttons cost as much room as the tab label they
+ *  sit next to, which is what a 2x2 split produces on a 1400px window. `more`
+ *  stays inline because it is where the collapsed controls go, and `close`
+ *  stays because it is the one control people reach for without looking. */
+export const NARROW_PANE_WIDTH = 260
+
+export function paneControlsFor(
+  width: number,
+  isDesktop = true,
+): {
+  inline: PaneControl[]
+  overflow: PaneControl[]
+} {
+  // Splits do not exist below `md`. Hiding them entirely is kinder than
+  // offering a control that produces an unreadable 2x2 grid on a 390px
+  // screen — see DESIGN.md "Space".
+  if (!isDesktop) return { inline: ['more', 'close'], overflow: [] }
+  if (width >= NARROW_PANE_WIDTH) {
+    return { inline: ['split-h', 'split-v', 'more', 'close'], overflow: [] }
+  }
+  return { inline: ['more', 'close'], overflow: ['split-h', 'split-v'] }
+}
+
+/** Width of a leaf's chrome strip, observed rather than derived, because a
+ *  leaf's width comes from the split tree and the window, not from props.
+ *
+ *  DEVIATION from the plan: not yet called anywhere in this file. The plan's
+ *  Task 7 assumed `WorkspaceTileCanvas` already had a pane-level control
+ *  cluster (`split-h`/`split-v`/`more`/`close` buttons wired to `ctx.onSplit`
+ *  / `ctx.onCloseLeaf`, plus a `PaneOverflowMenu` component) to narrow. It
+ *  does not: this component only supports creating a split by dragging a tab
+ *  onto an edge zone (`moveTileTab` in `tileTree.ts`), there is no
+ *  leaf-level "close this pane" or "split this pane" action anywhere in
+ *  `WorkspaceTileCanvasProps`/`TileRenderContext`, and no `PaneOverflowMenu`
+ *  (or equivalently-named) component exists — the only overflow-menu shell
+ *  in the codebase is `TabStripPopoverMenu`, used by the *unrelated*
+ *  in-worktree terminal splitter (`PaneCanvas.tsx` + `PanelHeader.tsx`).
+ *  Building real split/close-leaf actions requires new `tileTree.ts`
+ *  mutations and new wiring in `WorkspaceTileArea.tsx`, both out of this
+ *  task's file scope. `paneControlsFor` and this hook are implemented and
+ *  exported per spec so a follow-up task can wire them up once that
+ *  capability exists, without re-deriving the collapse rule.
+ *
+ *  DEVIATION (Task 8): for the same reason, there is no split *keyboard*
+ *  shortcut anywhere in this file to guard below `md` — splits are only ever
+ *  created by dragging a tab onto an edge zone (`resolveHover` /
+ *  `moveTileTab`, wired through `DndContext`'s pointer sensor), and the only
+ *  `keydown` listener touching this tree lives in the unrelated
+ *  `WorkspaceTileArea.tsx` (tab shortcuts: new/select/close/cycle — grepped
+ *  for `split`, none). `paneControlsFor`'s `isDesktop` gate is the real,
+ *  testable half of Task 8's rule; the keyboard half has no handler to wrap
+ *  until the split action above is built. */
+export function usePaneWidth(): [(el: HTMLElement | null) => void, number] {
+  const [width, setWidth] = useState(Number.POSITIVE_INFINITY)
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el])
+  return [setEl, width]
 }
 
 /** A leaf's own header row: its tab strip. Extracted from `TileLeafView` so
@@ -649,18 +728,16 @@ function TileLeafHeader({
       ref={setHeaderDropRef}
       style={headerStyle}
       className={cn(
-        'flex items-center overflow-hidden border-b border-devdeck-border',
+        'flex items-center overflow-hidden',
         topChrome
           ? // Every leaf touching the workspace's top edge gets a real chrome
-            // strip. The first one starts at the true viewport edge so it
-            // still fuses with macOS's overlaid traffic lights; sibling top
-            // strips are measured to their split column, filling the blank
-            // upper area instead of pushing a second row into the pane body.
-            'fixed top-0 z-40 h-10 bg-devdeck-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.018)]'
-          : // Lower split panes keep the lighter in-pane header; they don't
-            // compete with the app chrome or steal vertical space from top panes.
-            'h-8 flex-none bg-devdeck-surface-2',
-        topChrome && !isTopLeft && 'border-l border-devdeck-border',
+            // strip. The first starts at the true viewport edge so it fuses
+            // with macOS's overlaid traffic lights; siblings are measured to
+            // their split column. The strip is part of the glass layer, so
+            // it paints nothing of its own — see DESIGN.md "Surfaces".
+            'fixed top-0 z-40 h-10 bg-transparent'
+          : // Lower split panes keep an in-pane header on the pane surface.
+            'h-8 flex-none bg-transparent',
       )}
     >
       {topChrome && isTopLeft ? (
@@ -682,8 +759,10 @@ function TileLeafHeader({
               onSelect={() => ctx.onSelectTab(leaf.id, tab.id)}
               onClose={tab.kind !== 'agents' ? () => ctx.onCloseTab(leaf.id, tab.id) : undefined}
             />
-            {/* Divider after the pinned Agents tab, matching the flat TabBar's original look. */}
-            {tab.kind === 'agents' && i < leaf.tabs.length - 1 ? (
+            {/* Separator between two consecutive UNselected tabs, browser-tab style —
+                never next to the active tab, whose own wash already reads as a boundary
+                on both sides. */}
+            {i < leaf.tabs.length - 1 && tab.id !== leaf.activeTabId && leaf.tabs[i + 1].id !== leaf.activeTabId ? (
               <div className="mx-1.5 h-4 w-px flex-none bg-devdeck-border-menu" />
             ) : null}
           </Fragment>
@@ -695,10 +774,10 @@ function TileLeafHeader({
         aria-label="New tab"
         title="New tab"
         className={cn(
-          'ml-0.5 mr-1 flex flex-none items-center justify-center rounded-[8px] border border-transparent text-devdeck-dim',
-          'transition-[background-color,border-color,color] hover:border-devdeck-border-card hover:bg-devdeck-surface-2 hover:text-devdeck-fg',
+          'ml-0.5 mr-1 flex flex-none items-center justify-center rounded-control border border-transparent text-devdeck-fg-2',
+          'transition-[background-color,border-color,color] hover:border-devdeck-border-card hover:bg-devdeck-card-wash hover:text-devdeck-fg',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60',
-          topChrome ? 'h-7 w-7' : 'h-6 w-6 rounded-[7px]',
+          topChrome ? 'h-7 w-7' : 'h-6 w-6 rounded-control',
         )}
       >
         <Plus size={topChrome ? 13 : 11} />
@@ -719,7 +798,18 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
   )
 
   return (
-    <div ref={setLeafRef} className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}>
+    <div
+      ref={setLeafRef}
+      // The pane card (DESIGN.md "Surfaces": every tile leaf is `#1c1c1d`
+      // opaque). Rounded and clipped as one unit so a lower split's in-pane
+      // header (TileLeafHeader's non-topChrome branch, `bg-transparent`)
+      // reads as sitting ON this surface rather than on the glass behind it.
+      // A topChrome leaf's header is `fixed` and out of this box's flow, so
+      // rounding here only affects its content — the header stays on glass,
+      // as intended, with the section's own gap between them.
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-container bg-devdeck-pane"
+      onPointerDownCapture={() => ctx.onFocusLeaf(leaf.id)}
+    >
       <TileLeafHeader
         leaf={leaf}
         isTopLeft={isTopLeft}
@@ -742,7 +832,7 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
         ))}
         {hoverZone ? (
           <div
-            className="pointer-events-none absolute z-10 border-2 border-devdeck-accent bg-devdeck-accent/15"
+            className="pointer-events-none absolute z-10 border-2 border-devdeck-line bg-devdeck-on"
             style={zoneStyle(hoverZone)}
           />
         ) : null}
@@ -918,7 +1008,7 @@ export function WorkspaceTileCanvas({
         {dragTab ? (
           <div
             ref={dragGhostRef}
-            className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-[9px] border border-devdeck-border-strong bg-devdeck-elevated px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]"
+            className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-control border border-devdeck-border-strong bg-devdeck-glass-solid px-3 font-mono text-[11px] text-devdeck-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_12px_30px_rgba(0,0,0,0.52)]"
           >
             <TabDot active focused />
             {/* The worktree pill is the one kind that shows no glyph — its

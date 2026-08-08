@@ -23,7 +23,7 @@ function HighlightedText({ text, ranges }: { text: string; ranges: HighlightRang
   ranges.forEach(([start, end], i) => {
     if (start > cursor) nodes.push(text.slice(cursor, start))
     nodes.push(
-      <span key={i} className="font-semibold text-devdeck-accent">
+      <span key={i} className="font-semibold text-devdeck-fg">
         {text.slice(start, end)}
       </span>,
     )
@@ -118,17 +118,17 @@ function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string 
         aria-modal="true"
         aria-label="Command palette"
         onMouseDown={(event) => event.stopPropagation()}
-        className="flex max-h-[68vh] w-full max-w-[680px] flex-col overflow-hidden rounded-lg border border-devdeck-border-menu bg-devdeck-popover shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+        className="flex max-h-[68vh] w-full max-w-[680px] flex-col overflow-hidden rounded-lg border border-devdeck-border-menu bg-devdeck-glass-solid shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
       >
         <div className="flex h-12 flex-none items-center gap-2.5 border-b border-devdeck-border px-3">
-          <Search size={15} className="flex-none text-devdeck-accent" />
+          <Search size={15} className="flex-none text-devdeck-fg-2" />
           {model.breadcrumbs.map((crumb) => (
             <span
               key={crumb}
-              className="flex flex-none items-center gap-1 rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 font-mono text-[10px] text-devdeck-fg-2"
+              className="flex flex-none items-center gap-1 rounded border border-devdeck-border-strong bg-devdeck-pane px-1.5 py-0.5 font-mono text-[10px] text-devdeck-fg-2"
             >
               {crumb}
-              <ChevronRight size={10} className="text-devdeck-dim" />
+              <ChevronRight size={10} className="text-devdeck-fg-2" />
             </span>
           ))}
 
@@ -142,7 +142,7 @@ function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string 
               className="pointer-events-none absolute inset-y-0 left-0 flex items-center whitespace-pre font-mono text-[13px]"
             >
               <span className="invisible">{model.query}</span>
-              <span className="text-devdeck-dim">{model.ghost}</span>
+              <span className="text-devdeck-fg-2">{model.ghost}</span>
             </span>
             <input
               ref={inputRef}
@@ -156,33 +156,33 @@ function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string 
               onChange={(event) => model.setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={model.placeholder}
-              className="relative w-full bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-dim"
+              className="relative w-full bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-fg-2"
             />
           </div>
 
-          <span className="flex-none rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim">
+          <span className="flex-none rounded border border-devdeck-border-strong bg-devdeck-pane px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
             ⌘K
           </span>
         </div>
 
         {model.sshPreview ? (
           <div className="flex flex-none items-center gap-2 border-b border-devdeck-border px-3 py-1.5 font-mono text-[11px]">
-            <span className="text-devdeck-accent">{model.sshPreview.summary}</span>
+            <span className="text-devdeck-fg">{model.sshPreview.summary}</span>
             {model.sshPreview.ignored.length > 0 ? (
-              <span className="text-devdeck-yellow-soft">{`· ignored: ${model.sshPreview.ignored.join(' ')}`}</span>
+              <span className="text-devdeck-wait">{`· ignored: ${model.sshPreview.ignored.join(' ')}`}</span>
             ) : null}
           </div>
         ) : null}
 
         <div id={listId} role="listbox" aria-label="Palette results" className="min-h-0 flex-1 overflow-auto py-1.5">
           {model.rows.length === 0 ? (
-            <div className="flex h-20 items-center justify-center font-mono text-[11px] text-devdeck-dim">
+            <div className="flex h-20 items-center justify-center font-mono text-[11px] text-devdeck-fg-2">
               No matches
             </div>
           ) : (
             model.groups.map((group) => (
               <div key={group.group}>
-                <div className="flex items-center justify-between px-3 pb-1 pt-2 font-mono text-[9.5px] uppercase tracking-wide text-devdeck-dim">
+                <div className="flex items-center justify-between px-3 pb-1 pt-2 font-mono text-[9.5px] uppercase tracking-wide text-devdeck-fg-2">
                   <span>{group.label}</span>
                   {group.truncated > 0 ? <span>{`+${group.truncated} more`}</span> : null}
                 </div>
@@ -206,7 +206,7 @@ function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string 
           )}
         </div>
 
-        <div className="flex h-8 flex-none items-center gap-3 border-t border-devdeck-border bg-devdeck-surface px-3 font-mono text-[9.5px] text-devdeck-dim">
+        <div className="flex h-8 flex-none items-center gap-3 border-t border-devdeck-border bg-devdeck-pane px-3 font-mono text-[9.5px] text-devdeck-fg-2">
           <span>↑↓ select</span>
           <span>↵ run</span>
           <span>⇥ complete / drill in</span>
@@ -245,15 +245,15 @@ function PaletteRow({
       onClick={onActivate}
       className={cn(
         'flex h-9 w-full cursor-pointer items-center gap-2.5 px-3 text-left',
-        selected ? 'bg-devdeck-accent-tint' : 'hover:bg-devdeck-hover-wash',
+        selected ? 'bg-devdeck-on' : 'hover:bg-devdeck-hover-wash',
         item.disabled && 'opacity-45',
       )}
     >
-      {Icon ? <Icon size={15} className="flex-none text-devdeck-muted" /> : <span className="w-[15px] flex-none" />}
+      {Icon ? <Icon size={15} className="flex-none text-devdeck-fg-2" /> : <span className="w-[15px] flex-none" />}
       <span className="max-w-[58%] flex-none truncate font-mono text-[12px] text-devdeck-fg">
         <HighlightedText text={item.title} ranges={item.ranges} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-devdeck-dim">
+      <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-devdeck-fg-2">
         {item.disabled ? item.disabled.reason : item.subtitle}
       </span>
     </div>

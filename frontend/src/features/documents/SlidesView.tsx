@@ -21,7 +21,7 @@ export function SlidesView({ bytes }: { bytes: Uint8Array }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-devdeck-terminal px-6 py-6">
+    <div className="min-h-0 flex-1 overflow-auto bg-devdeck-pane px-6 py-6">
       <div className="mx-auto flex max-w-4xl flex-col gap-4">
         {slides.map((slide) => (
           <SlideCard key={slide.number} slide={slide} total={slides.length} />
@@ -33,20 +33,20 @@ export function SlidesView({ bytes }: { bytes: Uint8Array }) {
 
 function SlideCard({ slide, total }: { slide: Slide; total: number }) {
   return (
-    <section className="overflow-hidden rounded border border-devdeck-border bg-devdeck-surface">
-      <header className="flex items-baseline gap-3 border-b border-devdeck-border bg-devdeck-surface-2 px-4 py-2">
-        <span className="flex-none font-mono text-[10px] text-devdeck-dim">
+    <section className="overflow-hidden rounded border border-devdeck-border bg-devdeck-pane">
+      <header className="flex items-baseline gap-3 border-b border-devdeck-border bg-devdeck-card-wash px-4 py-2">
+        <span className="flex-none font-mono text-[10px] text-devdeck-fg-2">
           {slide.number} / {total}
         </span>
         <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-devdeck-fg">
-          {slide.title || <span className="text-devdeck-dim italic">Untitled slide</span>}
+          {slide.title || <span className="text-devdeck-fg-2 italic">Untitled slide</span>}
         </h2>
       </header>
 
       <div className="flex flex-col gap-3 px-5 py-4">
         {slideIsEmpty(slide) ? (
-          <span className="font-mono text-[11px] text-devdeck-dim">
-            No text on this slide — it may be image- or chart-only.
+          <span className="font-mono text-[11px] text-devdeck-fg-2">
+            No text on this slide - it may be image- or chart-only.
           </span>
         ) : null}
 
@@ -60,8 +60,8 @@ function SlideCard({ slide, total }: { slide: Slide; total: number }) {
                 style={{ marginLeft: `${bullet.level * 1.15}rem` }}
                 className="flex gap-2"
               >
-                <span aria-hidden className="flex-none text-devdeck-dim">
-                  {bullet.level === 0 ? '•' : '–'}
+                <span aria-hidden className="flex-none text-devdeck-fg-2">
+                  {bullet.level === 0 ? '•' : '◦'}
                 </span>
                 <span className="min-w-0 whitespace-pre-wrap">{bullet.text}</span>
               </li>
@@ -77,7 +77,7 @@ function SlideCard({ slide, total }: { slide: Slide; total: number }) {
             <table className="w-full border-collapse text-[11.5px]">
               <tbody>
                 {table.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex} className={rowIndex === 0 ? 'bg-devdeck-surface-2' : undefined}>
+                  <tr key={rowIndex} className={rowIndex === 0 ? 'bg-devdeck-card-wash' : undefined}>
                     {row.map((cell, cellIndex) => (
                       <td
                         key={cellIndex}
@@ -110,9 +110,9 @@ function SlideCard({ slide, total }: { slide: Slide; total: number }) {
         ) : null}
 
         {slide.notes ? (
-          <div className="flex gap-2 rounded border border-devdeck-border bg-devdeck-terminal px-3 py-2">
-            <StickyNote size={13} className="mt-0.5 flex-none text-devdeck-dim" />
-            <p className="min-w-0 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-devdeck-muted">
+          <div className="flex gap-2 rounded border border-devdeck-border bg-devdeck-pane px-3 py-2">
+            <StickyNote size={13} className="mt-0.5 flex-none text-devdeck-fg-2" />
+            <p className="min-w-0 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
               {slide.notes}
             </p>
           </div>

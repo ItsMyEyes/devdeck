@@ -86,8 +86,8 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
         <div
           ref={popupRef}
           className={cn(
-            'absolute left-0 right-0 top-[calc(100%+5px)] z-[100] max-h-[220px] overflow-auto rounded-[11px]',
-            'border border-devdeck-border-menu bg-devdeck-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none',
+            'absolute left-0 right-0 top-[calc(100%+5px)] z-[100] max-h-[220px] overflow-auto rounded-control',
+            'border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none',
           )}
         >
           {matches.map((option, index) => (

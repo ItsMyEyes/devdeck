@@ -113,7 +113,7 @@ check('nextPageRequest starts at a null cursor and offset 0', () => {
   assertEqual(req.offset, 0, 'offset 0')
   assertEqual(req.limit, 500, 'limit is the batch size')
   assertEqual(req.filters, [], 'a transfer copies the whole table, unfiltered')
-  assertEqual(req.sort, [], 'no sort — the server picks its own stable key')
+  assertEqual(req.sort, [], 'no sort - the server picks its own stable key')
   assertEqual(req.globalSearch, '', 'no search')
 })
 

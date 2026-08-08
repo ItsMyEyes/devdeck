@@ -71,7 +71,7 @@ export function DBExportMenu({
         <Popover.Positioner side="bottom" align="end" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
           <Popover.Popup
             className={cn(
-              'min-w-[190px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
+              'min-w-[190px] origin-[var(--transform-origin)] rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5',
               'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -84,9 +84,9 @@ export function DBExportMenu({
                 onClick={() => void run(value)}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
               >
-                <Icon size={12} className="flex-none text-devdeck-accent-soft" />
+                <Icon size={12} className="flex-none text-devdeck-fg-2" />
                 {label}
-                <span className="ml-auto text-[10px] text-devdeck-dim-2">{hint}</span>
+                <span className="ml-auto text-[10px] text-devdeck-fg-2">{hint}</span>
               </button>
             ))}
           </Popover.Popup>

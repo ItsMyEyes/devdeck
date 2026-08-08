@@ -19,7 +19,7 @@ export interface DBTabStripProps {
 }
 
 const iconButtonClass =
-  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
+  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
 
 /** The active-tab accent color: the tab content's object-kind color for
  *  "table" tabs (which cover table/view/matview/function data views — the
@@ -35,9 +35,9 @@ function dbTabAccentColor(tab: DBTabContent): string {
 }
 
 function tabIcon(tab: DBTabContent) {
-  if (tab.kind === 'query') return <Terminal size={11} className="text-devdeck-accent-soft" />
-  if (tab.kind === 'ddl') return <Code2 size={11} className="text-devdeck-dim" />
-  if (tab.kind === 'designer') return <Wrench size={11} className="text-devdeck-dim" />
+  if (tab.kind === 'query') return <Terminal size={11} className="text-devdeck-fg-2" />
+  if (tab.kind === 'ddl') return <Code2 size={11} className="text-devdeck-fg-2" />
+  if (tab.kind === 'designer') return <Wrench size={11} className="text-devdeck-fg-2" />
   const color = dbTabAccentColor(tab)
   if (tab.object.kind === 'view') return <Eye size={11} color={color} />
   if (tab.object.kind === 'matview') return <Layers size={11} color={color} />
@@ -79,7 +79,7 @@ export function DBTabStrip({
   // closing the last tab) would leave no way to open anything.
 
   return (
-    <div className="flex flex-none items-stretch border-b border-devdeck-border-menu bg-devdeck-surface-2">
+    <div className="flex flex-none items-stretch border-b border-devdeck-border-menu bg-devdeck-card-wash">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={state.tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
           <div className="flex flex-1 items-stretch overflow-x-auto px-2">
@@ -113,7 +113,7 @@ export function DBTabStrip({
                 onClick={onNewQuery}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
               >
-                <Terminal size={12} className="text-devdeck-accent-soft" />
+                <Terminal size={12} className="text-devdeck-fg-2" />
                 New SQL query
               </button>
             </TabStripPopoverMenu>
@@ -178,7 +178,7 @@ function DBTabStripTab({
           ? isProduction
             ? 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text'
             : 'text-devdeck-fg'
-          : 'text-devdeck-dim hover:text-devdeck-fg-2',
+          : 'text-devdeck-fg-2 hover:text-devdeck-fg-2',
       )}
     >
       {tabIcon(tab)}
@@ -190,7 +190,7 @@ function DBTabStripTab({
           e.stopPropagation()
           onClose()
         }}
-        className="opacity-0 hover:text-devdeck-red-soft group-hover:opacity-100"
+        className="opacity-0 hover:text-devdeck-err group-hover:opacity-100"
         aria-label={`Close ${label}`}
       >
         <X size={11} />

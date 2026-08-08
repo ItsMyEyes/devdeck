@@ -94,13 +94,15 @@ function tailscaleLabel(status: TailscaleHubStatus | undefined, isLoading: boole
   if (status.ready) return { color: '#56d58a', text: status.url ?? 'ready' }
   if (status.reason === 'not_installed') return { color: '#f87171', text: "Tailscale isn't installed" }
   if (status.reason === 'not_ready') return { color: '#f87171', text: "Tailscale isn't signed in" }
+  if (status.reason === 'serve_target_mismatch')
+    return { color: '#f87171', text: 'tailscale serve points at a stale port — run `tailscale serve reset`' }
   return { color: '#f87171', text: 'Restart DevDeck to expose this hub' }
 }
 
 /** Card wrapping a settings section's body, right pane. */
 function SettingsCard({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 rounded-xl border border-devdeck-border-card bg-devdeck-surface-2/60 p-5">{children}</div>
+    <div className="mt-6 rounded-xl border border-devdeck-border-card bg-devdeck-card-wash/60 p-5">{children}</div>
   )
 }
 
@@ -119,9 +121,9 @@ function SectionHeadRow({
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">{label}</div>
+        <div className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">{label}</div>
         <div className="mt-1 text-[13px] font-semibold text-devdeck-fg">{title}</div>
-        {description ? <p className="mt-1 text-[11.5px] text-devdeck-muted-2">{description}</p> : null}
+        {description ? <p className="mt-1 text-[11.5px] text-devdeck-fg-2">{description}</p> : null}
       </div>
       {action ? <div className="flex-none">{action}</div> : null}
     </div>
@@ -131,7 +133,7 @@ function SectionHeadRow({
 /** Bordered value panel — key field, tailscale status, log row. */
 function InsetPanel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-lg border border-devdeck-border bg-devdeck-terminal p-3.5', className)}>
+    <div className={cn('rounded-lg border border-devdeck-border bg-devdeck-pane p-3.5', className)}>
       {children}
     </div>
   )
@@ -193,13 +195,13 @@ export function DesktopSettingsDialog() {
       <div className="flex h-full min-h-0">
         <nav
           aria-label="Settings navigation"
-          className="flex w-[232px] flex-none flex-col overflow-y-auto border-r border-devdeck-border bg-devdeck-surface p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 max-[720px]:w-14 max-[720px]:px-1.5"
+          className="flex w-[232px] flex-none flex-col overflow-y-auto border-r border-devdeck-border bg-devdeck-pane p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 max-[720px]:w-14 max-[720px]:px-1.5"
         >
           <button
             type="button"
             aria-label="Back to app"
             onClick={closeDialog}
-            className="flex h-9 w-full flex-none items-center gap-2.5 rounded-lg bg-devdeck-surface-2 px-2.5 text-[12.5px] text-devdeck-fg-2 hover:bg-devdeck-popover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 max-[720px]:justify-center max-[720px]:px-0"
+            className="flex h-9 w-full flex-none items-center gap-2.5 rounded-lg bg-devdeck-card-wash px-2.5 text-[12.5px] text-devdeck-fg-2 hover:bg-devdeck-glass-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 max-[720px]:justify-center max-[720px]:px-0"
           >
             <ArrowLeft size={14} className="flex-none" />
             <span className="truncate max-[720px]:hidden">Back to app</span>
@@ -207,7 +209,7 @@ export function DesktopSettingsDialog() {
 
           {NAV_GROUPS.map((group) => (
             <div key={group.label} className="mt-5">
-              <div className="mb-1.5 px-2.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2 max-[720px]:hidden">
+              <div className="mb-1.5 px-2.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2 max-[720px]:hidden">
                 {group.label}
               </div>
               <div className="flex flex-col gap-0.5">
@@ -226,8 +228,8 @@ export function DesktopSettingsDialog() {
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                         'max-[720px]:justify-center max-[720px]:px-0',
                         active
-                          ? 'border border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-fg'
-                          : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
+                          ? 'border border-devdeck-border-card bg-devdeck-card-wash text-devdeck-fg'
+                          : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
                       )}
                     >
                       <Icon size={15} className="flex-none" />
@@ -240,12 +242,12 @@ export function DesktopSettingsDialog() {
           ))}
         </nav>
 
-        <div className="flex-1 overflow-y-auto bg-devdeck-bg px-[30px] py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-devdeck-dim-2">Settings</div>
+        <div className="flex-1 overflow-y-auto bg-devdeck-pane px-[30px] py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-devdeck-fg-2">Settings</div>
           <DialogTitle className="mt-1 text-[26px] font-bold leading-tight text-devdeck-fg">
             {meta.title}
           </DialogTitle>
-          <DialogDescription className="mt-1.5 max-w-[560px] font-sans text-[12.5px] text-devdeck-muted-2">
+          <DialogDescription className="mt-1.5 max-w-[560px] font-sans text-[12.5px] text-devdeck-fg-2">
             {meta.subtitle}
           </DialogDescription>
 
@@ -269,12 +271,12 @@ export function DesktopSettingsDialog() {
                     <Divider />
                     <InsetPanel>
                       <div className="mb-2 flex items-center gap-2">
-                        <TriangleAlert size={14} className="text-devdeck-yellow-soft" />
+                        <TriangleAlert size={14} className="text-devdeck-wait" />
                         <span className="font-mono text-[11px] text-devdeck-fg">
                           DevDeck will restart immediately.
                         </span>
                       </div>
-                      <p className="mb-3 font-mono text-[10.5px] text-devdeck-dim-2">
+                      <p className="mb-3 font-mono text-[10.5px] text-devdeck-fg-2">
                         You&apos;ll be dropped back on the first-run hub picker. Any local sidecar this device is
                         running stops too.
                       </p>
@@ -302,13 +304,13 @@ export function DesktopSettingsDialog() {
                 <SectionHeadRow
                   label="Hub key"
                   title="Self-registration key"
-                  description="Used to self-register a new runtime with this hub — regenerates every restart."
+                  description="Used to self-register a new runtime with this hub - regenerates every restart."
                 />
                 <Divider />
                 {hubApiKey ? (
                   <InsetPanel>
                     <div className="flex items-center gap-3">
-                      <span className="w-14 flex-none text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
+                      <span className="w-14 flex-none text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
                         Key
                       </span>
                       <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-devdeck-fg">
@@ -319,7 +321,7 @@ export function DesktopSettingsDialog() {
                           type="button"
                           aria-label={keyRevealed ? 'Hide hub key' : 'Show hub key'}
                           onClick={() => setKeyRevealed((r) => !r)}
-                          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                         >
                           {keyRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
                         </button>
@@ -327,7 +329,7 @@ export function DesktopSettingsDialog() {
                           type="button"
                           aria-label="Copy hub key"
                           onClick={copyHubKey}
-                          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                         >
                           <Copy size={13} />
                         </button>
@@ -335,7 +337,7 @@ export function DesktopSettingsDialog() {
                     </div>
                   </InsetPanel>
                 ) : (
-                  <p className="font-mono text-[11px] text-devdeck-dim-2">Unavailable — reopen from the desktop app.</p>
+                  <p className="font-mono text-[11px] text-devdeck-fg-2">Unavailable - reopen from the desktop app.</p>
                 )}
               </>
             )}
@@ -346,7 +348,7 @@ export function DesktopSettingsDialog() {
                 <Divider />
                 <InsetPanel>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
+                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
                       Status
                     </span>
                     <span className="inline-flex items-center gap-2 font-mono text-[11px]" style={{ color: label.color }}>
@@ -371,15 +373,15 @@ export function DesktopSettingsDialog() {
               <SectionHeadRow
                 label="Editor"
                 title="VS Code mode"
-                description="Full IDE chrome — minimap, breadcrumbs, sticky scroll, folding and bracket guides. When off, the editor stays minimal: line numbers and syntax only."
+                description="Full IDE chrome - minimap, breadcrumbs, sticky scroll, folding and bracket guides. When off, the editor stays minimal: line numbers and syntax only."
                 action={
                   <Switch.Root
                     checked={vscodeMode}
                     onCheckedChange={setVsCodeModeEnabled}
                     aria-label="VS Code mode"
                     className={cn(
-                      'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-surface-2 transition-colors',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-accent',
+                      'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
                     )}
                   >
                     <Switch.Thumb
@@ -403,7 +405,7 @@ export function DesktopSettingsDialog() {
                 <Divider />
                 <InsetPanel>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
+                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
                       Log file
                     </span>
                     <div className="flex items-center gap-3">

@@ -17,88 +17,140 @@
      brief window before that effect's first run. */
   --app-height: 100dvh;
 
-  /* raw devdeck palette */
-  --devdeck-bg: #191a1c;
-  --devdeck-surface: #161719; /* header / sidebar */
-  --devdeck-surface-2: #1d1e21; /* drawer / sidebar cards */
-  --devdeck-card: #202124;
-  --devdeck-terminal: #111214;
-  --devdeck-popover: #242629;
-  --devdeck-elevated: #2a2c30;
+  /* ── materials ──────────────────────────────────────────────────────────
+     Two, plus one state wash. The sidebar card is glass + a wash, not a third
+     material. See DESIGN.md.
 
-  --devdeck-border: #292b2f; /* hairline */
-  --devdeck-border-strong: #35383d; /* inputs */
-  --devdeck-border-card: #303237;
-  --devdeck-border-menu: #3b3f45;
-  --devdeck-border-accent: #315b59;
+     saturate(.34) is load-bearing: macOS sidebar vibrancy DEsaturates. A value
+     above 1 inverts the effect and floods the chrome with wallpaper colour.
 
-  --devdeck-fg: #eeeeeb;
-  --devdeck-fg-2: #d4d6d3;
-  --devdeck-muted: #a4a8aa;
-  --devdeck-muted-2: #83898d;
-  --devdeck-dim: #686e73;
-  --devdeck-dim-2: #555b60;
-  --devdeck-dim-3: #42474c;
+     ── Neutral temperature ──
+     Every neutral below carries its (very small) chroma at the ACCENT's hue,
+     188.6deg. That is not a stylistic preference, it is the fix for a real
+     defect: these surfaces used to sit at hue 91-107deg — olive/khaki — while
+     the accent sits at 188.6deg. A ~90deg split between base and accent is
+     what made the teal read as loud and pasted-on, and the greys read as
+     dirty rather than clean.
 
+     Lightness is unchanged on every token, so every contrast ratio recorded
+     in DESIGN.md still holds (all within 0.05). Only the hue moved. */
+  --devdeck-glass: rgba(58, 63, 63, 0.8);
+  --devdeck-glass-filter: blur(48px) saturate(0.34) brightness(0.92);
+  /* swapped in under prefers-reduced-transparency, and available to the web
+     build, which has no wallpaper to sample. */
+  --devdeck-glass-solid: #2e3333;
+  --devdeck-card-wash: rgba(255, 255, 255, 0.055);
+  --devdeck-pane: #1a1d1d;
+
+  /* state: one wash for "selected", plus --devdeck-ring as a 2px bar for
+     "focused". The wash is relative — it adds light to whatever is behind it,
+     so one value reads the same on glass (#5e5f5f) and in the pane (#49494a).
+     It cannot carry state contrast alone (1.86:1); the ring does that. */
+  --devdeck-on: rgba(255, 255, 255, 0.2);
+
+  /* ── foreground ─────────────────────────────────────────────────────────
+     Two scales, because there are two backgrounds of different lightness.
+     Pick by what is BEHIND the text. Ratios verified against glass (#343838
+     composite), pane (#1a1d1d), and the reduced-transparency solid (#2e3333). */
+  --devdeck-fg: #f2f5f4; /* 10.82 / 15.47 / 11.69 */
+  --devdeck-fg-2: #9ca09f; /* 4.49 / 6.42 / 4.85 — also placeholders */
+  --devdeck-dim-glass: #8a8e8d; /* 3.58 on glass */
+  /* Below AA at 3.65:1, deliberately, for recessive numeric chrome only
+     (line numbers, status line). Parity with today (3.63) and VS Code (3.59).
+     Never use for text a user has to read. */
+  --devdeck-dim-pane: #727575;
+
+  /* non-text: input edges, separators that must be seen, focus ring. */
+  --devdeck-line: #7d8180; /* 3.01 / 4.30 / 3.25 */
+  --devdeck-ring: #39c6bd; /* 5.68 / 8.10 / 6.10 */
+
+  /* accent: four jobs only — focus ring, state bar, selection/links, and the
+     single primary action per screen. Nothing decorative. */
   --devdeck-accent: #39c6bd;
   --devdeck-accent-hover: #55d2ca;
-  --devdeck-accent-soft: #7fd9d3;
-  --devdeck-accent-ink: #0d1717;
+  --devdeck-accent-ink: #0d1717; /* 8.67:1 on the accent */
 
-  --devdeck-green: #56d58a;
-  --devdeck-green-soft: #8fd99f;
-  --devdeck-yellow: #f5c451;
-  --devdeck-yellow-soft: #ffd66a;
-  --devdeck-red: #f87171;
-  --devdeck-red-soft: #f08a8a;
+  /* status: semantic, not accents. */
+  --devdeck-run: #7fb37f;
+  --devdeck-wait: #c9a86a;
+  --devdeck-err: #c98080;
   --devdeck-purple: #c7a3ff;
-  --devdeck-gray: #6b7280;
 
-  /* tint tokens — background/border/text colours for soft, warning, success,
-     destructive, and ghost surface variants (button cva + feature-level alerts).
-     Hoisted from raw hexes so a single source drives every tint. */
-  --devdeck-accent-tint: #18302f;
-  --devdeck-accent-tint-hover: #1e3b39;
-  --devdeck-warning-ink: #1a1606;
-  --devdeck-green-tint: #1a1f17;
-  --devdeck-green-tint-border: #2c3a29;
-  --devdeck-green-tint-hover: #20271c;
-  --devdeck-red-tint: #3a2626;
-  --devdeck-red-tint-hover: #241818;
-  --devdeck-red-tint-strong: #3a1f1f;
-  --devdeck-red-tint-strong-border: #5a2c2c;
-  --devdeck-red-tint-strong-hover: #4a2424;
-  --devdeck-red-tint-strong-text: #f5a3a3;
-  --devdeck-yellow-tint: #241e0f;
-  --devdeck-yellow-tint-border: #3d331a;
-  --devdeck-yellow-tint-text: #d1a52c;
-  --devdeck-yellow-ink: #1e1604;
+  /* diff bands: full-bleed, no border, no radius. */
+  --devdeck-diff-del: #3d0100;
+  --devdeck-diff-add: #012801;
+
+  /* ── borders ────────────────────────────────────────────────────────────
+     Boundaries are tone and space. These stay defined because 608 call sites
+     across 120 files reference them; the VALUES go near-invisible so no
+     component file has to be edited and nothing reflows (width stays 1px).
+     Anything that must actually be seen uses --devdeck-line instead. */
+  --devdeck-border: rgba(255, 255, 255, 0.028);
+  --devdeck-border-card: rgba(255, 255, 255, 0.055);
+  --devdeck-border-menu: rgba(255, 255, 255, 0.075);
+  --devdeck-border-strong: var(--devdeck-line);
+  --devdeck-border-accent: var(--devdeck-ring);
+
   --devdeck-hover-wash: rgba(255, 255, 255, 0.035);
   --devdeck-hover-wash-menu: rgba(255, 255, 255, 0.06);
+
+  /* aliases: kept so ~200 existing call sites keep compiling. Task 11 retires
+     the decorative ones; until then they resolve to the new palette. */
+  --devdeck-accent-tint: rgba(57, 198, 189, 0.14);
+  --devdeck-accent-tint-hover: rgba(57, 198, 189, 0.2);
+  --devdeck-green-tint: rgba(127, 179, 127, 0.12);
+  --devdeck-green-tint-border: rgba(127, 179, 127, 0.24);
+  --devdeck-green-tint-hover: rgba(127, 179, 127, 0.18);
+  --devdeck-yellow-tint: rgba(201, 168, 106, 0.12);
+  --devdeck-yellow-tint-border: rgba(201, 168, 106, 0.24);
+  --devdeck-yellow-tint-text: var(--devdeck-wait);
+  --devdeck-yellow-ink: var(--devdeck-accent-ink);
+  --devdeck-warning-ink: var(--devdeck-accent-ink);
+  --devdeck-red-tint: rgba(201, 128, 128, 0.12);
+  --devdeck-red-tint-hover: rgba(201, 128, 128, 0.18);
+  --devdeck-red-tint-strong: rgba(201, 128, 128, 0.2);
+  --devdeck-red-tint-strong-border: rgba(201, 128, 128, 0.34);
+  --devdeck-red-tint-strong-hover: rgba(201, 128, 128, 0.26);
+  --devdeck-red-tint-strong-text: var(--devdeck-err);
   --devdeck-accent-gradient: linear-gradient(135deg, var(--devdeck-accent), #238d87);
 
-  /* semantic (shadcn-style) */
-  --background: var(--devdeck-bg);
+  /* ── radius: exactly three steps. No other value may appear. ──────────── */
+  --r-container: 14px; /* pane card, sidebar card, dialogs, popovers */
+  --r-control: 10px; /* tabs, rows, buttons, icon buttons, inputs */
+  --r-micro: 5px; /* keyboard badges, status chips */
+
+  /* ── gap ────────────────────────────────────────────────────────────── */
+  --devdeck-gap: 8px;
+
+  /* ── semantic (shadcn-style) ─────────────────────────────────────────── */
+  --background: var(--devdeck-pane);
   --foreground: var(--devdeck-fg);
-  --card: var(--devdeck-card);
+  --card: var(--devdeck-pane);
   --card-foreground: var(--devdeck-fg);
-  --popover: var(--devdeck-popover);
+  --popover: var(--devdeck-glass-solid);
   --popover-foreground: var(--devdeck-fg);
   --primary: var(--devdeck-accent);
   --primary-foreground: var(--devdeck-accent-ink);
-  --secondary: var(--devdeck-elevated);
-  --secondary-foreground: var(--devdeck-fg-2);
-  --muted: #14161b;
-  --muted-foreground: var(--devdeck-muted);
-  --accent: var(--devdeck-popover);
+  --secondary: var(--devdeck-on);
+  --secondary-foreground: var(--devdeck-fg);
+  --muted: var(--devdeck-pane);
+  --muted-foreground: var(--devdeck-fg-2);
+  --accent: var(--devdeck-on);
   --accent-foreground: var(--devdeck-fg);
-  --destructive: var(--devdeck-red);
+  --destructive: var(--devdeck-err);
   --destructive-foreground: var(--devdeck-accent-ink);
-  --border: var(--devdeck-border-strong);
-  --input: var(--devdeck-border-strong);
-  --ring: var(--devdeck-border-accent);
+  --border: var(--devdeck-line);
+  --input: var(--devdeck-line);
+  --ring: var(--devdeck-ring);
 
-  --radius: 0.45rem;
+  --radius: var(--r-control);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --devdeck-glass: var(--devdeck-glass-solid);
+    --devdeck-glass-filter: none;
+  }
 }
 
 @theme inline {
@@ -122,14 +174,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* raw devdeck palette, usable as e.g. text-devdeck-accent, bg-devdeck-card */
-  --color-devdeck-bg: var(--devdeck-bg);
-  --color-devdeck-surface: var(--devdeck-surface);
-  --color-devdeck-surface-2: var(--devdeck-surface-2);
-  --color-devdeck-card: var(--devdeck-card);
-  --color-devdeck-terminal: var(--devdeck-terminal);
-  --color-devdeck-popover: var(--devdeck-popover);
-  --color-devdeck-elevated: var(--devdeck-elevated);
+  /* raw devdeck palette, usable as e.g. text-devdeck-accent, bg-devdeck-pane */
   --color-devdeck-border: var(--devdeck-border);
   --color-devdeck-border-strong: var(--devdeck-border-strong);
   --color-devdeck-border-card: var(--devdeck-border-card);
@@ -137,23 +182,32 @@
   --color-devdeck-border-accent: var(--devdeck-border-accent);
   --color-devdeck-fg: var(--devdeck-fg);
   --color-devdeck-fg-2: var(--devdeck-fg-2);
-  --color-devdeck-muted: var(--devdeck-muted);
-  --color-devdeck-muted-2: var(--devdeck-muted-2);
-  --color-devdeck-dim: var(--devdeck-dim);
-  --color-devdeck-dim-2: var(--devdeck-dim-2);
-  --color-devdeck-dim-3: var(--devdeck-dim-3);
   --color-devdeck-accent: var(--devdeck-accent);
   --color-devdeck-accent-hover: var(--devdeck-accent-hover);
-  --color-devdeck-accent-soft: var(--devdeck-accent-soft);
   --color-devdeck-accent-ink: var(--devdeck-accent-ink);
-  --color-devdeck-green: var(--devdeck-green);
-  --color-devdeck-green-soft: var(--devdeck-green-soft);
-  --color-devdeck-yellow: var(--devdeck-yellow);
-  --color-devdeck-yellow-soft: var(--devdeck-yellow-soft);
-  --color-devdeck-red: var(--devdeck-red);
-  --color-devdeck-red-soft: var(--devdeck-red-soft);
   --color-devdeck-purple: var(--devdeck-purple);
-  --color-devdeck-gray: var(--devdeck-gray);
+
+  /* aliases: kept so ~200 existing call sites keep compiling. Task 11 retires
+     the decorative ones; until then they resolve to the new palette. */
+  --color-devdeck-green: var(--devdeck-run);
+  --color-devdeck-yellow: var(--devdeck-wait);
+  --color-devdeck-red: var(--devdeck-err);
+
+  /* materials and state */
+  --color-devdeck-glass: var(--devdeck-glass);
+  --color-devdeck-glass-solid: var(--devdeck-glass-solid);
+  --color-devdeck-card-wash: var(--devdeck-card-wash);
+  --color-devdeck-pane: var(--devdeck-pane);
+  --color-devdeck-on: var(--devdeck-on);
+  --color-devdeck-dim-glass: var(--devdeck-dim-glass);
+  --color-devdeck-dim-pane: var(--devdeck-dim-pane);
+  --color-devdeck-line: var(--devdeck-line);
+  --color-devdeck-ring: var(--devdeck-ring);
+  --color-devdeck-run: var(--devdeck-run);
+  --color-devdeck-wait: var(--devdeck-wait);
+  --color-devdeck-err: var(--devdeck-err);
+  --color-devdeck-diff-del: var(--devdeck-diff-del);
+  --color-devdeck-diff-add: var(--devdeck-diff-add);
 
   /* tint tokens */
   --color-devdeck-accent-tint: var(--devdeck-accent-tint);
@@ -178,11 +232,23 @@
   --font-sans: 'Geist', system-ui, -apple-system, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
+  /* Tailwind's named radius scale is COLLAPSED onto the three design steps
+     rather than deriving five values from --radius. ~280 existing call sites
+     already say rounded-md / rounded-lg / rounded-xl; aliasing them here snaps
+     all of them onto the system without editing a single component file, the
+     same lever the border retune used.
+
+     rounded-full stays outside this scale on purpose: a circle or a pill is a
+     shape, not a corner radius, and forcing it to 14px would break avatars,
+     status dots, and toggle knobs. */
+  --radius-sm: var(--r-micro); /* 5px  */
+  --radius-md: var(--r-control); /* 10px */
+  --radius-lg: var(--r-control); /* 10px */
+  --radius-xl: var(--r-container); /* 14px */
+  --radius-2xl: var(--r-container); /* 14px */
+  --radius-container: var(--r-container);
+  --radius-control: var(--r-control);
+  --radius-micro: var(--r-micro);
 
   --animate-blink: agblink 1.1s step-end infinite;
   --animate-slide-in: agslidein 0.18s ease;
@@ -232,6 +298,30 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Blanket neutraliser. The two rules below it predate this and stay, because
+     they park their elements in a deliberate rest state; the generic collapse
+     only guarantees *an* end state, not a good-looking one.
+
+     This is the one-lever fix again: 62 animated elements (58 `animate-spin`,
+     4 `animate-pulse`) live across the app and exactly one of them carried a
+     `motion-reduce:` variant. Guarding them here beats 62 edits that the 63rd
+     spinner would silently escape.
+
+     0.01ms rather than 0s on purpose: a zero-length transition does not
+     reliably fire `transitionend`, and two components listen for it. This runs
+     effectively instantly while keeping the event.
+
+     iteration-count:1 stops the infinite loops. A spin ends where it started,
+     and a pulse ends at full opacity, so both rest somewhere sensible. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   .animate-progress-slide {
     width: 100%;
     opacity: 0.4;
@@ -253,11 +343,23 @@
   body,
   #root {
     height: 100%;
+    /* The app is one fixed-height, internally-scrolled shell (every route's
+       root div is `h-[var(--app-height)] overflow-hidden` — see
+       w.$wsId.tsx) — the document itself is never meant to scroll at all.
+       On Tauri-for-macOS, WKWebView still applies its native rubber-band
+       bounce to the *whole* window content on every wheel/trackpad gesture
+       unless a scrollable element consumes it, since nothing here has a
+       real scroll offset to chain into. That bounce moves the entire
+       rendered frame — including anything `position: fixed` — as one rigid
+       unit, which reads as "every component follows the scroll". Chromium
+       (the web build) never had this problem; only WKWebView's elastic
+       overscroll does. */
+    overscroll-behavior: none;
   }
 
   body {
     margin: 0;
-    background: var(--devdeck-bg);
+    background: var(--devdeck-pane);
     color: var(--devdeck-fg);
     font-family: var(--font-sans);
     font-size: 13px;
@@ -265,18 +367,32 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* On Tauri-for-macOS the window itself is transparent
+     (tauri.macos.conf.json sets `transparent: true` + `windowEffects:
+     sidebar`) so macOS composites the vibrancy material behind it. That only
+     shows through if nothing in the DOM paints an opaque fill first —
+     `body`'s own background does exactly that, so it must drop out there.
+     `.mac-vibrancy` is set synchronously in main.tsx before first paint, and
+     only on macOS: Windows/Linux Tauri builds have no native transparency
+     configured (see useHasMacVibrancy's doc comment), so they — like the
+     web build, which has no OS material to reveal either — keep the opaque
+     body. */
+  html.mac-vibrancy body {
+    background: transparent;
+  }
+
   ::-webkit-scrollbar {
     width: 9px;
     height: 9px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #23272f;
+    background: rgba(255, 255, 255, 0.09);
     border-radius: 6px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #2f343d;
+    background: rgba(255, 255, 255, 0.14);
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-track {
@@ -285,7 +401,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--devdeck-dim-2);
+    color: var(--devdeck-fg-2);
   }
 }
 
@@ -323,7 +439,7 @@
 .devdeck-markdown code {
   font-family: var(--font-mono);
   font-size: 0.92em;
-  background: var(--devdeck-popover);
+  background: var(--devdeck-glass-solid);
   border: 1px solid var(--devdeck-border-strong);
   border-radius: 4px;
   padding: 0.1em 0.35em;
@@ -331,7 +447,7 @@
 .devdeck-markdown pre {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  background: var(--devdeck-popover);
+  background: var(--devdeck-glass-solid);
   border: 1px solid var(--devdeck-border-strong);
   border-radius: 8px;
   padding: 0.75em 1em;
@@ -354,6 +470,6 @@
 .devdeck-markdown blockquote {
   border-left: 2px solid var(--devdeck-border-accent);
   padding-left: 0.75em;
-  color: var(--devdeck-dim);
+  color: var(--devdeck-fg-2);
   margin: 0;
 }

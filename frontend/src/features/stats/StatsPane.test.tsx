@@ -65,7 +65,7 @@ describe('StatsPane', () => {
 
   it('renders the unsupported state with its reason', () => {
     mockUseSSHStats.mockReturnValue({
-      data: stats({ supported: false, reason: 'this host has no readable /proc/stat — Linux only' }),
+      data: stats({ supported: false, reason: 'this host has no readable /proc/stat - Linux only' }),
       isLoading: false,
       error: null,
     })

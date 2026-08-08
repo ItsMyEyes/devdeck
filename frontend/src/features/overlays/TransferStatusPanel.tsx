@@ -26,12 +26,12 @@ export function TransferStatusPanel() {
         return (
           <div
             key={t.id}
-            className="rounded-lg border border-devdeck-border-menu bg-devdeck-card p-3 text-devdeck-fg shadow-[0_12px_30px_rgba(0,0,0,0.45)]"
+            className="rounded-lg border border-devdeck-border-menu bg-devdeck-glass-solid p-3 text-devdeck-fg shadow-[0_12px_30px_rgba(0,0,0,0.45)]"
           >
             <div className="mb-1.5 flex items-center gap-2">
-              {t.status === 'active' && <Loader2 size={13} className="flex-none animate-spin text-devdeck-accent" />}
-              {t.status === 'done' && <CheckCircle2 size={13} className="flex-none text-devdeck-green-soft" />}
-              {t.status === 'error' && <XCircle size={13} className="flex-none text-devdeck-red-soft" />}
+              {t.status === 'active' && <Loader2 size={13} className="flex-none animate-spin text-devdeck-wait" />}
+              {t.status === 'done' && <CheckCircle2 size={13} className="flex-none text-devdeck-run" />}
+              {t.status === 'error' && <XCircle size={13} className="flex-none text-devdeck-err" />}
               <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-devdeck-fg-2">
                 {t.kind === 'upload' ? 'Uploading to' : 'Downloading'} {t.label}
               </span>
@@ -39,7 +39,7 @@ export function TransferStatusPanel() {
                 <button
                   type="button"
                   onClick={() => dismissTransfer(t.id)}
-                  className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+                  className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
                 >
                   <X size={11} />
                 </button>
@@ -47,11 +47,11 @@ export function TransferStatusPanel() {
             </div>
             <div className="h-1 w-full overflow-hidden rounded-full bg-devdeck-border-strong">
               <div
-                className={cn('h-full rounded-full transition-[width]', t.status === 'error' ? 'bg-devdeck-red-soft' : 'bg-devdeck-accent')}
+                className={cn('h-full rounded-full transition-[width]', t.status === 'error' ? 'bg-devdeck-err' : 'bg-devdeck-wait')}
                 style={{ width: `${percent}%` }}
               />
             </div>
-            <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-devdeck-dim">
+            <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-devdeck-fg-2">
               <span>
                 {t.completedFiles}/{t.totalFiles} file{t.totalFiles === 1 ? '' : 's'}
               </span>

@@ -100,23 +100,23 @@ export const DocumentFileTab = forwardRef<
   return (
     <div
       className={cn(
-        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal',
+        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane',
         active ? 'flex' : 'hidden',
       )}
     >
-      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface px-3">
+      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-pane px-3">
         <MaterialFileIcon name={name} size={16} />
-        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-muted">
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-fg-2">
           {path}
         </span>
-        <span className="flex-none rounded bg-devdeck-elevated px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim">
+        <span className="flex-none rounded bg-devdeck-glass-solid px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
           {format?.label ?? 'Document'} · read-only
         </span>
         <button
           type="button"
           onClick={refresh}
           title="Reload from disk"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
         >
           <RotateCcw size={13} />
         </button>
@@ -125,7 +125,7 @@ export const DocumentFileTab = forwardRef<
           onClick={() => void download()}
           disabled={downloading}
           title="Download file"
-          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-elevated px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent-soft disabled:cursor-default disabled:opacity-40"
+          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-glass-solid px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-line hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
         >
           {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
           Download
@@ -135,7 +135,7 @@ export const DocumentFileTab = forwardRef<
           onClick={remove}
           disabled={deleteFile.isPending}
           title="Delete file"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft disabled:cursor-wait disabled:opacity-50"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-red-tint-hover hover:text-devdeck-err disabled:cursor-wait disabled:opacity-50"
         >
           {deleteFile.isPending ? (
             <Loader2 size={12} className="animate-spin" />
@@ -149,7 +149,7 @@ export const DocumentFileTab = forwardRef<
         <DocumentViewer target={target} path={path} format={format} enabled={seen} />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center">
-          <span className="font-mono text-[11px] text-devdeck-dim">Unsupported document</span>
+          <span className="font-mono text-[11px] text-devdeck-fg-2">Unsupported document</span>
         </div>
       )}
     </div>

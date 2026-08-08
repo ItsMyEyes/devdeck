@@ -179,7 +179,7 @@ check('move-tab-onto-center-merges-as-tab: dropping on center merges into the ta
 
   const moved = moveTabInLayout(afterSplit, fileLeaf.id, terminalLeaf.id, file.id, 'center')
 
-  assert(moved.root.type === 'leaf', 'split collapsed to a single leaf — no structural split remains')
+  assert(moved.root.type === 'leaf', 'split collapsed to a single leaf - no structural split remains')
   const merged = moved.root as LeafPane
   assertEqual(merged.id, terminalLeaf.id, 'surviving leaf is the merge target')
   assertEqual(merged.tabs.length, 2, 'target leaf now holds both tabs')

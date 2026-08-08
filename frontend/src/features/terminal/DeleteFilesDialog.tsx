@@ -22,10 +22,10 @@ export function DeleteFilesDialog({ open, names, pending, onCancel, onConfirm }:
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !pending && onCancel()} width={400} z={70} className="border-devdeck-red-tint">
       <div className="mb-2.5 flex items-center gap-2.5">
-        <TriangleAlert size={15} className="text-devdeck-red-soft" />
+        <TriangleAlert size={15} className="text-devdeck-err" />
         <DialogTitle>Delete {title}</DialogTitle>
       </div>
-      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         {bodyFor(names)}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">

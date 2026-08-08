@@ -174,11 +174,11 @@ export function AgentManagementModule() {
         />
       ) : (
         <>
-          {/* <section className="flex-none border-b border-devdeck-border bg-devdeck-surface/35 px-3 py-3 sm:px-4 sm:py-4">
+          {/* <section className="flex-none border-b border-devdeck-border bg-devdeck-pane/35 px-3 py-3 sm:px-4 sm:py-4">
             <div className="mx-auto grid w-full max-w-[1180px] gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
               <div className="min-w-0 py-0.5">
                 <h2 className="text-[13px] font-semibold text-devdeck-fg-2">Connected agents</h2>
-                <p className="mt-1 max-w-[32ch] text-[11px] leading-relaxed text-devdeck-dim">
+                <p className="mt-1 max-w-[32ch] text-[11px] leading-relaxed text-devdeck-fg-2">
                   Skills and MCP servers stay visible in one workspace.
                 </p>
               </div>
@@ -186,14 +186,14 @@ export function AgentManagementModule() {
                 {installedAgents.map((agent) => (
                   <article
                     key={agent.id}
-                    className="flex min-w-0 items-center gap-3 rounded-xl border border-devdeck-border-card bg-devdeck-card px-3 py-2.5"
+                    className="flex min-w-0 items-center gap-3 rounded-xl border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5"
                   >
                     <AgentMark id={agent.id} name={agent.name} active />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] font-semibold text-devdeck-fg-2">
                         {agent.name}
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 font-mono text-[9.5px] text-devdeck-dim">
+                      <div className="mt-0.5 flex items-center gap-2 font-mono text-[9.5px] text-devdeck-fg-2">
                         <span>{agent.skillCount} skills</span>
                         <span aria-hidden="true">/</span>
                         <span>{agent.modelCount} models</span>
@@ -206,7 +206,7 @@ export function AgentManagementModule() {
           </section> */}
 
           <div
-            className="grid flex-none grid-cols-2 gap-1 border-b border-devdeck-border bg-devdeck-bg px-3 py-2 sm:flex sm:px-4"
+            className="grid flex-none grid-cols-2 gap-1 border-b border-devdeck-border bg-devdeck-pane px-3 py-2 sm:flex sm:px-4"
             role="tablist"
             aria-label="Agent management views"
           >
@@ -219,13 +219,13 @@ export function AgentManagementModule() {
                 'flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-medium transition-colors sm:h-8',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 tab === 'skills'
-                  ? 'border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-fg'
-                  : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                  ? 'bg-devdeck-on text-devdeck-fg'
+                  : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
               )}
             >
               <Blocks size={14} />
               Skills
-              <span className="font-mono text-[10px] text-devdeck-dim">{skillCount}</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">{skillCount}</span>
             </button>
             <button
               type="button"
@@ -236,13 +236,13 @@ export function AgentManagementModule() {
                 'flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-medium transition-colors sm:h-8',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 tab === 'mcp'
-                  ? 'border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-fg'
-                  : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                  ? 'bg-devdeck-on text-devdeck-fg'
+                  : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
               )}
             >
               <ServerCog size={14} />
               <span>MCP<span className="hidden sm:inline"> management</span></span>
-              <span className="font-mono text-[10px] text-devdeck-dim">{mcpCount}</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">{mcpCount}</span>
             </button>
             {settingsAgents.length > 0 ? (
               <button
@@ -254,13 +254,13 @@ export function AgentManagementModule() {
                   'flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-medium transition-colors sm:h-8',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                   tab === 'settings'
-                    ? 'border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-fg'
-                    : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                    ? 'bg-devdeck-on text-devdeck-fg'
+                    : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
                 )}
               >
                 <SlidersHorizontal size={14} />
                 <span>Settings</span>
-                <span className="font-mono text-[10px] text-devdeck-dim">{envProfileCount}</span>
+                <span className="font-mono text-[10px] text-devdeck-fg-2">{envProfileCount}</span>
               </button>
             ) : null}
           </div>

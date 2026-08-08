@@ -119,12 +119,12 @@ export function EditDrawer() {
                 {view.isWorktree && <WorktreeGlyph root={view.isRoot} size={13} />}
                 <span className="truncate">{view.title}</span>
               </div>
-              <div className="mt-1 font-mono text-[11px] text-devdeck-dim">{view.sub}</div>
+              <div className="mt-1 font-mono text-[11px] text-devdeck-fg-2">{view.sub}</div>
             </div>
             <button
               onClick={closeEdit}
               aria-label="Close"
-              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg"
+              className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg"
             >
               <X size={14} />
             </button>
@@ -133,10 +133,10 @@ export function EditDrawer() {
           {/* body */}
           <div className="flex-1 overflow-auto p-[18px]">
             {view.meta.length > 0 && (
-              <div className="mb-[18px] rounded-[11px] border border-devdeck-border-card bg-devdeck-bg px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-devdeck-muted">
+              <div className="mb-[18px] rounded-control border border-devdeck-border-card bg-devdeck-pane px-3.5 py-3 font-mono text-[11.5px] leading-[1.7] text-devdeck-fg-2">
                 {view.meta.map((row) => (
                   <div key={row.k} className="flex gap-2.5">
-                    <span className="w-[70px] flex-none text-devdeck-dim">{row.k}</span>
+                    <span className="w-[70px] flex-none text-devdeck-fg-2">{row.k}</span>
                     <span className="truncate text-devdeck-fg-2">{row.v}</span>
                   </div>
                 ))}
@@ -155,7 +155,7 @@ export function EditDrawer() {
                       disabled={branchLocked}
                     />
                     {branchLocked && (
-                      <div className="mt-1.5 font-mono text-[10.5px] text-devdeck-dim">pause to change branch</div>
+                      <div className="mt-1.5 font-mono text-[10.5px] text-devdeck-fg-2">pause to change branch</div>
                     )}
                   </div>
                 )}
@@ -182,7 +182,7 @@ export function EditDrawer() {
                   <Button
                     variant="secondary"
                     size="lg"
-                    className="flex-none bg-devdeck-elevated"
+                    className="flex-none bg-devdeck-glass-solid"
                     onClick={() => openBrowse('edit', edit.b, editProject?.machineId)}
                   >
                     Browse…

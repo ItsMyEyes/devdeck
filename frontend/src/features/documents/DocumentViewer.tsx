@@ -41,7 +41,7 @@ export function DocumentViewer({
 
   if (query.isPending) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-terminal">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-pane">
         <DataLoading
           compact
           label={
@@ -56,9 +56,9 @@ export function DocumentViewer({
 
   if (query.error) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-devdeck-terminal px-6 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-devdeck-pane px-6 text-center">
         <FileWarning size={22} className="text-devdeck-yellow" />
-        <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
+        <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
           {query.error instanceof ApiError ? query.error.message : 'Could not download this file'}
         </span>
         <button
@@ -81,7 +81,7 @@ export function DocumentViewer({
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-terminal">
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-pane">
           <DataLoading compact label="loading viewer…" />
         </div>
       }
@@ -101,13 +101,13 @@ export function DocumentViewer({
 
 function Unsupported({ message, hint }: { message: string; hint: string }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-devdeck-terminal px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-devdeck-pane px-6 text-center">
       <FileWarning size={22} className="text-devdeck-yellow" />
-      <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
+      <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
         {message}
       </span>
       {hint ? (
-        <span className="max-w-lg font-mono text-[10.5px] leading-relaxed text-devdeck-dim">
+        <span className="max-w-lg font-mono text-[10.5px] leading-relaxed text-devdeck-fg-2">
           {hint}
         </span>
       ) : null}

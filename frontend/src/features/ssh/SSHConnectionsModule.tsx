@@ -49,10 +49,10 @@ function HostGlyph({ authType }: { authType: AuthType }) {
   return (
     <span
       className={cn(
-        'flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border',
+        'flex h-9 w-9 flex-none items-center justify-center rounded-control border',
         privateKey
-          ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft'
-          : 'border-devdeck-yellow-tint-border bg-devdeck-yellow-tint text-devdeck-yellow-soft',
+          ? 'border-devdeck-line bg-devdeck-on text-devdeck-fg-2'
+          : 'border-devdeck-yellow-tint-border bg-devdeck-yellow-tint text-devdeck-wait',
       )}
     >
       {privateKey ? <KeyRound size={16} /> : <Server size={16} />}
@@ -65,11 +65,11 @@ function HostKeyBadge({ connection }: { connection: SSHConnection }) {
   const showToast = useDevDeckStore((s) => s.showToast)
 
   if (!connection.hostKeyFingerprint) {
-    return <span className="font-mono text-[10px] text-devdeck-dim">trust on first connect</span>
+    return <span className="font-mono text-[10px] text-devdeck-fg-2">trust on first connect</span>
   }
 
   return (
-    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-devdeck-dim-2">
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-devdeck-fg-2">
       <Fingerprint size={10} className="flex-none" />
       <span className="min-w-0 truncate" title={connection.hostKeyFingerprint}>
         {connection.hostKeyFingerprint}
@@ -81,10 +81,10 @@ function HostKeyBadge({ connection }: { connection: SSHConnection }) {
         onClick={(event) => {
           event.stopPropagation()
           acceptHostKey.mutate(connection.id, {
-            onSuccess: () => showToast(`Host key for "${connection.name}" reset — re-pins on next connect`),
+            onSuccess: () => showToast(`Host key for "${connection.name}" reset - re-pins on next connect`),
           })
         }}
-        className="flex-none cursor-pointer rounded p-0.5 text-devdeck-muted-2 hover:bg-devdeck-hover-wash hover:text-devdeck-accent-soft"
+        className="flex-none cursor-pointer rounded p-0.5 text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         <RotateCcw size={11} />
       </button>
@@ -117,17 +117,17 @@ function HostCard({
 
   if (variant === 'list') {
     return (
-      <article className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:flex-row lg:items-center">
+      <article className="flex min-w-0 flex-col gap-2 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-strong lg:flex-row lg:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <HostGlyph authType={connection.authType} />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate text-[13px] font-semibold text-devdeck-fg-2">{connection.name}</span>
-              <span className="hidden truncate font-mono text-[10.5px] text-devdeck-dim sm:inline">
-                — {connectionSubtitle(connection)}
+              <span className="min-w-0 truncate text-[13px] font-semibold text-devdeck-fg">{connection.name}</span>
+              <span className="hidden truncate font-mono text-[10.5px] text-devdeck-fg-2 sm:inline">
+                - {connectionSubtitle(connection)}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10.5px] text-devdeck-dim">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10.5px] text-devdeck-fg-2">
               <span>{authLabel(connection.authType)}</span>
               {machineName ? <span>via {machineName}</span> : null}
               {jumpName ? (
@@ -145,7 +145,7 @@ function HostCard({
           <button
             type="button"
             onClick={connect}
-            className="flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-accent bg-devdeck-accent-tint px-2.5 text-[11.5px] font-semibold text-devdeck-accent-soft hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-menu bg-transparent px-2.5 text-[11.5px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <TerminalSquare size={12} />
             Connect
@@ -154,7 +154,7 @@ function HostCard({
             type="button"
             aria-label={`Edit ${connection.name}`}
             onClick={() => openEditSSHConnection(connection)}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <Settings2 size={13} />
           </button>
@@ -162,7 +162,7 @@ function HostCard({
             type="button"
             aria-label={`Delete ${connection.name}`}
             onClick={() => askDelete('ssh', connection.id, connection.name)}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <Trash2 size={13} />
           </button>
@@ -172,32 +172,32 @@ function HostCard({
   }
 
   return (
-    <article className="group flex min-h-[150px] flex-col overflow-hidden rounded-[13px] border border-devdeck-border-card bg-devdeck-card transition-colors hover:border-devdeck-border-accent">
+    <article className="group flex min-h-[150px] flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-strong">
       <div className="flex items-start gap-3 px-3 pb-2 pt-3">
         <HostGlyph authType={connection.authType} />
         <div className="min-w-0 flex-1 pt-0.5">
-          <div className="truncate text-[13px] font-semibold text-devdeck-fg-2">{connection.name}</div>
-          <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-dim">{connectionSubtitle(connection)}</div>
+          <div className="truncate text-[13px] font-semibold text-devdeck-fg">{connection.name}</div>
+          <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-fg-2">{connectionSubtitle(connection)}</div>
         </div>
         <button
           type="button"
           aria-label={`Delete ${connection.name}`}
           onClick={() => askDelete('ssh', connection.id, connection.name)}
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <Trash2 size={13} />
         </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 px-3">
-        <span className="rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-muted-2">
+        <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
           {authLabel(connection.authType)}
         </span>
         {machineName ? (
-          <span className="rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-muted-2">via {machineName}</span>
+          <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">via {machineName}</span>
         ) : null}
         {jumpName ? (
-          <span className="flex items-center gap-1 rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-muted-2">
+          <span className="flex items-center gap-1 rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
             <ArrowRight size={9} />
             {jumpName}
           </span>
@@ -214,7 +214,7 @@ function HostCard({
         <button
           type="button"
           onClick={connect}
-          className="flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-accent bg-devdeck-accent-tint text-[12px] font-semibold text-devdeck-accent-soft hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-menu bg-transparent text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <TerminalSquare size={13} />
           Connect
@@ -222,7 +222,7 @@ function HostCard({
         <button
           type="button"
           onClick={() => openEditSSHConnection(connection)}
-          className="flex h-8 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-[12px] font-semibold text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-8 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           Edit
         </button>
@@ -248,12 +248,12 @@ function SSHGroupSection({
     <section className="min-w-0">
       <div className="mb-3 flex items-center gap-3">
         {group === UNGROUPED ? (
-          <Server size={13} className="flex-none text-devdeck-dim" />
+          <Server size={13} className="flex-none text-devdeck-fg-2" />
         ) : (
-          <KeyRound size={13} className="flex-none text-devdeck-dim" />
+          <KeyRound size={13} className="flex-none text-devdeck-fg-2" />
         )}
-        <h2 className="truncate text-[18px] font-semibold leading-none text-devdeck-fg-2">{group}</h2>
-        <span className="rounded-full bg-devdeck-surface-2 px-2 py-0.5 font-mono text-[10px] text-devdeck-dim">{hosts.length}</span>
+        <h2 className="truncate text-[18px] font-semibold leading-none text-devdeck-fg">{group}</h2>
+        <span className="rounded-full bg-devdeck-card-wash px-2 py-0.5 font-mono text-[10px] text-devdeck-fg-2">{hosts.length}</span>
         <div className="h-px min-w-6 flex-1 bg-devdeck-border" />
       </div>
 
@@ -294,7 +294,7 @@ function ViewButton({ label, active, onClick, children }: { label: string; activ
       onClick={onClick}
       className={cn(
         'flex h-7 w-8 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-        active ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
+        active ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg',
       )}
     >
       {children}
@@ -314,13 +314,13 @@ function EmptyHostsState({
   onAction: () => void
 }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[13px] border border-dashed border-devdeck-border-menu bg-devdeck-card/35 px-4 text-center">
-      <div className="text-[13px] font-semibold text-devdeck-fg-2">{title}</div>
-      <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-devdeck-muted">{hint}</div>
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-control border border-dashed border-devdeck-border-menu bg-devdeck-glass-solid/35 px-4 text-center">
+      <div className="text-[13px] font-semibold text-devdeck-fg">{title}</div>
+      <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-devdeck-fg-2">{hint}</div>
       <button
         type="button"
         onClick={onAction}
-        className="mt-4 cursor-pointer rounded-md border border-devdeck-border-accent bg-devdeck-accent-tint px-3 py-1.5 text-[12px] font-semibold text-devdeck-accent-soft hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="mt-4 cursor-pointer rounded-md border border-devdeck-border-accent bg-devdeck-accent-tint px-3 py-1.5 text-[12px] font-semibold text-devdeck-accent hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         {actionLabel}
       </button>
@@ -375,10 +375,10 @@ export function SSHConnectionsModule() {
   if (error) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-4">
-        <div className="flex w-full max-w-[420px] flex-col items-center rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-5 py-6 text-center">
-          <Cable size={24} className="mb-3 text-devdeck-dim" />
+        <div className="flex w-full max-w-[420px] flex-col items-center rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-5 py-6 text-center">
+          <Cable size={24} className="mb-3 text-devdeck-fg-2" />
           <div className="text-[13px] font-medium text-devdeck-fg-2">Could not load SSH hosts</div>
-          <p className="mt-1 text-[12px] leading-relaxed text-devdeck-dim">
+          <p className="mt-1 text-[12px] leading-relaxed text-devdeck-fg-2">
             {error instanceof Error ? error.message : 'Failed to load SSH connections'}
           </p>
           <Button variant="secondary" size="sm" className="mt-4" onClick={() => refetch()}>
@@ -393,15 +393,15 @@ export function SSHConnectionsModule() {
   const hasMatches = groups.length > 0
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <section className="flex-none border-b border-devdeck-border bg-devdeck-bg px-3 py-3 sm:px-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-container bg-devdeck-pane">
+      <section className="flex-none border-b border-devdeck-border bg-devdeck-pane px-3 py-3 sm:px-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-[15px] font-semibold text-devdeck-fg-2">SSH</h1>
-              <span className="rounded-full bg-devdeck-surface-2 px-2 py-0.5 font-mono text-[10px] text-devdeck-muted-2">{hosts.length}</span>
+              <h1 className="text-[15px] font-semibold text-devdeck-fg">SSH</h1>
+              <span className="rounded-full bg-devdeck-card-wash px-2 py-0.5 font-mono text-[10px] text-devdeck-fg-2">{hosts.length}</span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-devdeck-dim">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-devdeck-fg-2">
               <span>{trustedCount} trusted</span>
               <span aria-hidden="true">·</span>
               <span>{groupCount} groups</span>
@@ -416,19 +416,19 @@ export function SSHConnectionsModule() {
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
             <div className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
-              <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-devdeck-dim" />
+              <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-devdeck-fg-2" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Filter hosts, groups, users…"
-                className="h-9 w-full rounded-[10px] border border-devdeck-border-card bg-devdeck-surface px-8 text-[12px] text-devdeck-fg placeholder:text-devdeck-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="h-9 w-full rounded-control border border-devdeck-border-card bg-devdeck-pane px-8 text-[12px] text-devdeck-fg placeholder:text-devdeck-fg-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               />
               {query ? (
                 <button
                   type="button"
                   aria-label="Clear host search"
                   onClick={() => setQuery('')}
-                  className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   <X size={12} />
                 </button>
@@ -436,7 +436,7 @@ export function SSHConnectionsModule() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="grid h-9 grid-cols-2 rounded-[10px] border border-devdeck-border-card bg-devdeck-surface p-1" role="group" aria-label="Host layout">
+              <div className="grid h-9 grid-cols-2 rounded-control border border-devdeck-border-card bg-devdeck-pane p-1" role="group" aria-label="Host layout">
                 <ViewButton label="Show card view" active={view === 'cards'} onClick={() => setView('cards')}>
                   <Grid2X2 size={14} />
                 </ViewButton>
@@ -448,7 +448,7 @@ export function SSHConnectionsModule() {
               <button
                 type="button"
                 onClick={openAddSSHConnection}
-                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-devdeck-border-accent bg-devdeck-accent-tint px-3 text-[12px] font-semibold text-devdeck-accent-soft transition-colors hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-devdeck-border-accent bg-devdeck-accent-tint px-3 text-[12px] font-semibold text-devdeck-accent transition-colors hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Plus size={13} />
                 New host

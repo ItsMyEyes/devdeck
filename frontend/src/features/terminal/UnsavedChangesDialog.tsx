@@ -35,7 +35,7 @@ export function UnsavedChangesDialog({ open, names, saving, onSave, onDiscard, o
         <TriangleAlert size={15} className="text-devdeck-yellow" />
         <DialogTitle>Save changes to {title}?</DialogTitle>
       </div>
-      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         {bodyFor(names)}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">

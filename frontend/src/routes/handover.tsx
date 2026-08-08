@@ -57,13 +57,13 @@ function HandoverPage() {
 
   if (mint.isError) {
     return (
-      <div className="flex h-screen w-full flex-col bg-devdeck-bg text-devdeck-fg">
+      <div className="flex h-[100dvh] w-full flex-col bg-devdeck-pane text-devdeck-fg">
         <DataError error={mint.error} onRetry={() => mint.mutate(machine)} />
       </div>
     )
   }
   return (
-    <div className="flex h-screen w-full flex-col bg-devdeck-bg text-devdeck-fg">
+    <div className="flex h-[100dvh] w-full flex-col bg-devdeck-pane text-devdeck-fg">
       <DataLoading label="signing you in…" />
     </div>
   )

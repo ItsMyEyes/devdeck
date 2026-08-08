@@ -8,6 +8,18 @@ import { qk } from './features/data/keys'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import './styles/globals.css'
 
+// Must run before first paint: flags the transparent-window CSS path in
+// globals.css (`html.mac-vibrancy body`). Scoped to macOS specifically —
+// native window vibrancy (tauri.macos.conf.json) only exists there; on
+// Windows/Linux the native window stays opaque, so making the DOM
+// transparent too would show nothing behind it. Mirrors
+// useHasMacVibrancy() in features/tabs/useIsTauri.ts, duplicated here
+// because this runs before React (and before first paint — a React effect
+// would paint one opaque frame first and show a flash).
+if ('__TAURI_INTERNALS__' in window && /Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
+  document.documentElement.classList.add('mac-vibrancy')
+}
+
 // Every mutation surfaces its failure through sonner, and the devdeck query cache is
 // re-fetched so the UI resyncs after a failed create/update/delete (e.g. a backend
 // restart or a 404 from a concurrent delete) instead of staying silently stale.

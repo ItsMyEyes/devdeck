@@ -30,23 +30,23 @@ export function AgentsBreadcrumb() {
       <button
         type="button"
         onClick={openWorkspaceMenu}
-        className="cursor-pointer whitespace-nowrap font-mono text-[11.5px] text-devdeck-muted-2 hover:text-devdeck-fg-2"
+        className="cursor-pointer whitespace-nowrap font-mono text-[11.5px] text-devdeck-fg-2 hover:text-devdeck-fg-2"
       >
         {ws?.name ?? '—'}
       </button>
-      <span className="text-devdeck-dim-3">/</span>
+      <span className="text-devdeck-fg-2">/</span>
       <button
         type="button"
         onClick={() => project && wsId && navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId: project.id } })}
-        className="cursor-pointer whitespace-nowrap text-[13px] font-semibold text-devdeck-fg-2"
+        className="cursor-pointer whitespace-nowrap text-[13px] font-semibold text-devdeck-fg"
       >
         {project?.name ?? '—'}
       </button>
-      {project && <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-dim-2">{project.path}</span>}
+      {project && <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-fg-2">{project.path}</span>}
 
       {worktree ? (
         <>
-          <span className="text-devdeck-dim-3">/</span>
+          <span className="text-devdeck-fg-2">/</span>
           <WorktreeGlyph root={worktree.root} size={12} />
           <span className="max-w-[200px] truncate whitespace-nowrap font-mono text-[12px] text-devdeck-fg-2">
             {worktreeLabel(project ?? undefined, worktree)}
@@ -54,7 +54,7 @@ export function AgentsBreadcrumb() {
         </>
       ) : (
         project && (
-          <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-dim">
+          <span className="whitespace-nowrap font-mono text-[11px] text-devdeck-fg-2">
             · {project.worktrees.length} worktrees
           </span>
         )

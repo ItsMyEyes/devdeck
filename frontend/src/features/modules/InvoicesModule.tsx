@@ -253,7 +253,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             onClick={() => setTab(t.key)}
             className={cn(
               'cursor-pointer rounded-md px-2.5 py-1.5 font-mono text-[11.5px] transition-colors',
-              tab === t.key ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg',
+              tab === t.key ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg',
             )}
           >
             {t.label}
@@ -265,15 +265,15 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
       {tab === 'finance' ? <FinanceAnalysisTab invoices={invoices} /> : null}
 
       {tab === 'invoices' && draft ? (
-        <div className="flex-none border-b border-devdeck-border bg-devdeck-card/40 px-4 py-3">
+        <div className="flex-none border-b border-devdeck-border bg-devdeck-glass-solid/40 px-4 py-3">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="font-mono text-[11.5px] text-devdeck-muted-2">
+            <span className="font-mono text-[11.5px] text-devdeck-fg-2">
               {draft.editId ? 'Edit invoice' : 'New invoice'}
             </span>
             <button
               onClick={() => setDraft(null)}
               aria-label="Close"
-              className="cursor-pointer p-0.5 text-devdeck-muted-2 hover:text-devdeck-fg"
+              className="cursor-pointer p-0.5 text-devdeck-fg-2 hover:text-devdeck-fg"
             >
               <X size={14} />
             </button>
@@ -281,7 +281,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
 
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Number</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Number</span>
               <Input
                 value={draft.number}
                 onChange={(e) => setDraft({ ...draft, number: e.target.value })}
@@ -290,7 +290,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Due date</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Due date</span>
               <Input
                 type="date"
                 value={draft.dueDate}
@@ -299,7 +299,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Status</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Status</span>
               <div className="w-[120px]">
                 <Select
                   value={draft.status}
@@ -313,7 +313,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             <div className="basis-full" />
 
             <label className="flex min-w-[180px] flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Company (bill to)</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Company (bill to)</span>
               <Input
                 value={draft.companyName}
                 onChange={(e) => setDraft({ ...draft, companyName: e.target.value })}
@@ -321,7 +321,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               />
             </label>
             <label className="flex min-w-[220px] flex-1 flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Short address</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Short address</span>
               <Input
                 value={draft.companyAddress}
                 onChange={(e) => setDraft({ ...draft, companyAddress: e.target.value })}
@@ -336,7 +336,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             <div className="basis-full" />
 
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Bank name *</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Bank name *</span>
               <Input
                 value={draft.bankName}
                 onChange={(e) => setDraft({ ...draft, bankName: e.target.value })}
@@ -345,7 +345,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Account name *</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Account name *</span>
               <Input
                 value={draft.bankAccountName}
                 onChange={(e) => setDraft({ ...draft, bankAccountName: e.target.value })}
@@ -354,7 +354,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-devdeck-dim">Account number *</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Account number *</span>
               <Input
                 value={draft.bankAccountNumber}
                 onChange={(e) => setDraft({ ...draft, bankAccountNumber: e.target.value })}
@@ -374,10 +374,10 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             <div className="basis-full" />
 
             <div className="w-full">
-              <span className="font-mono text-[10px] text-devdeck-dim">Job details</span>
+              <span className="font-mono text-[10px] text-devdeck-fg-2">Job details</span>
               <table className="mt-1 w-full border-collapse text-[12px]">
                 <thead>
-                  <tr className="text-left font-mono text-[10px] text-devdeck-dim uppercase">
+                  <tr className="text-left font-mono text-[10px] text-devdeck-fg-2 uppercase">
                     <th className="w-8 py-1">No.</th>
                     <th className="py-1">Deskripsi Pekerjaan (Jasa Engineer)</th>
                     <th className="w-20 py-1 text-right">Kuantitas</th>
@@ -389,7 +389,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                 <tbody>
                   {draft.items.map((it, i) => (
                     <tr key={i}>
-                      <td className="py-1 text-devdeck-dim">{i + 1}</td>
+                      <td className="py-1 text-devdeck-fg-2">{i + 1}</td>
                       <td className="py-1 pr-1">
                         <Input
                           value={it.description}
@@ -417,7 +417,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                         <button
                           onClick={() => removeItem(i)}
                           aria-label="Remove line item"
-                          className="cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
+                          className="cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-err"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -429,7 +429,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
               <div className="mt-1.5 flex items-center justify-between">
                 <button
                   onClick={addItem}
-                  className="flex cursor-pointer items-center gap-1 font-mono text-[11px] text-devdeck-accent-soft hover:underline"
+                  className="flex cursor-pointer items-center gap-1 font-mono text-[11px] text-devdeck-accent hover:underline"
                 >
                   <Plus size={12} />
                   Add line item
@@ -453,7 +453,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
         <div className="flex-1 overflow-auto p-4">
           <table className="w-full min-w-[900px] border-collapse text-[12.5px]">
             <thead>
-              <tr className="border-b border-devdeck-border text-left font-mono text-[10px] tracking-wide text-devdeck-dim uppercase">
+              <tr className="border-b border-devdeck-border text-left font-mono text-[10px] tracking-wide text-devdeck-fg-2 uppercase">
                 <th className="px-3 py-2 font-medium">Number</th>
                 <th className="px-3 py-2 font-medium">Company</th>
                 <th className="px-3 py-2 font-medium">Bank detail</th>
@@ -467,7 +467,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
             <tbody>
               {monthGroups.map((group) => (
                 <Fragment key={group.ym}>
-                  <tr className="border-b border-devdeck-border bg-devdeck-card/30">
+                  <tr className="border-b border-devdeck-border bg-devdeck-glass-solid/30">
                     <td colSpan={8} className="px-3 py-2">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[11px] font-semibold tracking-wide text-devdeck-fg-2 uppercase">
@@ -485,26 +485,26 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                     return (
                       <tr
                         key={iv.id}
-                        className="border-b border-devdeck-border-card last:border-none hover:bg-devdeck-card/50"
+                        className="border-b border-devdeck-border-card last:border-none hover:bg-devdeck-glass-solid/50"
                       >
-                        <td className="px-3 py-2.5 font-mono text-[11.5px] whitespace-nowrap text-devdeck-muted-2">
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] whitespace-nowrap text-devdeck-fg-2">
                           {iv.number}
                         </td>
                         <td className="max-w-[160px] truncate px-3 py-2.5 text-devdeck-fg">
                           {iv.companyName || '—'}
                         </td>
-                        <td className="max-w-[180px] px-3 py-2.5 text-devdeck-dim">
+                        <td className="max-w-[180px] px-3 py-2.5 text-devdeck-fg-2">
                           <div className="truncate">{iv.bankDetail.bankName || '—'}</div>
-                          <div className="truncate font-mono text-[10.5px] text-devdeck-dim">
+                          <div className="truncate font-mono text-[10.5px] text-devdeck-fg-2">
                             {iv.bankDetail.accountNumber}
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-devdeck-dim">
+                        <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-devdeck-fg-2">
                           {fmtDate(iv.createdAt)}
                         </td>
                         <td
                           className={`px-3 py-2.5 font-mono text-[11px] whitespace-nowrap ${
-                            overdue ? 'text-devdeck-red-soft' : 'text-devdeck-dim'
+                            overdue ? 'text-devdeck-err' : 'text-devdeck-fg-2'
                           }`}
                         >
                           {fmtDate(iv.dueDate)}
@@ -521,7 +521,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                               onClick={() => downloadInvoice(iv)}
                               aria-label="Download invoice"
                               title="Download"
-                              className="cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
+                              className="cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-fg"
                             >
                               <Download size={13} />
                             </button>
@@ -530,7 +530,7 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                                 onClick={() =>
                                   updateInvoice.mutate({ id: iv.id, patch: { status: 'paid' } })
                                 }
-                                className="cursor-pointer rounded-md px-1.5 py-1 font-mono text-[10.5px] text-devdeck-muted-2 hover:text-devdeck-green-soft"
+                                className="cursor-pointer rounded-md px-1.5 py-1 font-mono text-[10.5px] text-devdeck-fg-2 hover:text-devdeck-run"
                               >
                                 mark paid
                               </button>
@@ -538,14 +538,14 @@ export function InvoicesModule({ wsId }: { wsId: string }) {
                             <button
                               onClick={() => openEdit(iv)}
                               aria-label="Edit invoice"
-                              className="cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
+                              className="cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-fg"
                             >
                               <Pencil size={13} />
                             </button>
                             <button
                               onClick={() => deleteInvoice.mutate(iv.id)}
                               aria-label="Delete invoice"
-                              className="cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
+                              className="cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-err"
                             >
                               <Trash2 size={13} />
                             </button>

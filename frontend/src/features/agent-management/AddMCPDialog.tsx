@@ -126,7 +126,7 @@ export function AddMCPDialog({
       className="max-h-[calc(100dvh-24px)] overflow-y-auto p-4 sm:p-[21px]"
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-line bg-devdeck-on text-devdeck-fg-2">
           <ServerCog size={17} />
         </div>
         <div>
@@ -139,7 +139,7 @@ export function AddMCPDialog({
 
       <div className="mt-5 grid gap-4">
         <fieldset>
-          <legend className="mb-2 text-[11.5px] font-medium text-devdeck-muted">Install in</legend>
+          <legend className="mb-2 text-[11.5px] font-medium text-devdeck-fg-2">Install in</legend>
           <div className="grid grid-cols-1 gap-1.5 sm:flex sm:flex-wrap">
             {agents.map((agent) => {
               const selected = selectedAgents.includes(agent.id)
@@ -152,13 +152,13 @@ export function AddMCPDialog({
                     'flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 transition-colors sm:h-8 sm:px-2.5',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                     selected
-                      ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-fg'
-                      : 'border-devdeck-border-card bg-devdeck-surface-2 text-devdeck-muted',
+                      ? 'border-devdeck-line bg-devdeck-on text-devdeck-fg'
+                      : 'border-devdeck-border-card bg-devdeck-card-wash text-devdeck-fg-2',
                   )}
                 >
                   <AgentMark id={agent.id} name={agent.name} size="sm" active={selected} />
                   <span className="text-[11px] font-medium">{agent.name}</span>
-                  {selected ? <Check size={11} className="text-devdeck-accent" /> : null}
+                  {selected ? <Check size={11} className="text-devdeck-fg-2" /> : null}
                 </button>
               )
             })}
@@ -166,7 +166,7 @@ export function AddMCPDialog({
         </fieldset>
 
         <label className="grid gap-1.5">
-          <span className="text-[11.5px] font-medium text-devdeck-muted">Server name</span>
+          <span className="text-[11.5px] font-medium text-devdeck-fg-2">Server name</span>
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -176,8 +176,8 @@ export function AddMCPDialog({
         </label>
 
         <fieldset>
-          <legend className="mb-2 text-[11.5px] font-medium text-devdeck-muted">Transport</legend>
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 p-1">
+          <legend className="mb-2 text-[11.5px] font-medium text-devdeck-fg-2">Transport</legend>
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-devdeck-border-card bg-devdeck-card-wash p-1">
             {(['stdio', 'http'] as const).map((item) => (
               <button
                 key={item}
@@ -186,8 +186,8 @@ export function AddMCPDialog({
                 className={cn(
                   'min-h-9 cursor-pointer rounded-md px-2 py-1.5 font-mono text-[10.5px] leading-tight transition-colors sm:text-[11px]',
                   transport === item
-                    ? 'bg-devdeck-popover text-devdeck-fg shadow-[inset_0_0_0_1px_var(--devdeck-border-strong)]'
-                    : 'text-devdeck-dim hover:text-devdeck-muted',
+                    ? 'bg-devdeck-glass-solid text-devdeck-fg shadow-[inset_0_0_0_1px_var(--devdeck-border-strong)]'
+                    : 'text-devdeck-fg-2 hover:text-devdeck-fg-2',
                 )}
               >
                 {item === 'stdio' ? 'Local (stdio)' : 'Remote (HTTP)'}
@@ -197,7 +197,7 @@ export function AddMCPDialog({
         </fieldset>
 
         <label className="grid gap-1.5">
-          <span className="text-[11.5px] font-medium text-devdeck-muted">
+          <span className="text-[11.5px] font-medium text-devdeck-fg-2">
             {transport === 'stdio' ? 'Command' : 'Server URL'}
           </span>
           <Input
@@ -216,7 +216,7 @@ export function AddMCPDialog({
         {transport === 'stdio' ? (
           <div className="grid gap-3 md:grid-cols-2">
             <label className="grid gap-1.5">
-              <span className="text-[11.5px] font-medium text-devdeck-muted">Arguments</span>
+              <span className="text-[11.5px] font-medium text-devdeck-fg-2">Arguments</span>
               <textarea
                 value={args}
                 onChange={(event) => setArgs(event.target.value)}
@@ -225,10 +225,10 @@ export function AddMCPDialog({
                 spellCheck={false}
                 className={textareaClass}
               />
-              <span className="font-mono text-[9.5px] text-devdeck-dim">One argument per line</span>
+              <span className="font-mono text-[9.5px] text-devdeck-fg-2">One argument per line</span>
             </label>
             <label className="grid gap-1.5">
-              <span className="text-[11.5px] font-medium text-devdeck-muted">
+              <span className="text-[11.5px] font-medium text-devdeck-fg-2">
                 Environment variables
               </span>
               <textarea
@@ -240,15 +240,15 @@ export function AddMCPDialog({
                 spellCheck={false}
                 className={textareaClass}
               />
-              <span className="font-mono text-[9.5px] text-devdeck-dim">
+              <span className="font-mono text-[9.5px] text-devdeck-fg-2">
                 Values are sent directly to the agent CLI
               </span>
             </label>
           </div>
         ) : null}
 
-        <div className="flex items-start gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 px-3 py-2.5 text-[10.5px] leading-relaxed text-devdeck-muted-2">
-          <ShieldCheck size={14} className="mt-0.5 flex-none text-devdeck-green-soft" />
+        <div className="flex items-start gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-card-wash px-3 py-2.5 text-[10.5px] leading-relaxed text-devdeck-fg-2">
+          <ShieldCheck size={14} className="mt-0.5 flex-none text-devdeck-run" />
           DevDeck only returns redacted server metadata. Environment values remain in the agent&apos;s
           native configuration.
         </div>
@@ -256,7 +256,7 @@ export function AddMCPDialog({
         {error ? (
           <div
             role="alert"
-            className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint-hover px-3 py-2 text-[11px] text-devdeck-red-soft"
+            className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint-hover px-3 py-2 text-[11px] text-devdeck-err"
           >
             {error}
           </div>
@@ -288,8 +288,8 @@ export function AddMCPDialog({
 }
 
 const textareaClass = cn(
-  'w-full resize-none rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5 py-2',
-  'font-mono text-[11px] leading-relaxed text-devdeck-fg placeholder:text-devdeck-dim-2',
+  'w-full resize-none rounded-lg border border-devdeck-border-strong bg-devdeck-pane px-2.5 py-2',
+  'font-mono text-[11px] leading-relaxed text-devdeck-fg placeholder:text-devdeck-fg-2',
   'focus-visible:border-devdeck-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
 )
 

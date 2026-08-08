@@ -43,7 +43,7 @@ function connect(session: SSHSession, connectionId: string) {
   socket.onclose = () => {
     if (session.ws !== socket) return
     session.ws = null
-    term.write('\r\n\x1b[38;5;102m[ssh session closed — press Enter to reconnect]\x1b[0m\r\n')
+    term.write('\r\n\x1b[38;5;102m[ssh session closed - press Enter to reconnect]\x1b[0m\r\n')
   }
   socket.onerror = () => {
     term.write('\r\n\x1b[38;5;210m[ssh connection error]\x1b[0m\r\n')

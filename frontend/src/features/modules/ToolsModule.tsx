@@ -51,7 +51,7 @@ export function ToolsModule() {
           <button
             type="button"
             onClick={() => setMobileDetail(false)}
-            className="mb-2.5 flex flex-none items-center gap-1 self-start rounded-md py-1 font-mono text-[11px] text-devdeck-muted transition-colors hover:text-devdeck-fg md:hidden"
+            className="mb-2.5 flex flex-none items-center gap-1 self-start rounded-md py-1 font-mono text-[11px] text-devdeck-fg-2 transition-colors hover:text-devdeck-fg md:hidden"
           >
             <ChevronLeft size={14} />
             All tools

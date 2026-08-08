@@ -197,7 +197,7 @@ export function DBTableGrid({
 
   if (columnsLoading) return <DataLoading compact label="loading columns…" />
   if (columnsError || !columns) {
-    return <div className="p-4 text-[12px] text-devdeck-red-soft">{columnsError instanceof Error ? columnsError.message : 'Failed to load columns'}</div>
+    return <div className="p-4 text-[12px] text-devdeck-err">{columnsError instanceof Error ? columnsError.message : 'Failed to load columns'}</div>
   }
 
   const showGrid = Boolean(page) && (page!.rows.length > 0 || pendingInserts.length > 0)
@@ -213,7 +213,7 @@ export function DBTableGrid({
       />
       <div className="flex flex-none items-center justify-between border-b border-devdeck-border-menu px-3 py-1.5">
         <DBTableInfo connectionId={connectionId} object={object} filters={filters} />
-        <div className="flex items-center gap-3 font-mono text-[11px] text-devdeck-dim">
+        <div className="flex items-center gap-3 font-mono text-[11px] text-devdeck-fg-2">
           <button type="button" onClick={addPendingRow} className="flex items-center gap-1 hover:text-devdeck-fg">
             <Plus size={11} />
             Add row
@@ -233,7 +233,7 @@ export function DBTableGrid({
               <ArrowRightLeft size={13} />
             </Button>
           </div>
-          {page?.usedOffsetPaging ? <span className="text-devdeck-yellow-tint-text">offset paging — no usable row identity</span> : null}
+          {page?.usedOffsetPaging ? <span className="text-devdeck-yellow-tint-text">offset paging - no usable row identity</span> : null}
           {page?.truncated ? <span>showing first {page.rows.length} rows</span> : null}
           <button type="button" onClick={prevPage} disabled={pageIndex === 0} className="disabled:opacity-30">
             ‹ prev
@@ -248,13 +248,13 @@ export function DBTableGrid({
         <div className="flex flex-none items-center justify-between border-b border-devdeck-yellow-tint-border bg-devdeck-yellow-tint px-3 py-1.5">
           <span className="font-mono text-[11px] text-devdeck-yellow-tint-text">{pendingCount} pending change{pendingCount === 1 ? '' : 's'}</span>
           <div className="flex gap-2">
-            <button type="button" onClick={discardAllPending} className="text-[11px] text-devdeck-dim hover:text-devdeck-fg">
+            <button type="button" onClick={discardAllPending} className="text-[11px] text-devdeck-fg-2 hover:text-devdeck-fg">
               Discard
             </button>
             <button
               type="button"
               onClick={() => openCommitDialog(connectionId, buildRowEdits(), discardAllPending)}
-              className="text-[11px] font-medium text-devdeck-accent-soft hover:text-devdeck-accent"
+              className="text-[11px] font-medium text-devdeck-accent hover:text-devdeck-accent"
             >
               Review &amp; commit
             </button>
@@ -263,14 +263,14 @@ export function DBTableGrid({
       ) : null}
 
       {rowsError ? (
-        <div className="p-4 text-[12px] text-devdeck-red-soft">{rowsError instanceof Error ? rowsError.message : 'Failed to load rows'}</div>
+        <div className="p-4 text-[12px] text-devdeck-err">{rowsError instanceof Error ? rowsError.message : 'Failed to load rows'}</div>
       ) : rowsLoading && !page ? (
         <DataLoading compact label="loading rows…" />
       ) : !showGrid ? (
-        <div className="flex flex-1 items-center justify-center text-[12px] text-devdeck-dim">No rows match the current filters.</div>
+        <div className="flex flex-1 items-center justify-center text-[12px] text-devdeck-fg-2">No rows match the current filters.</div>
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 flex border-b border-devdeck-border-menu bg-devdeck-surface-2">
+          <div className="sticky top-0 z-10 flex border-b border-devdeck-border-menu bg-devdeck-card-wash">
             <div style={{ width: IDENTITY_COL_WIDTH }} className="flex-none border-r border-devdeck-border-menu" />
             {columns.map((col) => {
               const sortEntry = sort.find((s) => s.column === col.name)
@@ -281,11 +281,11 @@ export function DBTableGrid({
                   type="button"
                   onClick={() => toggleSort(col.name)}
                   style={{ minWidth: 140 }}
-                  className="flex h-8 flex-1 items-center gap-1.5 border-r border-devdeck-border-menu px-2.5 text-left font-mono text-[11px] font-medium text-devdeck-muted hover:text-devdeck-fg"
+                  className="flex h-8 flex-1 items-center gap-1.5 border-r border-devdeck-border-menu px-2.5 text-left font-mono text-[11px] font-medium text-devdeck-fg-2 hover:text-devdeck-fg"
                 >
                   {badge ? <Pill color={DB_TYPE_BADGE[badge].color}>{DB_TYPE_BADGE[badge].label}</Pill> : null}
                   <span className="truncate">{col.name}</span>
-                  {sortEntry ? <span className="text-devdeck-accent-soft">{sortEntry.desc ? '↓' : '↑'}</span> : null}
+                  {sortEntry ? <span className="text-devdeck-fg">{sortEntry.desc ? '↓' : '↑'}</span> : null}
                 </button>
               )
             })}
@@ -308,7 +308,7 @@ export function DBTableGrid({
                     type="button"
                     onClick={() => toggleDelete(virtualRow.index)}
                     style={{ width: IDENTITY_COL_WIDTH }}
-                    className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-dim hover:text-devdeck-red-soft"
+                    className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-fg-2 hover:text-devdeck-err"
                     aria-label={isDeleted ? 'Restore row' : 'Delete row'}
                     title={isDeleted ? 'Restore row' : 'Delete row'}
                   >
@@ -332,7 +332,7 @@ export function DBTableGrid({
                         className={cn(
                           'flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none focus:bg-devdeck-accent-tint/30 disabled:cursor-not-allowed',
                           isPending && !isDeleted && 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text',
-                          isDeleted && 'text-devdeck-dim line-through',
+                          isDeleted && 'text-devdeck-fg-2 line-through',
                         )}
                       />
                     )
@@ -343,12 +343,12 @@ export function DBTableGrid({
           </div>
 
           {pendingInserts.map((insert) => (
-            <div key={insert.id} className="flex border-b border-devdeck-border-menu/50 bg-devdeck-accent-tint/10">
+            <div key={insert.id} className="flex border-b border-devdeck-border-menu/50 bg-devdeck-yellow-tint/40">
               <button
                 type="button"
                 onClick={() => removePendingInsert(insert.id)}
                 style={{ width: IDENTITY_COL_WIDTH }}
-                className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-dim hover:text-devdeck-red-soft"
+                className="flex flex-none items-center justify-center border-r border-devdeck-border-menu/50 text-devdeck-fg-2 hover:text-devdeck-err"
                 aria-label="Remove new row"
                 title="Remove new row"
               >
@@ -362,7 +362,7 @@ export function DBTableGrid({
                   onChange={(e) => setPendingInsertValue(insert.id, col.name, e.target.value)}
                   placeholder={col.isLob ? '(not settable here)' : col.name}
                   style={{ minWidth: 140 }}
-                  className="flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-accent-soft outline-none placeholder:text-devdeck-dim-2 focus:bg-devdeck-accent-tint/30 disabled:cursor-not-allowed"
+                  className="flex-1 border-r border-devdeck-border-menu/50 bg-transparent px-2.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none placeholder:text-devdeck-fg-2 focus:bg-devdeck-accent-tint/30 disabled:cursor-not-allowed"
                 />
               ))}
             </div>

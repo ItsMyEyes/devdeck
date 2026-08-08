@@ -26,15 +26,15 @@ export function BrowserErrorPanel({
     <div
       role="alert"
       className={cn(
-        'flex h-full w-full flex-col items-center justify-center gap-3 overflow-auto bg-devdeck-surface p-6 text-center',
+        'flex h-full w-full flex-col items-center justify-center gap-3 overflow-auto bg-devdeck-pane p-6 text-center',
         className,
       )}
     >
-      <TriangleAlert size={22} className="flex-none text-devdeck-red-soft" />
+      <TriangleAlert size={22} className="flex-none text-devdeck-err" />
       <div className="text-[13px] font-medium text-devdeck-fg">{error.title}</div>
-      <p className="max-w-[420px] text-[12px] leading-relaxed text-devdeck-muted">{error.detail}</p>
+      <p className="max-w-[420px] text-[12px] leading-relaxed text-devdeck-fg-2">{error.detail}</p>
       {url ? (
-        <div className="max-w-full truncate font-mono text-[11px] text-devdeck-dim" title={url}>
+        <div className="max-w-full truncate font-mono text-[11px] text-devdeck-fg-2" title={url}>
           {url}
         </div>
       ) : null}

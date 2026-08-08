@@ -25,7 +25,7 @@ export function RemoveMCPDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} width={420}>
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint-hover text-devdeck-red-soft">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint-hover text-devdeck-err">
           <ServerOff size={17} />
         </div>
         <div>

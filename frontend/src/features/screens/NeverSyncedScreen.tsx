@@ -10,15 +10,15 @@ import { DevDeckLogo } from '@/features/branding/DevDeckLogo'
  */
 export function NeverSyncedScreen({ machineName }: { machineName: string }) {
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center gap-[18px] bg-devdeck-bg p-6 text-center text-devdeck-fg">
+    <div className="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-[18px] bg-devdeck-pane p-6 text-center text-devdeck-fg">
       <DevDeckLogo size={44} radius={9} />
-      <CloudOff size={28} strokeWidth={1.5} className="text-devdeck-dim" />
+      <CloudOff size={28} strokeWidth={1.5} className="text-devdeck-fg-2" />
       <div className="text-[22px] font-semibold tracking-[-0.02em]">
         {machineName || 'This runtime'} hasn&rsquo;t synced yet
       </div>
-      <div className="max-w-[440px] text-[13.5px] leading-relaxed text-devdeck-muted">
+      <div className="max-w-[440px] text-[13.5px] leading-relaxed text-devdeck-fg-2">
         This runtime has not received a catalog from its hub. Check <code>--hub-url</code> and{' '}
-        <code>--hub-key</code>, then look at this runtime&rsquo;s log — a wrong hub key otherwise looks
+        <code>--hub-key</code>, then look at this runtime&rsquo;s log - a wrong hub key otherwise looks
         exactly like an empty account.
       </div>
     </div>

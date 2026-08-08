@@ -25,7 +25,7 @@ const PRI_OPTIONS = (Object.keys(PRI) as Priority[]).map((p) => ({ value: p, lab
 function PropRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="w-[68px] flex-none font-mono text-[11px] text-devdeck-dim">{label}</span>
+      <span className="w-[68px] flex-none font-mono text-[11px] text-devdeck-fg-2">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">{children}</div>
     </div>
   )
@@ -34,7 +34,7 @@ function PropRow({ label, children }: { label: string; children: ReactNode }) {
 function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-2.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
+      <div className="mb-2.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
         {title}
       </div>
       <div className="flex flex-col gap-2">{children}</div>
@@ -88,12 +88,12 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
           type="button"
           onClick={goBack}
           aria-label="Back to issues"
-          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[11.5px] text-devdeck-muted-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
+          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
         >
           <ChevronLeft size={14} />
           Issues
         </button>
-        <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-devdeck-dim">{issue.title}</span>
+        <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-devdeck-fg-2">{issue.title}</span>
         <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleteIssue.isPending}>
           <Trash2 size={13} />
           Delete
@@ -154,10 +154,10 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
 
               <SidebarSection title="Details">
                 <PropRow label="Created">
-                  <span className="text-[12px] text-devdeck-muted">{fmtDate(issue.createdAt)}</span>
+                  <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.createdAt)}</span>
                 </PropRow>
                 <PropRow label="Updated">
-                  <span className="text-[12px] text-devdeck-muted">{fmtDate(issue.updatedAt)}</span>
+                  <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.updatedAt)}</span>
                 </PropRow>
               </SidebarSection>
             </div>

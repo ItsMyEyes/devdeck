@@ -55,7 +55,7 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
       try {
         JSON.parse(content)
       } catch {
-        toast.error('Invalid JSON — fix syntax errors before saving.')
+        toast.error('Invalid JSON - fix syntax errors before saving.')
         return
       }
     }
@@ -119,7 +119,7 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
       {/* toolbar */}
       <div className="flex flex-none items-center justify-between border-b border-devdeck-border px-4 py-2.5">
         <div className="flex items-center gap-2.5">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-devdeck-dim">
+          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-devdeck-fg-2">
             ~/.{agentId}/{filename}
           </span>
           <span
@@ -127,7 +127,7 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
               'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[9px]',
               save.isPending || query.isFetching
                 ? 'bg-devdeck-yellow-tint text-devdeck-yellow-tint-text'
-                : 'bg-devdeck-green-tint text-devdeck-green-soft',
+                : 'bg-devdeck-green-tint text-devdeck-run',
             )}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -147,11 +147,11 @@ export function EnvSettingsEditor({ machine, agentId }: { machine: Machine; agen
           </div>
         ) : query.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-            <p className="text-[12px] text-devdeck-red-soft">Could not load settings file</p>
+            <p className="text-[12px] text-devdeck-err">Could not load settings file</p>
             <button
               type="button"
               onClick={() => query.refetch()}
-              className="cursor-pointer text-[11px] text-devdeck-accent-soft hover:underline"
+              className="cursor-pointer text-[11px] text-devdeck-accent hover:underline"
             >
               Retry
             </button>

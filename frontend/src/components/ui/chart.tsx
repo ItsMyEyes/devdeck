@@ -37,13 +37,13 @@ interface ChartTooltipContentProps {
 export function ChartTooltipContent({ active, payload, label, formatter }: ChartTooltipContentProps) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 px-3 py-2 text-[11.5px] shadow-lg">
-      {label ? <div className="mb-1 font-mono text-[10px] text-devdeck-dim">{label}</div> : null}
+    <div className="rounded-lg border border-devdeck-border-card bg-devdeck-card-wash px-3 py-2 text-[11.5px] shadow-lg">
+      {label ? <div className="mb-1 font-mono text-[10px] text-devdeck-fg-2">{label}</div> : null}
       <div className="flex flex-col gap-1">
         {payload.map((p, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-sm" style={{ background: p.color }} />
-            <span className="text-devdeck-muted">{p.name}</span>
+            <span className="text-devdeck-fg-2">{p.name}</span>
             <span className="ml-auto font-mono font-semibold text-devdeck-fg">
               {formatter && p.value !== undefined ? formatter(p.value) : p.value}
             </span>

@@ -104,11 +104,11 @@ export function PinInput({
           aria-label={`${label} digit ${i + 1} of ${PIN_LENGTH}`}
           aria-invalid={invalid || undefined}
           className={cn(
-            'h-12 w-full min-w-0 rounded-lg border bg-devdeck-bg text-center font-mono text-[18px] text-devdeck-fg',
+            'h-12 w-full min-w-0 rounded-lg border bg-devdeck-pane text-center font-mono text-[18px] text-devdeck-fg',
             'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             'disabled:opacity-50',
             invalid
-              ? 'border-devdeck-red-soft focus-visible:border-devdeck-red-soft'
+              ? 'border-devdeck-err focus-visible:border-devdeck-err'
               : 'border-devdeck-border-strong focus-visible:border-devdeck-border-accent',
           )}
         />

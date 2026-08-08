@@ -42,7 +42,7 @@ export function Dialog({ open, onOpenChange, children, width = 480, z = 60, clas
             // dialog managing its own scrolling can drop it with a plain
             // `overflow-hidden` through tailwind-merge.
             'max-h-[calc(100dvh-36px)] overflow-auto',
-            'rounded-2xl border border-devdeck-border-menu bg-devdeck-card p-[21px] text-devdeck-fg outline-none',
+            'rounded-2xl border border-devdeck-border-menu bg-devdeck-glass-solid p-[21px] text-devdeck-fg outline-none',
             'shadow-[0_24px_60px_rgba(0,0,0,0.55)] transition-all duration-150',
             'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
             'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -71,7 +71,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <BaseDialog.Description
     ref={ref}
-    className={cn('font-mono text-xs text-devdeck-dim', className)}
+    className={cn('font-mono text-xs text-devdeck-fg-2', className)}
     {...props}
   />
 ))

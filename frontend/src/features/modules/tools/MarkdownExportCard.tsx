@@ -42,11 +42,11 @@ export function MarkdownExportCard() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+    <div className="flex min-h-0 flex-1 flex-col rounded-control border border-devdeck-border-card bg-devdeck-glass-solid">
       <div className="flex items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
           <div className="text-[12.5px] font-medium text-devdeck-fg">Markdown → Document</div>
-          <div className="mt-0.5 text-[11px] text-devdeck-muted">
+          <div className="mt-0.5 text-[11px] text-devdeck-fg-2">
             Renders mermaid diagrams to images, then exports via pandoc.
           </div>
         </div>
@@ -57,7 +57,7 @@ export function MarkdownExportCard() {
           <MarkdownEditor
             value={markdown}
             onChange={setMarkdown}
-            placeholder='Write markdown — click to edit, type "/" for headings, tables, mermaid…'
+            placeholder='Write markdown - click to edit, type "/" for headings, tables, mermaid…'
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">

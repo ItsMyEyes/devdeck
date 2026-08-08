@@ -1,10 +1,10 @@
 import { cn } from '@/lib/utils'
 
 const CHIP_COLORS = [
-  'bg-devdeck-accent-tint text-devdeck-accent-soft',
-  'bg-devdeck-green-tint text-devdeck-green-soft',
+  'bg-devdeck-purple/20 text-devdeck-purple',
+  'bg-devdeck-green-tint text-devdeck-run',
   'bg-devdeck-yellow/20 text-devdeck-yellow',
-  'bg-devdeck-red-tint text-devdeck-red-soft',
+  'bg-devdeck-red-tint text-devdeck-err',
 ]
 
 function chipColorFor(seed: string): string {

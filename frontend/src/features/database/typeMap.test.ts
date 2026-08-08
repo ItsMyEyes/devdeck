@@ -255,7 +255,7 @@ check('buildTransferTablePlan preserves nullability and primary keys', () => {
 
 check('buildTransferTablePlan drops every default', () => {
   const plan = buildTransferTablePlan(TARGET, SOURCE_COLS, 'postgres', 'mysql')
-  assertEqual(plan.columns?.map((c) => c.default), [null, null, null, null, null], 'defaults dropped — they are engine-specific expressions')
+  assertEqual(plan.columns?.map((c) => c.default), [null, null, null, null, null], 'defaults dropped - they are engine-specific expressions')
 })
 
 check('buildTransferTablePlan INCLUDES LOB columns (they exist in the target even though row transfer skips them)', () => {

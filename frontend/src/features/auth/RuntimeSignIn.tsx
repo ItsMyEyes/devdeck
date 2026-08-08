@@ -66,10 +66,10 @@ export function RuntimeSignIn({ machineName, hubUrl, machineId }: RuntimeSignInP
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-devdeck-bg px-4 text-devdeck-fg">
+    <div className="flex min-h-[100dvh] w-full items-center justify-center bg-devdeck-pane px-4 text-devdeck-fg">
       <div className="w-full max-w-[360px]">
         <h1 className="text-lg font-medium">{machineName || 'Runtime'}</h1>
-        <p className="mt-1 mb-6 text-[12px] text-devdeck-muted">Sign in to this runtime.</p>
+        <p className="mt-1 mb-6 text-[12px] text-devdeck-fg-2">Sign in to this runtime.</p>
 
         {canSSO && (
           <>
@@ -77,16 +77,16 @@ export function RuntimeSignIn({ machineName, hubUrl, machineId }: RuntimeSignInP
               <ExternalLink className="h-3.5 w-3.5" />
               Sign in via hub
             </Button>
-            <div className="mb-4 flex items-center gap-2 text-[11px] text-devdeck-dim">
-              <div className="h-px flex-1 bg-devdeck-dim-3" />
+            <div className="mb-4 flex items-center gap-2 text-[11px] text-devdeck-fg-2">
+              <div className="h-px flex-1 bg-devdeck-fg-2" />
               or
-              <div className="h-px flex-1 bg-devdeck-dim-3" />
+              <div className="h-px flex-1 bg-devdeck-fg-2" />
             </div>
           </>
         )}
 
         <form onSubmit={submit}>
-          <div className="mb-2 text-[11px] text-devdeck-muted-2">
+          <div className="mb-2 text-[11px] text-devdeck-fg-2">
             Enter this runtime&apos;s {PIN_LENGTH}-digit PIN
           </div>
           <PinInput
@@ -99,10 +99,10 @@ export function RuntimeSignIn({ machineName, hubUrl, machineId }: RuntimeSignInP
             autoFocus={!canSSO}
           />
           <p
-            className={`mt-2 mb-4 min-h-[16px] text-[11px] ${error ? 'text-devdeck-red-soft' : 'text-devdeck-dim-2'}`}
+            className={`mt-2 mb-4 min-h-[16px] text-[11px] ${error ? 'text-devdeck-err' : 'text-devdeck-fg-2'}`}
             role={error ? 'alert' : undefined}
           >
-            {error ?? 'Set it from the hub’s Runtimes page — or find it in this runtime’s startup log.'}
+            {error ?? 'Set it from the hub’s Runtimes page - or find it in this runtime’s startup log.'}
           </p>
           <Button type="submit" disabled={busy || pin.length !== PIN_LENGTH} className="w-full">
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

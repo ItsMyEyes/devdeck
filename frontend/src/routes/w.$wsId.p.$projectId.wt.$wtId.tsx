@@ -14,7 +14,7 @@ function TerminalRoute() {
 
   if (!worktree) {
     return (
-      <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-dim">worktree not found</div>
+      <div className="flex flex-1 items-center justify-center font-mono text-sm text-devdeck-fg-2">worktree not found</div>
     )
   }
   return <ExpandedTerminal worktree={worktree} wsId={wsId} projectId={projectId} isFocused />

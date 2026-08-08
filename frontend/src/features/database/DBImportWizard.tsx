@@ -201,7 +201,7 @@ export function DBImportWizard({
         <div className="min-w-0 flex-1">
           <DialogTitle>Import into {object.name}</DialogTitle>
           <DialogDescription className="mt-1">
-            Rows are inserted through the same commit path as a manual edit — nothing is written until step 4.
+            Rows are inserted through the same commit path as a manual edit - nothing is written until step 4.
           </DialogDescription>
         </div>
         <button
@@ -209,7 +209,7 @@ export function DBImportWizard({
           onClick={close}
           disabled={run.running}
           aria-label="Close"
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg disabled:opacity-50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg disabled:opacity-50"
         >
           <X size={14} />
         </button>
@@ -222,14 +222,14 @@ export function DBImportWizard({
             <span
               className={cn(
                 'flex h-5 w-5 flex-none items-center justify-center rounded-full border font-mono text-[10px]',
-                i < step && 'border-devdeck-green-tint-border bg-devdeck-green-tint text-devdeck-green-soft',
-                i === step && 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft',
-                i > step && 'border-devdeck-border-menu text-devdeck-dim-2',
+                i < step && 'border-devdeck-green-tint-border bg-devdeck-green-tint text-devdeck-run',
+                i === step && 'border-devdeck-line bg-devdeck-on text-devdeck-fg',
+                i > step && 'border-devdeck-border-menu text-devdeck-fg-2',
               )}
             >
               {i < step ? <Check size={10} /> : i + 1}
             </span>
-            <span className={cn('text-[11px]', i === step ? 'text-devdeck-fg' : 'text-devdeck-dim')}>{label}</span>
+            <span className={cn('text-[11px]', i === step ? 'text-devdeck-fg' : 'text-devdeck-fg-2')}>{label}</span>
             {i < STEPS.length - 1 ? <div className="h-px flex-1 bg-devdeck-border-menu" /> : null}
           </div>
         ))}
@@ -238,7 +238,7 @@ export function DBImportWizard({
       {columnsLoading ? (
         <DataLoading compact label="loading columns…" />
       ) : columnsError || !columns ? (
-        <div className="text-[12px] text-devdeck-red-soft">
+        <div className="text-[12px] text-devdeck-err">
           {columnsError instanceof Error ? columnsError.message : 'Failed to load target columns'}
         </div>
       ) : (
@@ -258,11 +258,11 @@ export function DBImportWizard({
                 className={cn(
                   'mb-3 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-6 transition-colors',
                   dragActive
-                    ? 'border-devdeck-border-accent bg-devdeck-accent-tint/40'
-                    : 'border-devdeck-border-strong bg-devdeck-bg',
+                    ? 'border-devdeck-line bg-devdeck-on'
+                    : 'border-devdeck-border-strong bg-devdeck-pane',
                 )}
               >
-                <Upload size={18} className="text-devdeck-dim" />
+                <Upload size={18} className="text-devdeck-fg-2" />
                 <p className="text-[12px] text-devdeck-fg-2">Drop a .csv, .tsv or .txt file here</p>
                 <input
                   ref={fileInputRef}
@@ -279,7 +279,7 @@ export function DBImportWizard({
                 <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
                   Choose file
                 </Button>
-                {fileName ? <p className="font-mono text-[11px] text-devdeck-dim">{fileName}</p> : null}
+                {fileName ? <p className="font-mono text-[11px] text-devdeck-fg-2">{fileName}</p> : null}
               </div>
 
               <div className="mb-3 flex items-end gap-3">
@@ -298,23 +298,23 @@ export function DBImportWizard({
                 </label>
               </div>
 
-              {readError ? <p className="mb-2 text-[11.5px] text-devdeck-red-soft">{readError}</p> : null}
+              {readError ? <p className="mb-2 text-[11.5px] text-devdeck-err">{readError}</p> : null}
 
               {text === '' ? (
-                <p className="text-[11.5px] text-devdeck-dim">No file loaded yet.</p>
+                <p className="text-[11.5px] text-devdeck-fg-2">No file loaded yet.</p>
               ) : parsed.headers.length === 0 ? (
-                <p className="text-[11.5px] text-devdeck-red-soft">
-                  Nothing parsed out of this file — check the delimiter and that the file is not empty.
+                <p className="text-[11.5px] text-devdeck-err">
+                  Nothing parsed out of this file - check the delimiter and that the file is not empty.
                 </p>
               ) : (
-                <div className="rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5 font-mono text-[11px] text-devdeck-fg-2">
+                <div className="rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-2.5 font-mono text-[11px] text-devdeck-fg-2">
                   <div>
                     {parsed.rows.length} row{parsed.rows.length === 1 ? '' : 's'} · {parsed.headers.length} column
                     {parsed.headers.length === 1 ? '' : 's'} · delimiter{' '}
-                    <span className="text-devdeck-accent-soft">{delimiterLabel(delimiter)}</span>
+                    <span className="text-devdeck-fg">{delimiterLabel(delimiter)}</span>
                     {delimiterChoice === AUTO ? ' (detected)' : ''}
                   </div>
-                  <div className="mt-1 truncate text-devdeck-dim">{parsed.headers.join(' · ')}</div>
+                  <div className="mt-1 truncate text-devdeck-fg-2">{parsed.headers.join(' · ')}</div>
                   {parsed.errors.length > 0 ? (
                     <div className="mt-2 text-devdeck-yellow-tint-text">
                       {parsed.errors.length} ragged row{parsed.errors.length === 1 ? '' : 's'}:
@@ -337,16 +337,16 @@ export function DBImportWizard({
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-devdeck-border-menu text-left">
-                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-dim">CSV column</th>
-                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-dim">Sample</th>
-                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-dim">Target column</th>
+                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-fg-2">CSV column</th>
+                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-fg-2">Sample</th>
+                    <th className="pb-1.5 text-[11px] font-medium text-devdeck-fg-2">Target column</th>
                   </tr>
                 </thead>
                 <tbody>
                   {parsed.headers.map((header, i) => (
                     <tr key={`${header}-${i}`} className="border-b border-devdeck-border-menu/50">
                       <td className="max-w-[160px] truncate py-1.5 pr-3 font-mono text-[11.5px] text-devdeck-fg-2">{header}</td>
-                      <td className="max-w-[160px] truncate py-1.5 pr-3 font-mono text-[11px] text-devdeck-dim">
+                      <td className="max-w-[160px] truncate py-1.5 pr-3 font-mono text-[11px] text-devdeck-fg-2">
                         {parsed.rows[0]?.[i] ?? ''}
                       </td>
                       <td className="w-[240px] py-1.5">
@@ -354,7 +354,7 @@ export function DBImportWizard({
                           value={mapping[header] ?? SKIP}
                           onValueChange={(v) => setMapping((prev) => ({ ...prev, [header]: v === SKIP ? null : v }))}
                           options={[
-                            { value: SKIP, label: '— skip this column —' },
+                            { value: SKIP, label: '- skip this column -' },
                             ...columns.map((c) => ({ value: c.name, label: `${c.name}  ·  ${c.dataType}` })),
                           ]}
                           className="h-7"
@@ -381,19 +381,19 @@ export function DBImportWizard({
           {/* ---- step 3: preview ---- */}
           {step === 2 ? (
             <div>
-              <p className="mb-2 text-[11.5px] text-devdeck-dim">
+              <p className="mb-2 text-[11.5px] text-devdeck-fg-2">
                 First {previewRows.length} of {totalRows} row{totalRows === 1 ? '' : 's'}, with coercion applied.
               </p>
               {previewRows.length === 0 ? (
-                <p className="text-[11.5px] text-devdeck-dim">Nothing to preview.</p>
+                <p className="text-[11.5px] text-devdeck-fg-2">Nothing to preview.</p>
               ) : (
-                <div className="overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-bg">
+                <div className="overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-pane">
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b border-devdeck-border-menu">
-                        <th className="px-2 py-1 text-left font-mono text-[10px] text-devdeck-dim-2">#</th>
+                        <th className="px-2 py-1 text-left font-mono text-[10px] text-devdeck-fg-2">#</th>
                         {previewRows[0].cells.map((c) => (
-                          <th key={c.column} className="px-2 py-1 text-left font-mono text-[10px] text-devdeck-dim">
+                          <th key={c.column} className="px-2 py-1 text-left font-mono text-[10px] text-devdeck-fg-2">
                             {c.column}
                           </th>
                         ))}
@@ -402,17 +402,17 @@ export function DBImportWizard({
                     <tbody>
                       {previewRows.map((r) => (
                         <tr key={r.row} className={cn('border-b border-devdeck-border-menu/50', !r.ok && 'bg-devdeck-red-tint/30')}>
-                          <td className="px-2 py-1 font-mono text-[10px] text-devdeck-dim-2">{r.row}</td>
+                          <td className="px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">{r.row}</td>
                           {r.cells.map((c) => (
                             <td
                               key={c.column}
                               title={c.error ?? undefined}
                               className={cn(
                                 'max-w-[150px] truncate px-2 py-1 font-mono text-[11px]',
-                                c.error ? 'text-devdeck-red-soft' : 'text-devdeck-fg-2',
+                                c.error ? 'text-devdeck-err' : 'text-devdeck-fg-2',
                               )}
                             >
-                              {c.error ? c.error : c.value === null ? <span className="text-devdeck-dim-2">null</span> : String(c.value)}
+                              {c.error ? c.error : c.value === null ? <span className="text-devdeck-fg-2">null</span> : String(c.value)}
                             </td>
                           ))}
                         </tr>
@@ -424,9 +424,9 @@ export function DBImportWizard({
 
               {errors.length > 0 ? (
                 <div className="mt-3 rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/30 p-2.5">
-                  <div className="mb-1 text-[11.5px] font-medium text-devdeck-red-soft">
+                  <div className="mb-1 text-[11.5px] font-medium text-devdeck-err">
                     {errors.length} validation error{errors.length === 1 ? '' : 's'} across {skippedRows} row
-                    {skippedRows === 1 ? '' : 's'} — those rows will be skipped.
+                    {skippedRows === 1 ? '' : 's'} - those rows will be skipped.
                   </div>
                   <div className="max-h-[120px] overflow-auto font-mono text-[10.5px] text-devdeck-fg-2">
                     {errors.slice(0, 50).map((e, i) => (
@@ -434,11 +434,11 @@ export function DBImportWizard({
                         row {e.row} · {e.column}: {e.message}
                       </div>
                     ))}
-                    {errors.length > 50 ? <div className="text-devdeck-dim">…and {errors.length - 50} more</div> : null}
+                    {errors.length > 50 ? <div className="text-devdeck-fg-2">…and {errors.length - 50} more</div> : null}
                   </div>
                 </div>
               ) : (
-                <p className="mt-3 text-[11.5px] text-devdeck-green-soft">
+                <p className="mt-3 text-[11.5px] text-devdeck-run">
                   All {totalRows} row{totalRows === 1 ? '' : 's'} validate.
                 </p>
               )}
@@ -463,13 +463,13 @@ export function DBImportWizard({
                 <span className="text-devdeck-fg-2">
                   {run.done} / {edits.length} row{edits.length === 1 ? '' : 's'}
                 </span>
-                <span className="text-devdeck-dim">{progressPercent(run.done, edits.length)}%</span>
+                <span className="text-devdeck-fg-2">{progressPercent(run.done, edits.length)}%</span>
               </div>
               <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-devdeck-border-menu">
                 <div
                   className={cn(
                     'h-full rounded-full transition-[width] duration-200',
-                    run.failedBatch !== null ? 'bg-devdeck-red-soft' : 'bg-devdeck-accent',
+                    run.failedBatch !== null ? 'bg-devdeck-err' : 'bg-devdeck-wait',
                   )}
                   style={{ width: `${progressPercent(run.done, edits.length)}%` }}
                 />
@@ -482,25 +482,25 @@ export function DBImportWizard({
               ) : null}
 
               {run.failedBatch !== null ? (
-                <p className="mb-2 text-[11.5px] text-devdeck-red-soft">
+                <p className="mb-2 text-[11.5px] text-devdeck-err">
                   Batch {run.failedBatch} failed: {run.error}. The {run.done} row{run.done === 1 ? '' : 's'} committed before it are
                   already in the table.
                 </p>
               ) : run.stopped ? (
                 <p className="mb-2 text-[11.5px] text-devdeck-yellow-tint-text">
-                  Stopped after {run.inserted} inserted row{run.inserted === 1 ? '' : 's'} — the completed batches remain in the table.
+                  Stopped after {run.inserted} inserted row{run.inserted === 1 ? '' : 's'} - the completed batches remain in the table.
                 </p>
               ) : run.finished ? (
-                <p className="mb-2 text-[11.5px] text-devdeck-green-soft">
+                <p className="mb-2 text-[11.5px] text-devdeck-run">
                   Inserted {run.inserted} row{run.inserted === 1 ? '' : 's'}.
                 </p>
               ) : run.running ? (
-                <p className="mb-2 flex items-center gap-1.5 text-[11.5px] text-devdeck-dim">
+                <p className="mb-2 flex items-center gap-1.5 text-[11.5px] text-devdeck-fg-2">
                   <LoaderCircle size={12} className="animate-spin" />
                   Committing batch {Math.floor(run.done / Number(batchSize)) + 1} of {batches.length}…
                 </p>
               ) : (
-                <p className="mb-2 text-[11.5px] text-devdeck-dim">
+                <p className="mb-2 text-[11.5px] text-devdeck-fg-2">
                   {edits.length} row{edits.length === 1 ? '' : 's'} ready in {batches.length} batch{batches.length === 1 ? '' : 'es'}.
                 </p>
               )}

@@ -147,7 +147,7 @@ export function DiffView({ text, mode, showFileSummary = false }: DiffViewProps)
 
   if (!text.trim()) {
     return (
-      <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-devdeck-dim">
+      <div className="flex h-24 items-center justify-center font-mono text-[10.5px] text-devdeck-fg-2">
         No differences
       </div>
     )
@@ -163,7 +163,7 @@ export function DiffView({ text, mode, showFileSummary = false }: DiffViewProps)
 
       {showFileSummary && parsed.files.length > 0 && (
         <div className="border-b border-devdeck-border px-3 py-2">
-          <div className="pb-1.5 font-mono text-[9.5px] tracking-[0.14em] text-devdeck-dim">
+          <div className="pb-1.5 font-mono text-[9.5px] tracking-[0.14em] text-devdeck-fg-2">
             {parsed.files.length} {parsed.files.length === 1 ? 'FILE' : 'FILES'} CHANGED
           </div>
           <div className="flex flex-col">
@@ -181,7 +181,7 @@ export function DiffView({ text, mode, showFileSummary = false }: DiffViewProps)
                 <MaterialFileIcon name={file.path.split('/').pop() ?? file.path} size={13} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-fg-2">{file.path}</span>
                 <span className="flex-none font-mono text-[10px] text-devdeck-green">+{file.additions}</span>
-                <span className="flex-none font-mono text-[10px] text-devdeck-red-soft">-{file.deletions}</span>
+                <span className="flex-none font-mono text-[10px] text-devdeck-err">-{file.deletions}</span>
               </button>
             ))}
           </div>
@@ -191,7 +191,7 @@ export function DiffView({ text, mode, showFileSummary = false }: DiffViewProps)
       {parsed.files.map((file) => (
         <div key={file.path} id={`diff-file-${file.path}`}>
           {(showFileSummary || parsed.files.length > 1) && (
-            <div className="sticky top-0 z-10 flex h-7 items-center gap-1.5 border-b border-devdeck-border bg-devdeck-surface-2 px-3">
+            <div className="sticky top-0 z-10 flex h-7 items-center gap-1.5 border-b border-devdeck-border bg-devdeck-card-wash px-3">
               <MaterialFileIcon name={file.path.split('/').pop() ?? file.path} size={13} />
               <span className="min-w-0 truncate font-mono text-[10.5px] text-devdeck-fg-2">
                 {file.oldPath !== file.path && file.oldPath !== '/dev/null' && !file.oldPath.endsWith('dev/null')
@@ -199,11 +199,11 @@ export function DiffView({ text, mode, showFileSummary = false }: DiffViewProps)
                   : file.path}
               </span>
               <span className="flex-none font-mono text-[10px] text-devdeck-green">+{file.additions}</span>
-              <span className="flex-none font-mono text-[10px] text-devdeck-red-soft">-{file.deletions}</span>
+              <span className="flex-none font-mono text-[10px] text-devdeck-err">-{file.deletions}</span>
             </div>
           )}
           {file.binary ? (
-            <div className="px-4 py-3 font-mono text-[10.5px] text-devdeck-dim">Binary file, no text diff</div>
+            <div className="px-4 py-3 font-mono text-[10.5px] text-devdeck-fg-2">Binary file, no text diff</div>
           ) : mode === 'split' ? (
             <SplitFileDiff file={file} />
           ) : (
@@ -265,11 +265,11 @@ function HunkHeader({ header }: { header: string }) {
   // "@@ -1,2 +1,3 @@ fn ctx" → range summary + optional trailing context.
   const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/.exec(header)
   return (
-    <div className="flex items-center gap-2 border-y border-devdeck-border bg-devdeck-surface-2 px-3 py-1 font-mono text-[9.5px]">
-      <span className="flex-none tracking-wide text-devdeck-dim">
+    <div className="flex items-center gap-2 border-y border-devdeck-border bg-devdeck-card-wash px-3 py-1 font-mono text-[9.5px]">
+      <span className="flex-none tracking-wide text-devdeck-fg-2">
         {match ? `−${match[1]},${match[2] ?? 1}  +${match[3]},${match[4] ?? 1}` : header}
       </span>
-      {match?.[5] ? <span className="min-w-0 truncate text-devdeck-dim-2">{match[5]}</span> : null}
+      {match?.[5] ? <span className="min-w-0 truncate text-devdeck-fg-2">{match[5]}</span> : null}
     </div>
   )
 }
@@ -312,11 +312,11 @@ function SplitCell({
     <div
       className={cn(
         'flex min-w-0 border-r border-devdeck-border last:border-r-0',
-        side.changed ? (removed ? 'text-devdeck-red-soft' : 'text-devdeck-green') : 'text-devdeck-fg-2',
+        side.changed ? (removed ? 'text-devdeck-err' : 'text-devdeck-green') : 'text-devdeck-fg-2',
       )}
       style={side.changed ? { background: removed ? REMOVED_BG : ADDED_BG } : undefined}
     >
-      <span className="w-10 flex-none select-none pr-2 pt-px text-right text-[10px] tabular-nums text-devdeck-dim-2">
+      <span className="w-10 flex-none select-none pr-2 pt-px text-right text-[10px] tabular-nums text-devdeck-fg-2">
         {side.no}
       </span>
       <LineText
@@ -363,17 +363,17 @@ function UnifiedLine({
   newNo?: number
   segments?: [string, string, string]
 }) {
-  const color = sign === '-' ? 'text-devdeck-red-soft' : sign === '+' ? 'text-devdeck-green' : 'text-devdeck-fg-2'
+  const color = sign === '-' ? 'text-devdeck-err' : sign === '+' ? 'text-devdeck-green' : 'text-devdeck-fg-2'
   const bg = sign === '-' ? REMOVED_BG : sign === '+' ? ADDED_BG : undefined
   return (
     <div className={cn('flex', color)} style={bg ? { background: bg } : undefined}>
-      <span className="w-9 flex-none select-none pr-1.5 pt-px text-right text-[10px] tabular-nums text-devdeck-dim-2">
+      <span className="w-9 flex-none select-none pr-1.5 pt-px text-right text-[10px] tabular-nums text-devdeck-fg-2">
         {sign === '+' ? '' : side.no}
       </span>
-      <span className="w-9 flex-none select-none pr-2 pt-px text-right text-[10px] tabular-nums text-devdeck-dim-2">
+      <span className="w-9 flex-none select-none pr-2 pt-px text-right text-[10px] tabular-nums text-devdeck-fg-2">
         {sign === '-' ? '' : sign === '+' ? side.no : newNo}
       </span>
-      <span className="w-4 flex-none select-none text-devdeck-dim">{sign}</span>
+      <span className="w-4 flex-none select-none text-devdeck-fg-2">{sign}</span>
       <LineText
         segments={segments}
         text={side.text}

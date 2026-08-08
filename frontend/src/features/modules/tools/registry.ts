@@ -24,7 +24,7 @@ export const TOOL_REGISTRY: ToolDef[] = [
   {
     id: 'jwt',
     label: 'JWT Encode / Decode',
-    description: 'Inspect, verify, and sign JWTs — HMAC secret or RSA (OpenSSL) key pair',
+    description: 'Inspect, verify, and sign JWTs - HMAC secret or RSA (OpenSSL) key pair',
     category: 'Encoding & Crypto',
     icon: KeyRound,
     Component: JwtTool,

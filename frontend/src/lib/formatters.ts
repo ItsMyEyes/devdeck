@@ -190,13 +190,13 @@ export function highlightJsonHtml(pretty: string): string {
   return escaped.replace(
     /"(?:\\u[0-9a-fA-F]{4}|\\.|[^"\\])*"(?:\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
     (match) => {
-      let cls = 'text-devdeck-accent-soft' // number
+      let cls = 'text-devdeck-accent' // number
       if (match.startsWith('"')) {
-        cls = match.trimEnd().endsWith(':') ? 'text-devdeck-purple' : 'text-devdeck-green-soft'
+        cls = match.trimEnd().endsWith(':') ? 'text-devdeck-purple' : 'text-devdeck-run'
       } else if (match === 'true' || match === 'false') {
         cls = 'text-devdeck-accent'
       } else if (match === 'null') {
-        cls = 'text-devdeck-dim'
+        cls = 'text-devdeck-fg-2'
       }
       return `<span class="${cls}">${match}</span>`
     },
@@ -207,10 +207,10 @@ export function highlightJsonHtml(pretty: string): string {
 export function highlightXmlHtml(pretty: string): string {
   const escaped = escapeHtml(pretty)
   return escaped
-    .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="text-devdeck-dim">$1</span>')
-    .replace(/(&lt;\/?)([a-zA-Z0-9:_-]+)/g, '$1<span class="text-devdeck-accent-soft">$2</span>')
+    .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="text-devdeck-fg-2">$1</span>')
+    .replace(/(&lt;\/?)([a-zA-Z0-9:_-]+)/g, '$1<span class="text-devdeck-accent">$2</span>')
     .replace(
       /([a-zA-Z0-9:_-]+)(=)(&quot;[^&]*&quot;|"[^"]*")/g,
-      '<span class="text-devdeck-purple">$1</span>$2<span class="text-devdeck-green-soft">$3</span>',
+      '<span class="text-devdeck-purple">$1</span>$2<span class="text-devdeck-run">$3</span>',
     )
 }

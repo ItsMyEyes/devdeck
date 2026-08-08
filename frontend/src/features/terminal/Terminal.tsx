@@ -30,12 +30,16 @@ export interface TerminalHandle {
   copyBuffer: () => void
 }
 
+/* xterm cannot read CSS custom properties, so the pane colour is duplicated
+   here as a literal. It must track --devdeck-pane exactly: any drift shows up
+   as a seam between the terminal canvas and the pane card behind it.
+   The ANSI entries below are content, not chrome, and are left alone. */
 export const TERMINAL_THEME = {
-  background: '#111214',
+  background: '#1a1d1d',
   foreground: '#c9ccca',
   cursor: '#39c6bd',
-  cursorAccent: '#111214',
-  selectionBackground: '#315b5980',
+  cursorAccent: '#1a1d1d',
+  selectionBackground: '#39c6bd40',
   black: '#191a1c',
   red: '#f87171',
   green: '#56d58a',
@@ -44,7 +48,7 @@ export const TERMINAL_THEME = {
   magenta: '#c7a3ff',
   cyan: '#8fd99f',
   white: '#d4d6d3',
-  brightBlack: '#686e73',
+  brightBlack: '#727575',
   brightRed: '#f08a8a',
   brightGreen: '#8fd99f',
   brightYellow: '#ffd66a',
@@ -252,7 +256,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       ws.onerror = () => {
         if (!everOpened) {
-          term.write('\r\n\x1b[38;5;210m[connection error — is the terminal server running?]\x1b[0m\r\n')
+          term.write('\r\n\x1b[38;5;210m[connection error - is the terminal server running?]\x1b[0m\r\n')
         }
       }
     }
@@ -264,7 +268,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // the first retry and doesn't need to alarm the user; only surface the
       // message once a retry has already failed, i.e. the drop is sustained.
       if (attempts > 0) {
-        term.write('\r\n\x1b[38;5;102m[connection lost — reconnecting…]\x1b[0m\r\n')
+        term.write('\r\n\x1b[38;5;102m[connection lost - reconnecting…]\x1b[0m\r\n')
       }
       attempts++
       retryTimer = window.setTimeout(() => {
@@ -391,7 +395,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
       {searchOpen ? (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-devdeck-border bg-devdeck-surface px-2 py-1 shadow-lg">
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-devdeck-border bg-devdeck-pane px-2 py-1 shadow-lg">
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -413,7 +417,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             type="button"
             onClick={() => searchAddonRef.current?.findPrevious(searchQuery)}
             aria-label="Previous match"
-            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
+            className="cursor-pointer text-devdeck-fg-2 hover:text-devdeck-fg"
           >
             <ChevronUp size={12} />
           </button>
@@ -421,7 +425,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             type="button"
             onClick={() => searchAddonRef.current?.findNext(searchQuery)}
             aria-label="Next match"
-            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
+            className="cursor-pointer text-devdeck-fg-2 hover:text-devdeck-fg"
           >
             <ChevronDown size={12} />
           </button>
@@ -429,7 +433,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             type="button"
             onClick={closeSearch}
             aria-label="Close search"
-            className="cursor-pointer text-devdeck-muted hover:text-devdeck-fg"
+            className="cursor-pointer text-devdeck-fg-2 hover:text-devdeck-fg"
           >
             <X size={12} />
           </button>

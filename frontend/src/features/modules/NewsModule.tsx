@@ -57,8 +57,8 @@ export function NewsModule({ wsId }: { wsId: string }) {
                   key={n.id}
                   onClick={() => n.unread && updateNews.mutate({ id: n.id, patch: { unread: false } })}
                   className={cn(
-                    'flex items-center gap-3 rounded-[11px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5',
-                    n.unread && 'cursor-pointer hover:border-devdeck-border-accent',
+                    'flex items-center gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5',
+                    n.unread && 'cursor-pointer hover:border-devdeck-line',
                   )}
                 >
                   {n.unread ? (
@@ -66,7 +66,7 @@ export function NewsModule({ wsId }: { wsId: string }) {
                       type="button"
                       aria-label={`Mark read: ${n.title}`}
                       onClick={() => updateNews.mutate({ id: n.id, patch: { unread: false } })}
-                      className="h-2 w-2 flex-none cursor-pointer rounded-full bg-devdeck-accent"
+                      className="h-2 w-2 flex-none cursor-pointer rounded-full bg-devdeck-fg-2"
                     />
                   ) : (
                     <span className="h-2 w-2 flex-none rounded-full bg-transparent" />
@@ -75,12 +75,12 @@ export function NewsModule({ wsId }: { wsId: string }) {
                     <div
                       className={cn(
                         'truncate text-[12.5px] leading-snug',
-                        n.unread ? 'font-medium text-devdeck-fg' : 'text-devdeck-muted',
+                        n.unread ? 'font-medium text-devdeck-fg' : 'text-devdeck-fg-2',
                       )}
                     >
                       {n.title}
                     </div>
-                    <div className="mt-[3px] font-mono text-[10.5px] text-devdeck-dim">
+                    <div className="mt-[3px] font-mono text-[10.5px] text-devdeck-fg-2">
                       {n.source} · {n.time}
                     </div>
                   </div>
@@ -91,7 +91,7 @@ export function NewsModule({ wsId }: { wsId: string }) {
                       deleteNews.mutate(n.id)
                     }}
                     aria-label="Delete news item"
-                    className="flex-none cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
+                    className="flex-none cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-err"
                   >
                     <Trash2 size={13} />
                   </button>

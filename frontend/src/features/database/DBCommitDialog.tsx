@@ -31,7 +31,7 @@ export function DBCommitDialog() {
         },
         onError: (err) => {
           if (err instanceof ApiError && err.status === 409) {
-            showToast('Another session changed one of these rows — reload the table and try again')
+            showToast('Another session changed one of these rows - reload the table and try again')
           } else {
             showToast(err instanceof Error ? err.message : 'Commit failed')
           }
@@ -44,17 +44,17 @@ export function DBCommitDialog() {
     <Dialog open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={560}>
       <DialogTitle>Commit {dialog.edits.length} change{dialog.edits.length === 1 ? '' : 's'}</DialogTitle>
       <DialogDescription className="mb-3">
-        Every row is matched against its current identity server-side before writing — this cannot be a stale write.
+        Every row is matched against its current identity server-side before writing - this cannot be a stale write.
       </DialogDescription>
 
-      <div className="mb-4 max-h-[280px] overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
+      <div className="mb-4 max-h-[280px] overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-2.5">
         {dialog.edits.map((edit, i) => (
           <div key={i} className="mb-2 border-b border-devdeck-border-menu/50 pb-2 font-mono text-[11px] text-devdeck-fg-2 last:mb-0 last:border-0 last:pb-0">
             <div
               className={cn(
-                'text-devdeck-dim',
-                edit.kind === 'delete' && 'text-devdeck-red-soft',
-                edit.kind === 'insert' && 'text-devdeck-green-soft',
+                'text-devdeck-fg-2',
+                edit.kind === 'delete' && 'text-devdeck-err',
+                edit.kind === 'insert' && 'text-devdeck-run',
               )}
             >
               {edit.kind.toUpperCase()} {edit.object.name}
@@ -69,7 +69,7 @@ export function DBCommitDialog() {
             {edit.kind === 'delete' && edit.oldValues
               ? Object.entries(edit.oldValues).map(([col, val]) => (
                   <div key={col}>
-                    {col}: <span className="text-devdeck-red-soft">{val === null ? 'null' : String(val)}</span>
+                    {col}: <span className="text-devdeck-err">{val === null ? 'null' : String(val)}</span>
                   </div>
                 ))
               : null}
@@ -80,7 +80,7 @@ export function DBCommitDialog() {
       {connection?.isProduction ? (
         <label className="mb-4 flex items-center gap-2 rounded-lg border border-devdeck-yellow-tint-border bg-devdeck-yellow-tint p-2.5 text-[11.5px] text-devdeck-yellow-tint-text">
           <input type="checkbox" checked={confirmedProduction} onChange={(e) => setConfirmedProduction(e.target.checked)} />
-          This connection is marked production — I want to apply this commit.
+          This connection is marked production - I want to apply this commit.
         </label>
       ) : null}
 

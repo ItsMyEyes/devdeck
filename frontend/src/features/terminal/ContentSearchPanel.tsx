@@ -83,7 +83,7 @@ function HighlightedMatch({ text, span }: { text: string; span: MatchSpan }) {
   return (
     <>
       {text.slice(0, span.start)}
-      <span className="rounded-sm bg-devdeck-accent/25 font-semibold text-devdeck-accent">{text.slice(span.start, end)}</span>
+      <span className="rounded-sm bg-devdeck-on font-semibold text-devdeck-fg">{text.slice(span.start, end)}</span>
       {text.slice(end)}
     </>
   )
@@ -215,8 +215,8 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
   const grepFallbackWorks = result?.engine === 'grep'
   const showInstallBanner = !!result && !result.rgAvailable && !dismissed
   const installBannerMessage = grepFallbackWorks
-    ? "ripgrep isn't installed on this target — using grep instead."
-    : "ripgrep isn't installed on this target and no grep fallback is available — content search is unavailable until ripgrep is installed."
+    ? "ripgrep isn't installed on this target - using grep instead."
+    : "ripgrep isn't installed on this target and no grep fallback is available - content search is unavailable until ripgrep is installed."
 
   return (
     <div
@@ -228,10 +228,10 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
         aria-modal="true"
         aria-label="Search in files"
         onMouseDown={(event) => event.stopPropagation()}
-        className="flex max-h-[74vh] w-full max-w-[760px] flex-col overflow-hidden rounded-lg border border-devdeck-border-menu bg-devdeck-popover shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+        className="flex max-h-[74vh] w-full max-w-[760px] flex-col overflow-hidden rounded-lg border border-devdeck-border-menu bg-devdeck-glass-solid shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
       >
         <div className="flex h-12 flex-none items-center gap-2.5 border-b border-devdeck-border px-3">
-          <Search size={15} className="flex-none text-devdeck-accent" />
+          <Search size={15} className="flex-none text-devdeck-fg-2" />
           <input
             ref={inputRef}
             value={query}
@@ -239,7 +239,7 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
             onKeyDown={handleKeydown}
             aria-label="Search file contents"
             placeholder="Search in files…"
-            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-dim"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-fg-2"
           />
           <button
             type="button"
@@ -247,8 +247,8 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
             aria-pressed={regexMode}
             title="Use regular expression"
             className={cn(
-              'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
-              regexMode && 'bg-devdeck-accent-tint text-devdeck-accent',
+              'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+              regexMode && 'bg-devdeck-on text-devdeck-fg',
             )}
           >
             <Regex size={14} />
@@ -259,8 +259,8 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
             aria-pressed={caseSensitive}
             title="Match case"
             className={cn(
-              'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
-              caseSensitive && 'bg-devdeck-accent-tint text-devdeck-accent',
+              'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+              caseSensitive && 'bg-devdeck-on text-devdeck-fg',
             )}
           >
             <CaseSensitive size={16} />
@@ -269,15 +269,15 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
             type="button"
             onClick={onClose}
             aria-label="Close content search"
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
           >
             <X size={14} />
           </button>
         </div>
 
         {showInstallBanner ? (
-          <div className="flex flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface-2 px-3 py-1.5">
-            <span className="min-w-0 flex-1 font-mono text-[10.5px] text-devdeck-muted">{installBannerMessage}</span>
+          <div className="flex flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-card-wash px-3 py-1.5">
+            <span className="min-w-0 flex-1 font-mono text-[10.5px] text-devdeck-fg-2">{installBannerMessage}</span>
             <button
               type="button"
               onClick={handleInstall}
@@ -301,7 +301,7 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
 
         <div className="min-h-0 flex-1 overflow-auto py-1.5">
           {trimmed === '' ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2 text-devdeck-dim">
+            <div className="flex h-32 flex-col items-center justify-center gap-2 text-devdeck-fg-2">
               <FileSearch size={20} />
               <span className="font-mono text-[11px]">Type to search file contents</span>
             </div>
@@ -310,11 +310,11 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
               <DataLoading compact label="searching…" />
             </div>
           ) : search.error ? (
-            <div className="flex h-32 items-center justify-center px-5 text-center font-mono text-[11px] text-devdeck-red-soft">
+            <div className="flex h-32 items-center justify-center px-5 text-center font-mono text-[11px] text-devdeck-err">
               {search.error instanceof ApiError ? search.error.message : 'Content search failed'}
             </div>
           ) : !result || result.files.length === 0 ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2 text-devdeck-dim">
+            <div className="flex h-32 flex-col items-center justify-center gap-2 text-devdeck-fg-2">
               <FileSearch size={20} />
               <span className="font-mono text-[11px]">No matches</span>
             </div>
@@ -330,14 +330,14 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
                     className="flex h-7 w-full cursor-pointer items-center gap-1.5 px-3 text-left hover:bg-devdeck-hover-wash"
                   >
                     {isCollapsed ? (
-                      <ChevronRight size={12} className="flex-none text-devdeck-dim-3" />
+                      <ChevronRight size={12} className="flex-none text-devdeck-fg-2" />
                     ) : (
-                      <ChevronDown size={12} className="flex-none text-devdeck-dim-3" />
+                      <ChevronDown size={12} className="flex-none text-devdeck-fg-2" />
                     )}
                     <MaterialFileIcon name={basename(file.path)} size={14} />
                     <span className="min-w-0 flex-none truncate font-mono text-[11px] text-devdeck-fg-2">{basename(file.path)}</span>
-                    {folder ? <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-devdeck-dim">{folder}</span> : <span className="flex-1" />}
-                    <span className="flex-none rounded border border-devdeck-border-strong px-1.5 py-0.5 font-mono text-[9px] text-devdeck-dim">
+                    {folder ? <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-devdeck-fg-2">{folder}</span> : <span className="flex-1" />}
+                    <span className="flex-none rounded border border-devdeck-border-strong px-1.5 py-0.5 font-mono text-[9px] text-devdeck-fg-2">
                       {file.matches.length}
                     </span>
                   </button>
@@ -354,10 +354,10 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
                             onClick={() => choose({ path: file.path, match })}
                             className={cn(
                               'flex h-7 w-full cursor-pointer items-center gap-2.5 pl-9 pr-3 text-left',
-                              key === selectedKey ? 'bg-devdeck-accent-tint' : 'hover:bg-devdeck-hover-wash',
+                              key === selectedKey ? 'bg-devdeck-on' : 'hover:bg-devdeck-hover-wash',
                             )}
                           >
-                            <span className="w-10 flex-none truncate text-right font-mono text-[10px] text-devdeck-dim">{match.line}</span>
+                            <span className="w-10 flex-none truncate text-right font-mono text-[10px] text-devdeck-fg-2">{match.line}</span>
                             <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-devdeck-fg-2">
                               <HighlightedMatch text={match.text} span={span} />
                             </span>
@@ -370,7 +370,7 @@ export function ContentSearchPanel({ open, target, onClose, onOpenMatch }: Conte
           )}
         </div>
 
-        <div className="flex h-8 flex-none items-center gap-3 border-t border-devdeck-border bg-devdeck-surface px-3 font-mono text-[9.5px] text-devdeck-dim">
+        <div className="flex h-8 flex-none items-center gap-3 border-t border-devdeck-border bg-devdeck-pane px-3 font-mono text-[9.5px] text-devdeck-fg-2">
           <span>↑↓ select</span>
           <span>Enter open at line</span>
           <span>Esc close</span>

@@ -52,7 +52,7 @@ export function Base64Tool() {
               { value: 'decode', label: 'Decode' },
             ]}
           />
-          <label className="flex items-center gap-1.5 font-mono text-[11px] text-devdeck-muted select-none">
+          <label className="flex items-center gap-1.5 font-mono text-[11px] text-devdeck-fg-2 select-none">
             <input type="checkbox" checked={urlSafe} onChange={(e) => setUrlSafe(e.target.checked)} className="accent-devdeck-accent" />
             URL-safe
           </label>
@@ -61,7 +61,7 @@ export function Base64Tool() {
     >
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_1fr]">
         <div className="flex min-h-[200px] flex-col gap-1.5">
-          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">
+          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">
             {mode === 'encode' ? 'Text' : 'Base64'}
           </span>
           <Textarea
@@ -79,7 +79,7 @@ export function Base64Tool() {
             onClick={swap}
             aria-label="Swap direction"
             title="Swap direction"
-            className="cursor-pointer rounded-md border border-devdeck-border-menu p-1.5 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
+            className="cursor-pointer rounded-md border border-devdeck-border-menu p-1.5 text-devdeck-fg-2 hover:text-devdeck-fg"
           >
             <ArrowLeftRight size={13} />
           </button>
@@ -87,7 +87,7 @@ export function Base64Tool() {
 
         <div className="flex min-h-[200px] flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">
+            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">
               {mode === 'encode' ? 'Base64' : 'Text'}
             </span>
             <Button variant="ghost" size="sm" onClick={copyOutput} disabled={!output}>
@@ -97,11 +97,11 @@ export function Base64Tool() {
           </div>
           {error ? (
             <div className="flex min-h-[200px] flex-1 items-start gap-2 rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 p-3">
-              <AlertTriangle size={14} className="mt-0.5 flex-none text-devdeck-red-soft" />
-              <div className="font-mono text-[11px] text-devdeck-muted">{error}</div>
+              <AlertTriangle size={14} className="mt-0.5 flex-none text-devdeck-err" />
+              <div className="font-mono text-[11px] text-devdeck-fg-2">{error}</div>
             </div>
           ) : (
-            <pre className="min-h-[200px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">
+            <pre className="min-h-[200px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-pane p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">
               {output}
             </pre>
           )}

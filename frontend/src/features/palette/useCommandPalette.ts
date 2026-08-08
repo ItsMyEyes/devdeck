@@ -117,7 +117,7 @@ export interface CommandPaletteModel {
   run: (modifiers?: { forceForm?: boolean; index?: number }) => void
 }
 
-const ROOT_PLACEHOLDER = 'Search tabs, worktrees, hosts — or type ssh / agent-new / browser…'
+const ROOT_PLACEHOLDER = 'Search tabs, worktrees, hosts - or type ssh / agent-new / browser…'
 
 /**
  * `APP_PAGES` paths mapped to the real route ids. A template literal built
@@ -570,7 +570,7 @@ export function useCommandPalette({
             kind: 'command',
             group: 'results',
             title: `New SSH host from "${arg}"…`,
-            subtitle: "couldn't read that as an ssh command — opens the form",
+            subtitle: "couldn't read that as an ssh command - opens the form",
             icon: MODULE_ICON.ssh,
             run: () => openQuickAddForm(`ssh ${arg}`),
           },
@@ -582,7 +582,7 @@ export function useCommandPalette({
           kind: 'command',
           group: 'results',
           title: sshValid ? `Connect & save "${sshDraft.name}"` : `New SSH host "${sshDraft.name}"…`,
-          subtitle: sshValid ? 'creates the host and opens a shell' : 'needs credentials — opens the form',
+          subtitle: sshValid ? 'creates the host and opens a shell' : 'needs credentials - opens the form',
           // This row *is* the typed command, so matching it against that same
           // command has to be a tautology. It can't be left to the title:
           // `deriveSSHQuickAddName` names the row after the target alone

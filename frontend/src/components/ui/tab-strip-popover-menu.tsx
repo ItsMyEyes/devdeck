@@ -38,7 +38,7 @@ export function TabStripPopoverMenu({
           <Popover.Popup
             ref={popupRef}
             className={cn(
-              'min-w-[150px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
+              'min-w-[150px] origin-[var(--transform-origin)] rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5',
               'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',

@@ -60,7 +60,7 @@ export function BookmarkDialog({ open, onOpenChange, machineId, machineName, url
   return (
     <Dialog open={open} onOpenChange={(o) => !createBookmark.isPending && onOpenChange(o)} width={420}>
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-line bg-devdeck-on text-devdeck-fg-2">
           <Star size={16} />
         </div>
         <div className="min-w-0">
@@ -71,11 +71,11 @@ export function BookmarkDialog({ open, onOpenChange, machineId, machineName, url
 
       <div className="mt-4 grid gap-3">
         <label className="grid gap-1.5">
-          <span className="text-[11.5px] font-medium text-devdeck-muted">Title</span>
+          <span className="text-[11.5px] font-medium text-devdeck-fg-2">Title</span>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus disabled={createBookmark.isPending} />
         </label>
         <label className="grid gap-1.5">
-          <span className="text-[11.5px] font-medium text-devdeck-muted">Group</span>
+          <span className="text-[11.5px] font-medium text-devdeck-fg-2">Group</span>
           <Combobox
             value={group}
             onChange={setGroup}
@@ -84,8 +84,8 @@ export function BookmarkDialog({ open, onOpenChange, machineId, machineName, url
             disabled={createBookmark.isPending}
           />
         </label>
-        <div className="text-[10.5px] leading-relaxed text-devdeck-dim">
-          Saved to <span className="text-devdeck-muted">{machineName}</span> — its icon is fetched automatically.
+        <div className="text-[10.5px] leading-relaxed text-devdeck-fg-2">
+          Saved to <span className="text-devdeck-fg-2">{machineName}</span> - its icon is fetched automatically.
         </div>
       </div>
 

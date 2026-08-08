@@ -38,7 +38,7 @@ describe('documentFormatForPath', () => {
     expect(documentFormatForPath('Report.DocX')).toMatchObject({ kind: 'word' })
   })
 
-  it('leaves text files — including CSV — to the editor', () => {
+  it('leaves text files - including CSV - to the editor', () => {
     expect(documentFormatForPath('main.go')).toBeNull()
     expect(documentFormatForPath('data.csv')).toBeNull()
     expect(documentFormatForPath('README.md')).toBeNull()

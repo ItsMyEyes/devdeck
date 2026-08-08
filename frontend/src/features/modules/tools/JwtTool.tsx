@@ -73,7 +73,7 @@ function DecodePanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Token</span>
+        <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Token</span>
         <Textarea
           value={token}
           onChange={(e) => onTokenChange(e.target.value)}
@@ -82,41 +82,41 @@ function DecodePanel() {
           spellCheck={false}
         />
         {parts.length === 3 ? (
-          <div className="overflow-x-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal px-2.5 py-2 font-mono text-[10.5px] break-all">
-            <span className="text-devdeck-red-soft">{parts[0]}</span>
-            <span className="text-devdeck-dim">.</span>
+          <div className="overflow-x-auto rounded-lg border border-devdeck-border-card bg-devdeck-pane px-2.5 py-2 font-mono text-[10.5px] break-all">
+            <span className="text-devdeck-err">{parts[0]}</span>
+            <span className="text-devdeck-fg-2">.</span>
             <span className="text-devdeck-purple">{parts[1]}</span>
-            <span className="text-devdeck-dim">.</span>
-            <span className="text-devdeck-accent-soft">{parts[2]}</span>
+            <span className="text-devdeck-fg-2">.</span>
+            <span className="text-devdeck-accent">{parts[2]}</span>
           </div>
         ) : null}
       </div>
 
       {!decoded ? null : decoded.error ? (
         <div className="flex items-start gap-2 rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 p-3">
-          <AlertTriangle size={14} className="mt-0.5 flex-none text-devdeck-red-soft" />
-          <div className="font-mono text-[11px] text-devdeck-muted">{decoded.error}</div>
+          <AlertTriangle size={14} className="mt-0.5 flex-none text-devdeck-err" />
+          <div className="font-mono text-[11px] text-devdeck-fg-2">{decoded.error}</div>
         </div>
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           <div className="flex min-h-0 flex-col gap-1.5">
-            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Header</span>
+            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Header</span>
             <pre
-              className="min-h-[80px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+              className="min-h-[80px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-pane p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
               // eslint-disable-next-line react/no-danger -- highlightJsonHtml HTML-escapes the source before wrapping matched tokens in fixed-class spans.
               dangerouslySetInnerHTML={{ __html: highlightJsonHtml(JSON.stringify(decoded.value?.header, null, 2)) }}
             />
           </div>
           <div className="flex min-h-0 flex-col gap-1.5">
-            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Payload</span>
+            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Payload</span>
             <pre
-              className="min-h-[80px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+              className="min-h-[80px] flex-1 overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-pane p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
               // eslint-disable-next-line react/no-danger -- highlightJsonHtml HTML-escapes the source before wrapping matched tokens in fixed-class spans.
               dangerouslySetInnerHTML={{ __html: highlightJsonHtml(JSON.stringify(decoded.value?.payload, null, 2)) }}
             />
             {claimDates(decoded.value?.payload).map((c) => (
-              <div key={c.key} className="font-mono text-[10.5px] text-devdeck-dim">
-                <span className="text-devdeck-muted-2 uppercase">{c.key}</span> — {c.value}
+              <div key={c.key} className="font-mono text-[10.5px] text-devdeck-fg-2">
+                <span className="text-devdeck-fg-2 uppercase">{c.key}</span> - {c.value}
               </div>
             ))}
           </div>
@@ -126,13 +126,13 @@ function DecodePanel() {
       {decoded?.value ? (
         <div className="flex flex-none flex-col gap-2 rounded-lg border border-devdeck-border-card p-3">
           <div className="flex items-center gap-2">
-            <KeyRound size={13} className="text-devdeck-muted-2" />
+            <KeyRound size={13} className="text-devdeck-fg-2" />
             <span className="text-[11.5px] font-medium text-devdeck-fg">Verify signature</span>
-            <span className="font-mono text-[10.5px] text-devdeck-dim">alg: {decoded.value.alg ?? 'unknown'}</span>
+            <span className="font-mono text-[10.5px] text-devdeck-fg-2">alg: {decoded.value.alg ?? 'unknown'}</span>
           </div>
           {!family ? (
-            <div className="font-mono text-[11px] text-devdeck-dim">
-              Verification isn't supported for this algorithm here — only HS256/384/512 and RS256/384/512.
+            <div className="font-mono text-[11px] text-devdeck-fg-2">
+              Verification isn't supported for this algorithm here - only HS256/384/512 and RS256/384/512.
             </div>
           ) : (
             <>
@@ -149,18 +149,18 @@ function DecodePanel() {
                 </Button>
                 {verifyResult ? (
                   verifyResult.valid ? (
-                    <span className="flex items-center gap-1 font-mono text-[11px] text-devdeck-green-soft">
+                    <span className="flex items-center gap-1 font-mono text-[11px] text-devdeck-run">
                       <ShieldCheck size={13} />
                       Valid signature
                     </span>
                   ) : (
-                    <span className="flex items-center gap-1 font-mono text-[11px] text-devdeck-red-soft">
+                    <span className="flex items-center gap-1 font-mono text-[11px] text-devdeck-err">
                       <ShieldAlert size={13} />
                       Invalid signature
                     </span>
                   )
                 ) : null}
-                {verifyError ? <span className="font-mono text-[11px] text-devdeck-red-soft">{verifyError}</span> : null}
+                {verifyError ? <span className="font-mono text-[11px] text-devdeck-err">{verifyError}</span> : null}
               </div>
             </>
           )}
@@ -215,16 +215,16 @@ function EncodePanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2.5">
-        <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Algorithm</span>
+        <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Algorithm</span>
         <Select value={alg} onValueChange={(v) => setAlg(v as JwtAlgorithm)} options={ALG_OPTIONS} className="w-[110px]" aria-label="Algorithm" />
-        <span className="font-mono text-[10.5px] text-devdeck-dim">
-          {family === 'hmac' ? 'HMAC — shared secret string' : 'RSA — private key from openssl genrsa (PKCS1) or PKCS8'}
+        <span className="font-mono text-[10.5px] text-devdeck-fg-2">
+          {family === 'hmac' ? 'HMAC - shared secret string' : 'RSA - private key from openssl genrsa (PKCS1) or PKCS8'}
         </span>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="flex min-h-[160px] flex-col gap-1.5">
-          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Payload (JSON)</span>
+          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Payload (JSON)</span>
           <Textarea
             value={payloadText}
             onChange={(e) => setPayloadText(e.target.value)}
@@ -233,7 +233,7 @@ function EncodePanel() {
           />
         </div>
         <div className="flex min-h-[160px] flex-col gap-1.5">
-          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">
+          <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">
             {family === 'hmac' ? 'Secret' : 'Private key (PEM)'}
           </span>
           <Textarea
@@ -251,19 +251,19 @@ function EncodePanel() {
           <Wand2 size={12} />
           {signing ? 'Signing…' : 'Generate token'}
         </Button>
-        {error ? <span className="font-mono text-[11px] text-devdeck-red-soft">{error}</span> : null}
+        {error ? <span className="font-mono text-[11px] text-devdeck-err">{error}</span> : null}
       </div>
 
       {token ? (
         <div className="flex flex-none flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-dim uppercase">Token</span>
+            <span className="font-mono text-[10.5px] tracking-wide text-devdeck-fg-2 uppercase">Token</span>
             <Button variant="ghost" size="sm" onClick={copyToken}>
               <Copy size={12} />
               Copy
             </Button>
           </div>
-          <pre className="overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
+          <pre className="overflow-auto rounded-lg border border-devdeck-border-card bg-devdeck-pane p-2.5 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
             {token}
           </pre>
         </div>

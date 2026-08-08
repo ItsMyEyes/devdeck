@@ -19,7 +19,7 @@ export function ModeTabs<T extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             'cursor-pointer rounded px-2.5 py-1 font-mono text-[11px] transition-colors',
-            value === o.value ? 'bg-devdeck-accent/10 text-devdeck-fg' : 'text-devdeck-muted hover:text-devdeck-fg',
+            value === o.value ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg',
           )}
         >
           {o.label}

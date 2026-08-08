@@ -27,17 +27,17 @@ const ENGINE_OPTIONS: { value: DBEngine; label: string }[] = [
 ]
 
 const PG_SSL_OPTIONS = [
-  { value: 'disable', label: 'disable — unencrypted' },
-  { value: 'prefer', label: 'prefer — unverified' },
-  { value: 'require', label: 'require — encrypted, unverified' },
+  { value: 'disable', label: 'disable - unencrypted' },
+  { value: 'prefer', label: 'prefer - unverified' },
+  { value: 'require', label: 'require - encrypted, unverified' },
   { value: 'verify-ca', label: 'verify-ca' },
   { value: 'verify-full', label: 'verify-full (recommended)' },
 ]
 
 const MYSQL_SSL_OPTIONS = [
-  { value: 'false', label: 'false — unencrypted' },
-  { value: 'preferred', label: 'preferred — unverified' },
-  { value: 'skip-verify', label: 'skip-verify — encrypted, unverified' },
+  { value: 'false', label: 'false - unencrypted' },
+  { value: 'preferred', label: 'preferred - unverified' },
+  { value: 'skip-verify', label: 'skip-verify - encrypted, unverified' },
   { value: 'verify-ca', label: 'verify-ca' },
   { value: 'verify-identity', label: 'verify-identity (recommended)' },
 ]
@@ -170,7 +170,7 @@ export function DBConnectionDialog() {
           <div className="truncate text-[14px] font-semibold text-devdeck-fg">
             {isEdit ? 'Edit database connection' : 'New database connection'}
           </div>
-          <div className="mt-1 font-mono text-[11px] text-devdeck-dim">
+          <div className="mt-1 font-mono text-[11px] text-devdeck-fg-2">
             Credentials are encrypted at rest and never sent back to the browser.
           </div>
         </div>
@@ -178,7 +178,7 @@ export function DBConnectionDialog() {
           onClick={close}
           disabled={busy}
           aria-label="Close"
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg disabled:opacity-50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg disabled:opacity-50"
         >
           <X size={14} />
         </button>
@@ -228,7 +228,7 @@ export function DBConnectionDialog() {
             <Label>TLS mode</Label>
             <Select value={dialog.sslMode} onValueChange={(v) => setDialog({ sslMode: v })} options={sslOptions} disabled={busy} aria-label="TLS mode" className="mb-3" />
             {dialog.isProduction ? (
-              <p className="-mt-2 mb-3 text-[11px] leading-snug text-devdeck-dim">
+              <p className="-mt-2 mb-3 text-[11px] leading-snug text-devdeck-fg-2">
                 Unencrypted and unverified modes are hidden while Production is checked.
               </p>
             ) : null}
@@ -237,14 +237,14 @@ export function DBConnectionDialog() {
 
         <label className="mb-3 flex items-center gap-2 text-[12px] text-devdeck-fg">
           <input type="checkbox" checked={dialog.isProduction} disabled={busy} onChange={(e) => onProductionChange(e.target.checked)} />
-          Production — colors this connection's tabs, forces extra confirmation on commits and DDL, and (for postgres/mysql) rejects an unverified TLS mode
+          Production - colors this connection's tabs, forces extra confirmation on commits and DDL, and (for postgres/mysql) rejects an unverified TLS mode
         </label>
 
         {!isSqlite ? (
-          <div className="mb-5 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">SSH tunnel</div>
+          <div className="mb-5 rounded-control border border-devdeck-border-card bg-devdeck-card-wash p-3">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-fg-2">SSH tunnel</div>
             <Select value={dialog.tunnelConnectionId} onValueChange={(v) => setDialog({ tunnelConnectionId: v })} options={tunnelOptions} disabled={busy} aria-label="SSH tunnel" />
-            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
+            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-fg-2">
               {dialog.tunnelConnectionId ? 'The executor tunnels through this SSH connection to reach the database.' : 'The executor dials the database directly.'}
             </p>
           </div>
@@ -257,7 +257,7 @@ export function DBConnectionDialog() {
               Test connection
             </Button>
             {testResult ? (
-              <span className={cn('text-[11.5px]', testResult.ok ? 'text-devdeck-green-soft' : 'text-devdeck-red-soft')}>
+              <span className={cn('text-[11.5px]', testResult.ok ? 'text-devdeck-run' : 'text-devdeck-err')}>
                 {testResult.ok ? 'Connected' : testResult.reason}
               </span>
             ) : null}
@@ -270,7 +270,7 @@ export function DBConnectionDialog() {
         {isEdit ? (
           confirmingDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-[11.5px] text-devdeck-red-soft">Delete?</span>
+              <span className="text-[11.5px] text-devdeck-err">Delete?</span>
               <Button variant="destructive-solid" size="sm" onClick={confirmDelete} disabled={busy}>
                 Confirm
               </Button>

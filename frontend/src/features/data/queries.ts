@@ -632,7 +632,10 @@ export function useCreateSSHForward(connectionId: string) {
   }
   return useMutation({
     mutationFn: (body: Omit<SSHForward, 'id' | 'connectionId'>) => createSSHForward(connectionId, body),
-    onSuccess: resync,
+    onSuccess: (_data, body) => {
+      resync()
+      toast.success(body.label ? `${body.label} added` : 'Forwarding rule added')
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to create the forwarding rule')
       resync()
@@ -650,7 +653,10 @@ export function useUpdateSSHForward(connectionId: string) {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<Omit<SSHForward, 'id' | 'connectionId'>> }) =>
       updateSSHForward(id, body),
-    onSuccess: resync,
+    onSuccess: (_data, vars) => {
+      resync()
+      toast.success(vars.body.label ? `${vars.body.label} updated` : 'Forwarding rule updated')
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update the forwarding rule')
       resync()
@@ -666,7 +672,10 @@ export function useDeleteSSHForward(connectionId: string) {
   }
   return useMutation({
     mutationFn: (id: string) => deleteSSHForward(id),
-    onSuccess: resync,
+    onSuccess: () => {
+      resync()
+      toast.success('Forwarding rule deleted')
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to delete the forwarding rule')
       resync()

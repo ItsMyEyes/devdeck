@@ -62,7 +62,7 @@ export function Select({
       <BaseSelect.Trigger
         aria-label={rest['aria-label']}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5',
+          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-pane px-2.5',
           'font-mono text-xs text-devdeck-fg transition-colors select-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[popup-open]:border-devdeck-border-accent',
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
@@ -74,7 +74,7 @@ export function Select({
             hostname in a narrow browser toolbar) has to truncate — left to wrap
             it doubles the trigger's height and pushes its own toolbar out. */}
         {renderValue ? renderValue(options.find((o) => o.value === value)) : <BaseSelect.Value className="truncate" />}
-        <BaseSelect.Icon className="flex-none text-devdeck-dim">
+        <BaseSelect.Icon className="flex-none text-devdeck-fg-2">
           <ChevronDown size={chevronSize} />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
@@ -89,7 +89,7 @@ export function Select({
           <BaseSelect.Popup
             ref={popupRef}
             className={cn(
-              'min-w-[var(--anchor-width)] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
+              'min-w-[var(--anchor-width)] origin-[var(--transform-origin)] rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5',
               'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -103,11 +103,11 @@ export function Select({
                 className={cn(
                   'flex h-8 cursor-pointer select-none items-center justify-between gap-3 rounded-md px-2.5 font-mono text-xs text-devdeck-fg-2 outline-none',
                   'data-[highlighted]:bg-white/[0.05] data-[highlighted]:text-devdeck-fg data-[selected]:text-devdeck-fg',
-                  'data-[disabled]:cursor-not-allowed data-[disabled]:text-devdeck-red-soft data-[disabled]:data-[highlighted]:bg-devdeck-red-tint',
+                  'data-[disabled]:cursor-not-allowed data-[disabled]:text-devdeck-err data-[disabled]:data-[highlighted]:bg-devdeck-red-tint',
                 )}
               >
                 <BaseSelect.ItemText>{o.label}</BaseSelect.ItemText>
-                <BaseSelect.ItemIndicator className="text-devdeck-accent">
+                <BaseSelect.ItemIndicator className="text-devdeck-fg-2">
                   <Check size={13} />
                 </BaseSelect.ItemIndicator>
               </BaseSelect.Item>

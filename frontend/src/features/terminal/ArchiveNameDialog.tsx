@@ -40,10 +40,10 @@ export function ArchiveNameDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !pending && onCancel()} width={400} z={70}>
       <div className="mb-2.5 flex items-center gap-2.5">
-        <FileArchive size={15} className="text-devdeck-accent-soft" />
+        <FileArchive size={15} className="text-devdeck-fg-2" />
         <DialogTitle>Download archive</DialogTitle>
       </div>
-      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         Zips {itemCount} item{itemCount === 1 ? '' : 's'}. Name the archive before it's built.
       </DialogDescription>
       <Input

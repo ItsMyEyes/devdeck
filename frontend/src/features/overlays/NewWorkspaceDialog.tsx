@@ -33,7 +33,7 @@ export function NewWorkspaceDialog() {
   return (
     <Dialog open={nw.open} onOpenChange={(o) => !o && closeNewWorkspace()} width={420}>
       <div className="mb-1 flex items-center gap-2.5">
-        <span className="h-[18px] w-[18px] rounded-md" style={{ background: 'var(--devdeck-accent-gradient)' }} />
+        <span className="h-[18px] w-[18px] rounded-md" style={{ background: 'var(--devdeck-on)' }} />
         <DialogTitle>New workspace</DialogTitle>
       </div>
       <DialogDescription className="mb-[18px]">group related projects together</DialogDescription>

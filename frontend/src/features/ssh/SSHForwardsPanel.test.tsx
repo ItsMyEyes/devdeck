@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { SSHForward, SSHForwardState } from '@/store/types'
 
 // jsdom has no PointerEvent — @base-ui/react's Switch.Root dispatches one
@@ -23,13 +23,15 @@ const mockUseSSHForwardStates = vi.fn()
 const mockStart = vi.fn()
 const mockStop = vi.fn()
 const mockUpdate = vi.fn()
+const mockCreate = vi.fn()
+const mockDelete = vi.fn()
 
 vi.mock('@/features/data/queries', () => ({
   useSSHForwards: (id: string) => mockUseSSHForwards(id),
   useSSHForwardStates: (enabled: boolean) => mockUseSSHForwardStates(enabled),
-  useCreateSSHForward: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateSSHForward: () => ({ mutate: mockCreate, isPending: false }),
   useUpdateSSHForward: () => ({ mutate: mockUpdate, isPending: false }),
-  useDeleteSSHForward: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteSSHForward: () => ({ mutate: mockDelete, isPending: false }),
   useStartSSHForward: () => ({ mutate: mockStart, isPending: false }),
   useStopSSHForward: () => ({ mutate: mockStop, isPending: false }),
 }))
@@ -109,6 +111,16 @@ describe('SSHForwardsPanel', () => {
     )
   })
 
+  it('warns that saving restarts a rule that is currently running, but not one that is off', () => {
+    mockUseSSHForwards.mockReturnValue({ data: [localRule], isLoading: false, error: null })
+    mockUseSSHForwardStates.mockReturnValue({ data: [state({ status: 'running', boundAddr: '127.0.0.1:5432' })] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/i }))
+
+    expect(screen.getByText(/saving restarts it/i)).toBeTruthy()
+  })
+
   it('toggling an off rule starts it with the full rule body', () => {
     mockUseSSHForwards.mockReturnValue({ data: [localRule], isLoading: false, error: null })
     mockUseSSHForwardStates.mockReturnValue({ data: [state()] })
@@ -178,5 +190,62 @@ describe('SSHForwardsPanel', () => {
     render(<SSHForwardsPanel connectionId="c1" visible />)
 
     expect(screen.getByText(/GatewayPorts/)).toBeTruthy()
+  })
+
+  it('shows a rule label as its primary line, with the address kept as a secondary line', () => {
+    mockUseSSHForwards.mockReturnValue({ data: [{ ...localRule, label: 'Postgres' }], isLoading: false, error: null })
+    mockUseSSHForwardStates.mockReturnValue({ data: [state()] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+
+    expect(screen.getByText('Postgres')).toBeTruthy()
+    expect(screen.getByText(/127\.0\.0\.1:5432/)).toBeTruthy()
+  })
+
+  it('opens the add dialog from the empty state and creates a rule from the form', () => {
+    mockUseSSHForwards.mockReturnValue({ data: [], isLoading: false, error: null })
+    mockUseSSHForwardStates.mockReturnValue({ data: [] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+    fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText(/bind port/i), { target: { value: '8080' } })
+    fireEvent.change(within(dialog).getByLabelText(/target host/i), { target: { value: 'app.internal' } })
+    fireEvent.change(within(dialog).getByLabelText(/target port/i), { target: { value: '80' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /add rule/i }))
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'local', bindPort: 8080, targetHost: 'app.internal', targetPort: 80 }),
+    )
+  })
+
+  it('rejects an out-of-range bind port instead of submitting', () => {
+    mockUseSSHForwards.mockReturnValue({ data: [], isLoading: false, error: null })
+    mockUseSSHForwardStates.mockReturnValue({ data: [] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+    fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText(/bind port/i), { target: { value: '99999' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /add rule/i }))
+
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/bind port/i)
+  })
+
+  it('asks for confirmation before deleting a rule', () => {
+    mockUseSSHForwards.mockReturnValue({ data: [localRule], isLoading: false, error: null })
+    mockUseSSHForwardStates.mockReturnValue({ data: [state()] })
+
+    render(<SSHForwardsPanel connectionId="c1" visible />)
+    fireEvent.click(screen.getByRole('button', { name: /delete forward/i }))
+
+    expect(mockDelete).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete forward/i }))
+
+    expect(mockDelete).toHaveBeenCalledWith('f1')
   })
 })

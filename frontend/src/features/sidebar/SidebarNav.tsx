@@ -53,11 +53,11 @@ export function SidebarNav({ compact: _compact }: SidebarNavProps = {}) {
               aria-current={active ? 'page' : undefined}
               onClick={() => goto(item.key)}
               className={cn(
-                'group relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[11px] transition-colors',
+                'group relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-control transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 active
-                  ? 'bg-devdeck-accent-tint text-devdeck-accent-soft'
-                  : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                  ? 'bg-devdeck-on text-devdeck-fg'
+                  : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
               )}
             >
               {/* Active marker at the rail's own edge. An inset ring — what this
@@ -66,13 +66,13 @@ export function SidebarNav({ compact: _compact }: SidebarNavProps = {}) {
               <span
                 aria-hidden
                 className={cn(
-                  'absolute -left-2 h-4 w-0.5 rounded-r-full bg-devdeck-accent transition-opacity duration-150',
+                  'absolute -left-2 h-4 w-0.5 rounded-r-full bg-devdeck-ring transition-opacity duration-150',
                   active ? 'opacity-100' : 'opacity-0',
                 )}
               />
               <item.Icon size={18} strokeWidth={active ? 2.2 : 1.9} />
               {showBadge ? (
-                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-devdeck-green ring-2 ring-devdeck-surface" />
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-devdeck-green ring-2 ring-devdeck-pane" />
               ) : null}
             </button>
           </Tooltip>

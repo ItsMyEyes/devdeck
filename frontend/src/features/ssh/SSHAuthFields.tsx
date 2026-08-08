@@ -126,7 +126,7 @@ export function SSHAuthFields({ authType, password, privateKey, privateKeyPath, 
       ])
       onChange({ authType: 'privatekey', privateKey: pemBlock('PRIVATE KEY', privateDer), privateKeyPath: '' })
       setGeneratedPublicKey(sshRsaPublicKey(publicJwk))
-      showToast('Generated SSH key — copy the public key to the host before connecting')
+      showToast('Generated SSH key - copy the public key to the host before connecting')
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to generate SSH key')
     }
@@ -188,18 +188,18 @@ export function SSHAuthFields({ authType, password, privateKey, privateKeyPath, 
             onChange={(e) => onChange({ privateKey: e.target.value, privateKeyPath: '' })}
             placeholder={isEdit ? 'unchanged' : 'select ~/.ssh/id_ed25519, paste PEM, or generate a key'}
             rows={4}
-            className="w-full resize-y rounded-lg border border-devdeck-border-strong bg-devdeck-bg px-2.5 py-2 font-mono text-[11px] text-devdeck-fg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="w-full resize-y rounded-lg border border-devdeck-border-strong bg-devdeck-pane px-2.5 py-2 font-mono text-[11px] text-devdeck-fg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
           {generatedPublicKey ? (
-            <div className="mt-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
+            <div className="mt-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-2.5">
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-devdeck-muted">Generated public key</span>
+                <span className="text-[11px] font-medium text-devdeck-fg-2">Generated public key</span>
                 <Button variant="ghost" size="sm" onClick={copyGeneratedPublicKey}>
                   Copy
                 </Button>
               </div>
               <code className="block break-all font-mono text-[10.5px] leading-relaxed text-devdeck-fg-2">{generatedPublicKey}</code>
-              <p className="mt-1.5 text-[10.5px] leading-snug text-devdeck-dim">
+              <p className="mt-1.5 text-[10.5px] leading-snug text-devdeck-fg-2">
                 Add this public key to the host's ~/.ssh/authorized_keys before connecting.
               </p>
             </div>

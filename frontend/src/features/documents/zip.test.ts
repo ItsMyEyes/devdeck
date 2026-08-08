@@ -19,7 +19,7 @@ describe('readZip', () => {
   })
 
   it('preserves UTF-8 content through both paths', async () => {
-    const text = 'héllo — ünïcode ✓ 日本語'
+    const text = 'héllo - ünïcode ✓ 日本語'
     const stored = readZip(await buildZip({ 'u.txt': text }))
     const deflated = readZip(await buildZip({ 'u.txt': text }, { deflate: true }))
     expect(await stored.readText('u.txt')).toBe(text)

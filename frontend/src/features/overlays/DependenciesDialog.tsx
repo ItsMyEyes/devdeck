@@ -53,23 +53,23 @@ export function DependenciesDialog({
           disabled={deps.isFetching}
           aria-label="Re-check dependencies"
           title="Re-check dependencies"
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-dim hover:bg-devdeck-surface-2 hover:text-devdeck-fg disabled:cursor-default disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-card-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <RefreshCw size={13} className={cn(deps.isFetching && 'animate-spin')} />
         </button>
       </div>
-      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
-        Language servers on {machine.name}. A server needs its prerequisite to work — one without the
+      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
+        Language servers on {machine.name}. A server needs its prerequisite to work - one without the
         other loads each file on its own and reports symbols from neighbouring files as undefined.
       </DialogDescription>
 
       {deps.isLoading ? (
-        <div className="flex items-center gap-2 py-8 font-mono text-[12px] text-devdeck-dim">
+        <div className="flex items-center gap-2 py-8 font-mono text-[12px] text-devdeck-fg-2">
           <Loader2 size={14} className="animate-spin" />
           Probing {machine.name}…
         </div>
       ) : deps.isError ? (
-        <div className="flex items-start gap-2 rounded-md border border-devdeck-red-border bg-devdeck-red-tint px-3 py-2.5 font-mono text-[11.5px] text-devdeck-red-soft">
+        <div className="flex items-start gap-2 rounded-control border border-devdeck-red-tint-strong-border bg-devdeck-red-tint px-3 py-2.5 font-mono text-[11.5px] text-devdeck-err">
           <TriangleAlert size={13} className="mt-0.5 flex-none" />
           <span>
             {deps.error instanceof Error ? deps.error.message : 'Could not reach this machine'}
@@ -90,11 +90,11 @@ export function DependenciesDialog({
           </div>
 
           {deps.data ? (
-            <div className="mt-4 rounded-md border border-devdeck-border bg-devdeck-surface-2 px-3 py-2.5">
-              <div className="mb-1 font-mono text-[10px] uppercase tracking-wide text-devdeck-dim-2">
+            <div className="mt-4 rounded-md border border-devdeck-border bg-devdeck-card-wash px-3 py-2.5">
+              <div className="mb-1 font-mono text-[10px] uppercase tracking-wide text-devdeck-fg-2">
                 Spawn PATH
               </div>
-              <div className="break-all font-mono text-[10.5px] leading-[1.5] text-devdeck-muted-2">
+              <div className="break-all font-mono text-[10.5px] leading-[1.5] text-devdeck-fg-2">
                 {deps.data.spawnPath}
               </div>
             </div>
@@ -131,11 +131,11 @@ function LanguageRow({
       className={cn(
         'flex items-center gap-3 rounded-md border px-3 py-2.5',
         ready
-          ? 'border-devdeck-border-card bg-devdeck-card'
-          : 'border-devdeck-border bg-devdeck-surface-2',
+          ? 'border-devdeck-border-card bg-devdeck-glass-solid'
+          : 'border-devdeck-border bg-devdeck-card-wash',
       )}
     >
-      <div className="w-[150px] flex-none truncate text-[12.5px] font-semibold text-devdeck-fg-2">
+      <div className="w-[150px] flex-none truncate text-[12.5px] font-semibold text-devdeck-fg">
         {language.label}
       </div>
 
@@ -153,7 +153,7 @@ function LanguageRow({
         ) : (
           <span
             title={language.blocker}
-            className="block max-w-[140px] truncate font-mono text-[10.5px] text-devdeck-dim"
+            className="block max-w-[140px] truncate font-mono text-[10.5px] text-devdeck-fg-2"
           >
             {language.blocker}
           </span>
@@ -167,24 +167,24 @@ function ToolLine({ tool }: { tool: DependencyStatus }) {
   return (
     <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px]">
       {tool.installed ? (
-        <Check size={11} className="flex-none text-devdeck-green-soft" />
+        <Check size={11} className="flex-none text-devdeck-run" />
       ) : (
-        <CircleDashed size={11} className="flex-none text-devdeck-dim" />
+        <CircleDashed size={11} className="flex-none text-devdeck-fg-2" />
       )}
-      <span className={cn('flex-none', tool.installed ? 'text-devdeck-muted' : 'text-devdeck-dim')}>
+      <span className={cn('flex-none', tool.installed ? 'text-devdeck-fg-2' : 'text-devdeck-fg-2')}>
         {tool.name}
       </span>
       {tool.installed ? (
         <>
           {tool.version ? (
-            <span className="flex-none text-devdeck-muted-2">{tool.version}</span>
+            <span className="flex-none text-devdeck-fg-2">{tool.version}</span>
           ) : null}
-          <span className="min-w-0 truncate text-devdeck-dim-2" title={tool.path}>
+          <span className="min-w-0 truncate text-devdeck-fg-2" title={tool.path}>
             {tool.path}
           </span>
         </>
       ) : (
-        <span className="text-devdeck-dim-2">not found</span>
+        <span className="text-devdeck-fg-2">not found</span>
       )}
     </div>
   )
@@ -206,42 +206,42 @@ function LspActivity({ machine, open }: { machine: Machine; open: boolean }) {
   const entries = trace.data?.entries ?? []
 
   return (
-    <div className="mt-3 rounded-md border border-devdeck-border bg-devdeck-surface-2 px-3 py-2.5">
+    <div className="mt-3 rounded-md border border-devdeck-border bg-devdeck-card-wash px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-devdeck-dim-2">
+        <span className="font-mono text-[10px] uppercase tracking-wide text-devdeck-fg-2">
           Language server activity
         </span>
         <button
           type="button"
           onClick={() => clear.mutate()}
           disabled={clear.isPending || entries.length === 0}
-          className="cursor-pointer font-mono text-[10px] text-devdeck-dim hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
+          className="cursor-pointer font-mono text-[10px] text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
         >
           clear
         </button>
       </div>
 
       {entries.length === 0 ? (
-        <div className="font-mono text-[10.5px] leading-[1.5] text-devdeck-dim">
-          Nothing yet. Open a source file in this worktree, then look here — the
+        <div className="font-mono text-[10.5px] leading-[1.5] text-devdeck-fg-2">
+          Nothing yet. Open a source file in this worktree, then look here - the
           spawn root and every document opened will be listed.
         </div>
       ) : (
         <div className="flex max-h-[168px] flex-col gap-0.5 overflow-y-auto">
           {entries.map((entry) => (
             <div key={entry.seq} className="flex gap-2 font-mono text-[10.5px] leading-[1.5]">
-              <span className="flex-none text-devdeck-dim-2">{entry.at}</span>
+              <span className="flex-none text-devdeck-fg-2">{entry.at}</span>
               <span
                 className={cn(
                   'w-[62px] flex-none',
                   entry.kind === 'initialize' || entry.kind === 'spawn'
-                    ? 'text-devdeck-accent-soft'
-                    : 'text-devdeck-dim',
+                    ? 'text-devdeck-fg'
+                    : 'text-devdeck-fg-2',
                 )}
               >
                 {entry.kind}
               </span>
-              <span className="min-w-0 break-all text-devdeck-muted-2">{entry.detail}</span>
+              <span className="min-w-0 break-all text-devdeck-fg-2">{entry.detail}</span>
             </div>
           ))}
         </div>

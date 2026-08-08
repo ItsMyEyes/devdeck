@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { editor } from 'monaco-editor/editor'
+import { ExternalLink, Eye, PanelRight, Pencil } from 'lucide-react'
 import { monaco } from '@/features/editor/monacoSetup'
 import { MonacoEditor } from '@/features/editor/MonacoEditor'
 import type { LineReveal } from '@/features/editor/reveal'
@@ -33,14 +34,16 @@ function applyEdit(instance: editor.IStandaloneCodeEditor, range: EditRange, tex
 }
 
 /**
- * Markdown file editor: Monaco on the left — with the same bold/italic/
+ * Markdown file editor. Opens read-only, showing just the rendered
+ * MarkdownPreview — a top-right Edit button (or double-clicking the preview)
+ * switches to edit mode: Monaco on the left, with the same bold/italic/
  * heading toolbar and "/" block-command menu as the Issue description field
  * (markdownCommands.ts's TOOLBAR_ACTIONS/SLASH_COMMANDS are plain
- * string-transform logic, shared as-is) — and a live MarkdownPreview on the
- * right. Unlike the Issue field there's no click-to-edit gate or attachment
- * upload (no issueId to attach to): the file is always shown as a split
- * editor+preview, consistent with CodeFileEditor/PlainCodeEditor for other
- * file types.
+ * string-transform logic, shared as-is), and a live MarkdownPreview on the
+ * right — plus a button to pop that live preview out into its own tab
+ * (`onOpenPreviewTab`) for callers that have a tab strip to open it into.
+ * Unlike the Issue field there's no attachment upload (no issueId to attach
+ * to).
  */
 export function MarkdownFileEditor({
   path,
@@ -48,6 +51,7 @@ export function MarkdownFileEditor({
   ready = true,
   onChange,
   reveal,
+  onOpenPreviewTab,
 }: {
   path: string
   value: string
@@ -58,12 +62,30 @@ export function MarkdownFileEditor({
   ready?: boolean
   onChange: (value: string) => void
   /** Content search's "open at line" entry point — see reveal.ts's
-   *  LineReveal doc comment. */
+   *  LineReveal doc comment. Forces edit mode open: a line/column reveal
+   *  only means something inside Monaco, never on the rendered preview. */
   reveal?: LineReveal
+  /** Edit mode's "open preview in new tab" button — opens `path`'s rendered
+   *  preview as its own tab. Omitted by callers with no tab strip to open it
+   *  into (the button itself is hidden in that case). */
+  onOpenPreviewTab?: (path: string) => void
 }) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const previewScrollRef = useRef<HTMLDivElement>(null)
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
+  const [mode, setMode] = useState<'preview' | 'edit'>('preview')
+  /** Edit mode's live-preview split — hidden lets the editor take the full
+   *  width without leaving edit mode (unlike the "Back to preview" button,
+   *  which drops the editor entirely). Irrelevant outside edit mode. */
+  const [splitVisible, setSplitVisible] = useState(true)
+
+  // A line/column reveal (content search's "open at line") only means
+  // something inside Monaco — force edit mode open so it's visible rather
+  // than landing silently behind the read-only preview.
+  useEffect(() => {
+    if (reveal) setMode('edit')
+  }, [reveal])
 
   const filteredCommands = slashMenu
     ? SLASH_COMMANDS.filter((c) => c.label.toLowerCase().includes(slashMenu.query.toLowerCase()))
@@ -143,6 +165,21 @@ export function MarkdownFileEditor({
       menuHasMatchesKeyRef.current = menuHasMatchesKey
 
       const disposables: Array<{ dispose(): void }> = [
+        // Scroll-syncs the live preview to the editor by position fraction
+        // (scrollTop / max scroll), not by line — cheap and framework-free,
+        // at the cost of drifting on documents where the editor and the
+        // rendered preview don't grow at the same rate (e.g. a huge mermaid
+        // diagram). One-directional: scrolling the preview itself doesn't
+        // move the editor back.
+        instance.onDidScrollChange((event) => {
+          const preview = previewScrollRef.current
+          if (!preview) return
+          const maxEditorScroll = event.scrollHeight - instance.getLayoutInfo().height
+          const maxPreviewScroll = preview.scrollHeight - preview.clientHeight
+          if (maxEditorScroll <= 0 || maxPreviewScroll <= 0) return
+          const fraction = Math.min(1, Math.max(0, event.scrollTop / maxEditorScroll))
+          preview.scrollTop = fraction * maxPreviewScroll
+        }),
         // Drives the slash-menu state machine off monaco's own content-change
         // event rather than a derived `onChange(value)` string: the event
         // carries the exact edit (`rangeOffset` + inserted `text`), so the
@@ -240,22 +277,83 @@ export function MarkdownFileEditor({
     [chooseSlashCommand],
   )
 
+  if (mode === 'preview') {
+    return (
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-devdeck-pane">
+        <Tooltip label="Edit (or double-click)">
+          <button
+            type="button"
+            onClick={() => setMode('edit')}
+            aria-label="Edit"
+            className="absolute right-4 top-4 z-10 flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-glass-solid px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent"
+          >
+            <Pencil size={12} />
+            Edit
+          </button>
+        </Tooltip>
+        <div onDoubleClick={() => setMode('edit')} className="min-h-full flex-1 cursor-text px-6 py-6">
+          <MarkdownPreview source={value} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-devdeck-border">
-        <div className="flex flex-none flex-wrap items-center gap-0.5 border-b border-devdeck-border bg-devdeck-surface px-2 py-1.5">
+      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', splitVisible && 'border-r border-devdeck-border')}>
+        <div className="flex flex-none flex-wrap items-center gap-0.5 border-b border-devdeck-border bg-devdeck-pane px-2 py-1.5">
           {TOOLBAR_ACTIONS.map((action) => (
             <Tooltip key={action.id} label={action.label}>
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => applyToolbarAction(action.apply)}
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
               >
                 <action.icon size={13} />
               </button>
             </Tooltip>
           ))}
+          <span className="mx-0.5 h-4 w-px bg-devdeck-border-strong" />
+          <Tooltip label={splitVisible ? 'Hide preview' : 'Show preview'}>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setSplitVisible((visible) => !visible)}
+              aria-label={splitVisible ? 'Hide preview' : 'Show preview'}
+              aria-pressed={splitVisible}
+              className={cn(
+                'flex h-6 w-6 cursor-pointer items-center justify-center rounded transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
+                splitVisible ? 'text-devdeck-accent' : 'text-devdeck-fg-2',
+              )}
+            >
+              <PanelRight size={13} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Back to preview">
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setMode('preview')}
+              aria-label="Preview"
+              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
+            >
+              <Eye size={13} />
+            </button>
+          </Tooltip>
+          {onOpenPreviewTab ? (
+            <Tooltip label="Open preview in new tab">
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onOpenPreviewTab(path)}
+                aria-label="Open preview in new tab"
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2"
+              >
+                <ExternalLink size={13} />
+              </button>
+            </Tooltip>
+          ) : null}
         </div>
 
         <div ref={containerRef} className="relative min-h-0 flex-1">
@@ -274,7 +372,7 @@ export function MarkdownFileEditor({
 
           {slashMenu && filteredCommands.length > 0 ? (
             <div
-              className="absolute z-[70] flex w-56 flex-col gap-0.5 rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
+              className="absolute z-[70] flex w-56 flex-col gap-0.5 rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]"
               style={{ top: slashMenu.top, left: slashMenu.left }}
             >
               {filteredCommands.map((cmd, i) => (
@@ -288,10 +386,10 @@ export function MarkdownFileEditor({
                     i === slashMenu.highlighted ? 'bg-white/[0.05] text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-white/[0.05]',
                   )}
                 >
-                  <cmd.icon size={14} className="flex-none text-devdeck-dim" />
+                  <cmd.icon size={14} className="flex-none text-devdeck-fg-2" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-[12.5px]">{cmd.label}</span>
-                    <span className="truncate text-[10.5px] text-devdeck-dim">{cmd.hint}</span>
+                    <span className="truncate text-[10.5px] text-devdeck-fg-2">{cmd.hint}</span>
                   </span>
                 </button>
               ))}
@@ -300,9 +398,11 @@ export function MarkdownFileEditor({
         </div>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-devdeck-bg px-6 py-6">
-        <MarkdownPreview source={value} />
-      </div>
+      {splitVisible ? (
+        <div ref={previewScrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto bg-devdeck-pane px-6 py-6">
+          <MarkdownPreview source={value} />
+        </div>
+      ) : null}
     </div>
   )
 }

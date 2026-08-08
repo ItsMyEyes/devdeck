@@ -16,7 +16,7 @@ import type { Terminal as XTerm } from '@xterm/xterm'
  */
 const MAX_QUEUED_BYTES = 4 * 1024 * 1024
 
-const RESYNC_NOTICE = '\r\n\x1b[38;5;222m■ [output outran the terminal — screen resynced]\x1b[0m\r\n'
+const RESYNC_NOTICE = '\r\n\x1b[38;5;222m■ [output outran the terminal - screen resynced]\x1b[0m\r\n'
 
 export interface TerminalWriter {
   /** Queue output for the terminal, applying backpressure and the memory cap. */

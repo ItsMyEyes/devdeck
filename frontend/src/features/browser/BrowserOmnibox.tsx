@@ -45,7 +45,7 @@ export interface BrowserOmniboxProps {
 function dotColor(status: MachineHealth['status'] | undefined): string {
   if (status === 'online') return 'var(--devdeck-green)'
   if (status === 'offline') return 'var(--devdeck-red)'
-  return 'var(--devdeck-dim)'
+  return 'var(--devdeck-fg-2)'
 }
 
 /** The toolbar's center zone and its anchor (design spec §3.3). Replaces both
@@ -110,7 +110,7 @@ export function BrowserOmnibox({
   return (
     <div
       className={cn(
-        'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-full border bg-devdeck-surface-2 pl-2 pr-1',
+        'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-full border bg-devdeck-card-wash pl-2 pr-1',
         'border-devdeck-border-card transition-colors',
         'hover:border-devdeck-border-strong focus-within:border-devdeck-border-strong',
         'max-w-[640px] pointer-coarse:h-9',
@@ -118,7 +118,7 @@ export function BrowserOmnibox({
     >
       {editingInline ? (
         <>
-          <Search size={12} className="flex-none text-devdeck-dim" />
+          <Search size={12} className="flex-none text-devdeck-fg-2" />
           <form onSubmit={handleSubmit} className="flex min-w-0 flex-1">
             <input
               ref={inputRef}
@@ -141,7 +141,7 @@ export function BrowserOmnibox({
               // the whole tile on focus.
               className={cn(
                 'min-w-0 flex-1 bg-transparent text-[11px] text-devdeck-fg',
-                'placeholder:text-devdeck-dim focus:outline-none pointer-coarse:text-[16px]',
+                'placeholder:text-devdeck-fg-2 focus:outline-none pointer-coarse:text-[16px]',
               )}
             />
           </form>
@@ -157,9 +157,9 @@ export function BrowserOmnibox({
             aria-label="Edit address"
             className="flex min-w-0 flex-1 items-center text-left text-[11px] focus-visible:outline-none pointer-coarse:text-[13px]"
           >
-            <span className="flex-none text-devdeck-dim">{prefix}</span>
+            <span className="flex-none text-devdeck-fg-2">{prefix}</span>
             <span className="flex-none font-medium text-devdeck-fg">{domain}</span>
-            <span className="min-w-0 truncate text-devdeck-dim">{rest}</span>
+            <span className="min-w-0 truncate text-devdeck-fg-2">{rest}</span>
           </button>
         </>
       )}
@@ -187,7 +187,7 @@ export function BrowserOmnibox({
         disabled={!url}
         aria-label="Bookmark this page"
         className={cn(
-          'flex h-5 w-5 flex-none items-center justify-center rounded-full text-devdeck-dim transition-colors',
+          'flex h-5 w-5 flex-none items-center justify-center rounded-full text-devdeck-fg-2 transition-colors',
           'hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2 disabled:opacity-40 disabled:hover:bg-transparent',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60 pointer-coarse:h-7 pointer-coarse:w-7',
         )}

@@ -27,7 +27,7 @@ export function DBTableInfo({ connectionId, object, filters }: { connectionId: s
     setExactCount(null)
   }, [connectionId, object.database, object.schema, object.name, JSON.stringify(filters)])
 
-  if (isLoading) return <span className="text-[11px] text-devdeck-dim">loading stats…</span>
+  if (isLoading) return <span className="text-[11px] text-devdeck-fg-2">loading stats…</span>
   if (!data) return null
 
   function runCount() {
@@ -38,7 +38,7 @@ export function DBTableInfo({ connectionId, object, filters }: { connectionId: s
   }
 
   return (
-    <div className="flex items-center gap-3 font-mono text-[11px] text-devdeck-dim">
+    <div className="flex items-center gap-3 font-mono text-[11px] text-devdeck-fg-2">
       <span>
         {exactCount !== null
           ? `${exactCount.toLocaleString()} rows (exact)`
@@ -51,8 +51,8 @@ export function DBTableInfo({ connectionId, object, filters }: { connectionId: s
           type="button"
           onClick={runCount}
           disabled={countMutation.isPending}
-          className="text-devdeck-accent-soft hover:text-devdeck-accent disabled:opacity-50"
-          title="Runs a full COUNT(*) — a sequential scan on a large table, unlike the estimate above"
+          className="text-devdeck-accent hover:text-devdeck-accent disabled:opacity-50"
+          title="Runs a full COUNT(*) - a sequential scan on a large table, unlike the estimate above"
         >
           {countMutation.isPending ? 'counting…' : 'Count rows'}
         </button>

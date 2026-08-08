@@ -1,12 +1,16 @@
 import type { InvoiceStatus, IssueStatus, LineKind, Priority, WorktreeState } from '@/store/types'
 
-/** Worktree lifecycle → label + status color. */
+/**
+ * Worktree lifecycle → label + status color.
+ * Hex literals (not var()) because Pill/StatusDot append an alpha suffix to
+ * this value — they must match --devdeck-run/wait/err/fg-2 in globals.css.
+ */
 export const STATE: Record<WorktreeState, { label: string; color: string }> = {
-  running: { label: 'running', color: '#56d58a' },
-  waiting: { label: 'needs input', color: '#f5c451' },
-  idle: { label: 'idle', color: '#6b7280' },
-  stopped: { label: 'stopped', color: '#6b7280' },
-  error: { label: 'error', color: '#f87171' },
+  running: { label: 'running', color: '#7fb37f' },
+  waiting: { label: 'needs input', color: '#c9a86a' },
+  idle: { label: 'idle', color: '#9ca09f' },
+  stopped: { label: 'stopped', color: '#9ca09f' },
+  error: { label: 'error', color: '#c98080' },
 }
 
 export const PRI: Record<Priority, { label: string; color: string }> = {

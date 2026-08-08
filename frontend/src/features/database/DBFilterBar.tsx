@@ -44,11 +44,11 @@ export function DBFilterBar({ columns, filters, onFiltersChange, globalSearch, o
   return (
     <div className="flex flex-none flex-col gap-1.5 border-b border-devdeck-border-menu px-3 py-2">
       <div className="flex items-center gap-2">
-        <Search size={13} className="flex-none text-devdeck-dim" />
+        <Search size={13} className="flex-none text-devdeck-fg-2" />
         <Input
           value={globalSearch}
           onChange={(e) => onGlobalSearchChange(e.target.value)}
-          placeholder="Find in all columns (slow — sequential scan)…"
+          placeholder="Find in all columns (slow - sequential scan)…"
           className="h-7 font-mono text-[11.5px]"
         />
         <Button variant="ghost" size="sm" onClick={addFilter}>

@@ -16,7 +16,7 @@ export function TimestampTool() {
   return (
     <ToolCard
       title="Timestamp Converter"
-      description="Paste a unix timestamp (seconds or ms) or a date/time string — parses either direction."
+      description="Paste a unix timestamp (seconds or ms) or a date/time string - parses either direction."
       actions={
         <Button variant="secondary" size="sm" onClick={() => setInput(String(Math.floor(Date.now() / 1000)))}>
           <Clock size={12} />
@@ -32,7 +32,7 @@ export function TimestampTool() {
         spellCheck={false}
       />
       {invalid ? (
-        <div className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 px-3 py-2 font-mono text-[11px] text-devdeck-muted">
+        <div className="rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint/40 px-3 py-2 font-mono text-[11px] text-devdeck-fg-2">
           Couldn't parse that as a timestamp or date
         </div>
       ) : result ? (

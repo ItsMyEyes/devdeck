@@ -21,7 +21,7 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = ["unstable"] }
+tauri = { version = "2.11.3", features = ["macos-private-api", "unstable"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
@@ -36,5 +36,13 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # `tauri` dependency above when building for macOS, leaving other platforms
 # unaffected. See
 # docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md.
+#
+# `macos-private-api` is required for `transparent`/`windowEffects` in
+# tauri.macos.conf.json to actually render — without it the window silently
+# falls back to an opaque black surface instead of compositing the sidebar
+# vibrancy material. This is the same private-API tradeoff noted in Tauri's
+# own docs: it disqualifies the bundle from Mac App Store distribution,
+# which DevDeck (sidecar binary, custom PTY/WebSocket transport) was never
+# going to pursue anyway.
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri = { version = "2.11.3", features = ["unstable", "macos-proxy"] }
+tauri = { version = "2.11.3", features = ["unstable", "macos-proxy", "macos-private-api"] }

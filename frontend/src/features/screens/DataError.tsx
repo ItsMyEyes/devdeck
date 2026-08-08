@@ -11,11 +11,11 @@ export function DataError({ error, onRetry }: { error?: unknown; onRetry?: () =>
         : undefined
   return (
     <div className="flex-1 overflow-auto p-4">
-      <div className="flex h-[60vh] flex-col items-center justify-center gap-3.5 rounded-[14px] border border-dashed border-devdeck-border-strong font-mono text-[13px] text-devdeck-dim">
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-3.5 rounded-container border border-dashed border-devdeck-border-strong font-mono text-[13px] text-devdeck-fg-2">
         <CloudOff size={26} strokeWidth={1.5} className="text-devdeck-red" />
         <span>Couldn&rsquo;t reach the backend</span>
         {message ? (
-          <span className="max-w-[80%] truncate text-[12px] text-devdeck-dim-2">{message}</span>
+          <span className="max-w-[80%] truncate text-[12px] text-devdeck-fg-2">{message}</span>
         ) : null}
         {onRetry ? (
           <Button onClick={onRetry} className="px-3.5">Retry</Button>

@@ -30,7 +30,7 @@ function bodyFor(kind: string, name: string, groupHostCount: number) {
   if (kind === 'ssh')
     return `This removes SSH connection "${name}" and its stored credentials. The remote host itself is not touched.`
   if (kind === 'ssh-group')
-    return `This removes group "${name}" — ${groupHostCount} host${groupHostCount === 1 ? '' : 's'} move back to Ungrouped. The hosts themselves and their credentials are not touched.`
+    return `This removes group "${name}" - ${groupHostCount} host${groupHostCount === 1 ? '' : 's'} move back to Ungrouped. The hosts themselves and their credentials are not touched.`
   return `This removes project "${name}" and all of its worktrees from devdeck. Your files on disk are not touched.`
 }
 
@@ -126,7 +126,7 @@ export function ConfirmDeleteDialog() {
       )
         .then(() => {
           cancelConfirm()
-          showToast(`Removed group "${name}" — ${groupAffectedConnections.length} host(s) moved to Ungrouped`)
+          showToast(`Removed group "${name}" - ${groupAffectedConnections.length} host(s) moved to Ungrouped`)
         })
         .catch((err) => showToast(err instanceof Error ? err.message : 'Failed to remove group'))
     } else {
@@ -151,10 +151,10 @@ export function ConfirmDeleteDialog() {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && cancelConfirm()} width={400} z={70} className="border-devdeck-red-tint">
       <div className="mb-2.5 flex items-center gap-2.5">
-        <TriangleAlert size={15} className="text-devdeck-red-soft" />
+        <TriangleAlert size={15} className="text-devdeck-err" />
         <DialogTitle>Delete {confirm ? titleFor(confirm.kind) : ''}</DialogTitle>
       </div>
-      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         {confirm ? bodyFor(confirm.kind, confirm.name, groupAffectedConnections.length) : ''}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">

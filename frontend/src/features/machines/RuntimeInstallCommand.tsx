@@ -31,7 +31,7 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
   const hubKey = useHubKey(true)
 
   if (hubKey.isLoading) {
-    return <p className="mb-5 font-mono text-[10.5px] text-devdeck-dim-2">Loading hub key…</p>
+    return <p className="mb-5 font-mono text-[10.5px] text-devdeck-fg-2">Loading hub key…</p>
   }
 
   // A hub with no --key cannot accept self-registration at all, so there is no
@@ -39,9 +39,9 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
   // on the target machine.
   if (hubKey.data && !hubKey.data.configured) {
     return (
-      <div className="mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3">
+      <div className="mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-pane p-3">
         <p className="mb-1 font-mono text-[11px] text-devdeck-fg">This hub has no API key</p>
-        <p className="font-mono text-[10.5px] text-devdeck-dim-2">
+        <p className="font-mono text-[10.5px] text-devdeck-fg-2">
           A runtime authenticates its self-registration with the hub&apos;s key. Restart DevDeck with{' '}
           <code>--key &lt;value&gt;</code> (or set <code>DEVDECK_KEY</code>), then reopen this dialog.
         </p>
@@ -73,8 +73,8 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
             className={cn(
               'cursor-pointer rounded-md border px-2.5 py-1 font-mono text-[10.5px]',
               target === t.value
-                ? 'border-devdeck-accent-soft text-devdeck-accent-soft'
-                : 'border-devdeck-border-card text-devdeck-muted-2 hover:text-devdeck-fg',
+                ? 'border-devdeck-line bg-devdeck-on text-devdeck-fg'
+                : 'border-devdeck-border-card text-devdeck-fg-2 hover:text-devdeck-fg',
             )}
           >
             {t.label}
@@ -83,22 +83,22 @@ export function RuntimeInstallCommand({ hubUrl, machineName }: RuntimeInstallCom
       </div>
 
       <Label>Install command</Label>
-      <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
+      <p className="mb-2 font-mono text-[10.5px] text-devdeck-fg-2">
         Run this on the target machine. It downloads DevDeck, registers it with this hub, and verifies the
         registration landed.
       </p>
       {hubKey.isError ? (
-        <p className="mb-2 font-mono text-[10.5px] text-devdeck-red-soft">
-          Could not load the hub key — fill in &lt;your-hub-key&gt; yourself before running this.
+        <p className="mb-2 font-mono text-[10.5px] text-devdeck-err">
+          Could not load the hub key - fill in &lt;your-hub-key&gt; yourself before running this.
         </p>
       ) : null}
-      <div className="relative mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-2.5 pr-9">
+      <div className="relative mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-pane p-2.5 pr-9">
         <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-devdeck-fg">{command}</pre>
         <button
           type="button"
           onClick={copyCommand}
           aria-label="Copy command"
-          className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
+          className="absolute right-2.5 top-2.5 cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-fg"
         >
           <Copy size={12} />
         </button>

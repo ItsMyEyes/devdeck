@@ -46,11 +46,11 @@ export function MarkitdownCard() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-[11px] border border-devdeck-border-card bg-devdeck-card">
+    <div className="flex min-h-0 flex-1 flex-col rounded-control border border-devdeck-border-card bg-devdeck-glass-solid">
       <div className="flex items-center justify-between gap-3 border-b border-devdeck-border-card px-3.5 py-2.5">
         <div>
           <div className="text-[12.5px] font-medium text-devdeck-fg">Convert to Markdown</div>
-          <div className="mt-0.5 text-[11px] text-devdeck-muted">
+          <div className="mt-0.5 text-[11px] text-devdeck-fg-2">
             PDF, Word, PowerPoint, Excel, images, audio, HTML → markdown via markitdown.
           </div>
         </div>
@@ -65,7 +65,7 @@ export function MarkitdownCard() {
         {result ? (
           <div className="flex h-full min-h-[220px] flex-col gap-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-mono text-[11px] text-devdeck-dim">{result.filename}</span>
+              <span className="truncate font-mono text-[11px] text-devdeck-fg-2">{result.filename}</span>
               <div className="flex flex-none items-center gap-1.5">
                 <Button variant="ghost" size="sm" onClick={copyMarkdown}>
                   <Copy size={12} />
@@ -81,14 +81,14 @@ export function MarkitdownCard() {
               <MarkdownEditor
                 value={result.markdown}
                 onChange={(markdown) => setResult({ ...result, markdown })}
-                placeholder="Converted markdown appears here — click to edit before copying."
+                placeholder="Converted markdown appears here - click to edit before copying."
               />
             </div>
           </div>
         ) : (
           <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-devdeck-border-card text-center">
-            <span className="text-[12px] text-devdeck-muted">No document converted yet</span>
-            <span className="text-[11px] text-devdeck-dim-2">Choose a file to see its markdown here</span>
+            <span className="text-[12px] text-devdeck-fg-2">No document converted yet</span>
+            <span className="text-[11px] text-devdeck-fg-2">Choose a file to see its markdown here</span>
           </div>
         )}
       </div>

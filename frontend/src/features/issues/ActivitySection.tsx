@@ -63,10 +63,10 @@ function eventLabel(event: IssueEvent): string {
 function TimelineEventRow({ event }: { event: IssueEvent }) {
   const Icon = eventIcon(event.kind)
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[11.5px] text-devdeck-dim">
-      <Icon size={12} className="flex-none text-devdeck-dim-2" />
+    <div className="flex items-center gap-2 py-0.5 text-[11.5px] text-devdeck-fg-2">
+      <Icon size={12} className="flex-none text-devdeck-fg-2" />
       <span className="min-w-0 flex-1 truncate">You {eventLabel(event)}</span>
-      <span className="flex-none text-devdeck-dim-3">{fmtTimeAgo(event.createdAt)}</span>
+      <span className="flex-none text-devdeck-fg-2">{fmtTimeAgo(event.createdAt)}</span>
     </div>
   )
 }
@@ -90,15 +90,15 @@ export function ActivitySection({ issueId }: { issueId: string }) {
 
   return (
     <div className="flex flex-col gap-3 border-t border-devdeck-border pt-6">
-      <div className="flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2">
+      <div className="flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
         Activity
-        {comments && comments.length > 0 ? <span className="text-devdeck-dim-3">{comments.length}</span> : null}
+        {comments && comments.length > 0 ? <span className="text-devdeck-fg-2">{comments.length}</span> : null}
       </div>
 
       {loading ? (
-        <p className="text-[12px] text-devdeck-dim">Loading activity…</p>
+        <p className="text-[12px] text-devdeck-fg-2">Loading activity…</p>
       ) : timeline.length === 0 ? (
-        <p className="text-[12px] text-devdeck-dim-2">No activity yet — changes and comments will show up here.</p>
+        <p className="text-[12px] text-devdeck-fg-2">No activity yet - changes and comments will show up here.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {timeline.map((item) =>

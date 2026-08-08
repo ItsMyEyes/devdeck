@@ -47,7 +47,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   useNativeOverlayBlocker(mobileDrawer && sidebarOpen && !isDesktopWidth)
 
   const railControlClass =
-    'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-[10px] text-devdeck-muted transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+    'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-control text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-devdeck-ring'
   const railDivider = <div aria-hidden className="my-1.5 h-px w-6 flex-none bg-devdeck-border" />
 
   const toggleButton = canExpandPanel ? (
@@ -71,17 +71,26 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
       )}
       <aside
         className={cn(
-          'flex flex-none overflow-hidden border-r border-devdeck-border bg-devdeck-surface',
+          'flex flex-none overflow-hidden',
+          // The sidebar is a card on the glass: glass + a light wash. The wash
+          // is mechanical, not decorative — without it the card is the same
+          // value as the gap around it and its rounded corners have nothing to
+          // read against.
+          'my-[var(--devdeck-gap)] ml-[var(--devdeck-gap)] rounded-container bg-devdeck-card-wash',
           hasSidebarPanel ? 'w-[306px]' : 'w-[56px]',
           mobileDrawer &&
             cn(
               'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[45] max-md:max-w-[86vw]',
+              // The drawer animates `transform`, and backdrop-filter on a
+              // transforming element repaints every frame. Solid keeps the
+              // slide at 60fps on phones.
+              'max-md:m-0 max-md:rounded-none max-md:bg-devdeck-glass-solid',
               'max-md:shadow-[8px_0_40px_rgba(0,0,0,0.55)] max-md:transition-transform max-md:duration-200',
               sidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
             ),
         )}
       >
-        <div className={cn('flex flex-none flex-col items-center bg-devdeck-surface py-2.5', hasSidebarPanel ? 'w-[56px] border-r border-devdeck-border' : 'w-full')}>
+        <div className={cn('flex flex-none flex-col items-center py-2.5', hasSidebarPanel ? 'w-[56px]' : 'w-full')} style={{ marginRight: '10px' }}>
           {toggleButton ? (
             <div className="mb-1 flex flex-col items-center gap-1">
               {toggleButton ? (
@@ -122,7 +131,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
           ) : null}
         </div>
         {hasSidebarPanel ? (
-          <div className="flex min-w-0 flex-1 flex-col bg-devdeck-surface">
+          <div className="flex min-w-0 flex-1 flex-col">
             {view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />}
           </div>
         ) : null}

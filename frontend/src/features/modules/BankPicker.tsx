@@ -10,7 +10,7 @@ export function BankPicker({ onPick }: BankPickerProps) {
   const { data: banks = [] } = useBanks()
   const options = [
     { value: '', label: 'Load preset…' },
-    ...banks.map((b) => ({ value: b.id, label: `${b.bankName} — ${b.accountNumber}` })),
+    ...banks.map((b) => ({ value: b.id, label: `${b.bankName} - ${b.accountNumber}` })),
   ]
 
   return (

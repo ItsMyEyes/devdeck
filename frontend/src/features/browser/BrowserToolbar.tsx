@@ -81,7 +81,7 @@ export function BrowserToolbar({
   )
 
   return (
-    <div className="flex h-9 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-bg px-2">
+    <div className="flex h-9 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-pane px-2">
       <div className="flex flex-none items-center gap-1">
         <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={onBack} disabled={!canGoBack} aria-label="Back">
           <ArrowLeft size={12} />
@@ -121,7 +121,7 @@ export function BrowserToolbar({
           trigger={<MoreHorizontal size={13} />}
           triggerClassName={cn(
             toolbarButtonClass,
-            'flex h-7 w-7 items-center justify-center rounded-md text-devdeck-muted hover:bg-devdeck-hover-wash',
+            'flex h-7 w-7 items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-hover-wash',
           )}
           triggerTitle="More"
           triggerAriaLabel="More browser controls"

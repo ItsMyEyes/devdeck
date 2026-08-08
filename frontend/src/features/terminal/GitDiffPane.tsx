@@ -42,10 +42,10 @@ export function GitDiffPane({ worktreeId, machine, target }: GitDiffPaneProps) {
   const isCommit = 'commit' in target
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal">
-      <div className="flex h-8 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface-2 px-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane">
+      <div className="flex h-8 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-card-wash px-3">
         {isCommit ? (
-          <GitCommitHorizontal size={12} className="flex-none text-devdeck-accent" />
+          <GitCommitHorizontal size={12} className="flex-none text-devdeck-fg-2" />
         ) : (
           <MaterialFileIcon name={basename(target.path)} size={14} />
         )}
@@ -53,7 +53,7 @@ export function GitDiffPane({ worktreeId, machine, target }: GitDiffPaneProps) {
           {isCommit ? target.commit.slice(0, 10) : target.path}
         </span>
         {isCommit ? null : (
-          <span className="flex-none font-mono text-[9.5px] text-devdeck-dim max-md:hidden">
+          <span className="flex-none font-mono text-[9.5px] text-devdeck-fg-2 max-md:hidden">
             {target.staged ? 'staged · index vs HEAD' : 'unstaged · worktree'}
           </span>
         )}
@@ -64,7 +64,7 @@ export function GitDiffPane({ worktreeId, machine, target }: GitDiffPaneProps) {
             title="Side-by-side diff"
             className={cn(
               'flex h-5 w-5 cursor-pointer items-center justify-center rounded',
-              diffMode === 'split' ? 'bg-devdeck-accent/15 text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
+              diffMode === 'split' ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg',
             )}
           >
             <Columns2 size={12} />
@@ -75,7 +75,7 @@ export function GitDiffPane({ worktreeId, machine, target }: GitDiffPaneProps) {
             title="Unified diff"
             className={cn(
               'flex h-5 w-5 cursor-pointer items-center justify-center rounded',
-              diffMode === 'unified' ? 'bg-devdeck-accent/15 text-devdeck-accent-soft' : 'text-devdeck-dim hover:text-devdeck-fg',
+              diffMode === 'unified' ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg',
             )}
           >
             <Rows3 size={12} />
@@ -88,7 +88,7 @@ export function GitDiffPane({ worktreeId, machine, target }: GitDiffPaneProps) {
             <DataLoading compact />
           </div>
         ) : diff.error ? (
-          <div className="px-4 py-4 font-mono text-[10.5px] text-devdeck-red-soft">{errMessage(diff.error)}</div>
+          <div className="px-4 py-4 font-mono text-[10.5px] text-devdeck-err">{errMessage(diff.error)}</div>
         ) : (
           <DiffView text={diff.data?.diff ?? ''} mode={diffMode} showFileSummary={isCommit} />
         )}

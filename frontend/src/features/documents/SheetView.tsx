@@ -25,20 +25,20 @@ export function SheetView({ bytes }: { bytes: Uint8Array }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-devdeck-terminal">
+    <div className="flex min-h-0 flex-1 flex-col bg-devdeck-pane">
       <Grid sheet={sheet} />
 
       {sheet.truncated ? (
-        <div className="flex-none border-t border-devdeck-border bg-devdeck-surface-2 px-3 py-1.5 font-mono text-[10px] text-devdeck-yellow">
+        <div className="flex-none border-t border-devdeck-border bg-devdeck-card-wash px-3 py-1.5 font-mono text-[10px] text-devdeck-yellow">
           Showing the first {Math.min(sheet.totalRows, MAX_ROWS).toLocaleString()} of{' '}
           {sheet.totalRows.toLocaleString()} rows and{' '}
-          {Math.min(sheet.totalColumns, MAX_COLUMNS)} of {sheet.totalColumns} columns — download the
+          {Math.min(sheet.totalColumns, MAX_COLUMNS)} of {sheet.totalColumns} columns - download the
           file to see all of it.
         </div>
       ) : null}
 
       {sheets.length > 1 ? (
-        <div className="flex flex-none items-center gap-1 overflow-x-auto border-t border-devdeck-border bg-devdeck-surface px-2 py-1">
+        <div className="flex flex-none items-center gap-1 overflow-x-auto border-t border-devdeck-border bg-devdeck-pane px-2 py-1">
           {sheets.map((candidate, index) => (
             <button
               key={`${candidate.name}-${index}`}
@@ -47,8 +47,8 @@ export function SheetView({ bytes }: { bytes: Uint8Array }) {
               className={cn(
                 'flex-none cursor-pointer rounded px-2.5 py-1 font-mono text-[11px]',
                 index === activeSheet
-                  ? 'bg-devdeck-elevated text-devdeck-fg'
-                  : 'text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
+                  ? 'bg-devdeck-glass-solid text-devdeck-fg'
+                  : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
               )}
             >
               {candidate.name}
@@ -64,7 +64,7 @@ function Grid({ sheet }: { sheet: SheetGrid }) {
   if (sheet.rows.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        <span className="font-mono text-[11px] text-devdeck-dim">{sheet.name} is empty</span>
+        <span className="font-mono text-[11px] text-devdeck-fg-2">{sheet.name} is empty</span>
       </div>
     )
   }
@@ -76,11 +76,11 @@ function Grid({ sheet }: { sheet: SheetGrid }) {
           {/* Sticky spreadsheet headers: the A/B/C row and the 1/2/3 gutter
               both pin, so a wide sheet stays navigable while scrolled. */}
           <tr>
-            <th className="sticky left-0 top-0 z-20 w-12 border border-devdeck-border bg-devdeck-surface-2 px-2 py-1 text-devdeck-dim" />
+            <th className="sticky left-0 top-0 z-20 w-12 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 text-devdeck-fg-2" />
             {Array.from({ length: sheet.columnCount }, (_, index) => (
               <th
                 key={index}
-                className="sticky top-0 z-10 min-w-24 border border-devdeck-border bg-devdeck-surface-2 px-2 py-1 font-normal text-devdeck-dim"
+                className="sticky top-0 z-10 min-w-24 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 font-normal text-devdeck-fg-2"
               >
                 {columnLabel(index)}
               </th>
@@ -90,7 +90,7 @@ function Grid({ sheet }: { sheet: SheetGrid }) {
         <tbody>
           {sheet.rows.map((row, rowIndex) => (
             <tr key={rowIndex}>
-              <td className="sticky left-0 z-10 border border-devdeck-border bg-devdeck-surface-2 px-2 py-1 text-right text-devdeck-dim">
+              <td className="sticky left-0 z-10 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 text-right text-devdeck-fg-2">
                 {rowIndex + 1}
               </td>
               {row.map((cell, columnIndex) => (

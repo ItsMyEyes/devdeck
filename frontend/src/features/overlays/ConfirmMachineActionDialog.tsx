@@ -8,24 +8,24 @@ const COPY = {
   restart: {
     title: 'Restart runtime',
     body: (name: string) =>
-      `This restarts the runtime process on "${name}". Active terminals on this machine will disconnect and reconnect once it's back — usually a few seconds.`,
+      `This restarts the runtime process on "${name}". Active terminals on this machine will disconnect and reconnect once it's back - usually a few seconds.`,
     confirmLabel: 'Restart',
-    iconClassName: 'text-devdeck-yellow-soft',
+    iconClassName: 'text-devdeck-wait',
     confirmVariant: 'warning' as const,
   },
   stop: {
     title: 'Stop runtime',
     body: (name: string) =>
-      `This stops the runtime process on "${name}". It will not come back on its own — you'll need to relaunch it manually on that machine.`,
+      `This stops the runtime process on "${name}". It will not come back on its own - you'll need to relaunch it manually on that machine.`,
     confirmLabel: 'Stop',
-    iconClassName: 'text-devdeck-red-soft',
+    iconClassName: 'text-devdeck-err',
     confirmVariant: 'destructive-solid' as const,
   },
   update: {
     title: 'Update runtime',
     body: (name: string) => `This updates the runtime on "${name}".`,
     confirmLabel: 'Update & restart',
-    iconClassName: 'text-devdeck-yellow-soft',
+    iconClassName: 'text-devdeck-wait',
     confirmVariant: 'warning' as const,
   },
 }
@@ -60,11 +60,11 @@ export function ConfirmMachineActionDialog() {
           restartMachine.mutate(id, {
             onSuccess: () => {
               cancel()
-              showToast(`Updated "${name}" to ${res.version} — restarting`)
+              showToast(`Updated "${name}" to ${res.version} - restarting`)
             },
             onError: () => {
               cancel()
-              showToast(`Updated "${name}" to ${res.version} — restart it to apply`)
+              showToast(`Updated "${name}" to ${res.version} - restart it to apply`)
             },
           })
         },
@@ -100,7 +100,7 @@ export function ConfirmMachineActionDialog() {
         <TriangleAlert size={15} className={copy?.iconClassName} />
         <DialogTitle>{copy?.title ?? ''}</DialogTitle>
       </div>
-      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-5 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         {description}
       </DialogDescription>
       <div className="flex justify-end gap-2.5">

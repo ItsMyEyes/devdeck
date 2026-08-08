@@ -53,8 +53,10 @@ export function ProgressLine({ active, delayMs = 150, className }: ProgressLineP
       )}
     >
       <span
-        className="animate-progress-slide block h-full w-[30%] rounded-full"
-        style={{ background: 'var(--devdeck-accent-gradient)' }}
+        // This is a page-load status indicator, not a decorative accent — it
+        // reports "in progress" the same way an agent's amber dot does, so it
+        // takes the status token rather than the accent.
+        className="animate-progress-slide block h-full w-[30%] rounded-full bg-devdeck-wait"
       />
     </div>
   )

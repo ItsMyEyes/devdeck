@@ -11,9 +11,9 @@ export function NeverSyncedNotice({ lastSyncedAt }: { lastSyncedAt: string | nul
   if (lastSyncedAt === null) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-        <CloudOff size={20} strokeWidth={1.5} className="text-devdeck-dim" />
+        <CloudOff size={20} strokeWidth={1.5} className="text-devdeck-fg-2" />
         <p className="text-[13px] font-medium text-devdeck-fg-2">Never synced with the hub</p>
-        <p className="text-[11.5px] text-devdeck-dim">
+        <p className="text-[11.5px] text-devdeck-fg-2">
           This runtime has not received a catalog yet. Check <code>--hub-url</code> and{' '}
           <code>--hub-key</code>, then look at this runtime&rsquo;s log.
         </p>
@@ -21,6 +21,6 @@ export function NeverSyncedNotice({ lastSyncedAt }: { lastSyncedAt: string | nul
     )
   }
   return (
-    <p className="px-4 py-2 text-[11.5px] text-devdeck-dim">Catalog synced {fmtTimeAgo(lastSyncedAt)}</p>
+    <p className="px-4 py-2 text-[11.5px] text-devdeck-fg-2">Catalog synced {fmtTimeAgo(lastSyncedAt)}</p>
   )
 }

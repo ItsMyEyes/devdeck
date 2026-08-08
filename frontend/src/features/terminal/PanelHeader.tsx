@@ -49,7 +49,7 @@ export interface PanelHeaderProps {
 }
 
 const iconButtonClass =
-  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
+  'flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
 
 /** Compact per-pane header: tab strip + split/overflow/close controls. Purely presentational — knows nothing about Terminal/GitPanel/FileEditor. */
 export function PanelHeader({
@@ -71,7 +71,7 @@ export function PanelHeader({
   return (
     <div
       className={cn(
-        'flex h-8 flex-none items-stretch border-b border-devdeck-border bg-devdeck-surface-2',
+        'flex h-8 flex-none items-stretch border-b border-devdeck-border bg-devdeck-card-wash',
         className,
       )}
     >
@@ -181,8 +181,8 @@ function PanelHeaderTabButton({
       className={cn(
         'group flex h-full max-w-[200px] flex-none touch-none cursor-grab items-center gap-1.5 border-r border-devdeck-border pl-3 pr-1 font-mono text-[11px] active:cursor-grabbing',
         active
-          ? 'bg-devdeck-terminal text-devdeck-fg'
-          : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
+          ? 'bg-devdeck-pane text-devdeck-fg'
+          : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg-2',
         isDragging && 'opacity-40',
       )}
     >
@@ -203,7 +203,7 @@ function PanelHeaderTabButton({
           onCloseTab()
         }}
         aria-label={`Close ${tab.label}`}
-        className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-60 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100"
+        className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 opacity-60 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100"
       >
         <X size={10} />
       </button>

@@ -39,22 +39,22 @@ export function BrowserFindBar({ open, query, onQueryChange, active, total, onNe
   }
 
   return (
-    <div className="flex h-8 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-bg px-2">
-      <Search size={12} className="flex-none text-devdeck-dim" />
+    <div className="flex h-8 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-pane px-2">
+      <Search size={12} className="flex-none text-devdeck-fg-2" />
       <input
         ref={inputRef}
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Find on page"
-        className="min-w-0 flex-1 bg-transparent text-[11.5px] text-devdeck-fg outline-none placeholder:text-devdeck-dim"
+        className="min-w-0 flex-1 bg-transparent text-[11.5px] text-devdeck-fg outline-none placeholder:text-devdeck-fg-2"
       />
-      <span className="flex-none text-[10.5px] text-devdeck-muted">{total > 0 ? `${active}/${total}` : ''}</span>
+      <span className="flex-none text-[10.5px] text-devdeck-fg-2">{total > 0 ? `${active}/${total}` : ''}</span>
       <button
         type="button"
         onClick={onPrev}
         aria-label="Previous match"
-        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         <ChevronUp size={13} />
       </button>
@@ -62,7 +62,7 @@ export function BrowserFindBar({ open, query, onQueryChange, active, total, onNe
         type="button"
         onClick={onNext}
         aria-label="Next match"
-        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         <ChevronDown size={13} />
       </button>
@@ -70,7 +70,7 @@ export function BrowserFindBar({ open, query, onQueryChange, active, total, onNe
         type="button"
         onClick={onClose}
         aria-label="Close find bar"
-        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        className="flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         <X size={12} />
       </button>

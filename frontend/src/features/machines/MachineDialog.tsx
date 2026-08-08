@@ -107,7 +107,7 @@ export function MachineDialog() {
     <Dialog open={dialog.open} onOpenChange={(o) => !o && !busy && close()} width={480}>
       <DialogTitle>{isEdit ? 'Edit runtime' : 'Add runtime'}</DialogTitle>
       <DialogDescription className="mb-[18px]">
-        Runtimes run worktrees, terminals, and git — reachable over your tailnet.
+        Runtimes run worktrees, terminals, and git - reachable over your tailnet.
       </DialogDescription>
 
       {!isEdit ? (
@@ -115,7 +115,7 @@ export function MachineDialog() {
           <button
             type="button"
             onClick={() => setPasteMode((m) => !m)}
-            className="cursor-pointer font-mono text-[11px] text-devdeck-muted-2 underline decoration-dotted hover:text-devdeck-accent-soft"
+            className="cursor-pointer font-mono text-[11px] text-devdeck-fg-2 underline decoration-dotted hover:text-devdeck-accent"
           >
             {pasteMode ? 'Use the self-register command instead' : 'Have a connection string instead?'}
           </button>
@@ -155,7 +155,7 @@ export function MachineDialog() {
       ) : pasteMode ? (
         <>
           <Label>Connection string</Label>
-          <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">
+          <p className="mb-2 font-mono text-[10.5px] text-devdeck-fg-2">
             Paste the line from the runtime's <code>copy-this.md</code> (format: name|url|key).
           </p>
           <Input
@@ -165,7 +165,7 @@ export function MachineDialog() {
             placeholder="builder|https://builder.tail-x.ts.net|a1b2c3..."
             className="mb-1 font-mono"
           />
-          <p className={`mb-5 font-mono text-[10.5px] ${pasteInvalid ? 'text-devdeck-red-soft' : 'text-devdeck-dim-2'}`}>
+          <p className={`mb-5 font-mono text-[10.5px] ${pasteInvalid ? 'text-devdeck-err' : 'text-devdeck-fg-2'}`}>
             {pasteInvalid
               ? 'Expected exactly 3 fields separated by "|": name, an https:// URL, and a key.'
               : parsedPaste
@@ -185,21 +185,21 @@ export function MachineDialog() {
           />
 
           {tailscaleNotReady ? (
-            <div className="mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-terminal p-3">
+            <div className="mb-5 rounded-lg border border-devdeck-border-card bg-devdeck-pane p-3">
               <p className="mb-1 font-mono text-[11px] text-devdeck-fg">{tailscaleNotReady.title}</p>
-              <p className="mb-2 font-mono text-[10.5px] text-devdeck-dim-2">{tailscaleNotReady.body}</p>
+              <p className="mb-2 font-mono text-[10.5px] text-devdeck-fg-2">{tailscaleNotReady.body}</p>
               {tailscaleNotReady.copyValue ? (
                 <button
                   type="button"
                   onClick={() => copyTailscaleLink(tailscaleNotReady.copyValue!)}
-                  className="cursor-pointer font-mono text-[10.5px] text-devdeck-accent-soft underline decoration-dotted"
+                  className="cursor-pointer font-mono text-[10.5px] text-devdeck-accent underline decoration-dotted"
                 >
                   {tailscaleNotReady.copyLabel}
                 </button>
               ) : null}
             </div>
           ) : isLoopbackHub && tailscaleStatus.isLoading ? (
-            <p className="mb-5 font-mono text-[10.5px] text-devdeck-dim-2">Checking Tailscale…</p>
+            <p className="mb-5 font-mono text-[10.5px] text-devdeck-fg-2">Checking Tailscale…</p>
           ) : (
             <RuntimeInstallCommand hubUrl={resolvedHubUrl ?? window.location.origin} machineName={dialog.name} />
           )}

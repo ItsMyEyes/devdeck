@@ -197,7 +197,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
 
   // Creates the native webview (once per doc, sized correctly from the
   // start) and keeps it glued to the placeholder's on-screen rect on every
-  // resize/drag/fullscreen-toggle after that. Opening lives here — not in
+  // resize/drag/fullscreen-toggle/scroll after that. Opening lives here — not in
   // `navigate()` — because the placeholder <div> this measures doesn't
   // exist in the DOM until React re-renders with `doc.url` set; opening
   // from `navigate()` directly raced this effect's first bounds report
@@ -243,8 +243,18 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
 
     const observer = new ResizeObserver(sendBounds)
     observer.observe(el)
+    // ResizeObserver only fires when `el`'s own box size changes — scrolling an
+    // ancestor (the sidebar's project tree, a split's overflowing pane, the page
+    // itself) moves the placeholder's on-screen rect without resizing it, so the
+    // native webview never got told to follow and stayed glued to its last
+    // reported position while the rest of the DOM scrolled past it. Capture phase
+    // matches `useNativeOverlayBlocker`'s own scroll listener, for the same
+    // reason: 'scroll' doesn't bubble, so only capture sees it fire on a nested
+    // scrollable ancestor rather than just the window itself.
+    window.addEventListener('scroll', sendBounds, true)
     return () => {
       observer.disconnect()
+      window.removeEventListener('scroll', sendBounds, true)
       // This cleanup fires both when switching to a different doc (internal tab
       // switch) and when the whole tile unmounts (e.g. navigating to a non-tiled
       // route like Machines/Tools — see WorkspaceTileArea's `showContent: false`).
@@ -578,7 +588,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     // `@container/tile` — the toolbar below reflows on the *tile's* width, not
     // the viewport's: a browser tile split three ways on a desktop is just as
     // narrow as a full-width one on a phone, and needs the same layout.
-    <div className="@container/tile flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-bg">
+    <div className="@container/tile flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane">
       {/* `relative` so ProgressLine can pin itself to the chrome's bottom seam
           — it spans the tile's full width, reading as "this tile is loading"
           rather than decorating any one control. */}
@@ -642,25 +652,25 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
         {!doc.url ? (
           <div className="flex h-full flex-col items-center gap-5 overflow-auto p-4 @sm/tile:p-6">
             {bookmarksByMachine.length === 0 ? (
-              <div className="mt-16 text-[12px] text-devdeck-muted">No bookmarks yet.</div>
+              <div className="mt-16 text-[12px] text-devdeck-fg-2">No bookmarks yet.</div>
             ) : (
               bookmarksByMachine.map(([machineLabel, groups]) => (
                 <div key={machineLabel} className="w-full max-w-[520px]">
                   <div className="mb-2.5 flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-devdeck-fg-2">{machineLabel}</span>
+                    <span className="text-[11px] font-semibold text-devdeck-fg">{machineLabel}</span>
                     <div className="h-px flex-1 bg-devdeck-border" />
                   </div>
                   <div className="grid gap-3">
                     {groups.map(([group, items]) => (
                       <div key={group}>
-                        <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</div>
+                        <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-fg-2">{group}</div>
                         <div className="grid grid-cols-1 gap-2 @sm/tile:grid-cols-2">
                           {items.map((bookmark) => (
                             // Open and remove are siblings, not nested <button>s — nesting
                             // is invalid HTML and made the two tap targets overlap.
                             <div
                               key={bookmark.id}
-                              className="flex items-center gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 pr-1 focus-within:border-devdeck-border-accent hover:border-devdeck-border-accent"
+                              className="flex items-center gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-card-wash pr-1 focus-within:border-devdeck-border-accent hover:border-devdeck-border-accent"
                             >
                               <button
                                 type="button"
@@ -674,7 +684,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
                                 type="button"
                                 onClick={() => deleteBookmark.mutate(bookmark.id)}
                                 aria-label={`Remove ${bookmark.title}`}
-                                className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-devdeck-muted-2 hover:text-devdeck-red-soft pointer-coarse:h-9 pointer-coarse:w-9"
+                                className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-devdeck-fg-2 hover:text-devdeck-err pointer-coarse:h-9 pointer-coarse:w-9"
                               >
                                 <X size={12} />
                               </button>

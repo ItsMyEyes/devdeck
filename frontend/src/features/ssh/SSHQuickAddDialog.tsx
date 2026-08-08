@@ -144,7 +144,7 @@ export function SSHQuickAddDialog({ onCreateSSH }: SSHQuickAddDialogProps) {
     <Dialog open={open} onOpenChange={(o) => !o && !busy && closeSSHQuickAdd()} width={440}>
       <DialogTitle>New SSH host</DialogTitle>
       <DialogDescription className="mb-4">
-        Paste a full ssh command — user, port, -i and -J are read from it.
+        Paste a full ssh command - user, port, -i and -J are read from it.
       </DialogDescription>
 
       {/* Enter submits from any field so the whole flow stays keyboard-only;
@@ -156,7 +156,7 @@ export function SSHQuickAddDialog({ onCreateSSH }: SSHQuickAddDialogProps) {
         }}
       >
         <div className="mb-5">
-          <div className="rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
+          <div className="rounded-control border border-devdeck-border-card bg-devdeck-card-wash p-3">
             <Label>ssh command</Label>
             <Input
               ref={rawInputRef}
@@ -168,7 +168,7 @@ export function SSHQuickAddDialog({ onCreateSSH }: SSHQuickAddDialogProps) {
               aria-label="ssh command"
             />
               {parsed ? (
-                <p className="mb-3 font-mono text-[11px] leading-snug text-devdeck-dim">
+                <p className="mb-3 font-mono text-[11px] leading-snug text-devdeck-fg-2">
                   {parsed.target.user || '(no user)'}@{parsed.target.host}:{parsed.target.port}
                   {parsed.jumps.length > 0
                     ? ` · via ${parsed.jumps.map((hop) => `${hop.user}@${hop.host}`).join(' → ')}`
@@ -176,15 +176,15 @@ export function SSHQuickAddDialog({ onCreateSSH }: SSHQuickAddDialogProps) {
                   {parsed.ignoredFlags.length > 0 ? ` · ignored: ${parsed.ignoredFlags.join(' ')}` : ''}
                 </p>
               ) : draft.raw.trim() ? (
-                <p className="mb-3 font-mono text-[11px] text-devdeck-red-soft">Can't read that ssh command.</p>
+                <p className="mb-3 font-mono text-[11px] text-devdeck-err">Can't read that ssh command.</p>
               ) : (
-                <p className="mb-3 font-mono text-[11px] text-devdeck-dim">
-                  Paste a full command — user, port, -i and -J are read from it.
+                <p className="mb-3 font-mono text-[11px] text-devdeck-fg-2">
+                  Paste a full command - user, port, -i and -J are read from it.
                 </p>
               )}
               {parsed && !parsed.target.user ? (
-                <p className="mb-3 font-mono text-[11px] text-devdeck-red-soft">
-                  No username in that command — add one as user@host or -l user.
+                <p className="mb-3 font-mono text-[11px] text-devdeck-err">
+                  No username in that command - add one as user@host or -l user.
                 </p>
               ) : null}
 
@@ -226,7 +226,7 @@ export function SSHQuickAddDialog({ onCreateSSH }: SSHQuickAddDialogProps) {
                     label="Jump host uses different credentials"
                   />
                   {draft.jumpAuthOverride ? (
-                    <div className="mt-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
+                    <div className="mt-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-2.5">
                       <SSHAuthFields
                         authType={draft.jumpAuth.authType}
                         password={draft.jumpAuth.password}
@@ -293,9 +293,9 @@ function CheckboxRow({
     >
       <span
         className={cn(
-          'flex h-[15px] w-[15px] flex-none items-center justify-center rounded-[4px] border transition-colors',
+          'flex h-[15px] w-[15px] flex-none items-center justify-center rounded-micro border transition-colors',
           checked
-            ? 'border-devdeck-accent bg-primary text-primary-foreground'
+            ? 'border-devdeck-line bg-devdeck-on text-devdeck-fg'
             : 'border-devdeck-border-strong text-transparent',
         )}
       >

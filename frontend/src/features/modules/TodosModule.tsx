@@ -71,8 +71,8 @@ export function TodosModule({ wsId }: { wsId: string }) {
                   className={cn(
                     'h-6 rounded-md px-2 font-mono text-[11px] capitalize transition-colors',
                     filter === f
-                      ? 'bg-devdeck-popover text-devdeck-fg'
-                      : 'text-devdeck-dim hover:text-devdeck-fg-2',
+                      ? 'bg-devdeck-glass-solid text-devdeck-fg'
+                      : 'text-devdeck-fg-2 hover:text-devdeck-fg-2',
                   )}
                 >
                   {f}
@@ -119,7 +119,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
       ) : (
         <div className="flex-1 overflow-auto p-4 pt-3">
           {visible.length === 0 ? (
-            <div className="py-10 text-center font-mono text-[12px] text-devdeck-dim">nothing here</div>
+            <div className="py-10 text-center font-mono text-[12px] text-devdeck-fg-2">nothing here</div>
           ) : (
             <div className="flex flex-col gap-1.5">
               {visible.map((t) => {
@@ -127,16 +127,16 @@ export function TodosModule({ wsId }: { wsId: string }) {
                 return (
                   <div
                     key={t.id}
-                    className="flex items-center gap-3 rounded-[11px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5"
+                    className="flex items-center gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5"
                   >
                     <button
                       onClick={() => updateTodo.mutate({ id: t.id, patch: { done: !t.done } })}
                       aria-label={t.done ? 'Mark not done' : 'Mark done'}
                       className={cn(
-                        'flex h-[17px] w-[17px] flex-none items-center justify-center rounded-[5px] border transition-colors',
+                        'flex h-[17px] w-[17px] flex-none items-center justify-center rounded-micro border transition-colors',
                         t.done
-                          ? 'border-devdeck-accent bg-primary text-primary-foreground'
-                          : 'border-devdeck-border-strong text-transparent hover:border-devdeck-border-accent',
+                          ? 'border-devdeck-run bg-devdeck-run text-devdeck-pane'
+                          : 'border-devdeck-border-strong text-transparent hover:border-devdeck-run',
                       )}
                     >
                       <Check size={11} strokeWidth={3} />
@@ -144,7 +144,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                     <span
                       className={cn(
                         'flex-1 text-[12.5px] leading-snug',
-                        t.done ? 'text-devdeck-dim line-through' : 'text-devdeck-fg',
+                        t.done ? 'text-devdeck-fg-2 line-through' : 'text-devdeck-fg',
                       )}
                     >
                       {t.text}
@@ -153,7 +153,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                     <button
                       onClick={() => deleteTodo.mutate(t.id)}
                       aria-label="Delete task"
-                      className="flex-none cursor-pointer p-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
+                      className="flex-none cursor-pointer p-1 text-devdeck-fg-2 hover:text-devdeck-err"
                     >
                       <Trash2 size={14} />
                     </button>

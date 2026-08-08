@@ -26,10 +26,10 @@ export const DB_KIND_COLOR: Record<DBKindKey, string> = {
 /** Tiny colored abbreviation shown next to each column name in the grid
  *  header. json intentionally reuses devdeck-green's hex value — a grid
  *  header badge is a different visual context from where that token carries
- *  success meaning elsewhere in the app. binary reuses devdeck-muted's hex
+ *  success meaning elsewhere in the app. binary reuses devdeck-fg-2's hex
  *  (not devdeck-gray's #6b7280, which only clears ~3.3:1 against the grid
  *  header background — below the 4.5:1 WCAG AA text-contrast bar); the
- *  literal hex is required here rather than `var(--devdeck-muted)` since
+ *  literal hex is required here rather than `var(--devdeck-fg-2)` since
  *  Pill appends alpha suffixes (`${color}18`/`${color}33`) to this value. */
 export const DB_TYPE_BADGE: Record<DBTypeBadgeKey, { color: string; label: string }> = {
   uuid: { color: '#4fb8c9', label: 'uuid' },

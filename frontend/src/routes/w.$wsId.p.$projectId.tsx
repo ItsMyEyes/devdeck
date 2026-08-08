@@ -44,7 +44,7 @@ function ProjectLayout() {
               onClick={() => navigate({ to: tab.to, params: { wsId, projectId } })}
               className={cn(
                 'cursor-pointer rounded-md px-2.5 py-1 font-mono text-[11.5px] transition-colors',
-                tab.match(pathname) ? 'bg-devdeck-popover text-devdeck-fg' : 'text-devdeck-dim hover:text-devdeck-fg-2',
+                tab.match(pathname) ? 'bg-devdeck-glass-solid text-devdeck-fg' : 'text-devdeck-fg-2 hover:text-devdeck-fg-2',
               )}
             >
               {tab.label}

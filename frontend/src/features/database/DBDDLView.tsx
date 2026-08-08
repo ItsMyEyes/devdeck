@@ -11,13 +11,13 @@ export function DBDDLView({ connectionId, object }: { connectionId: string; obje
 
   if (isLoading) return <DataLoading compact label="generating DDL…" />
   if (error || !data) {
-    return <div className="p-4 text-[12px] text-devdeck-red-soft">{error instanceof Error ? error.message : 'Failed to generate DDL'}</div>
+    return <div className="p-4 text-[12px] text-devdeck-err">{error instanceof Error ? error.message : 'Failed to generate DDL'}</div>
   }
 
   return (
     <div className="flex h-full flex-col p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-dim">Generated DDL</span>
+        <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-fg-2">Generated DDL</span>
         <Button
           variant="ghost"
           size="sm"
@@ -27,7 +27,7 @@ export function DBDDLView({ connectionId, object }: { connectionId: string; obje
           Copy
         </Button>
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-3 font-mono text-[11.5px] leading-relaxed text-devdeck-fg-2">
+      <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-3 font-mono text-[11.5px] leading-relaxed text-devdeck-fg-2">
         {data.ddl}
       </pre>
     </div>

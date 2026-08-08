@@ -11,18 +11,26 @@ const buttonVariants = cva(
       variant: {
         /** devdeck-blue primary CTA */
         default: 'bg-primary text-primary-foreground font-semibold hover:bg-devdeck-accent-hover',
+        /** Accent, but subordinate to `default`. For an action that is important
+         *  and app-level, yet is NOT the action the current screen is about —
+         *  the global "+ Worktree" next to a module's own CTA. Keeps the accent
+         *  identity without a second saturated fill competing on the page.
+         *  Matches the treatment "New agent" already uses. */
+        'accent-soft':
+          'bg-devdeck-accent-tint text-devdeck-accent font-semibold border border-devdeck-border-accent hover:bg-devdeck-accent-tint-hover',
         /** hairline outline — the workhorse toolbar button */
         secondary:
-          'bg-transparent text-devdeck-muted border border-devdeck-border-menu hover:bg-devdeck-popover hover:text-devdeck-fg',
-        ghost: 'bg-transparent text-devdeck-muted hover:bg-white/[0.04] hover:text-devdeck-fg',
-        /** blue-tinted (e.g. terminal "Send") */
-        soft: 'bg-devdeck-accent-tint text-devdeck-accent-soft border border-devdeck-border-accent hover:bg-devdeck-accent-tint-hover',
+          'bg-transparent text-devdeck-fg-2 border border-devdeck-border-menu hover:bg-devdeck-glass-solid hover:text-devdeck-fg',
+        ghost: 'bg-transparent text-devdeck-fg-2 hover:bg-white/[0.04] hover:text-devdeck-fg',
+        /** toggled/active state (e.g. a panel that is currently open) — the
+         *  one state wash, not an accent tint. */
+        soft: 'bg-devdeck-on text-devdeck-fg border border-devdeck-line hover:bg-devdeck-hover-wash',
         /** approve / warning */
-        warning: 'bg-devdeck-yellow text-devdeck-warning-ink font-semibold hover:bg-devdeck-yellow-soft',
+        warning: 'bg-devdeck-yellow text-devdeck-warning-ink font-semibold hover:bg-devdeck-wait',
         /** merge / success */
-        success: 'bg-devdeck-green-tint text-devdeck-green-soft border border-devdeck-green-tint-border hover:bg-devdeck-green-tint-hover',
+        success: 'bg-devdeck-green-tint text-devdeck-run border border-devdeck-green-tint-border hover:bg-devdeck-green-tint-hover',
         /** destructive outline (kill / delete) */
-        destructive: 'bg-transparent text-devdeck-red-soft border border-devdeck-red-tint hover:bg-devdeck-red-tint-hover',
+        destructive: 'bg-transparent text-devdeck-err border border-devdeck-red-tint hover:bg-devdeck-red-tint-hover',
         /** solid destructive (confirm delete) */
         'destructive-solid':
           'bg-devdeck-red-tint-strong text-devdeck-red-tint-strong-text font-semibold border border-devdeck-red-tint-strong-border hover:bg-devdeck-red-tint-strong-hover',

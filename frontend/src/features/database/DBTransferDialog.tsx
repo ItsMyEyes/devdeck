@@ -241,7 +241,7 @@ export function DBTransferDialog({
           onClick={close}
           disabled={running}
           aria-label="Close"
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg disabled:opacity-50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg disabled:opacity-50"
         >
           <X size={14} />
         </button>
@@ -250,7 +250,7 @@ export function DBTransferDialog({
       {columnsLoading ? (
         <DataLoading compact label="loading columns…" />
       ) : columnsError || !sourceColumns ? (
-        <div className="text-[12px] text-devdeck-red-soft">
+        <div className="text-[12px] text-devdeck-err">
           {columnsError instanceof Error ? columnsError.message : 'Failed to load source columns'}
         </div>
       ) : (
@@ -319,7 +319,7 @@ export function DBTransferDialog({
           ) : null}
 
           {statements ? (
-            <div className="mb-3 rounded-lg border border-devdeck-border-strong bg-devdeck-bg">
+            <div className="mb-3 rounded-lg border border-devdeck-border-strong bg-devdeck-pane">
               <button
                 type="button"
                 onClick={() => setStatementsOpen((v) => !v)}
@@ -337,19 +337,19 @@ export function DBTransferDialog({
           ) : null}
 
           {progress.running || progress.outcome !== null ? (
-            <div className="rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 p-2.5 font-mono text-[11px]">
+            <div className="rounded-lg border border-devdeck-border-card bg-devdeck-card-wash p-2.5 font-mono text-[11px]">
               <div className="flex items-center gap-2 text-devdeck-fg-2">
-                {progress.running ? <LoaderCircle size={12} className="animate-spin text-devdeck-accent-soft" /> : null}
+                {progress.running ? <LoaderCircle size={12} className="animate-spin text-devdeck-wait" /> : null}
                 <span>{progress.rows} rows</span>
-                <span className="text-devdeck-dim">·</span>
+                <span className="text-devdeck-fg-2">·</span>
                 <span>{elapsedSeconds.toFixed(1)}s</span>
-                <span className="text-devdeck-dim">·</span>
+                <span className="text-devdeck-fg-2">·</span>
                 <span>{rowsPerSecond(progress.rows, progress.elapsedMs)} rows/s</span>
-                {progress.running && progress.phase ? <span className="text-devdeck-dim">· {progress.phase}</span> : null}
+                {progress.running && progress.phase ? <span className="text-devdeck-fg-2">· {progress.phase}</span> : null}
               </div>
               {progress.outcome === 'error' ? (
-                <div className="mt-1.5 text-devdeck-red-soft">
-                  {progress.error} — {progress.rows} row{progress.rows === 1 ? '' : 's'} were already committed to the target and
+                <div className="mt-1.5 text-devdeck-err">
+                  {progress.error} - {progress.rows} row{progress.rows === 1 ? '' : 's'} were already committed to the target and
                   remain there.
                 </div>
               ) : progress.outcome === 'cancelled' ? (
@@ -358,7 +358,7 @@ export function DBTransferDialog({
                   remain there.
                 </div>
               ) : progress.outcome === 'done' ? (
-                <div className="mt-1.5 text-devdeck-green-soft">Transfer complete.</div>
+                <div className="mt-1.5 text-devdeck-run">Transfer complete.</div>
               ) : null}
             </div>
           ) : null}

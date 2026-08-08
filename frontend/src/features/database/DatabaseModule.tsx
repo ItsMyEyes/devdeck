@@ -36,16 +36,16 @@ function ConnectionCard({ conn, onOpen, onEdit }: { conn: DBConnection; onOpen: 
         if (e.key === 'Enter' || e.key === ' ') onOpen()
       }}
       className={cn(
-        'flex w-full cursor-pointer items-center gap-2.5 rounded-[13px] border p-3 text-left transition-colors',
+        'flex w-full cursor-pointer items-center gap-2.5 rounded-control border p-3 text-left transition-colors',
         conn.isProduction
-          ? 'border-devdeck-yellow-tint-border bg-devdeck-yellow-tint hover:bg-devdeck-yellow-tint-hover'
-          : 'border-devdeck-border-card bg-devdeck-card hover:bg-devdeck-hover-wash',
+          ? 'border-devdeck-yellow-tint-border bg-devdeck-yellow-tint hover:bg-devdeck-hover-wash'
+          : 'border-devdeck-border-card bg-devdeck-glass-solid hover:bg-devdeck-hover-wash',
       )}
     >
       <EngineGlyph engine={conn.engine} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium text-devdeck-fg">{conn.name}</div>
-        <div className="truncate font-mono text-[11px] text-devdeck-dim">
+        <div className="truncate font-mono text-[11px] text-devdeck-fg-2">
           {conn.engine === 'sqlite' ? conn.database : `${conn.host}:${conn.port}/${conn.database}`}
         </div>
       </div>
@@ -58,7 +58,7 @@ function ConnectionCard({ conn, onOpen, onEdit }: { conn: DBConnection; onOpen: 
         type="button"
         onClick={(e) => { e.stopPropagation(); onEdit() }}
         aria-label={`Edit ${conn.name}`}
-        className="flex-none rounded-md p-1 text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        className="flex-none rounded-md p-1 text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
         <Pencil size={13} />
       </button>
@@ -132,7 +132,7 @@ export function DatabaseModule() {
                 <button
                   type="button"
                   onClick={() => setActiveConnectionId(null)}
-                  className="flex min-w-0 items-center gap-1.5 text-[11px] text-devdeck-dim hover:text-devdeck-fg"
+                  className="flex min-w-0 items-center gap-1.5 text-[11px] text-devdeck-fg-2 hover:text-devdeck-fg"
                 >
                   {testStatus[activeConnection.id] ? (
                     <StatusDot color={testStatus[activeConnection.id].ok ? '#56d58a' : '#f87171'} size={6} />
@@ -165,7 +165,7 @@ export function DatabaseModule() {
               />
               <div className="relative min-h-0 flex-1 overflow-hidden">
                 {activeTabState.tabs.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-dim">
+                  <div className="flex h-full items-center justify-center text-[12px] text-devdeck-fg-2">
                     Select a table from the tree to browse it.
                   </div>
                 ) : (
@@ -216,9 +216,9 @@ export function DatabaseModule() {
         ) : (
           <>
             <div className="flex flex-none items-center gap-2.5 border-b border-devdeck-border-menu px-4 py-3">
-              <DatabaseIcon size={16} className="text-devdeck-muted" />
+              <DatabaseIcon size={16} className="text-devdeck-fg-2" />
               <h1 className="text-[15px] font-semibold text-devdeck-fg">Database</h1>
-              <span className="rounded-full bg-devdeck-popover px-2 py-0.5 font-mono text-[11px] text-devdeck-dim">
+              <span className="rounded-full bg-devdeck-glass-solid px-2 py-0.5 font-mono text-[11px] text-devdeck-fg-2">
                 {connections?.length ?? 0}
               </span>
               <div className="flex-1" />
@@ -244,7 +244,7 @@ export function DatabaseModule() {
                   onClick={() => setActiveGroup(ALL_GROUPS)}
                   className={cn(
                     'h-7 flex-none rounded-full px-3 font-mono text-[11px] transition-colors',
-                    activeGroup === ALL_GROUPS ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
+                    activeGroup === ALL_GROUPS ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash',
                   )}
                 >
                   All
@@ -256,7 +256,7 @@ export function DatabaseModule() {
                     onClick={() => setActiveGroup(g)}
                     className={cn(
                       'h-7 flex-none rounded-full px-3 font-mono text-[11px] transition-colors',
-                      activeGroup === g ? 'bg-devdeck-accent-tint text-devdeck-accent-soft' : 'text-devdeck-muted hover:bg-devdeck-hover-wash',
+                      activeGroup === g ? 'bg-devdeck-on text-devdeck-fg' : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash',
                     )}
                   >
                     {g}
@@ -269,18 +269,22 @@ export function DatabaseModule() {
               {isLoading ? (
                 <DataLoading compact label="loading connections…" />
               ) : error ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-fg-2">
                   <p>{error instanceof Error ? error.message : 'Failed to load connections'}</p>
                   <Button variant="secondary" size="sm" onClick={() => refetch()}>
                     Retry
                   </Button>
                 </div>
               ) : visible.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-dim">
-                  <DatabaseIcon size={28} className="text-devdeck-dim-2" />
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-devdeck-fg-2">
+                  <DatabaseIcon size={28} className="text-devdeck-fg-2" />
                   <p>{connections?.length ? 'No connections match your search.' : 'No database connections yet.'}</p>
                   {!connections?.length ? (
-                    <Button size="sm" onClick={openAdd}>
+                    /* secondary, not solid: this fires the same openAdd as the
+                       "New connection" button in the header, which is on screen
+                       at the same time. Two saturated accent fills for one
+                       action reads as two different actions. */
+                    <Button variant="secondary" size="sm" onClick={openAdd}>
                       <Plus size={13} />
                       Add your first connection
                     </Button>

@@ -87,7 +87,7 @@ export function DBTableDesigner({ connectionId, object, onApplied }: DBTableDesi
       )}
 
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-dim">Columns</span>
+        <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-fg-2">Columns</span>
         <Button variant="ghost" size="sm" onClick={addColumn}>
           <Plus size={12} />
           Add column
@@ -97,11 +97,11 @@ export function DBTableDesigner({ connectionId, object, onApplied }: DBTableDesi
         <div key={i} className="mb-1.5 flex items-center gap-1.5">
           <Input value={col.name} onChange={(e) => updateColumn(i, { name: e.target.value })} placeholder="name" className="w-36 font-mono text-[11.5px]" />
           <Input value={col.dataType} onChange={(e) => updateColumn(i, { dataType: e.target.value })} placeholder="text / integer / varchar(255)" className="flex-1 font-mono text-[11.5px]" />
-          <label className="flex items-center gap-1 text-[10.5px] text-devdeck-dim">
+          <label className="flex items-center gap-1 text-[10.5px] text-devdeck-fg-2">
             <input type="checkbox" checked={!col.nullable} onChange={(e) => updateColumn(i, { nullable: !e.target.checked })} />
             not null
           </label>
-          <label className="flex items-center gap-1 text-[10.5px] text-devdeck-dim">
+          <label className="flex items-center gap-1 text-[10.5px] text-devdeck-fg-2">
             <input type="checkbox" checked={col.isPrimaryKey} onChange={(e) => updateColumn(i, { isPrimaryKey: e.target.checked })} />
             PK
           </label>
@@ -121,7 +121,7 @@ export function DBTableDesigner({ connectionId, object, onApplied }: DBTableDesi
       </div>
 
       {preview ? (
-        <pre className="mt-3 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-3 font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
+        <pre className="mt-3 rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-3 font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
           {preview.join(';\n\n')};
         </pre>
       ) : null}

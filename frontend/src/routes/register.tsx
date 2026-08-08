@@ -33,10 +33,10 @@ function RegisterPage() {
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-devdeck-bg text-devdeck-fg">
+    <div className="flex min-h-[100dvh] w-full items-center justify-center bg-devdeck-pane px-4 text-devdeck-fg">
       <div className="w-[360px]">
         <h1 className="mb-1 text-lg font-medium">Create the DevDeck operator account</h1>
-        <p className="mb-6 text-[12px] text-devdeck-muted">
+        <p className="mb-6 text-[12px] text-devdeck-fg-2">
           One account per install.{totpRequired ? ' Two-factor setup is required next.' : ''}
         </p>
         <Label>Email</Label>
@@ -56,11 +56,11 @@ function RegisterPage() {
           placeholder="at least 12 characters"
           className="mb-5"
         />
-        {error && <p className="mb-4 text-[12px] text-devdeck-red-soft">{error}</p>}
+        {error && <p className="mb-4 text-[12px] text-devdeck-err">{error}</p>}
         <Button onClick={submit} disabled={register.isPending} className="w-full">
           {register.isPending ? 'Creating…' : 'Create account →'}
         </Button>
-        <p className="mt-4 text-center text-[12px] text-devdeck-muted">
+        <p className="mt-4 text-center text-[12px] text-devdeck-fg-2">
           Already have an account? <Link to="/login" className="underline">Sign in</Link>
         </p>
       </div>

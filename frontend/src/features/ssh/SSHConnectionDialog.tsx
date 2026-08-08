@@ -218,8 +218,8 @@ export function SSHConnectionDialog() {
           <div className="truncate text-[14px] font-semibold text-devdeck-fg">
             {isEdit ? 'Edit SSH connection' : 'Add SSH connection'}
           </div>
-          <div className="mt-1 font-mono text-[11px] text-devdeck-dim">
-            Any SSH host — not limited to registered machines. Credentials are encrypted at rest and never sent
+          <div className="mt-1 font-mono text-[11px] text-devdeck-fg-2">
+            Any SSH host - not limited to registered machines. Credentials are encrypted at rest and never sent
             back to the browser.
           </div>
         </div>
@@ -227,7 +227,7 @@ export function SSHConnectionDialog() {
           onClick={close}
           disabled={busy}
           aria-label="Close"
-          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg disabled:opacity-50"
+          className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md border border-devdeck-border-strong text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg disabled:opacity-50"
         >
           <X size={14} />
         </button>
@@ -236,7 +236,7 @@ export function SSHConnectionDialog() {
       {/* body */}
       <div className="flex-1 overflow-auto p-[18px]">
         {!isEdit ? (
-          <div className="mb-4 rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
+          <div className="mb-4 rounded-control border border-devdeck-border-card bg-devdeck-card-wash p-3">
             <Label>Paste ssh command</Label>
             <Input
               value={pasteRaw}
@@ -247,10 +247,10 @@ export function SSHConnectionDialog() {
               aria-label="Paste ssh command"
             />
             {pasteRaw.trim() && !parseSSHCommand(pasteRaw) ? (
-              <p className="mt-1.5 font-mono text-[11px] text-devdeck-red-soft">Can't read that ssh command.</p>
+              <p className="mt-1.5 font-mono text-[11px] text-devdeck-err">Can't read that ssh command.</p>
             ) : (
-              <p className="mt-1.5 font-mono text-[11px] leading-snug text-devdeck-dim">
-                Fills Host, Port, Username, Name — plus the key path from -i and the jump host from -J.
+              <p className="mt-1.5 font-mono text-[11px] leading-snug text-devdeck-fg-2">
+                Fills Host, Port, Username, Name - plus the key path from -i and the jump host from -J.
               </p>
             )}
             {extraHops > 0 ? (
@@ -327,8 +327,8 @@ export function SSHConnectionDialog() {
           isEdit={isEdit}
         />
 
-        <div className="rounded-[12px] border border-devdeck-border-card bg-devdeck-surface-2 p-3">
-          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">Connection flow</div>
+        <div className="rounded-control border border-devdeck-border-card bg-devdeck-card-wash p-3">
+          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-devdeck-fg-2">Connection flow</div>
 
           <Label>1. Executor machine</Label>
           <Select
@@ -349,7 +349,7 @@ export function SSHConnectionDialog() {
             aria-label="Connect via"
           />
           {addingJump ? (
-            <div className="mt-2 rounded-lg border border-devdeck-border-strong bg-devdeck-bg p-2.5">
+            <div className="mt-2 rounded-lg border border-devdeck-border-strong bg-devdeck-pane p-2.5">
               <Label>Host</Label>
               <Input
                 value={jumpDraft.host}
@@ -399,7 +399,7 @@ export function SSHConnectionDialog() {
               </div>
             </div>
           ) : (
-            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-dim">
+            <p className="mt-1.5 text-[11px] leading-snug text-devdeck-fg-2">
               {dialog.jumpConnectionId
                 ? 'The executor dials the jump host first, then tunnels the SSH handshake through it to reach this host.'
                 : 'The executor dials this host directly.'}

@@ -21,7 +21,7 @@ export function DocxView({ bytes }: { bytes: Uint8Array }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-devdeck-terminal px-8 py-8">
+    <div className="min-h-0 flex-1 overflow-auto bg-devdeck-pane px-8 py-8">
       {/* A fixed reading measure — a document body stretched across an
           ultrawide pane is unreadable, and this is a reading surface. */}
       <div className="mx-auto flex max-w-3xl flex-col gap-3 text-[13px] leading-relaxed text-devdeck-fg-2">
@@ -47,7 +47,7 @@ const HEADING_CLASS: Record<number, string> = {
   3: 'mt-3 text-[15px] font-semibold text-devdeck-fg',
   4: 'mt-3 text-[13.5px] font-semibold text-devdeck-fg',
   5: 'mt-2 text-[13px] font-semibold text-devdeck-fg-2',
-  6: 'mt-2 text-[12.5px] font-semibold uppercase tracking-wide text-devdeck-muted',
+  6: 'mt-2 text-[12.5px] font-semibold uppercase tracking-wide text-devdeck-fg-2',
 }
 
 function ParagraphBlock({ paragraph }: { paragraph: DocxParagraph }) {
@@ -100,7 +100,7 @@ function Runs({ runs }: { runs: DocxRun[] }) {
               href={run.href}
               target="_blank"
               rel="noreferrer"
-              className={cn(className, 'text-devdeck-accent-soft underline underline-offset-2')}
+              className={cn(className, 'text-devdeck-accent underline underline-offset-2')}
             >
               {content}
             </a>
@@ -142,7 +142,7 @@ function TableBlock({ rows }: { rows: DocxParagraph[][][] }) {
       <table className="w-full border-collapse text-[12px]">
         <tbody>
           {rows.map((cells, rowIndex) => (
-            <tr key={rowIndex} className={rowIndex === 0 ? 'bg-devdeck-surface-2' : undefined}>
+            <tr key={rowIndex} className={rowIndex === 0 ? 'bg-devdeck-card-wash' : undefined}>
               {cells.map((paragraphs, cellIndex) => (
                 <td
                   key={cellIndex}

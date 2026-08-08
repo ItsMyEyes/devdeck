@@ -13,7 +13,7 @@ function RuntimeHealth({ machineId }: { machineId: string }) {
   const { data, isLoading } = useMachineHealth(machineId)
   if (isLoading || !data) {
     return (
-      <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-dim">
+      <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-fg-2">
         <StatusDot color="#6b7280" size={6} />
         checking
       </span>
@@ -21,14 +21,14 @@ function RuntimeHealth({ machineId }: { machineId: string }) {
   }
   if (data.status === 'online') {
     return (
-      <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-green-soft">
+      <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-run">
         <StatusDot color="#56d58a" size={6} />
         online{data.latencyMs !== undefined ? ` · ${data.latencyMs}ms` : ''}
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-red-soft">
+    <span className="inline-flex items-center gap-2 font-mono text-[10.5px] text-devdeck-err">
       <StatusDot color="#f87171" size={6} />
       offline
     </span>
@@ -44,21 +44,21 @@ function MachineRow({ machine }: { machine: Machine }) {
   const check = useMachineUpdateCheck(machine.id)
   const canUpdate = check.data?.updateAvailable === true && check.data.managed === false
   return (
-    <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
-      <div className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-devdeck-surface-2 text-devdeck-muted">
+    <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+      <div className="flex h-9 w-9 items-center justify-center rounded-control bg-devdeck-card-wash text-devdeck-fg-2">
         {machine.isLocal ? <Monitor size={15} /> : <Server size={15} />}
       </div>
 
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="truncate text-[13px] font-semibold text-devdeck-fg-2">{machine.name}</div>
+          <div className="truncate text-[13px] font-semibold text-devdeck-fg">{machine.name}</div>
           {machine.isLocal ? (
-            <span className="flex-none rounded-md border border-devdeck-border-card bg-devdeck-surface-2 px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim-2">
+            <span className="flex-none rounded-md border border-devdeck-border-card bg-devdeck-card-wash px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
               local
             </span>
           ) : null}
         </div>
-        <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-dim-2">{machine.url}</div>
+        <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-fg-2">{machine.url}</div>
       </div>
 
       <div className="col-span-2 flex items-center gap-2 pl-12 lg:col-span-1 lg:pl-0">
@@ -66,12 +66,12 @@ function MachineRow({ machine }: { machine: Machine }) {
         <div className="min-w-2 flex-1 lg:hidden" />
         <div className="ml-auto flex items-center gap-1 lg:ml-0">
           {machine.isLocal ? (
-            <span className="rounded-md bg-devdeck-surface-2 px-2 py-1 font-mono text-[10px] text-devdeck-dim-2">
+            <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
               managed
             </span>
           ) : null}
           {build.data?.version ? (
-            <span className="flex-none rounded-md border border-devdeck-border-card bg-devdeck-surface-2 px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-dim-2">
+            <span className="flex-none rounded-md border border-devdeck-border-card bg-devdeck-card-wash px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
               {build.data.version}
             </span>
           ) : null}
@@ -85,7 +85,7 @@ function MachineRow({ machine }: { machine: Machine }) {
                   activeSessions: check.data?.activeSessions,
                 })
               }
-              className="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-devdeck-surface-2 px-1.5 font-mono text-[9.5px] text-devdeck-green-soft hover:bg-devdeck-popover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="flex h-7 cursor-pointer items-center gap-1 rounded-md bg-devdeck-card-wash px-1.5 font-mono text-[9.5px] text-devdeck-run hover:bg-devdeck-glass-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <Download size={12} />
               {check.data?.latest}
@@ -99,7 +99,7 @@ function MachineRow({ machine }: { machine: Machine }) {
             aria-label={`Set sign-in PIN for ${machine.name}`}
             title="Set sign-in PIN"
             onClick={() => openRuntimePin(machine.id, machine.name)}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <KeyRound size={13} />
           </button>
@@ -107,7 +107,7 @@ function MachineRow({ machine }: { machine: Machine }) {
             type="button"
             aria-label={`Restart ${machine.name}`}
             onClick={() => askMachineAction('restart', machine.id, machine.name)}
-            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <RotateCw size={13} />
           </button>
@@ -117,7 +117,7 @@ function MachineRow({ machine }: { machine: Machine }) {
                 type="button"
                 aria-label={`Stop ${machine.name}`}
                 onClick={() => askMachineAction('stop', machine.id, machine.name)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Power size={13} />
               </button>
@@ -125,7 +125,7 @@ function MachineRow({ machine }: { machine: Machine }) {
                 type="button"
                 aria-label={`Edit ${machine.name}`}
                 onClick={() => openEditMachine(machine.id, machine.name, machine.url, machine.key)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Settings2 size={13} />
               </button>
@@ -133,7 +133,7 @@ function MachineRow({ machine }: { machine: Machine }) {
                 type="button"
                 aria-label={`Delete ${machine.name}`}
                 onClick={() => askDelete('machine', machine.id, machine.name)}
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted hover:bg-devdeck-red-tint hover:text-devdeck-red-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Trash2 size={13} />
               </button>
@@ -169,12 +169,12 @@ export function MachinesModule() {
       <div className="flex flex-none items-center gap-3 border-b border-devdeck-border px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold text-devdeck-fg-2">Runtimes</h1>
-            <span className="rounded-full bg-devdeck-surface-2 px-2 py-0.5 font-mono text-[10px] text-devdeck-muted-2">
+            <h1 className="text-[15px] font-semibold text-devdeck-fg">Runtimes</h1>
+            <span className="rounded-full bg-devdeck-card-wash px-2 py-0.5 font-mono text-[10px] text-devdeck-fg-2">
               {total}
             </span>
           </div>
-          <div className="mt-1 font-mono text-[11px] text-devdeck-dim">
+          <div className="mt-1 font-mono text-[11px] text-devdeck-fg-2">
             {local} local · {Math.max(0, total - local)} remote
           </div>
         </div>
@@ -194,8 +194,8 @@ export function MachinesModule() {
             <DataLoading compact label="loading runtimes…" />
           </div>
         ) : error ? (
-          <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-[12px] border border-devdeck-border-card bg-devdeck-card px-4">
-            <span className="text-center font-mono text-xs text-devdeck-dim-2">
+          <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-4">
+            <span className="text-center font-mono text-xs text-devdeck-fg-2">
               {error instanceof Error ? error.message : 'Failed to load runtimes'}
             </span>
             <Button variant="secondary" size="sm" onClick={() => refetch()}>
@@ -203,9 +203,9 @@ export function MachinesModule() {
             </Button>
           </div>
         ) : !machines || machines.length === 0 ? (
-          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-[12px] border border-dashed border-devdeck-border-menu bg-devdeck-card/35 px-4 text-center">
-            <div className="text-[13px] font-semibold text-devdeck-fg-2">No runtimes registered yet</div>
-            <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-devdeck-muted">
+          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-control border border-dashed border-devdeck-border-menu bg-devdeck-glass-solid/35 px-4 text-center">
+            <div className="text-[13px] font-semibold text-devdeck-fg">No runtimes registered yet</div>
+            <div className="mt-2 max-w-[42ch] text-[12px] leading-relaxed text-devdeck-fg-2">
               Add a runtime to run worktrees, terminals, and git on another machine.
             </div>
             <Button className="mt-4" size="sm" onClick={openAddMachine}>

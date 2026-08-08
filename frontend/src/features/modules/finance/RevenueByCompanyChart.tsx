@@ -21,13 +21,13 @@ export function RevenueByCompanyChart({ invoices }: { invoices: Invoice[] }) {
   }
 
   return (
-    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 p-4">
-      <span className="font-mono text-[11px] text-devdeck-dim uppercase">Revenue per company</span>
+    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-card-wash p-4">
+      <span className="font-mono text-[11px] text-devdeck-fg-2 uppercase">Revenue per company</span>
       <ChartContainer config={config} className="flex-1">
         <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
           <CartesianGrid horizontal={false} stroke="var(--devdeck-border-card)" />
-          <XAxis type="number" tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-dim)" tickFormatter={(v) => fmtRupiah(v)} />
-          <YAxis type="category" dataKey="company" tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-dim)" width={100} />
+          <XAxis type="number" tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-fg-2)" tickFormatter={(v) => fmtRupiah(v)} />
+          <YAxis type="category" dataKey="company" tickLine={false} axisLine={false} fontSize={10} stroke="var(--devdeck-fg-2)" width={100} />
           <ChartTooltip content={<ChartTooltipContent formatter={(v) => fmtRupiah(Number(v))} />} />
           <Bar dataKey="total" fill="var(--color-total)" radius={4} />
         </BarChart>

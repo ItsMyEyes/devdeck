@@ -168,7 +168,7 @@ function InlineNameInput({
         }
       }}
       onBlur={(event) => fireCommit(event.currentTarget.value)}
-      className="h-[22px] min-w-0 flex-1 rounded border border-devdeck-border-accent bg-devdeck-elevated px-1.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none"
+      className="h-[22px] min-w-0 flex-1 rounded border border-devdeck-border-accent bg-devdeck-glass-solid px-1.5 font-mono text-[11.5px] text-devdeck-fg-2 outline-none"
     />
   )
 }
@@ -193,11 +193,11 @@ function ContextMenuAction({
       className={cn(
         'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 outline-none',
         'data-[highlighted]:bg-devdeck-hover-wash data-[disabled]:cursor-default data-[disabled]:opacity-40',
-        danger && 'text-devdeck-red-soft data-[highlighted]:bg-devdeck-red-tint-hover',
+        danger && 'text-devdeck-err data-[highlighted]:bg-devdeck-red-tint-hover',
       )}
     >
       <span className="flex-1 truncate">{label}</span>
-      {shortcut ? <span className="font-mono text-[10px] text-devdeck-dim">{shortcut}</span> : null}
+      {shortcut ? <span className="font-mono text-[10px] text-devdeck-fg-2">{shortcut}</span> : null}
     </ContextMenu.Item>
   )
 }
@@ -232,12 +232,12 @@ function HeaderMenuAction({
       className={cn(
         'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left font-mono text-[11.5px] text-devdeck-fg-2',
         'hover:bg-devdeck-hover-wash disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent',
-        danger && 'text-devdeck-red-soft hover:bg-devdeck-red-tint-hover',
+        danger && 'text-devdeck-err hover:bg-devdeck-red-tint-hover',
       )}
     >
       <span className="flex h-4 w-4 flex-none items-center justify-center">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
-      {shortcut ? <span className="font-mono text-[10px] text-devdeck-dim">{shortcut}</span> : null}
+      {shortcut ? <span className="font-mono text-[10px] text-devdeck-fg-2">{shortcut}</span> : null}
     </button>
   )
 }
@@ -466,7 +466,7 @@ export function TerminalExplorer({
         toast.error('That pane is no longer open')
         return
       }
-      if (clipboard.mode === 'cut') toast.info('Copied across panes — the original was kept')
+      if (clipboard.mode === 'cut') toast.info('Copied across panes - the original was kept')
       void transferAcrossShells(source, ownTransferHandle(), clipboard.paths, clipboard.hasDir, folder)
       return
     }
@@ -780,7 +780,7 @@ export function TerminalExplorer({
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-devdeck-surface" onKeyDown={handleKeyDown} onPaste={handlePaste}>
+    <aside className="flex min-h-0 flex-1 flex-col bg-devdeck-pane" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
       {/* Two inline actions + an overflow menu, rather than the six-to-seven
           inline buttons this header used to carry. The sidebar this renders in
@@ -790,10 +790,10 @@ export function TerminalExplorer({
           panel edge. Only New File and Refresh stay inline; everything else
           moves into "..." and keeps its keyboard shortcut and context-menu
           entry. */}
-      <div className="flex h-9 flex-none items-center border-b border-devdeck-border bg-devdeck-surface-2">
+      <div className="flex h-9 flex-none items-center border-b border-devdeck-border bg-devdeck-card-wash">
         <div
           title={rootLabel}
-          className="flex h-full min-w-0 flex-1 items-center truncate border-r border-devdeck-border bg-devdeck-surface px-3 font-mono text-[11px] text-devdeck-fg"
+          className="flex h-full min-w-0 flex-1 items-center truncate border-r border-devdeck-border bg-devdeck-pane px-3 font-mono text-[11px] text-devdeck-fg"
         >
           {rootLabel}
         </div>
@@ -803,7 +803,7 @@ export function TerminalExplorer({
           disabled={writeFile.isPending}
           title={`New file in ${uploadTargetLabel} (Ctrl+N)`}
           aria-label="New file"
-          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-wait"
         >
           {writeFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <FilePlus2 size={13} />}
         </button>
@@ -813,7 +813,7 @@ export function TerminalExplorer({
           disabled={mkdir.isPending}
           title={`New folder in ${uploadTargetLabel}`}
           aria-label="New folder"
-          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-wait"
         >
           {mkdir.isPending ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />}
         </button>
@@ -823,7 +823,7 @@ export function TerminalExplorer({
           disabled={isFetching}
           title="Refresh files"
           aria-label="Refresh files"
-          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-wait"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-wait"
         >
           <RefreshCw size={13} className={cn(isFetching && 'animate-spin')} />
         </button>
@@ -833,7 +833,7 @@ export function TerminalExplorer({
           disabled={expanded.size === 0}
           title="Collapse all folders"
           aria-label="Collapse all folders"
-          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
+          className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-default disabled:opacity-40"
         >
           <ChevronsDownUp size={13} />
         </button>
@@ -842,7 +842,7 @@ export function TerminalExplorer({
           triggerTitle="More file actions"
           triggerAriaLabel="More file actions"
           align="end"
-          triggerClassName="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-dim hover:text-devdeck-fg"
+          triggerClassName="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg"
         >
           <div className="flex min-w-[190px] flex-col gap-0.5">
             <HeaderMenuAction
@@ -881,14 +881,14 @@ export function TerminalExplorer({
           sidebar is 200-560px wide, and the count competed with the root
           label for the same space. */}
       {selectedCount > 0 ? (
-        <div className="flex h-7 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-accent/10 pl-3 pr-1.5 font-mono text-[10.5px] text-devdeck-fg-2">
+        <div className="flex h-7 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-on pl-3 pr-1.5 font-mono text-[10.5px] text-devdeck-fg-2">
           <span className="min-w-0 flex-1 truncate">{selectedCount} selected</span>
           <button
             type="button"
             onClick={clearSelection}
             title="Clear selection"
             aria-label="Clear selection"
-            className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+            className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
           >
             <X size={11} />
           </button>
@@ -913,7 +913,7 @@ export function TerminalExplorer({
                 'min-h-0 flex-1 overflow-auto py-1',
                 // Root-targeted drop: the pointer is over empty space or a
                 // file row, so the drop lands at the tree root.
-                isDragOver && dropTargetPath === null && 'bg-devdeck-accent/[0.06] ring-1 ring-inset ring-devdeck-accent/70',
+                isDragOver && dropTargetPath === null && 'bg-devdeck-on ring-1 ring-inset ring-devdeck-line',
               )}
             />
           }
@@ -956,7 +956,7 @@ export function TerminalExplorer({
           <ContextMenu.Positioner className="outline-none" style={{ zIndex: 70 }}>
             <ContextMenu.Popup
               className={cn(
-                'min-w-[190px] origin-[var(--transform-origin)] rounded-[11px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
+                'min-w-[190px] origin-[var(--transform-origin)] rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5',
                 'shadow-[0_18px_44px_rgba(0,0,0,0.55)] outline-none transition-all duration-150',
                 'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
                 'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -1008,11 +1008,11 @@ export function TerminalExplorer({
         <button
           type="button"
           onClick={onRequestQuickOpen}
-          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-surface-2 px-3 text-left font-mono text-[10.5px] text-devdeck-muted hover:text-devdeck-fg-2"
+          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-card-wash px-3 text-left font-mono text-[10.5px] text-devdeck-fg-2 hover:text-devdeck-fg-2"
         >
           <Search size={12} />
           <span>Search files / folders</span>
-          <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
+          <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-pane px-1.5 py-0.5 text-[9.5px] text-devdeck-fg-2">
             Ctrl P
           </kbd>
         </button>
@@ -1022,12 +1022,12 @@ export function TerminalExplorer({
         <button
           type="button"
           onClick={onRequestContentSearch}
-          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-surface-2 px-3 text-left font-mono text-[10.5px] text-devdeck-muted hover:text-devdeck-fg-2"
+          className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-card-wash px-3 text-left font-mono text-[10.5px] text-devdeck-fg-2 hover:text-devdeck-fg-2"
         >
           <FileSearch size={12} />
           <span>Search in files</span>
           {contentSearchShortcut ? (
-            <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-terminal px-1.5 py-0.5 text-[9.5px] text-devdeck-dim">
+            <kbd className="ml-auto rounded border border-devdeck-border-strong bg-devdeck-pane px-1.5 py-0.5 text-[9.5px] text-devdeck-fg-2">
               {contentSearchShortcut}
             </kbd>
           ) : null}
@@ -1124,7 +1124,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
         <DataLoading compact label="loading files…" />
       </div>
     ) : (
-      <div className="flex h-[29px] items-center gap-2 text-devdeck-dim" style={{ paddingLeft: indent + 18 }}>
+      <div className="flex h-[29px] items-center gap-2 text-devdeck-fg-2" style={{ paddingLeft: indent + 18 }}>
         <Loader2 size={11} className="animate-spin" />
       </div>
     )
@@ -1134,7 +1134,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
     const message = error instanceof ApiError ? error.message : 'Could not read this folder'
     return depth === 0 ? (
       <div className="flex h-32 flex-col items-center justify-center gap-3 px-4 text-center">
-        <span className="font-mono text-[10.5px] leading-relaxed text-devdeck-muted">{message}</span>
+        <span className="font-mono text-[10.5px] leading-relaxed text-devdeck-fg-2">{message}</span>
         <button
           type="button"
           onClick={() => refetch()}
@@ -1148,7 +1148,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
         type="button"
         onClick={() => refetch()}
         title={message}
-        className="flex h-[29px] w-full cursor-pointer items-center gap-1.5 truncate font-mono text-[10.5px] text-devdeck-red-soft hover:bg-devdeck-hover-wash"
+        className="flex h-[29px] w-full cursor-pointer items-center gap-1.5 truncate font-mono text-[10.5px] text-devdeck-err hover:bg-devdeck-hover-wash"
         style={{ paddingLeft: indent + 18 }}
       >
         {message} · retry
@@ -1160,11 +1160,11 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
 
   if (entries.length === 0 && !creatingHere) {
     return depth === 0 ? (
-      <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-devdeck-dim">
+      <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-devdeck-fg-2">
         Empty folder
       </div>
     ) : (
-      <div className="flex h-[29px] items-center font-mono text-[10.5px] text-devdeck-dim" style={{ paddingLeft: indent + 18 }}>
+      <div className="flex h-[29px] items-center font-mono text-[10.5px] text-devdeck-fg-2" style={{ paddingLeft: indent + 18 }}>
         empty
       </div>
     )
@@ -1240,15 +1240,15 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
               }}
               className={cn(
                 'group flex h-[29px] items-center pr-1.5 hover:bg-devdeck-hover-wash',
-                isSelected && 'bg-devdeck-accent/10',
+                isSelected && 'bg-devdeck-on',
                 isDragging && 'opacity-40',
-                rest.dropTargetPath === entry.path && 'bg-devdeck-accent/20 ring-1 ring-inset ring-devdeck-accent',
+                rest.dropTargetPath === entry.path && 'bg-devdeck-on ring-1 ring-inset ring-devdeck-line',
               )}
               style={{ paddingLeft: indent }}
             >
               {isRenaming ? (
                 <div className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-1.5">
-                  <ChevronRight size={11} className={cn('flex-none text-devdeck-dim-3', !entry.isDir && 'invisible')} />
+                  <ChevronRight size={11} className={cn('flex-none text-devdeck-fg-2', !entry.isDir && 'invisible')} />
                   <MaterialFileIcon name={entry.name} isDir={entry.isDir} size={16} />
                   <InlineNameInput
                     defaultValue={entry.name}
@@ -1277,7 +1277,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                   <ChevronRight
                     size={11}
                     className={cn(
-                      'flex-none text-devdeck-dim-3 transition-transform duration-100',
+                      'flex-none text-devdeck-fg-2 transition-transform duration-100',
                       isOpen && 'rotate-90',
                       !entry.isDir && 'invisible',
                     )}
@@ -1293,7 +1293,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 }
                 disabled={rest.downloadPending}
                 title={`Download ${entry.name}`}
-                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
               >
                 <Download size={11} />
               </button>
@@ -1302,7 +1302,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                 onClick={() => rest.onRemovePath(selectedEntry)}
                 disabled={rest.deletePending}
                 title={`Delete ${entry.name}`}
-                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
+                className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 opacity-0 hover:bg-devdeck-red-tint-hover hover:text-devdeck-err group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-wait"
               >
                 <Trash2 size={11} />
               </button>

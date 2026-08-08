@@ -44,22 +44,22 @@ export function RenameSymbolDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !pending && onCancel()} width={460} z={70}>
       <div className="mb-2.5 flex items-center gap-2.5">
-        <Pencil size={15} className="text-devdeck-accent-soft" />
+        <Pencil size={15} className="text-devdeck-fg-2" />
         <DialogTitle>{plan ? 'Confirm rename' : `Rename ${symbol}`}</DialogTitle>
       </div>
 
       {plan ? (
         <>
-          <DialogDescription className="mb-3 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+          <DialogDescription className="mb-3 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
             Renaming to <span className="font-mono text-devdeck-fg-2">{plan.newName}</span> changes{' '}
             {plan.otherFiles.length} other file{plan.otherFiles.length === 1 ? '' : 's'} on disk. Those writes
             happen immediately and cannot be undone from the editor.
           </DialogDescription>
-          <ul className="mb-4 max-h-52 overflow-auto rounded border border-devdeck-border-strong bg-devdeck-elevated p-2 font-mono text-[11.5px]">
+          <ul className="mb-4 max-h-52 overflow-auto rounded border border-devdeck-border-strong bg-devdeck-glass-solid p-2 font-mono text-[11.5px]">
             {plan.currentEdits.length > 0 && (
               <li className="flex items-center justify-between px-1.5 py-1 text-devdeck-fg-2">
                 <span className="truncate">{currentPath}</span>
-                <span className="ml-3 shrink-0 text-devdeck-dim">
+                <span className="ml-3 shrink-0 text-devdeck-fg-2">
                   {plan.currentEdits.length} edit{plan.currentEdits.length === 1 ? '' : 's'} · unsaved
                 </span>
               </li>
@@ -67,7 +67,7 @@ export function RenameSymbolDialog({
             {plan.otherFiles.map((file) => (
               <li key={file.path} className="flex items-center justify-between px-1.5 py-1 text-devdeck-fg-2">
                 <span className="truncate">{file.path}</span>
-                <span className="ml-3 shrink-0 text-devdeck-dim">
+                <span className="ml-3 shrink-0 text-devdeck-fg-2">
                   {file.edits.length} edit{file.edits.length === 1 ? '' : 's'}
                 </span>
               </li>
@@ -86,7 +86,7 @@ export function RenameSymbolDialog({
         </>
       ) : (
         <>
-          <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+          <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
             The language server decides which references change. You will see the full list before anything is
             written.
           </DialogDescription>

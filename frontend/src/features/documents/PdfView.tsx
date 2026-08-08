@@ -33,14 +33,14 @@ export function PdfView({ bytes, name }: { bytes: Uint8Array; name: string }) {
   return (
     <object data={url} type="application/pdf" className="min-h-0 flex-1" aria-label={name}>
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <span className="max-w-md font-mono text-[11px] leading-relaxed text-devdeck-muted">
+        <span className="max-w-md font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
           This browser has no built-in PDF viewer.
         </span>
         <a
           href={url}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-elevated px-3 py-1.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent-soft"
+          className="flex items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-glass-solid px-3 py-1.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent"
         >
           <ExternalLink size={12} />
           Open {name} in a new tab

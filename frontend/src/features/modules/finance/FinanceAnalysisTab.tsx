@@ -8,8 +8,8 @@ import { StatusBreakdownChart } from './StatusBreakdownChart'
 export function FinanceAnalysisTab({ invoices }: { invoices: Invoice[] }) {
   if (invoices.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8 text-center font-mono text-[12px] text-devdeck-dim">
-        No invoices yet — charts will appear once you create one.
+      <div className="flex flex-1 items-center justify-center p-8 text-center font-mono text-[12px] text-devdeck-fg-2">
+        No invoices yet - charts will appear once you create one.
       </div>
     )
   }

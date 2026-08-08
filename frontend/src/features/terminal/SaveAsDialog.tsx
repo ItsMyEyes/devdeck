@@ -33,10 +33,10 @@ export function SaveAsDialog({ open, defaultPath, pending, onCancel, onConfirm }
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !pending && onCancel()} width={420} z={70}>
       <div className="mb-2.5 flex items-center gap-2.5">
-        <Save size={15} className="text-devdeck-accent-soft" />
+        <Save size={15} className="text-devdeck-fg-2" />
         <DialogTitle>Save As</DialogTitle>
       </div>
-      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-muted">
+      <DialogDescription className="mb-4 font-sans text-[12.5px] leading-[1.55] text-devdeck-fg-2">
         Path relative to the worktree root.
       </DialogDescription>
       <Input

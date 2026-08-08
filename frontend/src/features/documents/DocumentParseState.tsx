@@ -18,7 +18,7 @@ export function DocumentParseState({
 }) {
   if (state.status === 'loading') {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-terminal">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-pane">
         <DataLoading compact label={label} />
       </div>
     )
@@ -26,12 +26,12 @@ export function DocumentParseState({
 
   if (state.status === 'error') {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-devdeck-terminal px-6 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-devdeck-pane px-6 text-center">
         <FileWarning size={22} className="text-devdeck-yellow" />
-        <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
+        <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
           {state.error ?? 'Could not read this document'}
         </span>
-        <span className="max-w-lg font-mono text-[10.5px] leading-relaxed text-devdeck-dim">
+        <span className="max-w-lg font-mono text-[10.5px] leading-relaxed text-devdeck-fg-2">
           Download it to open in its native application.
         </span>
       </div>
@@ -39,8 +39,8 @@ export function DocumentParseState({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-terminal px-6 text-center">
-      <span className="font-mono text-[11px] text-devdeck-dim">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-devdeck-pane px-6 text-center">
+      <span className="font-mono text-[11px] text-devdeck-fg-2">
         {emptyLabel ?? 'Nothing to show'}
       </span>
     </div>

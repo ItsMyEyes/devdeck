@@ -271,7 +271,7 @@ check('buildInsertEdits collects every bad cell in a row, not just the first', (
 check('buildInsertEdits treats a missing cell in a short row as an empty string', () => {
   const cols = [col('id', 'integer'), col('note', 'text', { nullable: true })]
   const r = buildInsertEdits(OBJ, { a: 'id', b: 'note' }, ['a', 'b'], [['1']], cols)
-  assertEqual(r.errors, [], 'no error — a missing nullable cell is null')
+  assertEqual(r.errors, [], 'no error - a missing nullable cell is null')
   assertEqual(r.edits[0].newValues, { id: 1, note: null }, 'null for the absent cell')
 })
 

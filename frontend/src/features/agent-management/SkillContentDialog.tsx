@@ -79,7 +79,7 @@ export function SkillContentDialog({
       className="flex h-[min(82vh,760px)] flex-col overflow-hidden p-0"
     >
       <div className="flex flex-none items-start gap-3 border-b border-devdeck-border px-4 py-3.5">
-        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent-soft">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-devdeck-line bg-devdeck-on text-devdeck-fg-2">
           <FilePenLine size={17} />
         </div>
         <div className="min-w-0 flex-1">
@@ -92,7 +92,7 @@ export function SkillContentDialog({
             ) : dirty ? (
               <span className="font-mono text-[9.5px] text-devdeck-yellow">Modified</span>
             ) : initialized ? (
-              <span className="font-mono text-[9.5px] text-devdeck-green-soft">Synced</span>
+              <span className="font-mono text-[9.5px] text-devdeck-run">Synced</span>
             ) : null}
           </div>
           <DialogDescription className="mt-1">
@@ -103,7 +103,7 @@ export function SkillContentDialog({
           type="button"
           onClick={() => requestOpenChange(false)}
           aria-label="Close skill editor"
-          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-devdeck-dim transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
         >
           <X size={15} />
         </button>
@@ -126,7 +126,7 @@ export function SkillContentDialog({
         ) : contentQuery.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <AlertTriangle size={22} className="text-devdeck-yellow" />
-            <p className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
+            <p className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
               {contentQuery.error instanceof Error
                 ? contentQuery.error.message
                 : 'Could not load SKILL.md'}
@@ -150,8 +150,8 @@ export function SkillContentDialog({
         )}
       </div>
 
-      <div className="flex flex-none items-center gap-2 border-t border-devdeck-border bg-devdeck-card px-4 py-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-devdeck-dim">
+      <div className="flex flex-none items-center gap-2 border-t border-devdeck-border bg-devdeck-glass-solid px-4 py-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-devdeck-fg-2">
           {contentQuery.data?.path ?? 'SKILL.md'}
         </span>
         <Button

@@ -264,7 +264,7 @@ export function DBSqlEditor({
     <div className="flex h-full min-h-0">
       <div className="w-52 flex-none overflow-auto border-r border-devdeck-border-menu p-2">
         <div className="mb-2 flex items-center justify-between px-1">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-dim">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-devdeck-fg-2">
             {showHistory ? 'History' : 'Saved queries'}
           </span>
           {showHistory ? (
@@ -272,7 +272,7 @@ export function DBSqlEditor({
               type="button"
               onClick={confirmClearHistory}
               disabled={clearHistory.isPending || historyRows.length === 0}
-              className="text-devdeck-dim hover:text-devdeck-red-soft disabled:opacity-40"
+              className="text-devdeck-fg-2 hover:text-devdeck-err disabled:opacity-40"
               aria-label="Clear history"
               title="Clear history"
             >
@@ -283,13 +283,13 @@ export function DBSqlEditor({
 
         {showHistory ? (
           historyLoading ? (
-            <p className="px-1.5 text-[11px] text-devdeck-dim">Loading…</p>
+            <p className="px-1.5 text-[11px] text-devdeck-fg-2">Loading…</p>
           ) : historyError ? (
-            <p className="px-1.5 text-[11px] text-devdeck-red-soft">
+            <p className="px-1.5 text-[11px] text-devdeck-err">
               {historyError instanceof Error ? historyError.message : 'Failed to load history'}
             </p>
           ) : historyRows.length === 0 ? (
-            <p className="px-1.5 text-[11px] text-devdeck-dim">No queries run yet.</p>
+            <p className="px-1.5 text-[11px] text-devdeck-fg-2">No queries run yet.</p>
           ) : (
             historyRows.map((h) => {
               const when = parseExecutedAt(h.executedAt)
@@ -306,14 +306,14 @@ export function DBSqlEditor({
                       aria-hidden
                       className={cn(
                         'size-1.5 flex-none rounded-full',
-                        h.status === 'success' ? 'bg-devdeck-green' : 'bg-devdeck-red-soft',
+                        h.status === 'success' ? 'bg-devdeck-green' : 'bg-devdeck-err',
                       )}
                     />
                     <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg-2">
                       {firstSQLLine(h.sql, 40)}
                     </span>
                   </span>
-                  <span className="ml-3 block truncate text-[10px] text-devdeck-dim-2">
+                  <span className="ml-3 block truncate text-[10px] text-devdeck-fg-2">
                     {when ? formatDistanceToNow(when, { addSuffix: true }) : 'unknown time'} · {h.elapsedMs} ms
                   </span>
                 </button>
@@ -333,7 +333,7 @@ export function DBSqlEditor({
               <button
                 type="button"
                 onClick={() => deleteSaved.mutate({ id: q.id, connectionId })}
-                className="opacity-0 hover:text-devdeck-red-soft group-hover:opacity-100"
+                className="opacity-0 hover:text-devdeck-err group-hover:opacity-100"
                 aria-label={`Delete ${q.name}`}
               >
                 <Trash2 size={11} />
@@ -349,7 +349,7 @@ export function DBSqlEditor({
             size="sm"
             onClick={runCurrent}
             disabled={runQuery.isPending}
-            title="Run (⌘/Ctrl+Enter) — runs the selection when there is one"
+            title="Run (⌘/Ctrl+Enter) - runs the selection when there is one"
           >
             <Play size={12} />
             Run
@@ -406,16 +406,16 @@ export function DBSqlEditor({
 
         <div className="min-h-0 flex-1 overflow-auto p-3">
           {error ? (
-            <div className="text-[12px] text-devdeck-red-soft">{error}</div>
+            <div className="text-[12px] text-devdeck-err">{error}</div>
           ) : !result ? (
-            <div className="text-[12px] text-devdeck-dim">Run a query to see results.</div>
+            <div className="text-[12px] text-devdeck-fg-2">Run a query to see results.</div>
           ) : (
             <div className="overflow-auto">
               <table className="w-full border-collapse font-mono text-[11.5px]">
                 <thead>
                   <tr>
                     {result.columns.map((c) => (
-                      <th key={c.name} className="border-b border-devdeck-border-menu px-2 py-1 text-left text-devdeck-muted">
+                      <th key={c.name} className="border-b border-devdeck-border-menu px-2 py-1 text-left text-devdeck-fg-2">
                         {c.name}
                       </th>
                     ))}
@@ -426,7 +426,7 @@ export function DBSqlEditor({
                     <tr key={i}>
                       {row.map((v, j) => (
                         <td key={j} className="border-b border-devdeck-border-menu/50 px-2 py-1 text-devdeck-fg-2">
-                          {v === null ? <span className="italic text-devdeck-dim-2">null</span> : String(v)}
+                          {v === null ? <span className="italic text-devdeck-fg-2">null</span> : String(v)}
                         </td>
                       ))}
                     </tr>
@@ -434,7 +434,7 @@ export function DBSqlEditor({
                 </tbody>
               </table>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-[11px] text-devdeck-dim">
+                <span className="text-[11px] text-devdeck-fg-2">
                   {result.rows.length} {result.rows.length === 1 ? 'row' : 'rows'} · {result.elapsedMs} ms
                   {result.truncated ? ` · truncated (showing the first ${result.rows.length})` : ''}
                 </span>

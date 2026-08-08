@@ -19,10 +19,10 @@ export function StatusBreakdownChart({ invoices }: { invoices: Invoice[] }) {
     .filter((d) => d.count > 0)
 
   return (
-    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-surface-2 p-4">
-      <span className="font-mono text-[11px] text-devdeck-dim uppercase">Status breakdown</span>
+    <div className="flex h-[260px] flex-col gap-2 rounded-lg border border-devdeck-border-card bg-devdeck-card-wash p-4">
+      <span className="font-mono text-[11px] text-devdeck-fg-2 uppercase">Status breakdown</span>
       {data.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center font-mono text-[11px] text-devdeck-dim">No invoices yet</div>
+        <div className="flex flex-1 items-center justify-center font-mono text-[11px] text-devdeck-fg-2">No invoices yet</div>
       ) : (
         <ChartContainer config={config} className="flex-1">
           <PieChart>

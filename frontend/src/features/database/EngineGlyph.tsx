@@ -11,7 +11,7 @@ export function EngineGlyph({ engine, size = 32 }: { engine: DBEngine; size?: nu
   const color = DB_ENGINE_COLOR[engine]
   return (
     <span
-      className="flex flex-none items-center justify-center rounded-[10px] border font-mono text-[10px] font-semibold"
+      className="flex flex-none items-center justify-center rounded-control border font-mono text-[10px] font-semibold"
       style={{ width: size, height: size, color, background: `${color}18`, borderColor: `${color}44` }}
     >
       {label}

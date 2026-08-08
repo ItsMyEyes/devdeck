@@ -41,10 +41,10 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
       <Popover.Trigger
         aria-label={active ? `Select workspace, current workspace ${active.name}` : 'Select workspace'}
         className={cn(
-          'group flex h-10 w-10 cursor-pointer items-center justify-center rounded-[11px] border border-transparent',
-          'bg-devdeck-surface-2 text-devdeck-muted transition-colors hover:border-devdeck-border-accent hover:bg-devdeck-popover hover:text-devdeck-fg',
+          'group flex h-10 w-10 cursor-pointer items-center justify-center rounded-control border border-transparent',
+          'bg-devdeck-card-wash text-devdeck-fg-2 transition-colors hover:border-devdeck-border-accent hover:bg-devdeck-glass-solid hover:text-devdeck-fg',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-          open && 'border-devdeck-border-accent bg-devdeck-popover text-devdeck-fg',
+          open && 'border-devdeck-border-accent bg-devdeck-glass-solid text-devdeck-fg',
         )}
       >
         <WorkspaceBadge name={active?.name ?? '?'} active={open} small />
@@ -53,16 +53,16 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
   ) : (
     <Popover.Trigger
       className={cn(
-        'flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-surface-2 px-2.5 text-left',
+        'flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-card-wash px-2.5 text-left',
         'transition-colors hover:border-devdeck-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
     >
       <WorkspaceBadge name={active?.name ?? '?'} active />
       <div className="min-w-0 flex-1">
-        <div className="font-mono text-[8.5px] tracking-[0.14em] text-devdeck-dim">WORKSPACE</div>
+        <div className="font-mono text-[8.5px] tracking-[0.14em] text-devdeck-fg-2">WORKSPACE</div>
         <div className="mt-px truncate text-[12.5px] font-semibold text-devdeck-fg">{active?.name ?? '—'}</div>
       </div>
-      <ChevronDown size={13} className="flex-none text-devdeck-dim" />
+      <ChevronDown size={13} className="flex-none text-devdeck-fg-2" />
     </Popover.Trigger>
   )
 
@@ -89,7 +89,7 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
             <Popover.Popup
               className={cn(
                 compact ? 'w-[260px]' : 'w-[var(--anchor-width)] min-w-[260px]',
-                'origin-[var(--transform-origin)] rounded-[12px] border border-devdeck-border-menu bg-devdeck-popover p-1.5',
+                'origin-[var(--transform-origin)] rounded-control border border-devdeck-border-menu bg-devdeck-glass-solid p-1.5',
                 'shadow-[0_12px_28px_rgba(0,0,0,0.48)] outline-none transition-all duration-150',
                 'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
                 'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
@@ -97,12 +97,12 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
             >
               <div className="flex items-center justify-between px-2 py-1.5">
                 <div className="min-w-0">
-                  <div className="font-mono text-[9px] font-semibold tracking-[0.14em] text-devdeck-dim">WORKSPACE</div>
-                  <div className="mt-0.5 truncate text-[12px] text-devdeck-muted">
+                  <div className="font-mono text-[9px] font-semibold tracking-[0.14em] text-devdeck-fg-2">WORKSPACE</div>
+                  <div className="mt-0.5 truncate text-[12px] text-devdeck-fg-2">
                     {active ? `${active.projects.length} groups · ${activeHosts} agents` : 'No workspace selected'}
                   </div>
                 </div>
-                <ChevronDown size={13} className="flex-none text-devdeck-dim" />
+                <ChevronDown size={13} className="flex-none text-devdeck-fg-2" />
               </div>
 
               <WorkspaceMenu
@@ -115,7 +115,7 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
               <button
                 type="button"
                 onClick={openNewWorkspace}
-                className="mt-1 flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border-t border-devdeck-border-strong px-2 text-[12px] font-medium text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="mt-1 flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border-t border-devdeck-border-strong px-2 text-[12px] font-medium text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Plus size={14} className="w-5" />
                 New workspace
@@ -148,7 +148,7 @@ function WorkspaceMenu({
     if (neverSynced) {
       return <NeverSyncedNotice lastSyncedAt={null} />
     }
-    return <div className="px-2 py-5 text-center text-[12px] text-devdeck-dim">No workspaces yet</div>
+    return <div className="px-2 py-5 text-center text-[12px] text-devdeck-fg-2">No workspaces yet</div>
   }
 
   return (
@@ -172,8 +172,8 @@ function WorkspaceMenu({
             className={cn(
               'group flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
               isActive
-                ? 'bg-devdeck-accent-tint text-devdeck-fg ring-1 ring-inset ring-devdeck-border-accent'
-                : 'text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                ? 'bg-devdeck-on text-devdeck-fg'
+                : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
             )}
           >
             <WorkspaceBadge name={workspace.name} active={isActive} small />
@@ -181,7 +181,7 @@ function WorkspaceMenu({
               <div className={cn('truncate text-[12.5px] font-semibold', isActive ? 'text-devdeck-fg' : 'text-devdeck-fg-2')}>
                 {workspace.name}
               </div>
-              <div className="mt-0.5 truncate font-mono text-[9.5px] text-devdeck-dim">
+              <div className="mt-0.5 truncate font-mono text-[9.5px] text-devdeck-fg-2">
                 {workspace.projects.length} groups · {hostCount} agents
               </div>
             </div>
@@ -192,11 +192,11 @@ function WorkspaceMenu({
                 onEdit(workspace)
               }}
               aria-label={`Edit ${workspace.name}`}
-              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-devdeck-dim opacity-80 hover:bg-devdeck-hover-wash hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 opacity-80 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <Settings2 size={12} />
             </button>
-            <span className="flex h-5 w-5 items-center justify-center text-devdeck-accent-soft">
+            <span className="flex h-5 w-5 items-center justify-center text-devdeck-fg">
               {isActive ? <Check size={13} strokeWidth={2.5} /> : null}
             </span>
           </div>
@@ -215,9 +215,9 @@ function WorkspaceBadge({ name, active, small }: { name: string; active: boolean
         width: s,
         height: s,
         borderRadius: small ? 8 : 7,
-        background: active ? '#1b2744' : 'var(--devdeck-surface-2)',
+        background: active ? '#1b2744' : 'var(--devdeck-card-wash)',
         borderColor: active ? 'var(--devdeck-border-accent)' : 'var(--devdeck-border-card)',
-        color: active ? '#8fb1ff' : 'var(--devdeck-muted)',
+        color: active ? '#8fb1ff' : 'var(--devdeck-fg-2)',
       }}
     >
       {name.slice(0, 2).toUpperCase()}

@@ -43,19 +43,19 @@ function TotpSetupPage() {
 
   if (backupCodes) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-devdeck-bg text-devdeck-fg">
+      <div className="flex min-h-[100dvh] w-full items-center justify-center bg-devdeck-pane px-4 text-devdeck-fg">
         <div className="w-[400px]">
           <h1 className="mb-1 text-lg font-medium">Save your backup codes</h1>
-          <p className="mb-4 text-[12px] text-devdeck-muted">
+          <p className="mb-4 text-[12px] text-devdeck-fg-2">
             Each code works once, if you lose your authenticator. They will not be shown again.
           </p>
-          <div className="mb-6 grid grid-cols-2 gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-elevated p-3 font-mono text-[12.5px]">
+          <div className="mb-6 grid grid-cols-2 gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-glass-solid p-3 font-mono text-[12.5px]">
             {backupCodes.map((c) => (
               <span key={c}>{c}</span>
             ))}
           </div>
           <Button onClick={() => navigate({ to: '/login' })} className="w-full">
-            I've saved these — sign in →
+            I've saved these - sign in →
           </Button>
         </div>
       </div>
@@ -63,10 +63,10 @@ function TotpSetupPage() {
   }
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-devdeck-bg text-devdeck-fg">
+    <div className="flex min-h-[100dvh] w-full items-center justify-center bg-devdeck-pane px-4 text-devdeck-fg">
       <div className="w-[360px]">
         <h1 className="mb-1 text-lg font-medium">Set up two-factor authentication</h1>
-        <p className="mb-4 text-[12px] text-devdeck-muted">
+        <p className="mb-4 text-[12px] text-devdeck-fg-2">
           Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password).
         </p>
         {qrDataUrl && (
@@ -80,7 +80,7 @@ function TotpSetupPage() {
           className="mb-5"
           autoFocus
         />
-        {error && <p className="mb-4 text-[12px] text-devdeck-red-soft">{error}</p>}
+        {error && <p className="mb-4 text-[12px] text-devdeck-err">{error}</p>}
         <Button onClick={submit} disabled={verifyTotpSetup.isPending} className="w-full">
           {verifyTotpSetup.isPending ? 'Verifying…' : 'Enable 2FA →'}
         </Button>

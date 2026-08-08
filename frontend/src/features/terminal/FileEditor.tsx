@@ -1,5 +1,5 @@
 import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useState } from 'react'
-import { FileWarning, Loader2, RotateCcw, Save, Trash2 } from 'lucide-react'
+import { FileWarning } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -15,7 +15,6 @@ import type {
   DefinitionReveal,
   DefinitionTarget,
 } from './CodeFileEditor'
-import { MaterialFileIcon } from './MaterialFileIcon'
 import type { LineReveal } from './PlainCodeEditor'
 
 const CodeFileEditor = lazy(() =>
@@ -46,6 +45,10 @@ interface FileEditorProps {
   onOpenDefinition: (path: string, target: DefinitionTarget) => void
   isPathDirty: (path: string) => boolean
   reveal?: DefinitionReveal
+  /** Markdown's edit-mode "open preview in new tab" button — see
+   *  MarkdownFileEditor's `onOpenPreviewTab` doc comment. Unused (and the
+   *  button hidden) for every other path. */
+  onOpenPreviewTab?: (path: string) => void
 }
 
 export interface FileEditorHandle {
@@ -53,6 +56,13 @@ export interface FileEditorHandle {
    *  fails — used by the close-tab "Save" action, which needs to know
    *  whether it's safe to actually close. No-ops if there's nothing dirty. */
   save: () => Promise<void>
+  /** Discards the draft, restoring the last-saved content — the pane
+   *  overflow menu's "Revert file" action. Optional: a read-only tab (e.g.
+   *  DocumentFileTab, dispatched to below) has nothing to revert. */
+  revert?: () => void
+  /** Deletes this file from disk after a confirm prompt — the pane overflow
+   *  menu's "Delete file" action. Optional for the same reason as `revert`. */
+  remove?: () => void
 }
 
 function basename(path: string) {
@@ -114,7 +124,7 @@ function DocumentTabFallback({ active }: { active: boolean }) {
   return (
     <div
       className={cn(
-        'min-h-0 min-w-0 flex-1 items-center justify-center bg-devdeck-terminal',
+        'min-h-0 min-w-0 flex-1 items-center justify-center bg-devdeck-pane',
         active ? 'flex' : 'hidden',
       )}
     >
@@ -134,6 +144,7 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
     onOpenDefinition,
     isPathDirty,
     reveal,
+    onOpenPreviewTab,
   },
   ref,
 ) {
@@ -165,7 +176,23 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
     void saveNow().catch(() => undefined)
   }
 
-  useImperativeHandle(ref, () => ({ save: saveNow }))
+  function revert() {
+    if (!dirty || writeFile.isPending || !file.data) return
+    setDraft(file.data.content)
+  }
+
+  function remove() {
+    if (!window.confirm(`Delete ${basename(path)}? This cannot be undone.`))
+      return
+    deleteFile.mutate(path, {
+      onSuccess: () => {
+        toast.success(`Deleted ${basename(path)}`)
+        onDeleted(path)
+      },
+    })
+  }
+
+  useImperativeHandle(ref, () => ({ save: saveNow, revert, remove }))
 
   useEffect(() => {
     if (!active) return
@@ -179,72 +206,13 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
     return () => window.removeEventListener('keydown', handleKeydown)
   })
 
-  function remove() {
-    if (!window.confirm(`Delete ${basename(path)}? This cannot be undone.`))
-      return
-    deleteFile.mutate(path, {
-      onSuccess: () => {
-        toast.success(`Deleted ${basename(path)}`)
-        onDeleted(path)
-      },
-    })
-  }
-
   return (
     <div
       className={cn(
-        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-terminal',
+        'min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane',
         active ? 'flex' : 'hidden',
       )}
     >
-      <div className="flex h-10 flex-none items-center gap-2 border-b border-devdeck-border bg-devdeck-surface px-3">
-        <MaterialFileIcon name={basename(path)} size={16} />
-        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-muted">
-          {path}
-        </span>
-        {dirty ? (
-          <span className="font-mono text-[9.5px] text-devdeck-yellow">
-            Modified
-          </span>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => file.data && setDraft(file.data.content)}
-          disabled={!dirty || writeFile.isPending}
-          title="Revert changes"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-default disabled:opacity-30"
-        >
-          <RotateCcw size={13} />
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={!dirty || writeFile.isPending}
-          title="Save file (Ctrl+S)"
-          className="flex h-7 items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-elevated px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-border-accent hover:text-devdeck-accent-soft disabled:cursor-default disabled:opacity-40"
-        >
-          {writeFile.isPending ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Save size={12} />
-          )}
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={remove}
-          disabled={deleteFile.isPending}
-          title="Delete file"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-devdeck-dim hover:bg-devdeck-red-tint-hover hover:text-devdeck-red-soft disabled:cursor-wait disabled:opacity-50"
-        >
-          {deleteFile.isPending ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Trash2 size={13} />
-          )}
-        </button>
-      </div>
-
       {file.isLoading ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <DataLoading compact label="loading file…" />
@@ -252,7 +220,7 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
       ) : file.error ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
           <FileWarning size={22} className="text-devdeck-yellow" />
-          <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-muted">
+          <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
             {file.error instanceof ApiError
               ? file.error.message
               : 'Could not open this file'}
@@ -273,7 +241,14 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
             </div>
           }
         >
-          <MarkdownFileEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={toLineReveal(reveal)} />
+          <MarkdownFileEditor
+            path={path}
+            value={draft}
+            ready={initialized}
+            onChange={setDraft}
+            reveal={toLineReveal(reveal)}
+            onOpenPreviewTab={onOpenPreviewTab}
+          />
         </Suspense>
       ) : (
         <Suspense

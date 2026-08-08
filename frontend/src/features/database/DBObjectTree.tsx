@@ -37,11 +37,11 @@ function TreeLevel({ connectionId, caps, path, depth, parentObject, onOpenTable,
   const { data, isLoading, error } = useDBTree(connectionId, path)
 
   if (isLoading) {
-    return <div style={{ paddingLeft: 8 + depth * 14 }} className="h-[29px] text-[11px] text-devdeck-dim">loading…</div>
+    return <div style={{ paddingLeft: 8 + depth * 14 }} className="h-[29px] text-[11px] text-devdeck-fg-2">loading…</div>
   }
   if (error) {
     return (
-      <div style={{ paddingLeft: 8 + depth * 14 }} className="h-[29px] text-[11px] text-devdeck-red-soft">
+      <div style={{ paddingLeft: 8 + depth * 14 }} className="h-[29px] text-[11px] text-devdeck-err">
         {error instanceof Error ? error.message : 'failed to load'}
       </div>
     )
@@ -71,7 +71,7 @@ function TreeLevel({ connectionId, caps, path, depth, parentObject, onOpenTable,
                 className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[12px] text-devdeck-fg-2 group-hover:text-devdeck-fg"
               >
                 {node.hasChildren && !isLeaf ? (
-                  <ChevronRight size={12} className={cn('flex-none text-devdeck-dim transition-transform', isOpen && 'rotate-90')} />
+                  <ChevronRight size={12} className={cn('flex-none text-devdeck-fg-2 transition-transform', isOpen && 'rotate-90')} />
                 ) : (
                   <span className="w-3 flex-none" />
                 )}
@@ -84,7 +84,7 @@ function TreeLevel({ connectionId, caps, path, depth, parentObject, onOpenTable,
                   onClick={(e) => { e.stopPropagation(); onOpenDDL({ ...object, name: node.name }) }}
                   title={`View DDL for ${node.name}`}
                   aria-label={`View DDL for ${node.name}`}
-                  className="mr-1.5 flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-dim opacity-0 hover:bg-devdeck-accent-tint hover:text-devdeck-accent-soft group-hover:opacity-100 focus-visible:opacity-100"
+                  className="mr-1.5 flex h-6 w-6 flex-none items-center justify-center rounded text-devdeck-fg-2 opacity-0 hover:bg-devdeck-hover-wash hover:text-devdeck-fg group-hover:opacity-100 focus-visible:opacity-100"
                 >
                   <Code2 size={12} />
                 </button>

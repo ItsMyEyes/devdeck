@@ -172,7 +172,7 @@ describe('SocksPublishSection', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(mockMutate).not.toHaveBeenCalled()
-    expect(screen.getByText(/1–65535/)).toBeTruthy()
+    expect(screen.getByText(/1-65535/)).toBeTruthy()
   })
 
   it('disables the port input while a mutation is in flight', () => {

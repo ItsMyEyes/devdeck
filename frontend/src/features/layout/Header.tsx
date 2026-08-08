@@ -36,7 +36,7 @@ export function Header() {
   }
 
   return (
-    <header className="flex h-[54px] flex-none items-center gap-3.5 border-b border-devdeck-border bg-devdeck-surface px-3.5">
+    <header className="flex h-[54px] flex-none items-center gap-3.5 border-b border-devdeck-border bg-devdeck-pane px-3.5">
       {/* mobile sidebar toggle */}
       <button
         onClick={() => setSidebarOpen(true)}
@@ -52,14 +52,14 @@ export function Header() {
       <div className="flex items-center gap-2.5">
         <DevDeckLogo />
         <span className="text-[15px] font-semibold tracking-[-0.02em]">devdeck</span>
-        <span className="ml-0.5 hidden rounded-[5px] border border-devdeck-border-strong px-1.5 py-0.5 font-mono text-[10.5px] text-devdeck-dim md:inline">
+        <span className="ml-0.5 hidden rounded-micro border border-devdeck-border-strong px-1.5 py-0.5 font-mono text-[10.5px] text-devdeck-fg-2 md:inline">
           one operator · many companies
         </span>
       </div>
 
       {/* live agent counts */}
       {agents && (
-        <div className="ml-1 hidden items-center gap-3.5 font-mono text-[11.5px] text-devdeck-muted md:flex">
+        <div className="ml-1 hidden items-center gap-3.5 font-mono text-[11.5px] text-devdeck-fg-2 md:flex">
           <span className="flex items-center gap-1.5">
             <span className="h-[7px] w-[7px] rounded-full bg-devdeck-green" />
             {running} running
@@ -109,7 +109,11 @@ function PrimaryAction({ view, newsCount, onWorktree, onMarkRead }: PrimaryActio
     )
   }
   return (
-    <Button onClick={onWorktree}>
+    /* accent-soft, not solid: this button is on screen on every route, so a
+       saturated fill here competes with whatever action the current module is
+       actually for (Add runtime, New connection). The solid accent belongs to
+       the page; this keeps the accent identity one step down. */
+    <Button variant="accent-soft" onClick={onWorktree}>
       <Plus size={15} />
       Worktree
     </Button>

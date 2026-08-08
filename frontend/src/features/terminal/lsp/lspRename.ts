@@ -93,7 +93,7 @@ export async function buildRenamePlan(args: {
   // A disk write would silently discard an unsaved buffer, so refuse upfront.
   const dirty = split.otherFiles.map((file) => file.path).filter(isPathDirty)
   if (dirty.length > 0) {
-    return { ok: false, reason: `Save ${dirty.join(', ')} before renaming — they have unsaved changes` }
+    return { ok: false, reason: `Save ${dirty.join(', ')} before renaming - they have unsaved changes` }
   }
 
   return { ok: true, plan: { newName, currentEdits: split.currentEdits, otherFiles: split.otherFiles } }

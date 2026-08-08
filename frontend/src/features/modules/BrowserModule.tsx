@@ -391,7 +391,7 @@ export function BrowserModule() {
     // `@container/browser` — the address row below reflows on this surface's own
     // width, so it degrades the same way whether it's narrow because the viewport
     // is a phone or because the module is sharing a split (see `BrowserTile`).
-    <div ref={rootRef} className="@container/browser flex min-h-0 flex-1 flex-col bg-devdeck-bg">
+    <div ref={rootRef} className="@container/browser flex min-h-0 flex-1 flex-col bg-devdeck-pane">
       {!focusMode && (
         <>
           <ModuleHeader
@@ -424,7 +424,7 @@ export function BrowserModule() {
             }
           />
 
-          <div className="flex flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-surface px-2 py-1.5">
+          <div className="flex flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-pane px-2 py-1.5">
             <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
               {tabs.map((tab) => {
                 const selected = tab.id === active.id
@@ -434,8 +434,8 @@ export function BrowserModule() {
                     className={cn(
                       'group/tab flex h-8 min-w-[150px] max-w-[240px] items-center rounded-lg border text-[12px]',
                       selected
-                        ? 'border-devdeck-border-accent bg-devdeck-card text-devdeck-fg shadow-sm shadow-black/10'
-                        : 'border-transparent bg-transparent text-devdeck-muted hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+                        ? 'border-devdeck-border-accent bg-devdeck-glass-solid text-devdeck-fg shadow-sm shadow-black/10'
+                        : 'border-transparent bg-transparent text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
                     )}
                   >
                     <button
@@ -450,7 +450,7 @@ export function BrowserModule() {
                       type="button"
                       onClick={() => closeTab(tab.id)}
                       aria-label="Close tab"
-                      className="mr-1 cursor-pointer rounded p-1 text-devdeck-muted-2 opacity-70 hover:bg-devdeck-popover hover:text-devdeck-fg group-hover/tab:opacity-100"
+                      className="mr-1 cursor-pointer rounded p-1 text-devdeck-fg-2 opacity-70 hover:bg-devdeck-glass-solid hover:text-devdeck-fg group-hover/tab:opacity-100"
                     >
                       <X size={12} />
                     </button>
@@ -466,7 +466,7 @@ export function BrowserModule() {
           {/* Wraps rather than crushing: the controls flanking the address bar are
               all fixed-width, so on a narrow surface the input was the only thing
               that could shrink. Below 32rem it takes its own full-width row. */}
-          <form onSubmit={submit} className="flex flex-none flex-wrap items-center gap-1.5 border-b border-devdeck-border bg-devdeck-bg px-3 py-2">
+          <form onSubmit={submit} className="flex flex-none flex-wrap items-center gap-1.5 border-b border-devdeck-border bg-devdeck-pane px-3 py-2">
             <Button size="icon-sm" variant="secondary" className={toolbarButtonClass} onClick={() => goHistory(-1)} disabled={!canGoBack} aria-label="Back">
               <ArrowLeft size={13} />
             </Button>
@@ -513,20 +513,20 @@ export function BrowserModule() {
           </form>
 
           {detailsOpen && (
-            <div className="flex flex-none flex-col border-b border-devdeck-border bg-devdeck-surface">
+            <div className="flex flex-none flex-col border-b border-devdeck-border bg-devdeck-pane">
               <div className="flex items-center gap-2 px-3 py-1.5">
                 <button
                   type="button"
                   onClick={() => setPortalOpen((open) => !open)}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-devdeck-muted hover:bg-devdeck-popover hover:text-devdeck-fg"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg"
                   aria-expanded={portalOpen}
                 >
                   <Bookmark size={13} />
                   Portal
-                  <span className="rounded bg-devdeck-popover px-1.5 py-0.5 font-mono text-[10px] text-devdeck-dim">{bookmarks.length}</span>
+                  <span className="rounded bg-devdeck-glass-solid px-1.5 py-0.5 font-mono text-[10px] text-devdeck-fg-2">{bookmarks.length}</span>
                 </button>
                 <div className="h-4 w-px bg-devdeck-border" />
-                <label className="flex items-center gap-1.5 text-[11px] text-devdeck-dim">
+                <label className="flex items-center gap-1.5 text-[11px] text-devdeck-fg-2">
                   Save group
                   <Input
                     value={bookmarkGroup}
@@ -536,7 +536,7 @@ export function BrowserModule() {
                   />
                 </label>
                 <div className="min-w-0 flex-1" />
-                <span className="hidden text-[10.5px] text-devdeck-dim md:inline">Click bookmark to open, hover for actions</span>
+                <span className="hidden text-[10.5px] text-devdeck-fg-2 md:inline">Click bookmark to open, hover for actions</span>
               </div>
 
               {portalOpen && (
@@ -544,18 +544,18 @@ export function BrowserModule() {
                   {bookmarkGroups.map(([group, items]) => (
                     <div
                       key={group}
-                      className="flex flex-none items-center gap-1.5 rounded-lg border border-devdeck-border-menu bg-devdeck-bg/40 px-2 py-1"
+                      className="flex flex-none items-center gap-1.5 rounded-lg border border-devdeck-border-menu bg-devdeck-pane/40 px-2 py-1"
                     >
-                      <span className="mr-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-dim">{group}</span>
+                      <span className="mr-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-devdeck-fg-2">{group}</span>
                       {items.map((bookmark) => (
                         <div
                           key={bookmark.id}
-                          className="group/bookmark flex items-center rounded-full bg-devdeck-popover ring-1 ring-transparent hover:ring-devdeck-border"
+                          className="group/bookmark flex items-center rounded-full bg-devdeck-glass-solid ring-1 ring-transparent hover:ring-devdeck-border"
                         >
                           <button
                             type="button"
                             onClick={() => openBookmark(bookmark, false)}
-                            className="max-w-[150px] cursor-pointer truncate px-2.5 py-1 text-left text-[11.5px] text-devdeck-fg-2 hover:text-devdeck-accent-soft"
+                            className="max-w-[150px] cursor-pointer truncate px-2.5 py-1 text-left text-[11.5px] text-devdeck-fg-2 hover:text-devdeck-accent"
                             title={bookmark.url}
                           >
                             {bookmark.title}
@@ -565,7 +565,7 @@ export function BrowserModule() {
                               type="button"
                               onClick={() => openBookmark(bookmark, true)}
                               aria-label={`Open ${bookmark.title} in a new tab`}
-                              className="cursor-pointer px-1 py-1 text-devdeck-muted-2 hover:text-devdeck-accent-soft"
+                              className="cursor-pointer px-1 py-1 text-devdeck-fg-2 hover:text-devdeck-accent"
                             >
                               <Plus size={11} />
                             </button>
@@ -573,7 +573,7 @@ export function BrowserModule() {
                               type="button"
                               onClick={() => removeBookmark(bookmark.id)}
                               aria-label={`Remove ${bookmark.title}`}
-                              className="cursor-pointer px-1.5 py-1 text-devdeck-muted-2 hover:text-devdeck-red-soft"
+                              className="cursor-pointer px-1.5 py-1 text-devdeck-fg-2 hover:text-devdeck-err"
                             >
                               <Trash2 size={11} />
                             </button>
@@ -589,10 +589,10 @@ export function BrowserModule() {
         </>
       )}
 
-      <div className={cn('relative min-h-0 flex-1 bg-devdeck-terminal', focusMode ? 'p-0' : 'p-2')}>
+      <div className={cn('relative min-h-0 flex-1 bg-devdeck-pane', focusMode ? 'p-0' : 'p-2')}>
         {focusMode && (
           <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5">
-            <Button size="sm" variant="secondary" onClick={() => setFocusMode(false)} className="bg-devdeck-bg/90 backdrop-blur">
+            <Button size="sm" variant="secondary" onClick={() => setFocusMode(false)} className="bg-devdeck-pane/90 backdrop-blur">
               Show controls
             </Button>
             <Button
@@ -601,18 +601,18 @@ export function BrowserModule() {
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
               title={isFullscreen ? 'Exit full screen' : 'Full screen'}
-              className="bg-devdeck-bg/90 backdrop-blur"
+              className="bg-devdeck-pane/90 backdrop-blur"
             >
               {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </Button>
           </div>
         )}
         {proxyError ? (
-          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-surface text-[12px] text-devdeck-muted">
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-pane text-[12px] text-devdeck-fg-2">
             Browser proxy unavailable: {proxyError}
           </div>
         ) : !frameSrc ? (
-          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-surface text-[12px] text-devdeck-muted">
+          <div className="flex h-full w-full items-center justify-center rounded-lg border border-devdeck-border bg-devdeck-pane text-[12px] text-devdeck-fg-2">
             Preparing browser proxy session…
           </div>
         ) : active.error ? (
@@ -637,8 +637,8 @@ export function BrowserModule() {
       </div>
 
       {!focusMode && detailsOpen && (
-        <div className="flex flex-none items-center gap-2 border-t border-devdeck-border px-3 py-1.5 font-mono text-[10.5px] text-devdeck-dim">
-          <span className="h-1.5 w-1.5 rounded-full bg-devdeck-accent" />
+        <div className="flex flex-none items-center gap-2 border-t border-devdeck-border px-3 py-1.5 font-mono text-[10.5px] text-devdeck-fg-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-devdeck-fg-2" />
           <span>Requests leave from the DevDeck server network. Some sites with strict embed or bot protection may not render fully.</span>
         </div>
       )}

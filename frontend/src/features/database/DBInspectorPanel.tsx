@@ -19,7 +19,7 @@ function formatBytes(n: number | null) {
 function InspectorRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between py-1.5">
-      <span className="text-[11px] text-devdeck-dim">{label}</span>
+      <span className="text-[11px] text-devdeck-fg-2">{label}</span>
       <span className="font-mono text-[11.5px] text-devdeck-fg-2">{value}</span>
     </div>
   )
@@ -33,7 +33,7 @@ function InspectorRow({ label, value }: { label: string; value: string }) {
  *  works correctly against the active filters. */
 function TableStats({ connectionId, object }: { connectionId: string; object: DBObjectRef }) {
   const { data, isLoading } = useDBStats(connectionId, object)
-  if (isLoading) return <span className="text-[11px] text-devdeck-dim">loading stats…</span>
+  if (isLoading) return <span className="text-[11px] text-devdeck-fg-2">loading stats…</span>
   if (!data) return null
   return (
     <>
@@ -57,7 +57,7 @@ function kindColor(kind: string): string {
 export function DBInspectorPanel({ connection, activeTab }: { connection: DBConnection; activeTab: DBTabContent | null }) {
   if (!activeTab) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center text-[12px] text-devdeck-dim">
+      <div className="flex h-full items-center justify-center p-4 text-center text-[12px] text-devdeck-fg-2">
         Select an object to see its details here.
       </div>
     )
@@ -80,7 +80,7 @@ export function DBInspectorPanel({ connection, activeTab }: { connection: DBConn
   if (activeTab.kind === 'ddl' || activeTab.kind === 'designer') {
     return (
       <div className="p-3">
-        <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-devdeck-dim">
+        <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-devdeck-fg-2">
           {activeTab.kind === 'ddl' ? 'DDL' : 'Table designer'}
         </div>
         <div className="truncate text-[13px] font-medium text-devdeck-fg">{activeTab.object?.name ?? 'New table'}</div>
@@ -90,7 +90,7 @@ export function DBInspectorPanel({ connection, activeTab }: { connection: DBConn
 
   return (
     <div className="p-3">
-      <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-devdeck-accent-soft">Query</div>
+      <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-devdeck-fg">Query</div>
       <div className="mb-3 truncate text-[13px] font-medium text-devdeck-fg">{connection.name}</div>
       <div className="divide-y divide-devdeck-border-menu/50">
         <InspectorRow label="Engine" value={connection.engine} />

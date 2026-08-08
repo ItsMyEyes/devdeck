@@ -7,9 +7,10 @@ import { Header } from '@/features/layout/Header'
 import { Sidebar } from '@/features/sidebar/Sidebar'
 import { GlobalOverlays } from '@/features/overlays/GlobalOverlays'
 import { WorkspaceTileArea } from '@/features/tabs/WorkspaceTileArea'
-import { useIsTauri } from '@/features/tabs/useIsTauri'
+import { useHasMacVibrancy, useIsTauri } from '@/features/tabs/useIsTauri'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { useReducedTransparency } from '@/features/useReducedTransparency'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
@@ -45,6 +46,8 @@ function WorkspaceLayout() {
   const pathname = useLocation({ select: (l) => l.pathname })
   const workspaceMode = WORKSPACE_MODE_PATTERN.test(pathname)
   const isTauri = useIsTauri()
+  const hasMacVibrancy = useHasMacVibrancy()
+  const reducedTransparency = useReducedTransparency()
   const inTiledScope = isTauri && TILED_SCOPE_PATTERN.test(pathname)
 
   const workspaces = useWorkspaces()
@@ -67,14 +70,14 @@ function WorkspaceLayout() {
 
   if (workspaces.isPending) {
     return (
-      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-bg text-devdeck-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-pane text-devdeck-fg">
         <DataLoading label="loading workspace…" />
       </div>
     )
   }
   if (workspaces.isError) {
     return (
-      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-bg text-devdeck-fg">
+      <div className="flex h-[var(--app-height)] w-full flex-col bg-devdeck-pane text-devdeck-fg">
         <DataError error={workspaces.error} onRetry={() => workspaces.refetch()} />
       </div>
     )
@@ -83,7 +86,28 @@ function WorkspaceLayout() {
   return (
     <div
       className={cn(
-        'flex h-[var(--app-height)] w-full flex-col overflow-hidden bg-devdeck-bg text-devdeck-fg',
+        'flex h-[var(--app-height)] w-full flex-col overflow-hidden text-devdeck-fg',
+        // One glass layer covers the ENTIRE window. An earlier revision put
+        // glass only on the rail and sidebar, which let raw wallpaper bleed
+        // through the gaps around the pane and produced a bright band along
+        // the window's bottom edge. Covering everything makes the wallpaper a
+        // colour cast rather than a visible area.
+        //
+        // On Tauri-for-macOS this div stays transparent on purpose: the
+        // window itself is transparent with native `windowEffects: sidebar`
+        // vibrancy (tauri.macos.conf.json), composited by macOS rather than
+        // blurred inside the webview. Painting the CSS glass approximation
+        // on top would stack an 80%-opaque fill over that native material
+        // and hide it — see DESIGN.md §1. The native material also honours
+        // prefers-reduced-transparency on its own, so `reducedTransparency`
+        // only matters below. Windows/Linux Tauri builds have no native
+        // transparency configured (`useHasMacVibrancy`'s doc comment), so
+        // they fall through to the same CSS path as the web build.
+        hasMacVibrancy
+          ? undefined
+          : reducedTransparency
+            ? 'bg-devdeck-glass-solid'
+            : 'bg-devdeck-glass [backdrop-filter:var(--devdeck-glass-filter)]',
         // Reserves space for WorkspaceTileCanvas's top-left leaf strip,
         // which is `fixed` to the true viewport top (see
         // WorkspaceTileCanvas.tsx) so it visually merges with macOS's
@@ -100,7 +124,7 @@ function WorkspaceLayout() {
       {!workspaceMode && !isTauri && <Header />}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar mobileDrawer={!workspaceMode && !isTauri} />
-        <section className="flex min-w-0 flex-1 flex-col bg-devdeck-bg">
+        <section className="flex min-w-0 flex-1 flex-col gap-[var(--devdeck-gap)] p-[var(--devdeck-gap)] pl-0">
           {isTauri ? (
             // Always mounted so the pinned strip never disappears; only its
             // tiling body is suppressed off the tile-owned routes

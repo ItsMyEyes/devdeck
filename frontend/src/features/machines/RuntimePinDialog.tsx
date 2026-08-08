@@ -72,7 +72,7 @@ export function RuntimePinDialog() {
   }
 
   const hint = weak
-    ? 'Pick something less guessable — no repeated digits or straight runs.'
+    ? 'Pick something less guessable - no repeated digits or straight runs.'
     : mismatch
       ? 'The two PINs do not match.'
       : (error ?? null)
@@ -82,14 +82,14 @@ export function RuntimePinDialog() {
       <DialogTitle>Sign-in PIN</DialogTitle>
       <DialogDescription className="mb-[18px]">
         The {PIN_LENGTH}-digit code for {dialog.machineName || 'this runtime'}&apos;s own web UI. Its runtime key is
-        unchanged — that stays the machine-to-machine credential.
+        unchanged - that stays the machine-to-machine credential.
       </DialogDescription>
 
       {unresolved ? (
-        <p className="mb-5 font-mono text-[11px] text-devdeck-dim-2">Loading runtime…</p>
+        <p className="mb-5 font-mono text-[11px] text-devdeck-fg-2">Loading runtime…</p>
       ) : (
         <>
-          <div className="mb-4 flex items-center gap-2 font-mono text-[10.5px] text-devdeck-dim-2">
+          <div className="mb-4 flex items-center gap-2 font-mono text-[10.5px] text-devdeck-fg-2">
             <ShieldCheck size={12} className="flex-none" />
             {status.isLoading
               ? 'Checking current PIN…'
@@ -103,7 +103,7 @@ export function RuntimePinDialog() {
                   : 'No PIN is set yet.'}
           </div>
 
-          <div className="mb-1.5 text-[11px] text-devdeck-muted-2">New PIN</div>
+          <div className="mb-1.5 text-[11px] text-devdeck-fg-2">New PIN</div>
           <PinInput
             label="New sign-in PIN"
             value={pin}
@@ -117,7 +117,7 @@ export function RuntimePinDialog() {
             className="mb-3.5"
           />
 
-          <div className="mb-1.5 text-[11px] text-devdeck-muted-2">Confirm PIN</div>
+          <div className="mb-1.5 text-[11px] text-devdeck-fg-2">Confirm PIN</div>
           <PinInput
             label="Confirm sign-in PIN"
             value={confirm}
@@ -130,7 +130,7 @@ export function RuntimePinDialog() {
           />
 
           <p
-            className={`mt-2 mb-4 min-h-[16px] text-[11px] ${hint ? 'text-devdeck-red-soft' : 'text-devdeck-dim-2'}`}
+            className={`mt-2 mb-4 min-h-[16px] text-[11px] ${hint ? 'text-devdeck-err' : 'text-devdeck-fg-2'}`}
             role={hint ? 'alert' : undefined}
           >
             {hint ?? 'Anyone with this PIN can sign in to this runtime.'}

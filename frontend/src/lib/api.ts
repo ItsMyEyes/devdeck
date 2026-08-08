@@ -793,7 +793,7 @@ export function deleteBookmark(id: string): Promise<void> {
 
 export interface TailscaleHubStatus {
   ready: boolean
-  reason?: 'not_installed' | 'not_ready' | 'serve_disabled'
+  reason?: 'not_installed' | 'not_ready' | 'serve_disabled' | 'serve_target_mismatch'
   url?: string
 }
 

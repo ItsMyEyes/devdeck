@@ -22,8 +22,8 @@ const MASKED_KEY = '••••••••••••••••'
 const KEEP_STORED_PORT = 0
 
 const switchRootClass = cn(
-  'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-surface-2 transition-colors',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-accent',
+  'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
   'disabled:cursor-not-allowed disabled:opacity-50',
 )
 
@@ -33,12 +33,12 @@ const switchThumbClass = cn(
 )
 
 const iconButtonClass = cn(
-  'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-surface-2 text-devdeck-muted',
-  'hover:bg-devdeck-popover hover:text-devdeck-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-devdeck-surface-2 disabled:hover:text-devdeck-muted',
+  'flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2',
+  'hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-devdeck-card-wash disabled:hover:text-devdeck-fg-2',
 )
 
-const fieldLabelClass = 'w-12 flex-none text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-dim-2'
+const fieldLabelClass = 'w-12 flex-none text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2'
 
 /** Both row containers copy the same field, so the toast wording and the
  *  "nothing to copy" guard live in one place. */
@@ -104,7 +104,7 @@ function SocksPublishRow({
     ? 'var(--devdeck-green)'
     : enabled
       ? 'var(--devdeck-yellow)'
-      : 'var(--devdeck-dim)'
+      : 'var(--devdeck-fg-2)'
 
   // Enter, deliberately — not blur. A blur-commit would fire its own PUT on
   // the way to clicking the toggle, so the operator's click would land on a
@@ -116,16 +116,16 @@ function SocksPublishRow({
   }
 
   return (
-    <div className="rounded-lg border border-devdeck-border bg-devdeck-terminal p-3.5">
+    <div className="rounded-lg border border-devdeck-border bg-devdeck-pane p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <StatusDot color={dotColor} size={6} />
           <span className="truncate text-[12.5px] text-devdeck-fg">{name}</span>
         </div>
         {isLoading ? (
-          <span className="font-mono text-[11px] text-devdeck-dim-2">loading…</span>
+          <span className="font-mono text-[11px] text-devdeck-fg-2">loading…</span>
         ) : error ? (
-          <span className="font-mono text-[11px] text-devdeck-red-soft">
+          <span className="font-mono text-[11px] text-devdeck-err">
             {error instanceof Error ? error.message : 'unreachable'}
           </span>
         ) : (
@@ -144,7 +144,7 @@ function SocksPublishRow({
       {/* Neither loading, failed, nor answered: the fetch is gated off (the
           section is not on screen), so there is nothing to show yet. */}
       {!status && !isLoading && !error && (
-        <p className="mt-3 font-mono text-[11px] text-devdeck-dim-2">Proxy status unavailable.</p>
+        <p className="mt-3 font-mono text-[11px] text-devdeck-fg-2">Proxy status unavailable.</p>
       )}
 
       {status && !error && (
@@ -172,24 +172,24 @@ function SocksPublishRow({
             <span
               className={cn(
                 'min-w-0 flex-1 truncate font-mono text-[11px]',
-                running ? 'text-devdeck-fg-2' : enabled ? 'text-devdeck-yellow-soft' : 'text-devdeck-dim-2',
+                running ? 'text-devdeck-fg-2' : enabled ? 'text-devdeck-wait' : 'text-devdeck-fg-2',
               )}
             >
               {running
                 ? (status.boundAddr ?? `:${status.port}`)
                 : enabled
-                  ? 'enabled, not listening — the port may be in use'
+                  ? 'enabled, not listening - the port may be in use'
                   : 'stopped'}
             </span>
           </div>
 
           {portInvalid && (
-            <p className="pl-[60px] font-mono text-[10.5px] text-devdeck-red-soft">
-              Port must be a number between 1–65535.
+            <p className="pl-[60px] font-mono text-[10.5px] text-devdeck-err">
+              Port must be a number between 1-65535.
             </p>
           )}
           {!portInvalid && portUnapplied && (
-            <p className="pl-[60px] font-mono text-[10.5px] text-devdeck-dim-2">
+            <p className="pl-[60px] font-mono text-[10.5px] text-devdeck-fg-2">
               Press Enter to apply port {parsedPort}.
             </p>
           )}
@@ -309,14 +309,14 @@ export function SocksPublishSection({ open }: { open: boolean }) {
       <LocalSocksRow name={selfName} open={open} />
 
       {machines.isLoading ? (
-        <p className="font-mono text-[11px] text-devdeck-dim-2">Loading machines…</p>
+        <p className="font-mono text-[11px] text-devdeck-fg-2">Loading machines…</p>
       ) : machines.error ? (
-        <p className="font-mono text-[11px] text-devdeck-red-soft">
+        <p className="font-mono text-[11px] text-devdeck-err">
           {machines.error instanceof Error ? machines.error.message : 'Failed to load machines'}
         </p>
       ) : others.length === 0 ? (
-        <p className="font-mono text-[11px] text-devdeck-dim-2">
-          No other machines registered yet — add one to publish a proxy from it too.
+        <p className="font-mono text-[11px] text-devdeck-fg-2">
+          No other machines registered yet - add one to publish a proxy from it too.
         </p>
       ) : (
         others.map((m) => <MachineSocksRow key={m.id} machine={m} open={open} />)
