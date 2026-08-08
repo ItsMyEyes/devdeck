@@ -653,6 +653,49 @@ function TerminalWorkspace({
     [worktree.id, setWorktreeLayout],
   )
 
+  /** Opens (or refocuses) one agent-chat thread as its own pane tab, from a
+   *  row in the sidebar's Sessions panel. Same "one instance per target,
+   *  refocus if already open" dedup as `openGitDiff` — `createAgentChatPane`
+   *  ids by `threadKey`, so re-picking a session that is already on screen
+   *  focuses it instead of stacking a second pane against the same thread
+   *  (two panes on one thread would both be live and both replay it). */
+  const openAgentChatThread = useCallback(
+    (threadKey: string) => {
+      const current = layoutRef.current
+      // The primary chat pane uses the bare worktree id; extras are
+      // `<worktreeId>::chat-N`. createAgentChatPane rebuilds either from the
+      // threadKey it was given, so the id round-trips exactly.
+      const seq = threadKey.startsWith(`${worktree.id}::chat-`)
+        ? Number(threadKey.slice(`${worktree.id}::chat-`.length))
+        : undefined
+      const content = createAgentChatPane(worktree.id, Number.isFinite(seq) ? seq : undefined)
+      const existingLeaf = findLeafForContent(current.root, content.id)
+      if (existingLeaf) {
+        setWorktreeLayout(worktree.id, {
+          ...current,
+          root: selectTabInTree(current.root, existingLeaf.id, content.id),
+          focusedPaneId: existingLeaf.id,
+        })
+        return
+      }
+      setWorktreeLayout(worktree.id, {
+        ...current,
+        root: addContentToLeaf(current.root, current.focusedPaneId, content),
+        focusedPaneId: current.focusedPaneId,
+      })
+    },
+    [worktree.id, setWorktreeLayout],
+  )
+
+  /** The thread whose pane is currently focused, so the Sessions panel can
+   *  highlight the row you are actually looking at. */
+  const activeThreadKey = useMemo(() => {
+    const leaf = findPane(layout.root, layout.focusedPaneId)
+    if (!leaf || leaf.type !== 'leaf') return undefined
+    const active = leaf.tabs.find((tab: PaneContent) => tab.id === leaf.activeTabId)
+    return active?.kind === 'agent-chat' ? active.threadKey : undefined
+  }, [layout])
+
   /** MarkdownFileEditor's edit-mode "open preview in new tab" button — opens
    *  (or refocuses) `path`'s rendered preview as its own tab, alongside
    *  whatever pane the editing `FileContent` tab for the same path lives in.
@@ -1011,7 +1054,15 @@ function TerminalWorkspace({
     },
     'agent-chat': ({ content }) => {
       if (content.kind !== 'agent-chat') return null
-      return <AgentChatPane worktreeId={worktree.id} threadKey={content.threadKey} machine={machine} />
+      return (
+        <AgentChatPane
+          worktreeId={worktree.id}
+          threadKey={content.threadKey}
+          machine={machine}
+          worktreeLabel={projectName ?? label}
+          branch={worktree.branch || null}
+        />
+      )
     },
   }
 
@@ -1032,6 +1083,8 @@ function TerminalWorkspace({
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
         contentSearchShortcut="Ctrl Shift F"
+        activeThreadKey={activeThreadKey}
+        onOpenThread={openAgentChatThread}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

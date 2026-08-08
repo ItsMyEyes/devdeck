@@ -89,6 +89,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
               sidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
             ),
         )}
+        style={{ backdropFilter: 'blur(20px)', marginRight: '6px' }}
       >
         <div className={cn('flex flex-none flex-col items-center py-2.5', hasSidebarPanel ? 'w-[56px]' : 'w-full')} style={{ marginRight: '10px' }}>
           {toggleButton ? (

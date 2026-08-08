@@ -47,6 +47,10 @@ type adapter struct {
 	ctx        context.Context
 
 	events chan event.Event
+	// readers counts live readLoop goroutines. The events channel must not be
+	// closed while any of them can still call emit — that is a send on a
+	// closed channel, i.e. a panic in production and a data race under -race.
+	readers sync.WaitGroup
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -67,7 +71,13 @@ func newAdapter(ctx context.Context, id provider.InstanceID, cfg Config, env map
 	}
 	go func() {
 		<-ctx.Done()
+		// Kill the processes first, so every readLoop sees EOF and returns,
+		// THEN wait for them, and only then close. Closing before the readers
+		// have finished raced with emit and could panic outright; StopAll
+		// alone is not enough, because a readLoop may still be draining
+		// stdout that was already buffered when the process died.
 		_ = a.StopAll(context.Background())
+		a.readers.Wait()
 		close(a.events)
 	}()
 	return a
@@ -222,6 +232,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 	a.sessions[in.ThreadID] = sess
 	a.mu.Unlock()
 
+	a.readers.Add(1)
 	go a.readLoop(sess, stdout)
 
 	return provider.Session{ThreadID: in.ThreadID, StartedAt: sess.startedAt, Model: sess.model}, nil
@@ -233,6 +244,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 // (emit drops instead) so a stalled subscriber cannot stall the CLI's own
 // stdout pipe.
 func (a *adapter) readLoop(sess *session, stdout io.Reader) {
+	defer a.readers.Done()
 	sc := bufio.NewScanner(stdout)
 	// A tool result can embed an entire file's contents; the scanner's
 	// default 64KB buffer is nowhere near enough for that.

@@ -24,6 +24,10 @@ export interface AgentChatPaneProps {
   worktreeId: string
   threadKey: string
   machine: Machine
+  /** Shown in the composer's status strip. Resolved by the caller, which
+   *  already holds the Worktree row — this component only has an id. */
+  worktreeLabel?: string
+  branch?: string | null
 }
 
 function PaneMessage({ tone = 'neutral', children }: { tone?: 'neutral' | 'error'; children: ReactNode }) {
@@ -40,7 +44,7 @@ function PaneMessage({ tone = 'neutral', children }: { tone?: 'neutral' | 'error
   )
 }
 
-export function AgentChatPane({ worktreeId, threadKey, machine }: AgentChatPaneProps) {
+export function AgentChatPane({ worktreeId, threadKey, machine, worktreeLabel, branch }: AgentChatPaneProps) {
   const { view, status, sendTurn, abortTurn, setRuntimeMode, setInteractionMode } =
     useAgentChatSocket({ machine, threadKey })
 
@@ -125,7 +129,14 @@ export function AgentChatPane({ worktreeId, threadKey, machine }: AgentChatPaneP
         )}
       </div>
 
-      <ChatComposer status={view.status} onSend={sendTurn} onAbort={abortTurn} controls={controls} />
+      <ChatComposer
+        status={view.status}
+        onSend={sendTurn}
+        onAbort={abortTurn}
+        controls={controls}
+        worktree={worktreeLabel}
+        branch={branch}
+      />
     </div>
   )
 }

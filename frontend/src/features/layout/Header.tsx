@@ -76,13 +76,6 @@ export function Header() {
       )}
 
       <div className="flex-1" />
-
-      <PrimaryAction
-        view={view}
-        newsCount={ws?.news.length ?? 0}
-        onWorktree={spawnWorktree}
-        onMarkRead={markRead}
-      />
     </header>
   )
 }
