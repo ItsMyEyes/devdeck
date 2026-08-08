@@ -31,9 +31,7 @@ export function emptyThreadView(): AgentThreadView {
  *  object and never mutates the view it is given. */
 export const EMPTY_THREAD_VIEW: AgentThreadView = Object.freeze(emptyThreadView())
 
-/** Shape of the payload carried by `thread.activity-appended` — the only
- *  event type this reducer folds into item text so far. Other event types
- *  pass through untouched in this spec; later specs extend this switch. */
+/** An assistant/reasoning text delta — `AssistantDeltaPayload` on the wire. */
 interface ActivityAppendedPayload {
   itemId: string
   stream: string
@@ -45,6 +43,42 @@ function isActivityAppendedPayload(payload: unknown): payload is ActivityAppende
   if (typeof payload !== 'object' || payload === null) return false
   const p = payload as Record<string, unknown>
   return typeof p.itemId === 'string' && typeof p.stream === 'string' && typeof p.text === 'string' && typeof p.sequence === 'number'
+}
+
+/** The user's own message — `TurnStartPayload` carried by
+ *  `thread.message-sent`. Rendering this is what makes a sent message appear
+ *  at all; the assistant's reply arrives later and separately. */
+interface MessageSentPayload {
+  text: string
+}
+
+function isMessageSentPayload(payload: unknown): payload is MessageSentPayload {
+  if (typeof payload !== 'object' || payload === null) return false
+  return typeof (payload as Record<string, unknown>).text === 'string'
+}
+
+/** A canonical provider event forwarded verbatim by Ingestion's fallback
+ *  ("better to store an unrecognized event as activity than drop it"), so the
+ *  activity-appended payload is a whole `event.Event` envelope rather than a
+ *  delta. Tool calls arrive exclusively this way — `item.started` /
+ *  `item.completed` with an `itemType` of `tool_call`. */
+interface ForwardedProviderEvent {
+  type: string
+  itemId?: string
+  payload?: {
+    itemType?: string
+    title?: string
+    status?: string
+    message?: string
+  }
+}
+
+function isForwardedProviderEvent(payload: unknown): payload is ForwardedProviderEvent {
+  if (typeof payload !== 'object' || payload === null) return false
+  const p = payload as Record<string, unknown>
+  // A forwarded envelope always carries the provider event's own `type`; a
+  // delta payload never does. That is what tells the two apart.
+  return typeof p.type === 'string'
 }
 
 function itemKindForStream(stream: string): ChatItemKind {
@@ -83,6 +117,49 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload): { item
   return { items: next, gap }
 }
 
+/** Folds a forwarded provider event into `items`: tool calls become a `tool`
+ *  row that completes in place, runtime errors become an `error` row.
+ *
+ *  `item.completed` updates the row `item.started` created rather than
+ *  appending a second one — they share an `itemId`, which is exactly what it
+ *  is for. Anything else forwarded (session/turn bookkeeping) is deliberately
+ *  not rendered; it advances `lastSeq` and nothing more. */
+function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProviderEvent): ChatItem[] {
+  const inner = ev.payload ?? {}
+
+  if (ev.type === 'runtime.error' || inner.itemType === 'error') {
+    const text = inner.message ?? inner.title ?? 'The agent reported an error.'
+    return [...items, { id: eventId, kind: 'error', text, lastSequence: 0 }]
+  }
+
+  if (inner.itemType !== 'tool_call') return items
+
+  const id = ev.itemId ?? eventId
+  const idx = items.findIndex((item) => item.id === id)
+
+  if (idx === -1) {
+    return [
+      ...items,
+      {
+        id,
+        kind: 'tool',
+        text: inner.title ?? '',
+        toolName: inner.title ?? 'Tool',
+        status: ev.type === 'item.completed' ? 'done' : 'running',
+        lastSequence: 0,
+      },
+    ]
+  }
+
+  const next = items.slice()
+  next[idx] = {
+    ...items[idx],
+    ...(inner.title ? { toolName: inner.title } : {}),
+    status: ev.type === 'item.completed' ? (inner.status === 'failed' ? 'failed' : 'done') : items[idx].status,
+  }
+  return next
+}
+
 /**
  * Folds a batch of ordered `AgentEvent`s into a new `AgentThreadView`. Never
  * mutates `view` — the caller (a zustand slice) relies on referential
@@ -102,10 +179,16 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
   for (const event of events) {
     if (event.seq <= view.lastSeq) continue
 
-    if (isActivityAppendedPayload(event.payload)) {
+    if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
+      // The user's own message. Keyed by eventId, not itemId — it has no
+      // provider item and never accumulates deltas.
+      items = [...items, { id: event.eventId, kind: 'user', text: event.payload.text, lastSequence: 0 }]
+    } else if (isActivityAppendedPayload(event.payload)) {
       const result = applyDelta(items, event.payload)
       items = result.items
       hasGap = hasGap || result.gap
+    } else if (isForwardedProviderEvent(event.payload)) {
+      items = applyForwarded(items, event.eventId, event.payload)
     }
 
     lastSeq = event.seq
