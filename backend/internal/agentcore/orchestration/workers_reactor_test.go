@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -227,7 +228,7 @@ func newReactorHarness(t *testing.T, brokerFn func(rec *callRecorder) approval.B
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	go h.engine.Run(ctx)
-	go h.reactor.Run(ctx)
+	h.reactor.Start(ctx)
 	return h
 }
 
@@ -396,4 +397,35 @@ func TestReactorStartsIngestionOncePerFreshInstance(t *testing.T) {
 	if got := h.consumedSnapshot(); len(got) != 1 {
 		t.Fatalf("consumed %v, want exactly one — a shared instance must not be consumed twice", got)
 	}
+}
+
+// Regression: a worktree with an empty Agent produced InstanceID ":default",
+// whose Kind is the empty string. That matched no driver and reported
+// "no driver registered for " — a blank where the agent name should be —
+// after which every turn failed with "thread is not bound to an instance".
+// All three worktrees in a real install were root worktrees with no agent, so
+// this was the default experience, not an edge case.
+func TestUnresolvedAgentReportsAConfigurationError(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.reactor.InstanceFor = func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
+		return ":default", provider.SessionStartInput{ThreadID: threadID}, nil
+	}
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+
+	// The failure must reach the thread as a visible error, not just a log
+	// line — that silence is what made this take four rounds to find.
+	waitFor(t, func() bool {
+		for _, e := range h.store.All() {
+			if e.Type != EvtThreadActivityAppended {
+				continue
+			}
+			if strings.Contains(string(e.Payload), "no agent configured") {
+				return true
+			}
+		}
+		return false
+	})
 }

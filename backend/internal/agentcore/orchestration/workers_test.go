@@ -46,7 +46,10 @@ func (a *stubAdapter) Events() <-chan event.Event { return a.ch }
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	// Bounds a hang, nothing more — a healthy condition is met in
+	// milliseconds. Generous on purpose so a failure here reads as "the thing
+	// never happened" rather than "the machine was busy".
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

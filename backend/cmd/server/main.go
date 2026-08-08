@@ -433,13 +433,24 @@ func main() {
 			if err != nil {
 				return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
 			}
-			return provider.InstanceID(wt.Agent + ":default"), provider.SessionStartInput{
+			// Root worktrees (and any worktree created before the agent field
+			// existed) carry an empty Agent. The terminal handles that by
+			// opening a plain shell, but chat has no such fallback — it must
+			// name an agent or nothing can run. Without this, InstanceID came
+			// out as ":default", whose empty Kind matched no driver and left
+			// every turn failing with "thread is not bound to an instance".
+			agentID := wt.Agent
+			if agentID == "" {
+				agentID = defaultChatAgent
+				log.Printf("agent: worktree %s has no agent configured; defaulting to %q", worktreeID, agentID)
+			}
+			return provider.InstanceID(agentID + ":default"), provider.SessionStartInput{
 				ThreadID: threadID,
 				Cwd:      wt.Path,
 			}, nil
 		},
 	}
-	go agentReactor.Run(context.Background())
+	agentReactor.Start(context.Background())
 
 	agentWS := handler.NewAgentWSHandler(agentEngine, st, agentChatSvc)
 	agentThreadH := handler.NewAgentThreadHandler(st)
@@ -1262,3 +1273,9 @@ func loadOrCreateSigningKey(dbPath string) (ed25519.PrivateKey, error) {
 	}
 	return priv, nil
 }
+
+// defaultChatAgent is used when a worktree has no Agent set. It is the only
+// agent with a ported agentcore Driver today, and settings' default_model is
+// a Claude model, so this matches what the composer's model picker already
+// shows. Adding drivers should turn this into a probe-aware choice.
+const defaultChatAgent = "claude"

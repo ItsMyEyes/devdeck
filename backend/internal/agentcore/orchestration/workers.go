@@ -264,8 +264,28 @@ type Reactor struct {
 	OnInstanceStarted func(ctx context.Context, a provider.Adapter)
 }
 
+// Start subscribes on the CALLER's goroutine, then runs the loop on a new
+// one. Prefer this over `go r.Run(ctx)`.
+//
+// Engine.publish only delivers to subscribers that exist at publish time, so
+// with `go r.Run(ctx)` every event committed before that goroutine happens to
+// reach Subscribe is silently dropped — no error, no retry, the turn simply
+// never reaches the provider. Subscribing before returning closes that window
+// entirely.
+func (r *Reactor) Start(ctx context.Context) {
+	sub, unsub := r.Engine.Subscribe(256)
+	go r.loop(ctx, sub, unsub)
+}
+
+// Run is Start's blocking form, kept for callers that own the goroutine. It
+// carries the same startup window Start exists to remove: anything committed
+// before this function body begins executing is missed.
 func (r *Reactor) Run(ctx context.Context) {
 	sub, unsub := r.Engine.Subscribe(256)
+	r.loop(ctx, sub, unsub)
+}
+
+func (r *Reactor) loop(ctx context.Context, sub <-chan []Event, unsub func()) {
 	defer unsub()
 
 	for {
@@ -423,9 +443,16 @@ func (r *Reactor) ensureInstanceStarted(ctx context.Context, id provider.Instanc
 		return nil
 	}
 	kind := instanceKind(id)
+	if kind == "" {
+		// An InstanceID like ":default" means the caller could not resolve an
+		// agent — most often a worktree with an empty Agent field. Say that,
+		// rather than "no driver registered for " with a blank where the name
+		// should be, which is what this reported before.
+		return fmt.Errorf("agentcore: no agent configured for this worktree (instance %q); set one on the worktree to use chat", id)
+	}
 	d, ok := r.Provider.Registry.Driver(kind)
 	if !ok {
-		return fmt.Errorf("agentcore: no driver registered for %s", kind)
+		return fmt.Errorf("agentcore: no driver registered for %q", kind)
 	}
 	cfg, err := d.DecodeConfig(d.DefaultConfig())
 	if err != nil {
