@@ -44,4 +44,45 @@ describe('globals.css token layer', () => {
     expect(match).not.toBeNull()
     expect(Number(match![1])).toBeLessThan(1)
   })
+
+  it('defines the Palette A elevation ladder', () => {
+    expect(css).toContain('--devdeck-base: #131616')
+    expect(css).toContain('--devdeck-pane: #1a1d1d')
+    expect(css).toContain('--devdeck-raised: #212525')
+    expect(css).toContain('--devdeck-card: #262b2b')
+    expect(css).toContain('--devdeck-hairline: rgba(255, 255, 255, 0.08)')
+  })
+
+  it('exposes the new surfaces as Tailwind color utilities', () => {
+    expect(css).toContain('--color-devdeck-base: var(--devdeck-base)')
+    expect(css).toContain('--color-devdeck-raised: var(--devdeck-raised)')
+    expect(css).toContain('--color-devdeck-card: var(--devdeck-card)')
+    expect(css).toContain('--color-devdeck-hairline: var(--devdeck-hairline)')
+  })
+
+  // The vendored AI Elements components style themselves through the shadcn
+  // semantic layer. Two of those tokens were aliases of --background, which
+  // made `bg-muted` invisible and `border-border` a hard 3:1 outline on every
+  // card. Nothing outside src/components/{shadcn,ai-elements} reads them —
+  // `border-border` and `bg-muted` have zero call sites — so re-pointing them
+  // is inert for the rest of the app.
+  it('gives the shadcn semantic layer distinct surfaces', () => {
+    expect(css).toContain('--muted: var(--devdeck-raised)')
+    expect(css).toContain('--card: var(--devdeck-raised)')
+    expect(css).toContain('--secondary: var(--devdeck-card)')
+    expect(css).toContain('--accent: var(--devdeck-card)')
+    expect(css).toContain('--border: var(--devdeck-hairline)')
+  })
+
+  it('does not alias --muted to the pane again', () => {
+    expect(css).not.toContain('--muted: var(--devdeck-pane)')
+  })
+
+  // message.tsx styles the user bubble with `is-user:dark` and
+  // `group-[.is-user]:…`. Without the custom variant registered, Tailwind
+  // emits no rule for the `is-user:` prefix and the bubble silently loses its
+  // treatment.
+  it('registers the is-user variant the Message component relies on', () => {
+    expect(css).toContain('@custom-variant is-user')
+  })
 })

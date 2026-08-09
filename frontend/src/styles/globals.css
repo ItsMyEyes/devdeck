@@ -4,6 +4,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* message.tsx marks a user turn with `.is-user` on the Message wrapper and
+   styles its bubble through `is-user:` and `group-[.is-user]:` prefixes.
+   Tailwind needs the variant declared or the `is-user:` rules never emit. */
+@custom-variant is-user (&:is(.is-user *));
+
 /*
  * devdeck design tokens - dark-only, neutral developer-workspace palette.
  * Raw palette is exposed as --devdeck-* for pixel-faithful spots; semantic tokens
@@ -41,6 +46,18 @@
   --devdeck-glass-solid: #2e3333;
   --devdeck-card-wash: rgba(255, 255, 255, 0.055);
   --devdeck-pane: #1a1d1d;
+
+  /* Elevation ladder. One pane colour cannot separate a code block from a
+     tool card from the message flow behind them, which is what the chat pane
+     needs; these three are that separation. Same neutral temperature as every
+     other surface (hue 188.6deg, matching the accent) — see the note above. */
+  --devdeck-base: #131616; /* backdrop behind panes */
+  --devdeck-raised: #212525; /* code blocks, tool cards, composer box */
+  --devdeck-card: #262b2b; /* code-block title bar, hover on raised */
+  /* Card and separator edge for the vendored component layer. --devdeck-line
+     (#7d8180) stays what it is — an edge that must be SEEN, on inputs and
+     real separators. A 3:1 line around every card is not that. */
+  --devdeck-hairline: rgba(255, 255, 255, 0.08);
 
   /* state: one wash for "selected", plus --devdeck-ring as a 2px bar for
      "focused". The wash is relative — it adds light to whatever is behind it,
@@ -125,21 +142,21 @@
   /* ── semantic (shadcn-style) ─────────────────────────────────────────── */
   --background: var(--devdeck-pane);
   --foreground: var(--devdeck-fg);
-  --card: var(--devdeck-pane);
+  --card: var(--devdeck-raised);
   --card-foreground: var(--devdeck-fg);
   --popover: var(--devdeck-glass-solid);
   --popover-foreground: var(--devdeck-fg);
   --primary: var(--devdeck-accent);
   --primary-foreground: var(--devdeck-accent-ink);
-  --secondary: var(--devdeck-on);
+  --secondary: var(--devdeck-card);
   --secondary-foreground: var(--devdeck-fg);
-  --muted: var(--devdeck-pane);
+  --muted: var(--devdeck-raised);
   --muted-foreground: var(--devdeck-fg-2);
-  --accent: var(--devdeck-on);
+  --accent: var(--devdeck-card);
   --accent-foreground: var(--devdeck-fg);
   --destructive: var(--devdeck-err);
   --destructive-foreground: var(--devdeck-accent-ink);
-  --border: var(--devdeck-line);
+  --border: var(--devdeck-hairline);
   --input: var(--devdeck-line);
   --ring: var(--devdeck-ring);
 
@@ -198,6 +215,10 @@
   --color-devdeck-glass-solid: var(--devdeck-glass-solid);
   --color-devdeck-card-wash: var(--devdeck-card-wash);
   --color-devdeck-pane: var(--devdeck-pane);
+  --color-devdeck-base: var(--devdeck-base);
+  --color-devdeck-raised: var(--devdeck-raised);
+  --color-devdeck-card: var(--devdeck-card);
+  --color-devdeck-hairline: var(--devdeck-hairline);
   --color-devdeck-on: var(--devdeck-on);
   --color-devdeck-dim-glass: var(--devdeck-dim-glass);
   --color-devdeck-dim-pane: var(--devdeck-dim-pane);
