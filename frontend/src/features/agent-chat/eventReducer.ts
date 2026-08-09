@@ -70,6 +70,11 @@ interface ForwardedProviderEvent {
     title?: string
     status?: string
     message?: string
+    /** `ItemStartedPayload.Detail` / `ItemCompletedPayload.Detail` — an opaque
+     *  `json.RawMessage` on the wire. On `item.started` it is
+     *  `{toolCallId, name}`; on `item.completed` it is the tool's own input
+     *  JSON. Never interpreted here beyond picking out `toolCallId`. */
+    detail?: unknown
   }
 }
 
@@ -89,7 +94,7 @@ function itemKindForStream(stream: string): ChatItemKind {
  *  array. A delta is keyed by `itemId` alone — reasoning and text streams
  *  for the same logical turn arrive under different `itemId`s upstream, so
  *  no separate stream key is needed here to keep them apart. */
-function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload): { items: ChatItem[]; gap: boolean } {
+function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, createdAt: number): { items: ChatItem[]; gap: boolean } {
   const idx = items.findIndex((item) => item.id === payload.itemId)
   if (idx === -1) {
     // First delta for this item. A gap can only be detected relative to a
@@ -100,6 +105,7 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload): { item
       id: payload.itemId,
       kind: itemKindForStream(payload.stream),
       text: payload.text,
+      createdAt,
       lastSequence: payload.sequence,
     }
     return { items: [...items, item], gap: false }
@@ -124,18 +130,31 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload): { item
  *  appending a second one — they share an `itemId`, which is exactly what it
  *  is for. Anything else forwarded (session/turn bookkeeping) is deliberately
  *  not rendered; it advances `lastSeq` and nothing more. */
-function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProviderEvent): ChatItem[] {
+/** Reads `detail.toolCallId` without interpreting the rest of the payload.
+ *  `detail` is whatever the provider sent — an object on `item.started`, the
+ *  tool's own arguments on `item.completed`, or absent. */
+function toolCallIdOf(detail: unknown): string | undefined {
+  if (typeof detail !== 'object' || detail === null) return undefined
+  const id = (detail as Record<string, unknown>).toolCallId
+  return typeof id === 'string' ? id : undefined
+}
+
+function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProviderEvent, createdAt: number): ChatItem[] {
   const inner = ev.payload ?? {}
 
   if (ev.type === 'runtime.error' || inner.itemType === 'error') {
     const text = inner.message ?? inner.title ?? 'The agent reported an error.'
-    return [...items, { id: eventId, kind: 'error', text, lastSequence: 0 }]
+    return [...items, { id: eventId, kind: 'error', text, createdAt, lastSequence: 0 }]
   }
 
   if (inner.itemType !== 'tool_call') return items
 
   const id = ev.itemId ?? eventId
   const idx = items.findIndex((item) => item.id === id)
+  const started = ev.type !== 'item.completed'
+  // On `item.started` the detail is the {toolCallId, name} envelope, not the
+  // tool's arguments; only `item.completed` carries the real input.
+  const input = started ? undefined : inner.detail
 
   if (idx === -1) {
     return [
@@ -145,7 +164,10 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
         kind: 'tool',
         text: inner.title ?? '',
         toolName: inner.title ?? 'Tool',
-        status: ev.type === 'item.completed' ? 'done' : 'running',
+        status: started ? 'running' : inner.status === 'failed' ? 'failed' : 'done',
+        toolCallId: toolCallIdOf(inner.detail),
+        ...(input === undefined ? {} : { input }),
+        createdAt,
         lastSequence: 0,
       },
     ]
@@ -155,7 +177,11 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
   next[idx] = {
     ...items[idx],
     ...(inner.title ? { toolName: inner.title } : {}),
-    status: ev.type === 'item.completed' ? (inner.status === 'failed' ? 'failed' : 'done') : items[idx].status,
+    // A replayed tail can re-deliver an event that carries no detail. Keeping
+    // the existing value is what makes reattach idempotent for this field.
+    ...(toolCallIdOf(inner.detail) === undefined ? {} : { toolCallId: toolCallIdOf(inner.detail) }),
+    ...(input === undefined ? {} : { input }),
+    status: started ? items[idx].status : inner.status === 'failed' ? 'failed' : 'done',
   }
   return next
 }
@@ -182,13 +208,13 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
     if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
       // The user's own message. Keyed by eventId, not itemId — it has no
       // provider item and never accumulates deltas.
-      items = [...items, { id: event.eventId, kind: 'user', text: event.payload.text, lastSequence: 0 }]
+      items = [...items, { id: event.eventId, kind: 'user', text: event.payload.text, createdAt: event.createdAt, lastSequence: 0 }]
     } else if (isActivityAppendedPayload(event.payload)) {
-      const result = applyDelta(items, event.payload)
+      const result = applyDelta(items, event.payload, event.createdAt)
       items = result.items
       hasGap = hasGap || result.gap
     } else if (isForwardedProviderEvent(event.payload)) {
-      items = applyForwarded(items, event.eventId, event.payload)
+      items = applyForwarded(items, event.eventId, event.payload, event.createdAt)
     }
 
     lastSeq = event.seq

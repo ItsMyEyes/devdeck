@@ -167,3 +167,131 @@ describe('reduceAgentEvents — non-delta events', () => {
     expect(view.items[2].text).toBe('I found the bug')
   })
 })
+
+describe('reduceAgentEvents — tool detail and timestamps', () => {
+  /** A forwarded provider `item.started` for a tool call. The outer event is
+   *  an orchestration `thread.activity-appended`; the provider's own envelope
+   *  rides in its payload. See applyForwarded's doc comment. */
+  function toolStarted(seq: number, itemId: string, name: string): AgentEvent {
+    return {
+      seq,
+      eventId: `e-${seq}`,
+      type: 'thread.activity-appended',
+      threadId: 't-1',
+      commandId: `c-${seq}`,
+      createdAt: 1_700_000_000_000 + seq * 1000,
+      payload: {
+        type: 'item.started',
+        itemId,
+        payload: { itemType: 'tool_call', title: name, detail: { toolCallId: 'tc_42', name } },
+      },
+    }
+  }
+
+  function toolCompleted(seq: number, itemId: string, input: unknown): AgentEvent {
+    return {
+      seq,
+      eventId: `e-${seq}`,
+      type: 'thread.activity-appended',
+      threadId: 't-1',
+      commandId: `c-${seq}`,
+      createdAt: 1_700_000_000_000 + seq * 1000,
+      payload: {
+        type: 'item.completed',
+        itemId,
+        payload: { itemType: 'tool_call', status: 'completed', detail: input },
+      },
+    }
+  }
+
+  it('keeps the toolCallId from the started event', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [toolStarted(1, 'i-1', 'Edit')])
+    expect(view.items[0].toolCallId).toBe('tc_42')
+  })
+
+  it('keeps the tool input from the completed event', () => {
+    const started = reduceAgentEvents(emptyThreadView(), [toolStarted(1, 'i-1', 'Edit')])
+    const view = reduceAgentEvents(started, [toolCompleted(2, 'i-1', { file_path: '/a/b.go' })])
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].input).toEqual({ file_path: '/a/b.go' })
+    expect(view.items[0].status).toBe('done')
+  })
+
+  it('does not clobber an input already folded in when a later event carries none', () => {
+    const withInput = reduceAgentEvents(emptyThreadView(), [
+      toolStarted(1, 'i-1', 'Edit'),
+      toolCompleted(2, 'i-1', { file_path: '/a/b.go' }),
+    ])
+    const view = reduceAgentEvents(withInput, [
+      {
+        seq: 3,
+        eventId: 'e-3',
+        type: 'thread.activity-appended',
+        threadId: 't-1',
+        commandId: 'c-3',
+        createdAt: 1_700_000_003_000,
+        payload: { type: 'item.completed', itemId: 'i-1', payload: { itemType: 'tool_call', status: 'completed' } },
+      },
+    ])
+    expect(view.items[0].input).toEqual({ file_path: '/a/b.go' })
+  })
+
+  it('stamps every item with the event createdAt', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      {
+        seq: 1,
+        eventId: 'e-1',
+        type: 'thread.message-sent',
+        threadId: 't-1',
+        commandId: 'c-1',
+        createdAt: 1_700_000_000_000,
+        payload: { text: 'hello' },
+      },
+      toolStarted(2, 'i-1', 'Read'),
+    ])
+    expect(view.items[0].createdAt).toBe(1_700_000_000_000)
+    expect(view.items[1].createdAt).toBe(1_700_000_002_000)
+  })
+
+  it('stamps an assistant delta item with the createdAt of its first chunk', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      {
+        seq: 1,
+        eventId: 'e-1',
+        type: 'thread.activity-appended',
+        threadId: 't-1',
+        commandId: 'c-1',
+        createdAt: 1_700_000_005_000,
+        payload: { itemId: 'a-1', stream: 'text', text: 'partial', sequence: 1 },
+      },
+      {
+        seq: 2,
+        eventId: 'e-2',
+        type: 'thread.activity-appended',
+        threadId: 't-1',
+        commandId: 'c-2',
+        createdAt: 1_700_000_009_000,
+        payload: { itemId: 'a-1', stream: 'text', text: ' more', sequence: 2 },
+      },
+    ])
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].text).toBe('partial more')
+    expect(view.items[0].createdAt).toBe(1_700_000_005_000)
+  })
+
+  it('records an error row with its timestamp', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      {
+        seq: 1,
+        eventId: 'e-1',
+        type: 'thread.activity-appended',
+        threadId: 't-1',
+        commandId: 'c-1',
+        createdAt: 1_700_000_011_000,
+        payload: { type: 'runtime.error', payload: { message: 'claude exited 1' } },
+      },
+    ])
+    expect(view.items[0].kind).toBe('error')
+    expect(view.items[0].createdAt).toBe(1_700_000_011_000)
+  })
+})

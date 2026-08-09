@@ -19,6 +19,19 @@ export interface ChatItem {
   /** Tool rows only; read-only in this spec — Allow/Deny arrives with approvals. */
   toolName?: string
   status?: 'running' | 'done' | 'failed'
+  /** Tool rows only. The provider's own call id, from `item.started`'s
+   *  `detail.toolCallId`. Carried so a future approvals feature can correlate
+   *  a decision back to the call that asked for it. */
+  toolCallId?: string
+  /** Tool rows only. The tool's arguments, from `item.completed`'s `detail` —
+   *  the accumulated `input_json_delta` the provider streams. Rendered by
+   *  `ToolInput`. `unknown` because the shape is per-tool and must never be
+   *  interpreted here. */
+  input?: unknown
+  /** Wall-clock of the event that CREATED this item (later deltas folded into
+   *  it do not move it). Optional only so existing `ChatItem` fixtures keep
+   *  compiling — the reducer always sets it. */
+  createdAt?: number
   /** Highest delta sequence folded into this item, per stream. */
   lastSequence: number
 }
