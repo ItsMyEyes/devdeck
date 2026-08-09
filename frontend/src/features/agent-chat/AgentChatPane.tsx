@@ -6,13 +6,14 @@
  * connecting (loading), a thread error, and no-messages-yet (empty) —
  * before falling through to the real timeline.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { MessageSquare } from 'lucide-react'
+import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation'
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
 import { ChatHeader } from '@/features/agent-chat/ChatHeader'
 import { EFFORT_OPTIONS, MODEL_OPTIONS } from '@/features/agent-chat/ComposerControls'
 import { MessagesTimeline } from '@/features/agent-chat/MessagesTimeline'
-import { shouldFollow } from '@/features/agent-chat/scrollAnchoring'
 import { useAgentChatSocket } from '@/features/agent-chat/useAgentChatSocket'
 import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
 import type { Machine } from '@/store/types'
@@ -79,28 +80,6 @@ export function AgentChatPane({ worktreeId, threadKey, machine, worktreeLabel, b
     [model, effort, interactionMode, runtimeMode, view.error, setInteractionMode, setRuntimeMode],
   )
 
-  // Follow-mode: sticks the timeline to the bottom as deltas stream in,
-  // unless the user has scrolled up to read history past the re-arm band
-  // `shouldFollow` defines — see scrollAnchoring.ts's doc comment for why a
-  // strict "at the very bottom" check isn't enough.
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const followRef = useRef(true)
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    followRef.current = shouldFollow(
-      { contentLength: el.scrollHeight, scroll: el.scrollTop, scrollLength: el.clientHeight },
-      0,
-    )
-  }, [])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el || !followRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [view.items])
-
   // Only the very first connect (no replayed items yet) shows a blocking
   // "connecting" state — a reconnect mid-thread keeps the existing timeline
   // on screen instead of blanking it, matching the PTY's own reattach
@@ -117,17 +96,25 @@ export function AgentChatPane({ worktreeId, threadKey, machine, worktreeLabel, b
         threadStatus={view.status}
       />
 
-      <div ref={scrollRef} onScroll={handleScroll} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {showConnecting ? (
-          <PaneMessage>Connecting to the agent…</PaneMessage>
-        ) : view.error ? (
-          <PaneMessage tone="error">{view.error}</PaneMessage>
-        ) : view.items.length === 0 ? (
-          <PaneMessage>No messages yet — say hello below.</PaneMessage>
-        ) : (
-          <MessagesTimeline view={view} />
-        )}
-      </div>
+      <Conversation className="min-h-0 flex-1">
+        <ConversationContent className="p-0">
+          {showConnecting ? (
+            <PaneMessage>Connecting to the agent…</PaneMessage>
+          ) : view.error ? (
+            <PaneMessage tone="error">{view.error}</PaneMessage>
+          ) : view.items.length === 0 ? (
+            <ConversationEmptyState
+              className="min-h-[220px]"
+              icon={<MessageSquare className="size-5 text-devdeck-fg-2" aria-hidden="true" />}
+              title="No messages yet"
+              description="Say hello below to start the thread."
+            />
+          ) : (
+            <MessagesTimeline view={view} />
+          )}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
       <ChatComposer
         status={view.status}

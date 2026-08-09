@@ -144,7 +144,6 @@ export default defineConfig({
       'src/features/agent-chat/timeline.test.ts',
       'src/features/agent-chat/adapter.test.ts',
       'src/features/agent-chat/MessagesTimeline.test.tsx',
-      'src/features/agent-chat/scrollAnchoring.test.ts',
       'src/features/terminal/paneTree.agentChat.test.ts',
       'src/features/agent-chat/AgentChatPane.test.tsx',
       'src/features/agent-chat/ChatComposer.test.tsx',
