@@ -1,35 +1,29 @@
 /**
- * Renders `buildTimeline(view)` — grouped messages, reasoning blocks, and
- * read-only tool rows. Purely presentational: all grouping/ordering logic
- * lives in `timeline.ts` (pure, unit-tested); this component only decides
- * how each `TimelineEntry` looks, plus owns the two pieces of state that
- * are legitimately UI concerns rather than view-model ones — which
- * reasoning/tool-group blocks the user has expanded, and (see below) each
- * turn's observed wall-clock timing. `buildTimeline` recomputes `collapsed:
- * true` fresh every call, so it can't hold that toggle itself.
+ * Renders `buildTimeline(view)` through the vendored AI Elements components.
+ * Purely presentational: grouping lives in `timeline.ts` (pure, unit-tested),
+ * the model-to-props mapping lives in `adapter.ts` (pure, unit-tested), and
+ * this file only decides which component each `TimelineEntry` becomes.
  *
- * Turn stamps (design spec: "Each completed turn is stamped `2:40:02 PM •
- * 10s`") are a documented deviation from the plan's data model: `ChatItem`
- * (`types.ts`) carries no timestamp, and `eventReducer.ts` doesn't fold
- * `AgentEvent.createdAt` into one — extending either is out of Task 8's file
- * list (neither is mentioned anywhere in the plan's file structure, for any
- * task). Rather than fabricate a stamp or silently drop the feature, this
- * component captures its own wall-clock reads the first time it observes a
- * turn start and the first time it observes that turn as settled (via
- * `turnBoundaries` + `view.status`), cached in a ref keyed by the turn's
- * leading message id. This is exact for the common case — a turn watched
- * live, which is what streaming deltas mean this pane is almost always
- * doing — and only approximate after a reconnect that replays a whole
- * historical thread in one burst, where it reads as "just now, instant".
- * That limitation is inherent to the current data model, not to this
- * component; a real fix threads `createdAt` through `ChatItem`.
+ * The one piece of state it owns is legitimately a UI concern: which
+ * reasoning blocks and tool groups the user has expanded. `buildTimeline`
+ * recomputes `collapsed: true` on every call, so it cannot hold that itself.
+ *
+ * Turn stamps come from `ChatItem.createdAt` (the orchestration event's own
+ * timestamp). The previous implementation read `Date.now()` during render and
+ * cached it in a ref, because `ChatItem` carried no timestamp; that hack and
+ * its "approximate after a reconnect replays a whole thread" caveat are both
+ * gone.
  */
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, Wrench } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { StatusDot } from '@/components/ui/status-dot'
-import { buildTimeline, collapseWorkLog, formatTurnStamp, turnBoundaries } from '@/features/agent-chat/timeline'
+import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message'
+import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
+import { Task, TaskContent, TaskTrigger } from '@/components/ai-elements/task'
+import { Tool, ToolContent, ToolHeader, ToolInput } from '@/components/ai-elements/tool'
+import { entryCreatedAt, messageRole, toolUIState, toolUIType, turnSpans } from '@/features/agent-chat/adapter'
+import { buildTimeline, collapseWorkLog, formatTurnStamp } from '@/features/agent-chat/timeline'
 import type { ReasoningEntry, TimelineEntry, ToolGroupEntry } from '@/features/agent-chat/timeline'
 import type { AgentThreadView, ChatItem } from '@/features/agent-chat/types'
 
@@ -37,93 +31,86 @@ export interface MessagesTimelineProps {
   view: AgentThreadView
 }
 
-const TOOL_STATUS_COLOR: Record<'running' | 'done' | 'failed', string> = {
-  running: 'var(--devdeck-wait)',
-  done: 'var(--devdeck-run)',
-  failed: 'var(--devdeck-err)',
-}
-
 function entryKey(entry: TimelineEntry, index: number): string {
   if (entry.kind === 'tool-group') return entry.items[0]?.id ?? `tool-group-${index}`
   return entry.item.id
 }
 
-function MessageBubble({ item }: { item: ChatItem }) {
-  if (item.kind === 'error') {
-    return (
-      <div className="self-stretch rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-devdeck-err">
-        {item.text}
-      </div>
-    )
-  }
-  const isUser = item.kind === 'user'
+/** An agent-reported failure. Deliberately not a `Message`: it is not part of
+ *  the conversation, and it must reach a screen reader as an alert. */
+function ErrorRow({ item }: { item: ChatItem }) {
   return (
     <div
-      className={cn(
-        'max-w-[82%] rounded-lg px-3 py-2 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap',
-        isUser
-          ? 'self-end border border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-fg'
-          : 'self-start text-devdeck-fg',
-      )}
+      role="alert"
+      className="self-stretch rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-devdeck-err"
     >
-      {item.text || '…'}
+      {item.text}
     </div>
   )
 }
 
-function ReasoningBlock({
-  entry,
-  expanded,
-  onToggle,
-}: {
-  entry: ReasoningEntry
-  expanded: boolean
-  onToggle: () => void
-}) {
+/** A conversation turn. The user bubble keeps this app's accent tint rather
+ *  than AI Elements' `bg-secondary` default — the tint is what the pane has
+ *  always used, and a solid accent fill would break DESIGN.md's rule that the
+ *  accent is never decorative. */
+function MessageRow({ item }: { item: ChatItem }) {
+  const isUser = item.kind === 'user'
   return (
-    <div className="max-w-[82%] self-start rounded-lg border border-devdeck-line bg-devdeck-on">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left font-mono text-[11px] text-devdeck-fg-2 hover:text-devdeck-fg"
+    <Message from={messageRole(item.kind)} className="max-w-[86%]">
+      <MessageContent
+        className={cn(
+          'font-mono text-[12.5px] leading-relaxed',
+          isUser && 'group-[.is-user]:border group-[.is-user]:border-devdeck-border-accent group-[.is-user]:bg-devdeck-accent-tint',
+        )}
       >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        Reasoning
-      </button>
-      {expanded ? (
-        <div className="border-t border-devdeck-line px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-devdeck-fg-2">
-          {entry.item.text}
-        </div>
-      ) : null}
-    </div>
+        <MessageResponse>{item.text || '…'}</MessageResponse>
+      </MessageContent>
+    </Message>
   )
 }
 
+function ReasoningRow({ entry, streaming }: { entry: ReasoningEntry; streaming: boolean }) {
+  return (
+    <Reasoning className="max-w-[86%] self-start" isStreaming={streaming} defaultOpen={false}>
+      <ReasoningTrigger />
+      <ReasoningContent>{entry.item.text}</ReasoningContent>
+    </Reasoning>
+  )
+}
+
+/** One tool call. `ToolInput` is rendered only when arguments actually
+ *  arrived; `ToolOutput` never is — the Claude provider does not parse
+ *  `tool_result`, so this app has no tool output to show. */
 function ToolRow({ item }: { item: ChatItem }) {
   return (
-    <div className="flex items-center gap-2 font-mono text-[11.5px] text-devdeck-fg-2">
-      <Wrench size={12} className="flex-none" />
-      <span className="min-w-0 flex-1 truncate">{item.toolName || item.text || 'tool call'}</span>
-      <StatusDot color={item.status ? TOOL_STATUS_COLOR[item.status] : 'var(--devdeck-fg-2)'} size={7} />
-    </div>
+    <Tool>
+      <ToolHeader type={toolUIType(item.toolName)} state={toolUIState(item.status)} />
+      {item.input === undefined ? null : (
+        <ToolContent>
+          <ToolInput input={item.input} />
+        </ToolContent>
+      )}
+    </Tool>
   )
 }
 
-function ToolGroup({ entry, expanded, onToggle }: { entry: ToolGroupEntry; expanded: boolean; onToggle: () => void }) {
+/** A run of consecutive calls. Everything but the newest folds behind a
+ *  disclosure — a turn that reads twenty files must not push the prose off
+ *  screen. */
+function ToolGroupRow({ entry, expanded, onToggle }: { entry: ToolGroupEntry; expanded: boolean; onToggle: () => void }) {
   const { visible, hidden } = collapseWorkLog(entry.items)
   return (
-    <div className="flex w-full flex-col gap-1 rounded-lg border border-devdeck-line bg-devdeck-on px-3 py-2">
+    <div className="flex w-full flex-col">
       {hidden.length > 0 ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center gap-1.5 text-left font-mono text-[11px] text-devdeck-fg-2 hover:text-devdeck-fg"
-        >
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {hidden.length} earlier {hidden.length === 1 ? 'step' : 'steps'}
-        </button>
+        <Task open={expanded} onOpenChange={onToggle}>
+          <TaskTrigger title={`${hidden.length} earlier ${hidden.length === 1 ? 'step' : 'steps'}`} />
+          <TaskContent>
+            {hidden.map((item) => (
+              <ToolRow key={item.id} item={item} />
+            ))}
+          </TaskContent>
+        </Task>
       ) : null}
-      {expanded ? hidden.map((item) => <ToolRow key={item.id} item={item} />) : null}
       {visible.map((item) => (
         <ToolRow key={item.id} item={item} />
       ))}
@@ -131,52 +118,14 @@ function ToolGroup({ entry, expanded, onToggle }: { entry: ToolGroupEntry; expan
   )
 }
 
-/** One turn's observed wall-clock timing — see this file's doc comment on
- *  why these are client-observed reads rather than server timestamps. */
-interface TurnTiming {
-  startedAt: number
-  completedAt: number | null
-}
-
-/** Caches each turn's `TurnTiming` in a ref keyed by `TurnBoundary.key`,
- *  computed synchronously during render (safe here: idempotent once a
- *  timing is set, and computing during render — not in an effect — means
- *  the render that first observes a turn as complete is the same render
- *  that shows its stamp, with no extra re-render needed to catch up). */
-function useTurnTimings(entries: TimelineEntry[], threadStatus: AgentThreadView['status']) {
-  const ref = useRef<Map<string, TurnTiming>>(new Map())
-  const boundaries = turnBoundaries(entries)
-
-  boundaries.forEach((boundary, index) => {
-    let timing = ref.current.get(boundary.key)
-    if (!timing) {
-      timing = { startedAt: Date.now(), completedAt: null }
-      ref.current.set(boundary.key, timing)
-    }
-    // The trailing turn is only "complete" once the thread itself isn't
-    // running — an earlier turn is always complete, since something after
-    // it (the next turn's user message) already arrived.
-    const isTrailing = index === boundaries.length - 1
-    const complete = !isTrailing || threadStatus !== 'running'
-    if (complete && timing.completedAt === null) timing.completedAt = Date.now()
-  })
-
-  return { boundaries, timings: ref.current }
-}
-
-function TurnStamp({ timing }: { timing: TurnTiming }) {
-  if (timing.completedAt === null) return null
-  return (
-    <div className="self-start px-1 font-mono text-[10px] text-devdeck-fg-2">
-      {formatTurnStamp(timing.startedAt, timing.completedAt)}
-    </div>
-  )
+function TurnStamp({ startedAt, completedAt }: { startedAt: number; completedAt: number }) {
+  return <div className="self-start px-1 font-mono text-[10px] text-devdeck-dim-pane">{formatTurnStamp(startedAt, completedAt)}</div>
 }
 
 export function MessagesTimeline({ view }: MessagesTimelineProps) {
   const entries = buildTimeline(view)
+  const spans = turnSpans(entries)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const { boundaries, timings } = useTurnTimings(entries, view.status)
 
   function toggle(id: string) {
     setExpanded((current) => {
@@ -187,46 +136,44 @@ export function MessagesTimeline({ view }: MessagesTimelineProps) {
     })
   }
 
+  const lastIndex = entries.length - 1
+
   return (
     <div className="flex flex-col gap-2.5 px-4 py-4">
       {entries.map((entry, index) => {
         const key = entryKey(entry, index)
-        const turnStamp = boundaries.find((b) => b.lastEntryIndex === index)
-        const timing = turnStamp ? timings.get(turnStamp.key) : undefined
+
+        // A turn stamp renders on the turn's last entry, but only once that
+        // turn is settled. The trailing turn is settled when the thread
+        // itself stops running; an earlier turn always is, because the next
+        // turn's user message already arrived after it.
+        const span = spans.find((s) => s.lastEntryIndex === index)
+        const isTrailingTurn = span?.lastEntryIndex === lastIndex
+        const settled = span !== undefined && (!isTrailingTurn || view.status !== 'running')
+        const startedAt = span ? entryCreatedAt(entries[span.firstEntryIndex]) : undefined
+        const completedAt = span ? entryCreatedAt(entries[span.lastEntryIndex]) : undefined
 
         let node: ReactNode
         if (entry.kind === 'message') {
-          node = <MessageBubble key={key} item={entry.item} />
+          node = entry.item.kind === 'error' ? <ErrorRow item={entry.item} /> : <MessageRow item={entry.item} />
         } else if (entry.kind === 'reasoning') {
-          node = (
-            <ReasoningBlock
-              key={key}
-              entry={entry}
-              expanded={expanded.has(entry.item.id)}
-              onToggle={() => toggle(entry.item.id)}
-            />
-          )
+          node = <ReasoningRow entry={entry} streaming={view.status === 'running' && index === lastIndex} />
         } else {
           const groupKey = `tool-group:${key}`
-          node = (
-            <ToolGroup
-              key={key}
-              entry={entry}
-              expanded={expanded.has(groupKey)}
-              onToggle={() => toggle(groupKey)}
-            />
-          )
+          node = <ToolGroupRow entry={entry} expanded={expanded.has(groupKey)} onToggle={() => toggle(groupKey)} />
         }
 
         return (
           <Fragment key={key}>
             {node}
-            {timing ? <TurnStamp timing={timing} /> : null}
+            {settled && startedAt !== undefined && completedAt !== undefined ? (
+              <TurnStamp startedAt={startedAt} completedAt={completedAt} />
+            ) : null}
           </Fragment>
         )
       })}
       {view.hasGap ? (
-        <div className="flex items-center gap-1.5 self-center rounded-full border border-devdeck-line bg-devdeck-on px-2.5 py-1 font-mono text-[10.5px] text-devdeck-fg-2">
+        <div className="flex items-center gap-1.5 self-center rounded-full border border-devdeck-hairline bg-devdeck-raised px-2.5 py-1 font-mono text-[10.5px] text-devdeck-fg-2">
           <AlertTriangle size={11} className="text-devdeck-wait" />
           Some updates may be missing from this thread
         </div>
