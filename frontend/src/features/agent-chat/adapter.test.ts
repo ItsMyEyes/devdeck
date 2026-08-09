@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { entryCreatedAt, messageRole, promptChatStatus, toolUIState, toolUIType, turnSpans } from '@/features/agent-chat/adapter'
+import {
+  entryCompletedAt,
+  entryCreatedAt,
+  messageRole,
+  promptChatStatus,
+  toolUIState,
+  toolUIType,
+  turnSpans,
+  withHardBreaks,
+} from '@/features/agent-chat/adapter'
 import { buildTimeline } from '@/features/agent-chat/timeline'
 import { emptyThreadView } from '@/features/agent-chat/eventReducer'
 import type { ChatItem } from '@/features/agent-chat/types'
@@ -129,5 +138,95 @@ describe('turnSpans', () => {
 
   it('returns nothing for an empty timeline', () => {
     expect(turnSpans([])).toEqual([])
+  })
+})
+
+// Regression: the turn footer stamped `entryCreatedAt` of the turn's LAST
+// entry, which for a streamed assistant message is its time-to-first-token —
+// so a 47-second turn read `• 3s`, and a trailing tool group was stamped with
+// its earliest call. The end of a turn is the newest fold into its last entry.
+describe('entryCompletedAt', () => {
+  it('prefers the last fold over the item creation stamp', () => {
+    const entries = buildTimeline({
+      ...emptyThreadView(),
+      items: [item({ id: 'a1', kind: 'assistant', createdAt: 3_000, updatedAt: 47_000 })],
+    })
+    expect(entryCompletedAt(entries[0])).toBe(47_000)
+  })
+
+  it('falls back to createdAt for an item nothing was folded into', () => {
+    const entries = buildTimeline({ ...emptyThreadView(), items: [item({ id: 'a1', kind: 'assistant', createdAt: 3_000 })] })
+    expect(entryCompletedAt(entries[0])).toBe(3_000)
+  })
+
+  it('takes the latest fold across a whole tool group, not its first call', () => {
+    const entries = buildTimeline({
+      ...emptyThreadView(),
+      items: [
+        item({ id: 't1', kind: 'tool', createdAt: 5_000, updatedAt: 9_000 }),
+        item({ id: 't2', kind: 'tool', createdAt: 10_000, updatedAt: 40_000 }),
+      ],
+    })
+    expect(entries).toHaveLength(1)
+    expect(entryCompletedAt(entries[0])).toBe(40_000)
+  })
+
+  it('reads a reasoning entry', () => {
+    const entries = buildTimeline({
+      ...emptyThreadView(),
+      items: [item({ id: 'r1', kind: 'reasoning', createdAt: 1_000, updatedAt: 2_000 })],
+    })
+    expect(entryCompletedAt(entries[0])).toBe(2_000)
+  })
+
+  it('returns undefined for an unstamped entry', () => {
+    const entries = buildTimeline({ ...emptyThreadView(), items: [item({ id: 'm1', kind: 'user' })] })
+    expect(entryCompletedAt(entries[0])).toBeUndefined()
+  })
+
+  it('returns undefined for a tool group with no stamps at all', () => {
+    const entries = buildTimeline({
+      ...emptyThreadView(),
+      items: [item({ id: 't1', kind: 'tool' }), item({ id: 't2', kind: 'tool' })],
+    })
+    expect(entryCompletedAt(entries[0])).toBeUndefined()
+  })
+})
+
+// Regression: the hand-rolled bubble used `whitespace-pre-wrap`, so agent
+// narration ("Done.\nNext I will run the tests.") kept its line breaks.
+// CommonMark treats a single newline as a space, and Streamdown ships neither
+// remark-breaks nor a way to append a plugin without replacing its own default
+// list — so the text is prepared here instead, which also keeps this testable
+// without a DOM.
+describe('withHardBreaks', () => {
+  it('turns a single newline into a markdown hard break', () => {
+    expect(withHardBreaks('Done.\nNext I will run the tests.')).toBe('Done.  \nNext I will run the tests.')
+  })
+
+  it('leaves a paragraph break alone', () => {
+    expect(withHardBreaks('one\n\ntwo')).toBe('one\n\ntwo')
+  })
+
+  it('leaves text with no newline alone', () => {
+    expect(withHardBreaks('just one line')).toBe('just one line')
+  })
+
+  it('does not touch the inside of a fenced code block', () => {
+    const fenced = 'run this:\n```go\nfunc main() {\n\tprintln("hi")\n}\n```\ndone'
+    expect(withHardBreaks(fenced)).toBe('run this:  \n```go\nfunc main() {\n\tprintln("hi")\n}\n```\ndone')
+  })
+
+  it('leaves an unterminated fence open to the end of the text', () => {
+    expect(withHardBreaks('```go\nfunc main() {\nreturn')).toBe('```go\nfunc main() {\nreturn')
+  })
+
+  it('does not double a break the author already wrote', () => {
+    expect(withHardBreaks('a  \nb')).toBe('a  \nb')
+    expect(withHardBreaks('a\\\nb')).toBe('a\\\nb')
+  })
+
+  it('is a no-op on empty text', () => {
+    expect(withHardBreaks('')).toBe('')
   })
 })

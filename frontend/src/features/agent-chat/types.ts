@@ -32,6 +32,11 @@ export interface ChatItem {
    *  it do not move it). Optional only so existing `ChatItem` fixtures keep
    *  compiling — the reducer always sets it. */
   createdAt?: number
+  /** Wall-clock of the LAST event folded into this item. For a streamed
+   *  assistant message `createdAt` is its time-to-first-token, so this is the
+   *  only honest end of a turn's span — see `entryCompletedAt` in
+   *  `adapter.ts`. Optional for the same fixture reason as `createdAt`. */
+  updatedAt?: number
   /** Highest delta sequence folded into this item, per stream. */
   lastSequence: number
 }

@@ -78,6 +78,20 @@ interface ForwardedProviderEvent {
   }
 }
 
+/** `thread.session-set`'s payload — Ingestion dispatches `CmdThreadSessionSet`
+ *  with `{status}` for SessionStarted (running), TurnCompleted/TurnAborted
+ *  (idle), SessionExited (stopped) and RequestOpened/UserInputRequested
+ *  (waiting), sometimes alongside a `resumeCursor` or a `pendingRequestAdd`.
+ *  Mirrors `applyOne`'s `EvtThreadSessionSet` case: an absent or unrecognised
+ *  status leaves the thread's current status alone. */
+const THREAD_STATUSES: readonly AgentThreadView['status'][] = ['idle', 'running', 'waiting', 'stopped']
+
+function sessionStatusOf(payload: unknown): AgentThreadView['status'] | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined
+  const status = (payload as Record<string, unknown>).status
+  return THREAD_STATUSES.find((known) => known === status)
+}
+
 function isForwardedProviderEvent(payload: unknown): payload is ForwardedProviderEvent {
   if (typeof payload !== 'object' || payload === null) return false
   const p = payload as Record<string, unknown>
@@ -106,6 +120,7 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, created
       kind: itemKindForStream(payload.stream),
       text: payload.text,
       createdAt,
+      updatedAt: createdAt,
       lastSequence: payload.sequence,
     }
     return { items: [...items, item], gap: false }
@@ -116,6 +131,9 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, created
   const updated: ChatItem = {
     ...existing,
     text: existing.text + payload.text,
+    // `createdAt` deliberately stays where it was; `updatedAt` is what moves,
+    // so a turn's span covers the whole stream and not just its first chunk.
+    updatedAt: createdAt,
     lastSequence: payload.sequence,
   }
   const next = items.slice()
@@ -144,7 +162,7 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
 
   if (ev.type === 'runtime.error' || inner.itemType === 'error') {
     const text = inner.message ?? inner.title ?? 'The agent reported an error.'
-    return [...items, { id: eventId, kind: 'error', text, createdAt, lastSequence: 0 }]
+    return [...items, { id: eventId, kind: 'error', text, createdAt, updatedAt: createdAt, lastSequence: 0 }]
   }
 
   if (inner.itemType !== 'tool_call') return items
@@ -168,6 +186,7 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
         toolCallId: toolCallIdOf(inner.detail),
         ...(input === undefined ? {} : { input }),
         createdAt,
+        updatedAt: createdAt,
         lastSequence: 0,
       },
     ]
@@ -176,6 +195,7 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
   const next = items.slice()
   next[idx] = {
     ...items[idx],
+    updatedAt: createdAt,
     ...(inner.title ? { toolName: inner.title } : {}),
     // A replayed tail can re-deliver an event that carries no detail. Keeping
     // the existing value is what makes reattach idempotent for this field.
@@ -200,15 +220,27 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
   let items = view.items
   let lastSeq = view.lastSeq
   let hasGap = view.hasGap
+  let status = view.status
   let changed = false
 
   for (const event of events) {
     if (event.seq <= view.lastSeq) continue
 
-    if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
+    // Thread status, mirroring the backend projector: the turn-start intent
+    // makes the thread running, and `thread.session-set` carries every later
+    // transition (running / waiting / idle / stopped). Neither produces a chat
+    // item — they only move the status.
+    if (event.type === 'thread.turn-start-requested') {
+      status = 'running'
+    } else if (event.type === 'thread.session-set') {
+      status = sessionStatusOf(event.payload) ?? status
+    } else if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
       // The user's own message. Keyed by eventId, not itemId — it has no
       // provider item and never accumulates deltas.
-      items = [...items, { id: event.eventId, kind: 'user', text: event.payload.text, createdAt: event.createdAt, lastSequence: 0 }]
+      items = [
+        ...items,
+        { id: event.eventId, kind: 'user', text: event.payload.text, createdAt: event.createdAt, updatedAt: event.createdAt, lastSequence: 0 },
+      ]
     } else if (isActivityAppendedPayload(event.payload)) {
       const result = applyDelta(items, event.payload, event.createdAt)
       items = result.items
@@ -226,6 +258,7 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
   return {
     ...view,
     items,
+    status,
     lastSeq,
     hasGap,
   }

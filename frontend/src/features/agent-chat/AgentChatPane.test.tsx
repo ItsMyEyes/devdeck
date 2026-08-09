@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
 import { emptyThreadView } from '@/features/agent-chat/eventReducer'
@@ -19,6 +19,15 @@ vi.mock('@/components/ai-elements/code-block', () => ({
 
 afterEach(() => {
   cleanup()
+})
+
+// `AgentChatPane` reaches `MessagesTimeline` through `React.lazy` (it drags in
+// Streamdown/Shiki/katex/mermaid, which must not sit in the eagerly loaded
+// workspace-route chunk). Resolving that module here, once, keeps the assertions
+// about the REAL timeline while taking vitest's transform of that whole graph
+// out of a `findBy*` timeout.
+beforeAll(async () => {
+  await import('@/features/agent-chat/MessagesTimeline')
 })
 
 // ChatHeader's agent/model pickers consume useAgents()/useAgentModels() (the
@@ -64,7 +73,34 @@ describe('AgentChatPane', () => {
     expect(screen.getByText(/claude CLI not found on PATH/i)).toBeInTheDocument()
   })
 
-  it('renders the timeline once messages exist', () => {
+  // Regression: `PaneMessage` centred itself with `flex-1`, which had real
+  // height back when the scroll container was the flex child. Inside
+  // `ConversationContent` (an auto-height block from use-stick-to-bottom) it
+  // collapses to one line pinned to the top of the pane. The empty state was
+  // given an explicit height for exactly this reason; these two were not.
+  it('gives the connecting state a height to centre itself in', () => {
+    mockSocket.mockReturnValue({
+      view: emptyThreadView(), status: 'connecting',
+      sendTurn: vi.fn(), abortTurn: vi.fn(),
+    })
+    render(<AgentChatPane worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+
+    const message = screen.getByText(/connecting/i)
+    expect(message.className).toContain('min-h-[220px]')
+    expect(message.className).toContain('items-center')
+  })
+
+  it('gives the thread-error state the same height', () => {
+    mockSocket.mockReturnValue({
+      view: { ...emptyThreadView(), error: 'claude CLI not found on PATH' },
+      status: 'open', sendTurn: vi.fn(), abortTurn: vi.fn(),
+    })
+    render(<AgentChatPane worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+
+    expect(screen.getByText(/claude CLI not found on PATH/i).className).toContain('min-h-[220px]')
+  })
+
+  it('renders the timeline once messages exist', async () => {
     mockSocket.mockReturnValue({
       view: {
         ...emptyThreadView(),
@@ -78,11 +114,13 @@ describe('AgentChatPane', () => {
     })
     render(<AgentChatPane worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
 
-    expect(screen.getByText(/the limiter is in place/)).toBeInTheDocument()
+    // `MessagesTimeline` is behind a lazy boundary (it drags in Streamdown,
+    // Shiki, katex and mermaid), so the transcript arrives on a microtask.
+    expect(await screen.findByText(/the limiter is in place/)).toBeInTheDocument()
     expect(screen.queryByText(/no messages yet/i)).not.toBeInTheDocument()
   })
 
-  it('keeps the existing timeline on screen while reconnecting mid-thread', () => {
+  it('keeps the existing timeline on screen while reconnecting mid-thread', async () => {
     mockSocket.mockReturnValue({
       view: {
         ...emptyThreadView(),
@@ -96,7 +134,7 @@ describe('AgentChatPane', () => {
     })
     render(<AgentChatPane worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
 
-    expect(screen.getByText(/earlier reply/)).toBeInTheDocument()
+    expect(await screen.findByText(/earlier reply/)).toBeInTheDocument()
     expect(screen.queryByText(/connecting/i)).not.toBeInTheDocument()
   })
 })

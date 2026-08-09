@@ -50,11 +50,14 @@ export function toolUIState(status: ChatItem['status']): ToolUIPart['state'] {
 }
 
 /**
- * `PromptInputSubmit`'s `status` prop. It renders a stop button (and a
- * `type="button"`, not `type="submit"`) whenever this is `submitted` or
- * `streaming` — which is exactly the interrupt affordance this composer wants.
- * Enter still steers an in-flight turn, because `PromptInputTextarea` calls
- * `form.requestSubmit()` directly rather than clicking the submit button.
+ * The AI SDK `ChatStatus` this thread is in. `ChatComposer` reads it to decide
+ * whether the agent is generating (`submitted` | `streaming`), which is when it
+ * renders a separate interrupt control beside the submit button.
+ *
+ * It is deliberately NOT handed to `PromptInputSubmit` as-is: that component
+ * turns itself into the stop control for both generating states, and `waiting`
+ * is the one state where the agent is asking the user for something, so a
+ * click on the action button there must send, not abort.
  */
 export function promptChatStatus(view: AgentThreadView): ChatStatus {
   if (view.error !== null) return 'error'
@@ -73,6 +76,63 @@ export function promptChatStatus(view: AgentThreadView): ChatStatus {
 export function entryCreatedAt(entry: TimelineEntry): number | undefined {
   if (entry.kind === 'tool-group') return entry.items[0]?.createdAt
   return entry.item.createdAt
+}
+
+/**
+ * When this entry last changed — the end of a turn's span.
+ *
+ * `entryCreatedAt` is not that end: a streamed assistant message is stamped
+ * with the arrival of its FIRST chunk (deliberately — see `applyDelta`), so
+ * using it for both ends of a turn reports the time-to-first-token as the whole
+ * duration. A tool group ends when its LATEST call last moved, not when its
+ * earliest one started.
+ */
+export function entryCompletedAt(entry: TimelineEntry): number | undefined {
+  if (entry.kind !== 'tool-group') return itemCompletedAt(entry.item)
+  const stamps = entry.items.map(itemCompletedAt).filter((at): at is number => at !== undefined)
+  return stamps.length === 0 ? undefined : Math.max(...stamps)
+}
+
+function itemCompletedAt(item: ChatItem): number | undefined {
+  return item.updatedAt ?? item.createdAt
+}
+
+/**
+ * Prepares agent text for `MessageResponse`, turning every single newline into
+ * a markdown hard break (two trailing spaces).
+ *
+ * Agent output is mostly prose with meaningful line breaks — progress
+ * narration, un-bulleted step lists, file lists, unfenced command output — and
+ * CommonMark collapses a single newline into a space. The bubble this replaced
+ * used `whitespace-pre-wrap` and was faithful; Streamdown is not, and it has no
+ * way to ADD a remark plugin (passing `remarkPlugins` replaces its own default
+ * list, including the code-meta plugin `@streamdown/code` depends on). Doing it
+ * to the text keeps the vendored file untouched and the rule unit-testable.
+ *
+ * Fenced code is left exactly as it arrived: trailing spaces there are content.
+ */
+export function withHardBreaks(text: string): string {
+  if (!text.includes('\n')) return text
+
+  const lines = text.split('\n')
+  let inFence = false
+
+  return lines
+    .map((line, index) => {
+      if (/^\s{0,3}(```|~~~)/.test(line)) {
+        inFence = !inFence
+        return line
+      }
+      if (inFence) return line
+
+      const next = lines[index + 1]
+      // Nothing follows, a blank line already ends the paragraph, or the author
+      // already wrote a hard break — in all three cases there is nothing to do.
+      if (next === undefined || next.trim() === '' || line.trim() === '') return line
+      if (line.endsWith('  ') || line.endsWith('\\')) return line
+      return `${line}  `
+    })
+    .join('\n')
 }
 
 export interface TurnSpan {

@@ -6,20 +6,33 @@
  * connecting (loading), a thread error, and no-messages-yet (empty) —
  * before falling through to the real timeline.
  */
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation'
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
 import { ChatHeader } from '@/features/agent-chat/ChatHeader'
 import { EFFORT_OPTIONS, MODEL_OPTIONS } from '@/features/agent-chat/ComposerControls'
-import { MessagesTimeline } from '@/features/agent-chat/MessagesTimeline'
 import { useAgentChatSocket } from '@/features/agent-chat/useAgentChatSocket'
 import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
 import type { Machine } from '@/store/types'
 
 const DEFAULT_MODEL = MODEL_OPTIONS[0].value
 const DEFAULT_EFFORT = EFFORT_OPTIONS[0].value
+
+/**
+ * Loaded on demand, and it has to be: `MessagesTimeline` reaches the vendored
+ * `message.tsx` / `reasoning.tsx`, which import `@streamdown/math` and
+ * `@streamdown/mermaid` unconditionally — katex + mermaid + their closure, and
+ * they are vendored files this plan does not edit. Imported statically they
+ * landed in the eagerly-loaded `/w/$wsId` chunk graph, so every visitor to a
+ * workspace downloaded ~0.9 MB of markdown machinery whether or not they ever
+ * opened a chat pane (and this deployment sits behind a tunnel). Behind this
+ * boundary it arrives with the first transcript instead.
+ */
+const MessagesTimeline = lazy(async () => ({
+  default: (await import('@/features/agent-chat/MessagesTimeline')).MessagesTimeline,
+}))
 
 export interface AgentChatPaneProps {
   worktreeId: string
@@ -31,13 +44,19 @@ export interface AgentChatPaneProps {
   branch?: string | null
 }
 
+/** A whole-pane state (connecting, thread error, transcript still loading).
+ *  The explicit `min-h` is load-bearing: `ConversationContent` is an
+ *  auto-height block inside `use-stick-to-bottom`'s scroller, so `flex-1` has
+ *  no free space to claim and `items-center` would centre a one-line-tall box —
+ *  the message would sit at the top of an empty pane. Same height the
+ *  `ConversationEmptyState` below is given, for the same reason. */
 function PaneMessage({ tone = 'neutral', children }: { tone?: 'neutral' | 'error'; children: ReactNode }) {
   return (
     <div
       className={
         tone === 'error'
-          ? 'flex flex-1 items-center justify-center px-6 text-center font-mono text-[12.5px] text-devdeck-err'
-          : 'flex flex-1 items-center justify-center px-6 text-center font-mono text-[12.5px] text-devdeck-fg-2'
+          ? 'flex min-h-[220px] flex-1 items-center justify-center px-6 text-center font-mono text-[12.5px] text-devdeck-err'
+          : 'flex min-h-[220px] flex-1 items-center justify-center px-6 text-center font-mono text-[12.5px] text-devdeck-fg-2'
       }
     >
       {children}
@@ -110,7 +129,9 @@ export function AgentChatPane({ worktreeId, threadKey, machine, worktreeLabel, b
               description="Say hello below to start the thread."
             />
           ) : (
-            <MessagesTimeline view={view} />
+            <Suspense fallback={<PaneMessage>Loading the transcript…</PaneMessage>}>
+              <MessagesTimeline view={view} />
+            </Suspense>
           )}
         </ConversationContent>
         <ConversationScrollButton />

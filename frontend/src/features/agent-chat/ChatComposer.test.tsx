@@ -84,6 +84,71 @@ describe('ChatComposer — t3code layout', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
+  // Regression: the single vendored action button became a Stop for BOTH
+  // generating states, so in `waiting` — the one state where the agent is
+  // asking the user for something — clicking it destroyed the turn instead of
+  // sending. Submit must stay reachable, with the interrupt beside it.
+  it('sends from the action button while the agent waits on the user', async () => {
+    const onSend = vi.fn()
+    const onAbort = vi.fn()
+    render(<ChatComposer status="waiting" onSend={onSend} onAbort={onAbort} controls={controls} />)
+
+    await userEvent.type(screen.getByRole('textbox'), 'use the second option')
+    await userEvent.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(onSend).toHaveBeenCalledWith('use the second option')
+    expect(onAbort).not.toHaveBeenCalled()
+  })
+
+  it('steers an in-flight turn from the action button too, not only from Enter', async () => {
+    const onSend = vi.fn()
+    const onAbort = vi.fn()
+    render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={controls} />)
+
+    await userEvent.type(screen.getByRole('textbox'), 'also add tests')
+    await userEvent.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(onSend).toHaveBeenCalledWith('also add tests')
+    expect(onAbort).not.toHaveBeenCalled()
+  })
+
+  it('keeps the interrupt reachable while the agent waits on the user', async () => {
+    const onAbort = vi.fn()
+    render(<ChatComposer status="waiting" onSend={vi.fn()} onAbort={onAbort} controls={controls} />)
+
+    await userEvent.click(screen.getByRole('button', { name: /stop/i }))
+    expect(onAbort).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers no interrupt while the thread is idle', () => {
+    render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument()
+  })
+
+  // Regression: `PromptInput` hardcodes its `InputGroup`'s className, so our
+  // `border`/`bg` landed on the <form> and the vendored box painted a second,
+  // hard `--devdeck-line` (3:1 grey) border plus a `bg-input/30` wash inside
+  // it. The composer must be ONE box on the intended surface.
+  it('paints one composer box instead of the vendored double border', () => {
+    const { container } = render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    const form = container.querySelector('form')
+    expect(form).not.toBeNull()
+    const box = container.querySelector('[data-slot="input-group"]')
+    expect(box).not.toBeNull()
+
+    // The form no longer paints a box of its own…
+    expect(form?.className).not.toMatch(/(^|\s)border(\s|$)/)
+    expect(form?.className).not.toMatch(/(^|\s)bg-devdeck-raised/)
+    // …and the vendored one is re-pointed from our side, since its className is
+    // out of reach. `bg` needs the important flag: `dark:bg-input/30` has the
+    // same specificity as the override.
+    expect(form?.className).toContain('[&>[data-slot=input-group]]:border-devdeck-hairline')
+    expect(form?.className).toContain('[&>[data-slot=input-group]]:bg-devdeck-raised!')
+    expect(form?.className).toContain('[&>[data-slot=input-group]]:shadow-none')
+  })
+
   it('keeps the status strip below the input', () => {
     render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} worktree="auth" branch="feat/auth" />)
 

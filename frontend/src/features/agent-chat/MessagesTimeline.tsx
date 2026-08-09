@@ -16,13 +16,13 @@
  */
 import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message'
+import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from '@/components/ai-elements/message'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
 import { Task, TaskContent, TaskTrigger } from '@/components/ai-elements/task'
 import { Tool, ToolContent, ToolHeader, ToolInput } from '@/components/ai-elements/tool'
-import { entryCreatedAt, messageRole, toolUIState, toolUIType, turnSpans } from '@/features/agent-chat/adapter'
+import { entryCompletedAt, entryCreatedAt, messageRole, toolUIState, toolUIType, turnSpans, withHardBreaks } from '@/features/agent-chat/adapter'
 import { buildTimeline, collapseWorkLog, formatTurnStamp } from '@/features/agent-chat/timeline'
 import type { ReasoningEntry, TimelineEntry, ToolGroupEntry } from '@/features/agent-chat/timeline'
 import type { AgentThreadView, ChatItem } from '@/features/agent-chat/types'
@@ -52,7 +52,13 @@ function ErrorRow({ item }: { item: ChatItem }) {
 /** A conversation turn. The user bubble keeps this app's accent tint rather
  *  than AI Elements' `bg-secondary` default — the tint is what the pane has
  *  always used, and a solid accent fill would break DESIGN.md's rule that the
- *  accent is never decorative. */
+ *  accent is never decorative.
+ *
+ *  Only the AGENT's text goes through markdown. The user's own text is
+ *  rendered verbatim in a pre-wrap block: it is a literal prompt, not a
+ *  document, and running it through Streamdown drops `<div>` as an HTML tag,
+ *  eats the underscores of `__init__`, turns a pasted `# comment` into an H1,
+ *  and collapses the newlines of a Shift+Enter message. */
 function MessageRow({ item }: { item: ChatItem }) {
   const isUser = item.kind === 'user'
   return (
@@ -63,9 +69,33 @@ function MessageRow({ item }: { item: ChatItem }) {
           isUser && 'group-[.is-user]:border group-[.is-user]:border-devdeck-border-accent group-[.is-user]:bg-devdeck-accent-tint',
         )}
       >
-        <MessageResponse>{item.text || '…'}</MessageResponse>
+        {isUser ? (
+          <div className="break-words whitespace-pre-wrap">{item.text || '…'}</div>
+        ) : (
+          <MessageResponse>{withHardBreaks(item.text) || '…'}</MessageResponse>
+        )}
       </MessageContent>
+      {isUser ? null : <CopyAction text={item.text} />}
     </Message>
+  )
+}
+
+/** Message-level copy. Streamdown gives fenced code its own copy button, but
+ *  the common case in a transcript is copying the agent's prose, which had no
+ *  affordance at all. Hidden until the turn is hovered or focused so a long
+ *  thread is not a column of icons. */
+function CopyAction({ text }: { text: string }) {
+  if (text.length === 0) return null
+  return (
+    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <MessageAction
+        className="size-6 text-devdeck-fg-2 hover:text-devdeck-fg"
+        label="Copy message"
+        onClick={() => void navigator.clipboard?.writeText(text)}
+      >
+        <Copy size={12} aria-hidden="true" />
+      </MessageAction>
+    </MessageActions>
   )
 }
 
@@ -73,18 +103,32 @@ function ReasoningRow({ entry, streaming }: { entry: ReasoningEntry; streaming: 
   return (
     <Reasoning className="max-w-[86%] self-start" isStreaming={streaming} defaultOpen={false}>
       <ReasoningTrigger />
-      <ReasoningContent>{entry.item.text}</ReasoningContent>
+      {/* Reasoning is prose whose line breaks matter even more than an answer's
+          — same treatment, same reason as MessageRow's assistant branch. */}
+      <ReasoningContent>{withHardBreaks(entry.item.text)}</ReasoningContent>
     </Reasoning>
   )
 }
 
 /** One tool call. `ToolInput` is rendered only when arguments actually
  *  arrived; `ToolOutput` never is — the Claude provider does not parse
- *  `tool_result`, so this app has no tool output to show. */
+ *  `tool_result`, so this app has no tool output to show.
+ *
+ *  With no arguments there is nothing to disclose, and `ToolHeader` is
+ *  unconditionally the collapsible's trigger — so the row is disabled rather
+ *  than offering a chevron that expands to nothing. That is every call while it
+ *  is still in flight, plus any zero-argument call. */
 function ToolRow({ item }: { item: ChatItem }) {
   return (
-    <Tool>
-      <ToolHeader type={toolUIType(item.toolName)} state={toolUIState(item.status)} />
+    <Tool disabled={item.input === undefined}>
+      {/* Radix marks a disabled collapsible's trigger with `data-disabled`;
+          hiding its chevron there is what stops the row reading as expandable.
+          The chevron is the trigger's only direct `svg` child. */}
+      <ToolHeader
+        className="data-[disabled]:cursor-default [&[data-disabled]>svg]:invisible"
+        type={toolUIType(item.toolName)}
+        state={toolUIState(item.status)}
+      />
       {item.input === undefined ? null : (
         <ToolContent>
           <ToolInput input={item.input} />
@@ -144,14 +188,19 @@ export function MessagesTimeline({ view }: MessagesTimelineProps) {
         const key = entryKey(entry, index)
 
         // A turn stamp renders on the turn's last entry, but only once that
-        // turn is settled. The trailing turn is settled when the thread
-        // itself stops running; an earlier turn always is, because the next
-        // turn's user message already arrived after it.
+        // turn is settled. The trailing turn is settled when the thread is
+        // neither running nor blocked waiting on the user (a turn parked on an
+        // approval has not finished); an earlier turn always is, because the
+        // next turn's user message already arrived after it.
         const span = spans.find((s) => s.lastEntryIndex === index)
         const isTrailingTurn = span?.lastEntryIndex === lastIndex
-        const settled = span !== undefined && (!isTrailingTurn || view.status !== 'running')
+        const inFlight = view.status === 'running' || view.status === 'waiting'
+        const settled = span !== undefined && (!isTrailingTurn || !inFlight)
         const startedAt = span ? entryCreatedAt(entries[span.firstEntryIndex]) : undefined
-        const completedAt = span ? entryCreatedAt(entries[span.lastEntryIndex]) : undefined
+        // The END of the turn, not the creation of its last entry — see
+        // `entryCompletedAt`. A streamed reply's createdAt is its
+        // time-to-first-token, which is not when the turn finished.
+        const completedAt = span ? entryCompletedAt(entries[span.lastEntryIndex]) : undefined
 
         let node: ReactNode
         if (entry.kind === 'message') {

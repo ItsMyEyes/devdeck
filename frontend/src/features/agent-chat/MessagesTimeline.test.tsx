@@ -134,6 +134,133 @@ describe('MessagesTimeline', () => {
     expect(screen.queryByText(/\ds$/)).not.toBeInTheDocument()
   })
 
+  // Regression: the user's own turn went through Streamdown too, so `<div>`
+  // was parsed as an HTML tag and dropped, `__init__` became italics, and
+  // `# comment` became an H1. A transcript has to show what the user sent.
+  it('keeps a user message literal instead of reading it as markdown', () => {
+    render(
+      <MessagesTimeline
+        view={view([item({ id: 'u1', kind: 'user', text: 'wrap it in a <div> tag, rename __init__ and fix # comment' })])}
+      />,
+    )
+
+    expect(screen.getByText('wrap it in a <div> tag, rename __init__ and fix # comment')).toBeInTheDocument()
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+  })
+
+  it('keeps both lines of a Shift+Enter user message', () => {
+    render(<MessagesTimeline view={view([item({ id: 'u1', kind: 'user', text: 'add rate limiting\nalso add tests' })])} />)
+
+    const bubble = screen.getByText(/add rate limiting/)
+    expect(bubble.textContent).toBe('add rate limiting\nalso add tests')
+    expect(bubble.className).toContain('whitespace-pre-wrap')
+  })
+
+  // Regression: markdown collapses a single newline into a space, so agent
+  // narration rendered as one run-on line where the old pre-wrap bubble showed
+  // three.
+  it('keeps hard line breaks in assistant prose', () => {
+    const { container } = render(
+      <MessagesTimeline
+        view={view([item({ id: 'a1', kind: 'assistant', text: 'Done.\nNext I will run the tests.\nThen I will commit.' })])}
+      />,
+    )
+
+    expect(container.querySelectorAll('br')).toHaveLength(2)
+  })
+
+  it('still renders an assistant markdown list as a list', () => {
+    render(<MessagesTimeline view={view([item({ id: 'a1', kind: 'assistant', text: '- first\n- second' })])} />)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+
+  // Regression: `ToolHeader` is unconditionally a CollapsibleTrigger, so a call
+  // with no arguments (a zero-argument tool, or any call still in flight)
+  // offered an expand chevron that revealed nothing.
+  it('does not offer a disclosure on a tool row with no arguments', () => {
+    render(<MessagesTimeline view={view([item({ id: 't1', kind: 'tool', toolName: 'Bash', status: 'done' })])} />)
+
+    expect(screen.getByRole('button', { name: /bash/i })).toBeDisabled()
+  })
+
+  it('keeps the disclosure live on a tool row that has arguments', () => {
+    render(
+      <MessagesTimeline
+        view={view([item({ id: 't1', kind: 'tool', toolName: 'Bash', status: 'done', input: { command: 'go test ./...' } })])}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /bash/i })).toBeEnabled()
+  })
+
+  // Regression: `completedAt` was the turn's last entry's CREATION stamp — for
+  // a streamed reply, its time-to-first-token. A 47s turn read `• 3s`.
+  it('stamps a turn with when it finished, not when its first token arrived', () => {
+    render(
+      <MessagesTimeline
+        view={view(
+          [
+            item({ id: 'u1', kind: 'user', text: 'go', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000 }),
+            item({ id: 'a1', kind: 'assistant', text: 'done', createdAt: 1_700_000_003_000, updatedAt: 1_700_000_047_000 }),
+          ],
+          { status: 'idle' },
+        )}
+      />,
+    )
+
+    expect(screen.getByText(/47s$/)).toBeInTheDocument()
+  })
+
+  it('stamps a turn ending in a tool group from its latest call', () => {
+    render(
+      <MessagesTimeline
+        view={view(
+          [
+            item({ id: 'u1', kind: 'user', text: 'go', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000 }),
+            item({ id: 't1', kind: 'tool', toolName: 'Read', status: 'done', createdAt: 1_700_000_005_000, updatedAt: 1_700_000_008_000 }),
+            item({ id: 't2', kind: 'tool', toolName: 'Edit', status: 'done', createdAt: 1_700_000_009_000, updatedAt: 1_700_000_040_000 }),
+          ],
+          { status: 'idle' },
+        )}
+      />,
+    )
+
+    expect(screen.getByText(/40s$/)).toBeInTheDocument()
+  })
+
+  // The spec listed copy actions as missing outright. Fenced code gets
+  // Streamdown's own copy button; prose had nothing.
+  it('offers a copy action on an assistant message', async () => {
+    const user = userEvent.setup()
+    render(<MessagesTimeline view={view([item({ id: 'a1', kind: 'assistant', text: 'the limiter is in place' })])} />)
+
+    await user.click(screen.getByRole('button', { name: /copy/i }))
+    await expect(window.navigator.clipboard.readText()).resolves.toBe('the limiter is in place')
+  })
+
+  it('does not offer a copy action on the user’s own message', () => {
+    render(<MessagesTimeline view={view([item({ id: 'u1', kind: 'user', text: 'hello' })])} />)
+
+    expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument()
+  })
+
+  it('does not stamp the trailing turn while the agent is waiting on the user', () => {
+    render(
+      <MessagesTimeline
+        view={view(
+          [
+            item({ id: 'u1', kind: 'user', text: 'go', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000 }),
+            item({ id: 't1', kind: 'tool', toolName: 'Bash', status: 'running', createdAt: 1_700_000_003_000 }),
+          ],
+          { status: 'waiting' },
+        )}
+      />,
+    )
+
+    expect(screen.queryByText(/\ds$/)).not.toBeInTheDocument()
+  })
+
   it('warns when the stream had a sequence gap', () => {
     render(<MessagesTimeline view={view([item({ id: 'a1', kind: 'assistant', text: 'hi' })], { hasGap: true })} />)
 

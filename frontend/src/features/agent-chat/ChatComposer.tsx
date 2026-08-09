@@ -20,9 +20,11 @@
  *
  * Built on the vendored `PromptInput`. `PromptInputTextarea` owns the
  * Enter/Shift+Enter contract (it calls `form.requestSubmit()` directly), and
- * `PromptInputSubmit` swaps itself to a `type="button"` stop control while the
- * status is `streaming`. That combination is what keeps "steer an in-flight
- * turn with Enter" working while the button reads as an interrupt.
+ * the submit button stays a real submit in every state, with the interrupt
+ * rendered beside it while the agent is generating. `PromptInputSubmit` can
+ * turn ITSELF into the stop control, but it does so for `waiting` as well as
+ * `streaming` — and `waiting` is the state where the agent is asking the user
+ * something, i.e. exactly when a click must send.
  *
  * The `@container/composer` dual render of `ComposerControls` stays.
  * `PromptInputTools` is a flex row with no overflow collapsing of its own, so
@@ -31,11 +33,12 @@
  * `useNativeOverlayBlocker` for the Tauri webview.
  */
 import { useState } from 'react'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -67,10 +70,14 @@ export interface ChatComposerProps {
 export function ChatComposer({ status, onSend, onAbort, worktree, branch, controls }: ChatComposerProps) {
   const [text, setText] = useState('')
 
-  // PromptInputSubmit reads a ChatStatus, not this app's thread status. Route
-  // it through the same mapping the adapter unit-tests, so "which button does
-  // the user see" has one definition.
+  // The adapter owns the thread-status → ChatStatus mapping, so "is the agent
+  // generating" has one definition. `PromptInputSubmit` is deliberately NOT
+  // given it: that component makes itself the stop control for both generating
+  // states, and a click must always send — the backend allows a follow-up
+  // message to steer an in-flight turn, and `waiting` is precisely the state
+  // where the user has something to say. The interrupt is its own control.
   const chatStatus = promptChatStatus({ ...emptyThreadView(), status })
+  const generating = chatStatus === 'streaming' || chatStatus === 'submitted'
 
   function handleSubmit(message: PromptInputMessage) {
     const trimmed = (message.text ?? '').trim()
@@ -81,9 +88,22 @@ export function ChatComposer({ status, onSend, onAbort, worktree, branch, contro
 
   return (
     <div className="flex flex-none flex-col border-t border-devdeck-line bg-devdeck-pane">
+      {/* `PromptInput` spreads className onto its <form> only — its child
+          `InputGroup` is hardcoded to `overflow-hidden`, so the box the user
+          actually sees is out of reach from here. Styling the form as well
+          produced two concentric borders with the inner one on `--input`
+          (`--devdeck-line`, a hard 3:1 grey) over a `bg-input/30` wash. So the
+          form paints nothing and the vendored box is re-pointed through
+          descendant utilities. `bg` carries the important flag because
+          `dark:bg-input/30` has the same specificity as the override; the
+          others out-specify their base rule and leave the focus ring intact. */}
       <PromptInput
         onSubmit={handleSubmit}
-        className="@container/composer mx-3 mt-2.5 mb-2 rounded-lg border border-devdeck-hairline bg-devdeck-raised"
+        className={cn(
+          '@container/composer mx-3 mt-2.5 mb-2',
+          '[&>[data-slot=input-group]]:rounded-lg [&>[data-slot=input-group]]:border-devdeck-hairline',
+          '[&>[data-slot=input-group]]:bg-devdeck-raised! [&>[data-slot=input-group]]:shadow-none',
+        )}
       >
         <PromptInputBody>
           <PromptInputTextarea
@@ -117,7 +137,18 @@ export function ChatComposer({ status, onSend, onAbort, worktree, branch, contro
             </div>
           </PromptInputTools>
 
-          <PromptInputSubmit status={chatStatus} onStop={onAbort} disabled={chatStatus === 'ready' && text.trim().length === 0} />
+          {generating ? (
+            <PromptInputButton
+              aria-label="Stop"
+              className="bg-devdeck-red-tint text-devdeck-err hover:bg-devdeck-red-tint-hover hover:text-devdeck-err"
+              onClick={onAbort}
+              title="Interrupt this turn"
+            >
+              <Square size={12} aria-hidden="true" />
+            </PromptInputButton>
+          ) : null}
+
+          <PromptInputSubmit status={chatStatus === 'error' ? 'error' : 'ready'} disabled={text.trim().length === 0} />
         </PromptInputFooter>
       </PromptInput>
 
