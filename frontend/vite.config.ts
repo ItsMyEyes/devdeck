@@ -81,6 +81,7 @@ export default defineConfig({
       'src/features/browser/BrowserTabStrip.test.tsx',
       'src/components/ui/progress-line.test.tsx',
       'src/components/ui/dialog.test.tsx',
+      'src/components/ai-elements/vendored.smoke.test.tsx',
       'src/features/terminal/lsp/lspTransport.test.ts',
       'src/features/terminal/lsp/lspTransport.initialize.test.ts',
       'src/features/terminal/lsp/lspTransport.request.test.ts',
