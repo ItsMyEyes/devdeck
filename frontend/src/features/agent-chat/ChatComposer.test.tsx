@@ -6,7 +6,7 @@
  * Shift+Enter behaviour carries over unchanged from spec 1.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
 import type { ChatComposerProps } from '@/features/agent-chat/ChatComposer'
@@ -31,25 +31,64 @@ const controls: ChatComposerProps['controls'] = {
 }
 
 describe('ChatComposer — t3code layout', () => {
-  it('renders a circular icon send button, not a labelled one', () => {
-    render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+  it('sends on Enter and inserts a newline on Shift+Enter', async () => {
+    const onSend = vi.fn()
+    render(<ChatComposer status="idle" onSend={onSend} onAbort={vi.fn()} controls={controls} />)
 
-    const send = screen.getByRole('button', { name: 'Send' })
-    expect(send.className).toContain('rounded-full')
-    // Icon-only: the accessible name comes from aria-label, not visible text.
-    expect(send.textContent).toBe('')
+    const box = screen.getByRole('textbox')
+    await userEvent.type(box, 'add rate limiting{Shift>}{Enter}{/Shift}second line')
+    expect(onSend).not.toHaveBeenCalled()
+
+    await userEvent.type(box, '{Enter}')
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0][0]).toContain('add rate limiting')
+    expect(onSend.mock.calls[0][0]).toContain('second line')
   })
 
-  it('becomes the interrupt control while the thread is running', async () => {
-    const onAbort = vi.fn()
+  it('clears the box after a send', async () => {
+    render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    const box = screen.getByRole('textbox')
+    await userEvent.type(box, 'hello{Enter}')
+    expect(box).toHaveValue('')
+  })
+
+  it('does not send an empty or whitespace-only message', async () => {
     const onSend = vi.fn()
+    render(<ChatComposer status="idle" onSend={onSend} onAbort={vi.fn()} controls={controls} />)
+
+    await userEvent.type(screen.getByRole('textbox'), '   {Enter}')
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  // The backend decider explicitly allows a follow-up message to steer an
+  // in-flight turn, so Enter must keep working while running. Only the BUTTON
+  // becomes an interrupt.
+  it('still steers an in-flight turn from the keyboard', async () => {
+    const onSend = vi.fn()
+    const onAbort = vi.fn()
     render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={controls} />)
 
-    const interrupt = screen.getByRole('button', { name: 'Interrupt' })
-    expect(interrupt.className).toContain('rounded-full')
-    await userEvent.click(interrupt)
+    await userEvent.type(screen.getByRole('textbox'), 'also add tests{Enter}')
+    expect(onSend).toHaveBeenCalledWith('also add tests')
+    expect(onAbort).not.toHaveBeenCalled()
+  })
+
+  it('turns the action button into an interrupt while running', async () => {
+    const onSend = vi.fn()
+    const onAbort = vi.fn()
+    render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={controls} />)
+
+    await userEvent.click(screen.getByRole('button', { name: /stop/i }))
     expect(onAbort).toHaveBeenCalledTimes(1)
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('keeps the status strip below the input', () => {
+    render(<ChatComposer status="idle" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} worktree="auth" branch="feat/auth" />)
+
+    expect(screen.getByText('auth')).toBeInTheDocument()
+    expect(screen.getByText('feat/auth')).toBeInTheDocument()
   })
 
   it('renders the control row on one line that cannot wrap', () => {
@@ -79,19 +118,6 @@ describe('ChatComposer — t3code layout', () => {
     for (const label of ['High · Normal', 'Build', 'Full access']) {
       expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThanOrEqual(2)
     }
-  })
-
-  it('sends on Enter and inserts a newline on Shift+Enter', () => {
-    const onSend = vi.fn()
-    render(<ChatComposer status="idle" onSend={onSend} onAbort={vi.fn()} controls={controls} />)
-
-    const textarea = screen.getByPlaceholderText(/ask for follow-up changes/i)
-    fireEvent.change(textarea, { target: { value: 'fix the auth redirect' } })
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
-    expect(onSend).not.toHaveBeenCalled()
-
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-    expect(onSend).toHaveBeenCalledWith('fix the auth redirect')
   })
 
   it('renders the status strip below the composer', () => {

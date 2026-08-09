@@ -17,17 +17,38 @@
  * escape hatch is a second real copy of the row rather than JS-measured
  * hiding. Four `Select`s in a `flex-wrap` row is what this replaced, and
  * it stacked into four full-width rows in any real pane width.
+ *
+ * Built on the vendored `PromptInput`. `PromptInputTextarea` owns the
+ * Enter/Shift+Enter contract (it calls `form.requestSubmit()` directly), and
+ * `PromptInputSubmit` swaps itself to a `type="button"` stop control while the
+ * status is `streaming`. That combination is what keeps "steer an in-flight
+ * turn with Enter" working while the button reads as an interrupt.
+ *
+ * The `@container/composer` dual render of `ComposerControls` stays.
+ * `PromptInputTools` is a flex row with no overflow collapsing of its own, so
+ * removing the second copy would bring back the four-wrapped-rows bug. The
+ * pills also stay on `@base-ui/react`, because they carry
+ * `useNativeOverlayBlocker` for the Tauri webview.
  */
 import { useState } from 'react'
-import type { KeyboardEvent } from 'react'
-import { ArrowUp, MoreHorizontal, Square } from 'lucide-react'
+import { MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from '@/components/ai-elements/prompt-input'
+import type { PromptInputMessage } from '@/components/ai-elements/prompt-input'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
+import { promptChatStatus } from '@/features/agent-chat/adapter'
 import { ChatStatusStrip } from '@/features/agent-chat/ChatStatusStrip'
 import { composerControlClassName } from '@/features/agent-chat/ComposerControl'
 import { ComposerControls } from '@/features/agent-chat/ComposerControls'
 import type { ComposerControlsProps } from '@/features/agent-chat/ComposerControls'
+import { emptyThreadView } from '@/features/agent-chat/eventReducer'
 import type { AgentThreadView } from '@/features/agent-chat/types'
 
 export interface ChatComposerProps {
@@ -45,36 +66,36 @@ export interface ChatComposerProps {
 
 export function ChatComposer({ status, onSend, onAbort, worktree, branch, controls }: ChatComposerProps) {
   const [text, setText] = useState('')
-  const running = status === 'running'
 
-  function send() {
-    const trimmed = text.trim()
+  // PromptInputSubmit reads a ChatStatus, not this app's thread status. Route
+  // it through the same mapping the adapter unit-tests, so "which button does
+  // the user see" has one definition.
+  const chatStatus = promptChatStatus({ ...emptyThreadView(), status })
+
+  function handleSubmit(message: PromptInputMessage) {
+    const trimmed = (message.text ?? '').trim()
     if (!trimmed) return
     onSend(trimmed)
     setText('')
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      send()
-    }
-  }
-
   return (
     <div className="flex flex-none flex-col border-t border-devdeck-line bg-devdeck-pane">
-      <div className="@container/composer mx-3 mt-2.5 mb-2 flex flex-col gap-2 rounded-lg border border-devdeck-border-strong bg-devdeck-pane px-2.5 py-2">
-        <Textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask for follow-up changes… (Enter to send, Shift+Enter for a new line)"
-          rows={2}
-          className="border-0 bg-transparent px-0 py-0 focus-visible:ring-0"
-        />
+      <PromptInput
+        onSubmit={handleSubmit}
+        className="@container/composer mx-3 mt-2.5 mb-2 rounded-lg border border-devdeck-hairline bg-devdeck-raised"
+      >
+        <PromptInputBody>
+          <PromptInputTextarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Ask for follow-up changes… (Enter to send, Shift+Enter for a new line)"
+            className="font-mono text-[12.5px]"
+          />
+        </PromptInputBody>
 
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+        <PromptInputFooter>
+          <PromptInputTools className="min-w-0 flex-1 overflow-hidden">
             <div
               data-testid="composer-controls-inline"
               className="hidden min-w-0 flex-nowrap items-center gap-0.5 overflow-hidden @sm/composer:flex"
@@ -94,26 +115,11 @@ export function ChatComposer({ status, onSend, onAbort, worktree, branch, contro
                 </div>
               </TabStripPopoverMenu>
             </div>
-          </div>
+          </PromptInputTools>
 
-          <button
-            type="button"
-            onClick={running ? onAbort : send}
-            disabled={!running && !text.trim()}
-            aria-label={running ? 'Interrupt' : 'Send'}
-            title={running ? 'Interrupt' : 'Send'}
-            className={cn(
-              'flex size-7 flex-none items-center justify-center rounded-full transition-colors',
-              'disabled:cursor-not-allowed disabled:opacity-40',
-              running
-                ? 'bg-devdeck-red-tint text-devdeck-err hover:bg-devdeck-red-tint-hover'
-                : 'bg-devdeck-accent text-devdeck-accent-ink hover:bg-devdeck-accent-hover',
-            )}
-          >
-            {running ? <Square size={12} fill="currentColor" aria-hidden="true" /> : <ArrowUp size={14} strokeWidth={2.5} aria-hidden="true" />}
-          </button>
-        </div>
-      </div>
+          <PromptInputSubmit status={chatStatus} onStop={onAbort} disabled={chatStatus === 'ready' && text.trim().length === 0} />
+        </PromptInputFooter>
+      </PromptInput>
 
       <ChatStatusStrip worktree={worktree ?? '—'} branch={branch} />
     </div>
