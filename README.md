@@ -91,6 +91,19 @@ Then open **http://localhost:5173**.
 
 It covers every deployment mode (hub, runtime, or both), generates your API key, pre-fills a runtime's public URL from Tailscale, verifies your hub URL and key before saving, and prints the `name|url|key` line you paste into the hub's Machines page. Every setting lands in one `devdeck.yaml` ([template](devdeck.yaml.example)); flags and `DEVDECK_*` env vars still work and override it. See [TUTORIAL.md §13](TUTORIAL.md#13-deployment-modes-hub-both-and-desktop).
 
+### macOS: "DevDeck is damaged / can't be opened"
+
+The desktop app is currently **ad-hoc signed** (not notarized with an Apple Developer ID). When you download it through a browser, macOS attaches a `com.apple.quarantine` flag to the bundle and Gatekeeper refuses to launch it — usually shown as *"DevDeck is damaged and can't be opened"* or *"can't be opened because it is from an unidentified developer."* The app itself is fine; the quarantine flag is what's blocking it.
+
+Strip the flag and open it:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/DevDeck.app
+open -a /Applications/DevDeck.app
+```
+
+This applies to every fresh download/re-install. As a one-off alternative you can right-click the app in Finder → **Open** → **Open anyway** to bypass Gatekeeper once, but the `xattr` command is cleaner and works every time. You'll need to redo it after each new download until the release is notarized.
+
 ## Documentation
 
 | Doc | What's in it |
