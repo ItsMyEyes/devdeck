@@ -149,6 +149,9 @@ export default defineConfig({
       'src/features/agent-chat/ChatComposer.test.tsx',
       'src/features/agent-chat/ComposerControls.test.tsx',
       'src/features/agent-chat/SessionsPanel.test.tsx',
+      'src/features/agent-chat/ModelPicker.test.tsx',
+      'src/features/machines/TerminalSessionsDialog.test.tsx',
+      'src/features/agent-chat/enabled.test.ts',
     ],
     // The route tree is generated at build time; excluding it keeps a cold
     // `npm test` from depending on `pretypecheck` having been run.

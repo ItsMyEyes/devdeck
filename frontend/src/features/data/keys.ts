@@ -71,6 +71,7 @@ export const qk = {
   /** Whether a runtime has a sign-in PIN set. id === '' means this process
    *  itself (a runtime looking at its own PIN), not a remote machine. */
   runtimePinStatus: (id: string) => ['machines', id, 'pinStatus'] as const,
+  terminalSessions: (id: string) => ['machines', id, 'terminal-sessions'] as const,
   tailscaleStatus: ['tailscaleStatus'] as const,
   hubKey: ['hubKey'] as const,
   bookmarks: ['bookmarks'] as const,

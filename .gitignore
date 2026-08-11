@@ -1,5 +1,6 @@
 /dist/
 .DS_Store
+node_modules/
 
 # Secrets. devdeck.yaml and copy-this.md both carry a live API key, and the
 # *.key files are the session-signing and handover-signing keys. All are

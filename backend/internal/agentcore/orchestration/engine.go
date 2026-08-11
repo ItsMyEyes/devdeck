@@ -491,6 +491,28 @@ func (e *Engine) State() *State {
 	return e.state
 }
 
+// ForgetThread drops a thread from the in-memory read model.
+//
+// This is the one mutation that does not come from an event, and it is not a
+// hole in the model — it is what KEEPS the model honest. State is derived from
+// the durable log; when a thread is deleted the log's rows for it are erased
+// (store.DeleteAgentThread explains why a tombstone is the wrong shape here),
+// so a thread left in memory afterwards is state with nothing behind it. This
+// re-establishes "State == Apply(log)" rather than breaking it.
+//
+// Call it AFTER the delete commits, for the same reason process() swaps state
+// only after Commit succeeds: never let memory hold facts the log doesn't.
+func (e *Engine) ForgetThread(threadID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.state.Threads[threadID]; !ok {
+		return
+	}
+	next := e.state.clone()
+	delete(next.Threads, threadID)
+	e.state = next
+}
+
 // Subscribe returns a channel of committed events, plus an unsubscribe
 // function. The channel is buffered; a slow subscriber will lose events (see
 // the drop note in publish) — so subscribers that need guarantees must be

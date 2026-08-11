@@ -27,6 +27,7 @@ import type { Machine, Worktree } from '@/store/types'
 import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
+import { agentChatEnabled } from '@/features/agent-chat/enabled'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
@@ -107,6 +108,10 @@ function basename(path: string) {
  *  tab, neither of which has an agent to chat with; defaulting it to chat
  *  would give every SSH connection a dead-end pane. */
 function createDefaultWorktreeLayout(worktreeId: string): WorktreeLayout {
+  // With chat hidden (shipped builds — see `@/features/agent-chat/enabled`)
+  // there is no chat pane to default to, so fall back to the shared
+  // terminal-primary layout the SSH shells already use.
+  if (!agentChatEnabled()) return createDefaultLayout(worktreeId)
   const rootId = generateId()
   const chat = createAgentChatPane(worktreeId)
   return {
@@ -1061,6 +1066,7 @@ function TerminalWorkspace({
           machine={machine}
           worktreeLabel={projectName ?? label}
           branch={worktree.branch || null}
+          agentId={worktree.agent || undefined}
         />
       )
     },

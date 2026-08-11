@@ -19,7 +19,7 @@ func newTestSSHHandler(t *testing.T) *SSHHandler {
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	return NewSSHHandler(st, service.NewSSHSecretService(st, make([]byte, 32)))
+	return NewSSHHandler(st, service.NewSSHSecretService(st, make([]byte, 32)), nil, nil)
 }
 
 func TestPostSSHConnectionValidatesRequiredFields(t *testing.T) {

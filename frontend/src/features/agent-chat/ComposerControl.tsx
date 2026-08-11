@@ -17,7 +17,7 @@ import { Select } from '@/components/ui/select'
  *  off (t3code's own choice — a pill fading in/out reads as laggy next to
  *  the send button, which does animate). */
 export const composerControlClassName =
-  'h-7 min-h-7 gap-1.5 px-2.5 text-devdeck-fg-2 transition-none hover:text-devdeck-fg'
+  'h-7 min-h-7 gap-1.5 rounded-md px-2 text-[13px] font-normal text-devdeck-fg-2 transition-none hover:bg-devdeck-hover-wash hover:text-devdeck-fg'
 
 /** A single ghost pill — Model, Effort, Interaction mode, or Runtime mode. */
 export function ComposerControl({ className, size = 'sm', variant = 'ghost', ...props }: ComponentProps<typeof Button>) {

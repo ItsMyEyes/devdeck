@@ -39,7 +39,7 @@ function buildInvoiceHtml(iv: Invoice): string {
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, "Geist", system-ui, sans-serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, "Liberation Sans", sans-serif;
     color: #1a1c20;
     max-width: 720px;
     margin: 48px auto;

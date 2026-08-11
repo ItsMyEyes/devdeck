@@ -260,9 +260,26 @@ func keepalive(ctx context.Context, conn *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := conn.Ping(ctx); err != nil {
+			// A bare Ping(ctx) using the long-lived connection ctx is not
+			// enough: nhooyr.io/websocket's ping only wakes on the conn
+			// closing, ctx.Done, or a pong arriving. Against a dead peer
+			// none of those happen, so Ping blocks forever, this ticker
+			// never fires again, and — since r.Context() isn't cancelled by
+			// a WebSocket hijack either — nothing ever rescues the read loop
+			// blocked in conn.Read on the same dead socket. Give each ping
+			// its own short deadline so a dead peer is actually detected.
+			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
 				if ctx.Err() == nil {
 					log.Printf("terminal: keepalive ping failed: %v", err)
+					// Unblock the read loop's conn.Read so it returns and
+					// runs the normal detach/cleanup path — just returning
+					// here leaves sess.conn pointing at a dead socket and
+					// detects nothing. Skipped on normal ctx cancellation:
+					// the handler is already tearing the conn down there.
+					_ = conn.CloseNow()
 				}
 				return
 			}

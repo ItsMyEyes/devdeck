@@ -3,7 +3,6 @@ import { Outlet, createFileRoute, redirect, useLocation } from '@tanstack/react-
 import { fetchWorkspaces } from '@/lib/api'
 import { qk } from '@/features/data/keys'
 import { useSettings, useUpdateSettings, useWorkspaces } from '@/features/data/queries'
-import { Header } from '@/features/layout/Header'
 import { Sidebar } from '@/features/sidebar/Sidebar'
 import { GlobalOverlays } from '@/features/overlays/GlobalOverlays'
 import { WorkspaceTileArea } from '@/features/tabs/WorkspaceTileArea'
@@ -121,7 +120,7 @@ function WorkspaceLayout() {
       {/* The tab strip already serves as Tauri's top bar (traffic lights,
           tabs, "+" spawn action) on every workspace route — Header would
           just duplicate it, so it only renders on the web build. */}
-      {!workspaceMode && !isTauri && <Header />}
+      {/* {!workspaceMode && !isTauri && <Header />} */}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar mobileDrawer={!workspaceMode && !isTauri} />
         <section className="flex min-w-0 flex-1 flex-col gap-[var(--devdeck-gap)] p-[var(--devdeck-gap)] pl-0">

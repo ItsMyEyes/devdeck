@@ -176,9 +176,28 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # The hand-written "what changed" summary lives in CHANGELOG.md, one
+      # `## vX.Y.Z` section per tag. Pull this tag's section out as the release
+      # body; generate_release_notes below appends the commit list under it.
+      # A tag with no section still releases — it just gets the commit list.
+      - name: Extract release notes for this tag
+        run: |
+          awk -v ver="## ${GITHUB_REF_NAME}" '
+            $0 == ver { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::no CHANGELOG.md section for ${GITHUB_REF_NAME}"
+            echo "See the commit list below." > release-notes.md
+          fi
+          cat release-notes.md
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -188,6 +207,7 @@ jobs:
             artifacts/desktop-macos/**/*
             artifacts/desktop-linux/**/*
             artifacts/desktop-windows/**/*
+          body_path: release-notes.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

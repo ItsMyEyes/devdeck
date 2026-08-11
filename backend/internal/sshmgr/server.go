@@ -191,7 +191,15 @@ func writeText(ctx context.Context, conn *websocket.Conn, s string) {
 }
 
 // keepalive pings every 30s and returns when the peer stops answering —
-// same tuning as internal/terminal's keepalive.
+// same tuning as internal/terminal's keepalive. A bare Ping(ctx) using the
+// long-lived connection ctx is not enough: nhooyr.io/websocket's ping only
+// wakes on the conn closing, ctx.Done, or a pong arriving, so against a dead
+// peer it blocks forever, the ticker never fires again, and runShell stays
+// blocked in conn.Read — its deferred client.Close()/sess.Close() never run,
+// leaving the remote shell and an sshd session alive until the OS TCP
+// keepalive eventually notices. Give each ping its own short deadline, and
+// on failure CloseNow the connection so the blocked conn.Read returns and
+// runShell's normal cleanup path runs.
 func keepalive(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -200,7 +208,14 @@ func keepalive(ctx context.Context, conn *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := conn.Ping(ctx); err != nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Printf("ssh: keepalive ping failed: %v", err)
+					_ = conn.CloseNow()
+				}
 				return
 			}
 		}

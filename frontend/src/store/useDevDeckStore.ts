@@ -342,6 +342,12 @@ interface DevDeckState {
    *  applies globally, on every route. Independent of `sidebarOpen`, which is the mobile
    *  drawer's open/close — this is a small/big toggle for the rail's own width. */
   railExpanded: boolean
+  /** Models the operator has starred in the composer's picker, as
+   *  `<agentId>:<modelId>` (see `ModelPicker.tsx`'s `favouriteKey`). Persisted
+   *  and browser-local on purpose: the runtime has no per-user store to hang
+   *  this off, and a favourite is a UI preference, not a fact about the
+   *  machine. */
+  favouriteModels: string[]
   /** Selected SSH host group filter — shared between the sidebar's compact
    *  group list (rendered when the rail is expanded) and the full SSH
    *  module, so picking a group in either place stays in sync. Not
@@ -385,6 +391,7 @@ interface DevDeckState {
   showToast: (msg: string) => void
   setSidebarOpen: (open: boolean) => void
   toggleRailExpanded: () => void
+  toggleFavouriteModel: (key: string) => void
   setSSHActiveGroup: (group: string) => void
   toggleWsMenu: () => void
   closeWsMenu: () => void
@@ -654,6 +661,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       sshRightSidebars: {},
       gitDiffs: {},
       railExpanded: false,
+      favouriteModels: [],
       sshActiveGroup: ALL_SSH_GROUPS,
       workspaceTileLayouts: {},
       browserTiles: {},
@@ -666,6 +674,12 @@ export const useDevDeckStore = create<DevDeckState>()(
       showToast: (msg) => sonnerToast(msg),
       setSidebarOpen: (open) => set((s) => void (s.sidebarOpen = open)),
       toggleRailExpanded: () => set((s) => void (s.railExpanded = !s.railExpanded)),
+      toggleFavouriteModel: (key) =>
+        set((s) => {
+          const at = s.favouriteModels.indexOf(key)
+          if (at >= 0) s.favouriteModels.splice(at, 1)
+          else s.favouriteModels.push(key)
+        }),
       setSSHActiveGroup: (group) => set((s) => void (s.sshActiveGroup = group)),
       toggleWsMenu: () => set((s) => void (s.wsMenuOpen = !s.wsMenuOpen)),
       closeWsMenu: () => set((s) => void (s.wsMenuOpen = false)),
@@ -1060,6 +1074,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         sshRightSidebars: s.sshRightSidebars,
         gitDiffs: s.gitDiffs,
         railExpanded: s.railExpanded,
+        favouriteModels: s.favouriteModels,
         workspaceTileLayouts: s.workspaceTileLayouts,
         dbActiveConnectionId: s.dbActiveConnectionId,
         dbTabs: s.dbTabs,

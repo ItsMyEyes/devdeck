@@ -146,10 +146,19 @@ type MCPEndpoint struct {
 	Token string
 }
 
+// ModelSelection is what the composer's picker sends with a turn. The tags
+// are load-bearing, not cosmetic: this is decoded straight off the WebSocket
+// as part of TurnStartPayload, and untagged Go field names would make the
+// client send `{"InstanceID":…}`. Nothing shipped depended on the old shape —
+// the frontend never sent this field at all, which is why the model pill was
+// decorative until now.
 type ModelSelection struct {
-	InstanceID InstanceID
-	Model      string
-	Options    map[string]any // effort, thinking, fastMode, ...
+	// InstanceID names the agent to run this turn on. Empty means "whatever
+	// the worktree is configured for"; a non-empty value that differs from the
+	// thread's current binding switches it (see Reactor.ensureSession).
+	InstanceID InstanceID     `json:"instanceId,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	Options    map[string]any `json:"options,omitempty"` // effort, thinking, fastMode, ...
 }
 
 type Session struct {

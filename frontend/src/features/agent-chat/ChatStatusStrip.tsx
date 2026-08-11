@@ -18,7 +18,7 @@ export interface ChatStatusStripProps {
 
 export function ChatStatusStrip({ worktree, branch }: ChatStatusStripProps) {
   return (
-    <div className="flex min-w-0 flex-none items-center justify-between gap-2 border-t border-devdeck-line px-3 py-1.5 font-mono text-[10.5px] text-devdeck-fg-2">
+    <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-none items-center justify-between gap-2 px-5 pb-2 text-[11.5px] text-devdeck-dim-pane">
       <span className="flex min-w-0 items-center gap-1.5 truncate">
         <FolderGit2 size={11} className="flex-none" aria-hidden="true" />
         <span className="truncate">{worktree}</span>

@@ -174,6 +174,7 @@ import {
   fetchAgentSkills,
   fetchAgents,
   fetchFsList,
+  fetchTerminalSessions,
   fetchGitDiff,
   fetchGitLog,
   fetchGitStatus,
@@ -1385,6 +1386,22 @@ export function useAgentThreads(machine: Machine | undefined, worktreeId: string
   })
 }
 
+function deleteAgentThread(machine: Machine, threadId: string): Promise<void> {
+  return machineRequest<void>(machine, 'DELETE', `/agent/threads/${encodeURIComponent(threadId)}`)
+}
+
+/** Erases a chat session — its sidebar row, its transcript and the command
+ *  receipts behind it (see the backend's `DeleteAgentThread` on why this is an
+ *  erase rather than a tombstone). Irreversible, so callers confirm first. */
+export function useDeleteAgentThread(machine: Machine | undefined, worktreeId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (threadId: string) => deleteAgentThread(machine!, threadId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: qk.agentThreads(machine?.id ?? '', worktreeId ?? '') }),
+  })
+}
+
 // ---- Agent / Model / Skill queries (installed CLI agents live on a machine) ----
 
 export function useAgents(machine: Machine | undefined) {
@@ -1777,12 +1794,31 @@ export function useGitPull(machine: Machine, worktreeId: string) {
   return useGitMutation(machine, worktreeId, (_: void) => gitPull(machine, worktreeId))
 }
 
-/** Kills one spawned terminal pane's PTY immediately on tab close — see
- *  killTerminalSession's comment on why this can't target a worktree's
- *  primary session. Not tied to any cached query, so no invalidation. */
+// ---- Terminal sessions ----
+
+/** Lists every live PTY session on `machine` — the maintenance dialog's data
+ *  source. `enabled` gates both the fetch and the poll so this only runs
+ *  while that dialog is open; 3s is plenty for a housekeeping view, not a
+ *  live metric (contrast useMachineStats/useLspTrace's 2s). */
+export function useTerminalSessions(machine: Machine, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.terminalSessions(machine.id),
+    queryFn: () => fetchTerminalSessions(machine),
+    enabled,
+    refetchInterval: enabled ? 3000 : false,
+  })
+}
+
+/** Kills a terminal session's PTY — a spawned pane on tab close, or (with
+ *  operator confirmation upstream, since it ends that worktree's agent
+ *  process) a worktree's primary session. See killTerminalSession's comment.
+ *  Invalidates the sessions list so a killed row drops out immediately
+ *  rather than waiting for the next poll tick. */
 export function useKillTerminalSession(machine: Machine) {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (sessionId: string) => killTerminalSession(machine, sessionId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.terminalSessions(machine.id) }),
   })
 }
 

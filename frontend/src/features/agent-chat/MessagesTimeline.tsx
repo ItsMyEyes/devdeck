@@ -8,18 +8,32 @@
  * reasoning blocks and tool groups the user has expanded. `buildTimeline`
  * recomputes `collapsed: true` on every call, so it cannot hold that itself.
  *
+ * ── Layout ──
+ * A transcript is a reading surface, so it is a single centred measure
+ * (`max-w-3xl`) rather than the full pane width, and it is set in the UI
+ * sans (Arial) at 14px — not in mono. Mono is for code, and it is still what
+ * code blocks, tool arguments and the terminal use; running an agent's prose
+ * through it was costing ~15% of the reading width in advance and made a
+ * markdown reply indistinguishable from command output.
+ *
+ * Only two shapes carry a bubble: the user's own turn (a right-aligned pill)
+ * and an error (an alert). The agent's reply is plain text on the pane, which
+ * is what lets its markdown — headings, lists, tables — actually read as a
+ * document instead of as a chat bubble's contents.
+ *
  * Turn stamps come from `ChatItem.createdAt` (the orchestration event's own
  * timestamp). The previous implementation read `Date.now()` during render and
  * cached it in a ref, because `ChatItem` carried no timestamp; that hack and
  * its "approximate after a reconnect replays a whole thread" caveat are both
  * gone.
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle, Copy } from 'lucide-react'
+import { AlertTriangle, ChevronRight, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from '@/components/ai-elements/message'
-import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning'
+import { Reasoning, ReasoningContent, ReasoningTrigger, useReasoning } from '@/components/ai-elements/reasoning'
+import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Task, TaskContent, TaskTrigger } from '@/components/ai-elements/task'
 import { Tool, ToolContent, ToolHeader, ToolInput } from '@/components/ai-elements/tool'
 import { entryCompletedAt, entryCreatedAt, messageRole, toolUIState, toolUIType, turnSpans, withHardBreaks } from '@/features/agent-chat/adapter'
@@ -30,6 +44,11 @@ import type { AgentThreadView, ChatItem } from '@/features/agent-chat/types'
 export interface MessagesTimelineProps {
   view: AgentThreadView
 }
+
+/** The transcript's reading measure. Everything in the column — messages,
+ *  tool cards, the composer above it — shares this width so the eye tracks a
+ *  single left edge down the thread. */
+const COLUMN = 'mx-auto flex w-full max-w-3xl flex-col'
 
 function entryKey(entry: TimelineEntry, index: number): string {
   if (entry.kind === 'tool-group') return entry.items[0]?.id ?? `tool-group-${index}`
@@ -42,17 +61,21 @@ function ErrorRow({ item }: { item: ChatItem }) {
   return (
     <div
       role="alert"
-      className="self-stretch rounded-lg border border-devdeck-red-tint bg-devdeck-red-tint px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-devdeck-err"
+      className="flex items-start gap-2 self-stretch rounded-xl border border-devdeck-red-tint-strong-border bg-devdeck-red-tint px-3.5 py-2.5 text-[13px] leading-relaxed whitespace-pre-wrap text-devdeck-err"
     >
-      {item.text}
+      <AlertTriangle size={14} className="mt-0.5 flex-none" aria-hidden="true" />
+      <span className="min-w-0">{item.text}</span>
     </div>
   )
 }
 
-/** A conversation turn. The user bubble keeps this app's accent tint rather
- *  than AI Elements' `bg-secondary` default — the tint is what the pane has
- *  always used, and a solid accent fill would break DESIGN.md's rule that the
- *  accent is never decorative.
+/** A conversation turn.
+ *
+ *  The user's turn is a right-aligned pill on the raised surface — neutral,
+ *  not accent-tinted: DESIGN.md reserves the accent for the focus ring, the
+ *  state bar, links and the single primary action per screen, and "every
+ *  message you have ever sent" is none of those. The agent's turn has no
+ *  bubble at all.
  *
  *  Only the AGENT's text goes through markdown. The user's own text is
  *  rendered verbatim in a pre-wrap block: it is a literal prompt, not a
@@ -62,17 +85,19 @@ function ErrorRow({ item }: { item: ChatItem }) {
 function MessageRow({ item }: { item: ChatItem }) {
   const isUser = item.kind === 'user'
   return (
-    <Message from={messageRole(item.kind)} className="max-w-[86%]">
+    <Message from={messageRole(item.kind)} className={isUser ? 'max-w-[82%]' : 'max-w-full'}>
       <MessageContent
         className={cn(
-          'font-mono text-[12.5px] leading-relaxed',
-          isUser && 'group-[.is-user]:border group-[.is-user]:border-devdeck-border-accent group-[.is-user]:bg-devdeck-accent-tint',
+          'text-[14px]',
+          isUser
+            ? 'leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:bg-devdeck-raised group-[.is-user]:px-4 group-[.is-user]:py-2.5'
+            : 'w-full max-w-full',
         )}
       >
         {isUser ? (
           <div className="break-words whitespace-pre-wrap">{item.text || '…'}</div>
         ) : (
-          <MessageResponse>{withHardBreaks(item.text) || '…'}</MessageResponse>
+          <MessageResponse className="chat-md">{withHardBreaks(item.text) || '…'}</MessageResponse>
         )}
       </MessageContent>
       {isUser ? null : <CopyAction text={item.text} />}
@@ -87,7 +112,7 @@ function MessageRow({ item }: { item: ChatItem }) {
 function CopyAction({ text }: { text: string }) {
   if (text.length === 0) return null
   return (
-    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+    <MessageActions className="-ml-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
       <MessageAction
         className="size-6 text-devdeck-fg-2 hover:text-devdeck-fg"
         label="Copy message"
@@ -99,13 +124,55 @@ function CopyAction({ text }: { text: string }) {
   )
 }
 
+/** The reasoning disclosure's label — `Worked for 11s ›`, the shape t3code
+ *  uses. The vendored default is a brain glyph plus "Thought for N seconds";
+ *  this replaces the whole thing rather than restyling it, because the glyph
+ *  is a direct child of the trigger and there is no prop that removes it. */
+function ReasoningLabel() {
+  const { isStreaming, isOpen, duration } = useReasoning()
+
+  return (
+    <>
+      {isStreaming ? (
+        <Shimmer as="span" duration={1.4}>
+          Working…
+        </Shimmer>
+      ) : (
+        <span>{duration === undefined ? 'Worked for a few seconds' : `Worked for ${duration}s`}</span>
+      )}
+      <ChevronRight aria-hidden="true" className={cn('size-3.5 transition-transform', isOpen && 'rotate-90')} />
+    </>
+  )
+}
+
+/** How long the agent spent on this reasoning block, from the orchestration
+ *  event's own timestamps. Handed to `Reasoning` so a REPLAYED thread stamps
+ *  the same duration the live one did — the vendored component can only time
+ *  a stream it watched itself, so on reconnect every block read "a few
+ *  seconds". `undefined` for a block that never advanced, which is what makes
+ *  the label fall back rather than claim "0s". */
+function reasoningDuration(item: ChatItem): number | undefined {
+  if (item.createdAt === undefined) return undefined
+  const seconds = Math.round(((item.updatedAt ?? item.createdAt) - item.createdAt) / 1000)
+  return seconds > 0 ? seconds : undefined
+}
+
 function ReasoningRow({ entry, streaming }: { entry: ReasoningEntry; streaming: boolean }) {
   return (
-    <Reasoning className="max-w-[86%] self-start" isStreaming={streaming} defaultOpen={false}>
-      <ReasoningTrigger />
+    <Reasoning
+      className="mb-0 max-w-full self-start"
+      duration={reasoningDuration(entry.item)}
+      isStreaming={streaming}
+      defaultOpen={false}
+    >
+      <ReasoningTrigger className="w-auto cursor-pointer gap-1.5 text-[13px] text-devdeck-fg-2 hover:text-devdeck-fg">
+        <ReasoningLabel />
+      </ReasoningTrigger>
       {/* Reasoning is prose whose line breaks matter even more than an answer's
           — same treatment, same reason as MessageRow's assistant branch. */}
-      <ReasoningContent>{withHardBreaks(entry.item.text)}</ReasoningContent>
+      <ReasoningContent className="chat-md mt-3 border-l border-devdeck-hairline pl-3.5 text-[13px] text-devdeck-fg-2">
+        {withHardBreaks(entry.item.text)}
+      </ReasoningContent>
     </Reasoning>
   )
 }
@@ -163,7 +230,43 @@ function ToolGroupRow({ entry, expanded, onToggle }: { entry: ToolGroupEntry; ex
 }
 
 function TurnStamp({ startedAt, completedAt }: { startedAt: number; completedAt: number }) {
-  return <div className="self-start px-1 font-mono text-[10px] text-devdeck-dim-pane">{formatTurnStamp(startedAt, completedAt)}</div>
+  return <div className="self-start pt-0.5 text-[11px] text-devdeck-dim-pane">{formatTurnStamp(startedAt, completedAt)}</div>
+}
+
+/** Ticks once a second while the agent works, so `WorkingRow` can count up.
+ *  `since` is the last event's wall clock, not a render-time reading, so the
+ *  count survives a re-render and is correct after a reconnect replay. */
+function useElapsedSeconds(since: number | undefined): number | null {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (since === undefined) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [since])
+
+  if (since === undefined) return null
+  return Math.max(0, Math.round((now - since) / 1000))
+}
+
+/** `••• Working for 5s` — the gap between "the turn was accepted" and "the
+ *  first token arrived", which is otherwise a silent, empty pane. Rendered
+ *  only while nothing else is moving on screen (see `showWorking` below): once
+ *  text is streaming or a tool row is live, that IS the progress indicator. */
+function WorkingRow({ since }: { since: number | undefined }) {
+  const seconds = useElapsedSeconds(since)
+
+  return (
+    <div className="flex items-center gap-2 self-start text-[13px] text-devdeck-fg-2">
+      <span aria-hidden="true" className="flex items-center gap-1">
+        <span className="size-[5px] animate-dot-pulse rounded-full bg-current" />
+        <span className="size-[5px] animate-dot-pulse rounded-full bg-current [animation-delay:0.22s]" />
+        <span className="size-[5px] animate-dot-pulse rounded-full bg-current [animation-delay:0.44s]" />
+      </span>
+      {seconds === null ? 'Working…' : `Working for ${seconds}s`}
+    </div>
+  )
 }
 
 export function MessagesTimeline({ view }: MessagesTimelineProps) {
@@ -182,8 +285,16 @@ export function MessagesTimeline({ view }: MessagesTimelineProps) {
 
   const lastIndex = entries.length - 1
 
+  // Only when the agent has accepted the turn and produced nothing visible
+  // yet. A streaming reply, a live tool row or a reasoning block is already
+  // telling the user the same thing, and two progress indicators at once read
+  // as two things happening.
+  const lastItem = view.items[view.items.length - 1]
+  const showWorking =
+    view.status === 'running' && (lastItem === undefined || lastItem.kind === 'user' || lastItem.text.trim().length === 0)
+
   return (
-    <div className="flex flex-col gap-2.5 px-4 py-4">
+    <div className={cn(COLUMN, 'gap-5 px-5 py-6 text-[14px] text-devdeck-fg')}>
       {entries.map((entry, index) => {
         const key = entryKey(entry, index)
 
@@ -221,8 +332,11 @@ export function MessagesTimeline({ view }: MessagesTimelineProps) {
           </Fragment>
         )
       })}
+
+      {showWorking ? <WorkingRow since={lastItem?.updatedAt ?? lastItem?.createdAt} /> : null}
+
       {view.hasGap ? (
-        <div className="flex items-center gap-1.5 self-center rounded-full border border-devdeck-hairline bg-devdeck-raised px-2.5 py-1 font-mono text-[10.5px] text-devdeck-fg-2">
+        <div className="flex items-center gap-1.5 self-center rounded-full border border-devdeck-hairline bg-devdeck-raised px-2.5 py-1 text-[11.5px] text-devdeck-fg-2">
           <AlertTriangle size={11} className="text-devdeck-wait" />
           Some updates may be missing from this thread
         </div>

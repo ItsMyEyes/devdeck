@@ -91,13 +91,24 @@ export interface UseAgentChatSocketOptions {
   threadKey: string
 }
 
+/** Mirrors the backend's `provider.ModelSelection` (see its json tags —
+ *  those tags exist for this type). `instanceId` names the AGENT to run the
+ *  turn on: leaving it unset keeps the worktree's configured agent, and
+ *  setting it to a different one switches the thread over, which starts a
+ *  fresh provider session (`Reactor.ensureSession`). */
+export interface TurnModelSelection {
+  instanceId?: string
+  model?: string
+  options?: Record<string, unknown>
+}
+
 export interface UseAgentChatSocketResult {
   view: AgentThreadView
   status: AgentSocketStatus
-  /** Dispatches `thread.turn.start`. Payload is deliberately minimal (just
-   *  the text) — model/attachment selection is threaded through once
-   *  `ChatHeader` exists to pick them. */
-  sendTurn: (text: string) => void
+  /** Dispatches `thread.turn.start`. `model` rides the payload as the
+   *  backend's `provider.ModelSelection`; omit it to let the worktree's own
+   *  agent and its default model decide. Attachments are still to come. */
+  sendTurn: (text: string, model?: TurnModelSelection) => void
   /** Dispatches `thread.turn.interrupt` for the thread's in-flight turn. */
   abortTurn: () => void
   /** Dispatches `thread.runtime-mode.set` — the composer's runtime-mode
@@ -280,7 +291,14 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
     }
   }, [threadKey])
 
-  const sendTurn = useCallback((text: string) => dispatch('thread.turn.start', { text }), [dispatch])
+  // `model` is omitted entirely when unset rather than sent as `{}`: an empty
+  // InstanceID means "whatever this worktree is configured for" on the
+  // backend, and sending the key at all would be indistinguishable from a
+  // deliberate blank.
+  const sendTurn = useCallback(
+    (text: string, model?: TurnModelSelection) => dispatch('thread.turn.start', model ? { text, model } : { text }),
+    [dispatch],
+  )
   const abortTurn = useCallback(() => dispatch('thread.turn.interrupt'), [dispatch])
   const setRuntimeMode = useCallback((mode: RuntimeMode) => dispatch('thread.runtime-mode.set', { mode }), [dispatch])
   const setInteractionMode = useCallback((mode: InteractionMode) => dispatch('thread.interaction-mode.set', { mode }), [dispatch])

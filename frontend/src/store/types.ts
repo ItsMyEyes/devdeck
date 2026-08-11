@@ -183,6 +183,28 @@ export interface HostStats {
   sampledAt: string
 }
 
+/** Mirror of backend/internal/domain.TerminalSession — one live PTY session
+ *  on a machine, whether it backs a worktree itself (primary) or a spawned
+ *  pane inside one. The backend keeps these alive indefinitely on purpose
+ *  (a background agent must survive a closed tab); this is the only view
+ *  onto that otherwise-invisible process table. */
+export interface TerminalSession {
+  id: string
+  pid: number
+  command: string
+  /** Present when the id belongs to a worktree (`w-…`), bare id or the part before `::`. */
+  worktreeId?: string
+  /** The id has no `::` suffix — it backs a worktree itself, not one spawned pane. */
+  primary: boolean
+  /** A WebSocket is currently bound to this PTY. */
+  attached: boolean
+  startedAt: string
+  /** null when the session has never produced output. */
+  lastOutputAt: string | null
+  /** Current ring-buffer occupancy in bytes. */
+  bufferBytes: number
+}
+
 /** A saved page in the machine-proxied Browser tile. Server-side (not
  *  localStorage) so the same bookmarks show up whether you're on the desktop
  *  app or a phone hitting the same hub — see backend/internal/domain.Bookmark. */

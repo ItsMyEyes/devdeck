@@ -194,7 +194,13 @@ type Store interface {
 	CommitAgentEvents(commandID string, evts []orchestration.Event) ([]orchestration.Event, error)
 	SeenAgentCommand(commandID string) ([]orchestration.Event, bool, error)
 	AgentEventsSince(threadID string, seq uint64) ([]orchestration.Event, error)
+	// AllAgentEvents feeds the engine's startup rehydration — its State is
+	// derived from the log, so the log has to be replayed into it on boot.
+	AllAgentEvents() ([]orchestration.Event, error)
 	AgentThreads(worktreeID string) ([]domain.AgentThread, error)
+	// DeleteAgentThread erases a thread outright — row, events and receipts.
+	// See the implementation's comment on why this is not a tombstone.
+	DeleteAgentThread(threadID string) error
 }
 
 // SettingsPatch carries optional fields for a partial settings update.

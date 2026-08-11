@@ -15,9 +15,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"devdeck/backend/internal/agentcore/approval"
@@ -48,6 +50,13 @@ import (
 
 	"github.com/mattn/go-isatty"
 )
+
+// shutdownTimeout caps how long a graceful shutdown waits for in-flight HTTP
+// requests to finish. Deliberately short: by the time it applies, every PTY,
+// forward and pooled SSH client has already been torn down, so what remains
+// is only ordinary request draining — and an operator restarting a server
+// should not have to wait on one stuck handler.
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	// `devdeck setup` is a subcommand, not a flag, so it must be recognised and
@@ -355,7 +364,6 @@ func main() {
 	bookmarkH := handler.NewBookmarkHandler(st, service.NewFaviconService(st))
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
-	sshH := handler.NewSSHHandler(st, sshSecrets)
 	// One dialer backs both the interactive shell and the SFTP file API, so
 	// enabling ExecutorMachineID routing here routes both: every file
 	// operation rides the same *ssh.Client the shell does.
@@ -372,6 +380,10 @@ func main() {
 
 	sshForwarder := sshmgr.NewForwarder(sshDialer)
 	sshForwardH := handler.NewSSHForwardHandler(st, sshForwarder)
+	// sshH needs sshForwarder (stop live forwards on delete) and sshFilePool
+	// (evict the cached SSH+SFTP pair on delete/edit/host-key-accept), so it
+	// is constructed here rather than up alongside the other handlers.
+	sshH := handler.NewSSHHandler(st, sshSecrets, sshForwarder, sshFilePool)
 
 	dbSecrets := service.NewDBSecretService(st, authKey)
 	dbH := handler.NewDBHandler(st, dbSecrets)
@@ -394,8 +406,27 @@ func main() {
 	// worktrees to chat about; the hub simply proxies the WebSocket like it
 	// does for /ws/terminal and /ws/ssh.
 	agentRegistry := provider.NewRegistry(claude.NewDriver())
+	// The engine's State is DERIVED from the event log, never stored — so it
+	// has to be rebuilt from that log on every boot. Skipping this was a real
+	// bug, not a theoretical one: the events survived the restart, so the
+	// WebSocket's replay found them and its auto-create path stayed quiet,
+	// while the decider had an empty thread map and answered every turn with
+	// "thread <id> does not exist" — permanently, because the auto-create
+	// command's receipt is durable and absorbed each retry.
+	//
+	// A failure here is fatal on purpose. Booting with a partially-replayed
+	// log means serving a read model that disagrees with disk, which is worse
+	// than not booting.
+	agentLog, err := st.AllAgentEvents()
+	if err != nil {
+		log.Fatalf("replay agent event log: %v", err)
+	}
+	if len(agentLog) > 0 {
+		log.Printf("agent: replayed %d events into the engine", len(agentLog))
+	}
 	agentEngine := orchestration.NewEngine(orchestration.EngineOptions{
 		Store:     orchestration.NewPortStore(st),
+		Initial:   orchestration.Apply(orchestration.NewState(), agentLog),
 		NewID:     func() string { return "ae-" + randomHex(8) },
 		QueueSize: 64,
 	})
@@ -447,7 +478,7 @@ func main() {
 	agentReactor.Start(context.Background())
 
 	agentWS := handler.NewAgentWSHandler(agentEngine, st, agentChatSvc)
-	agentThreadH := handler.NewAgentThreadHandler(st)
+	agentThreadH := handler.NewAgentThreadHandler(st, agentEngine)
 
 	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
 		PythonBin: *pythonBin,
@@ -799,6 +830,14 @@ func main() {
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/agent", agentWS.HandleWS)
 	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
+	mux.HandleFunc("DELETE /api/agent/threads/{threadId}", agentThreadH.DeleteThread)
+	// Listing exists because PTY sessions are deliberately never reaped (see
+	// registry.graceTTL): a session whose id has fallen out of the frontend's
+	// persisted pane layout is otherwise invisible and unkillable, and only a
+	// restart clears it. DELETE accepts any live id, including a worktree's
+	// primary session — the "don't kill the primary" rule belongs to the pane
+	// close path in the UI, not to an operator deliberately reaping an orphan.
+	mux.HandleFunc("GET /api/terminal/sessions", termH.GetSessions)
 	mux.HandleFunc("DELETE /api/terminal/sessions/{id}", termH.DeleteSession)
 	mux.HandleFunc("/ws/lsp", lspSrv.HandleWS)
 
@@ -914,9 +953,48 @@ func main() {
 	if err := publishedSOCKSSvc.StartIfEnabled(); err != nil {
 		log.Printf("published socks5 proxy: %v", err)
 	}
-	if err := http.Serve(listener, root); err != nil {
+	// Graceful shutdown, rather than letting the process die where it stands.
+	// Three things here exist only in this process's memory and nothing else
+	// ever closes them: live PTY children, the pooled SSH/SFTP clients, and
+	// the port-forward listeners. Closing the PTY master usually SIGHUPs a
+	// child, but an agent that ignores SIGHUP — or that has re-parented
+	// children of its own — simply survives as an orphan holding memory, and
+	// those accumulate across every restart with no way left to reach them.
+	srv := &http.Server{Handler: root}
+	shutdownDone := make(chan struct{})
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		defer close(shutdownDone)
+		sig := <-stop
+		log.Printf("shutdown: %v received, draining", sig)
+		// PTYs first, while the WebSockets are still up, so an attached
+		// client gets its "[process terminated]" notice before its socket
+		// goes away. KillAllSessions kills concurrently on purpose:
+		// terminateProcess waits up to 2s per session for SIGTERM before
+		// escalating, so doing this serially would put a 20-session host
+		// forty seconds into its own shutdown.
+		if n := terminal.KillAllSessions(); n > 0 {
+			log.Printf("shutdown: terminated %d terminal session(s)", n)
+		}
+		sshForwarder.StopAll()
+		sshFilePool.Close()
+		// Hijacked WebSockets are invisible to Shutdown, so this only drains
+		// ordinary in-flight HTTP requests; the timeout caps how long one
+		// slow request may hold the exit.
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
+	// Shutdown closes the listeners first, so Serve returns ErrServerClosed
+	// while the goroutine above is still draining — wait for it, or the
+	// process exits mid-teardown and undoes the point of having one.
+	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server: %v", err)
 	}
+	<-shutdownDone
 }
 
 // startForwardProxies optionally starts the SOCKS5 and/or HTTP forward

@@ -296,6 +296,36 @@ type HostStats struct {
 	SampledAt time.Time `json:"sampledAt"`
 }
 
+// TerminalSession is one live PTY session's observable state, as reported by
+// GET /api/terminal/sessions. In-memory only, like SSHForwardState: a
+// restart clears every session (registry.graceTTL is 0, so nothing else
+// ever does), and this is the only way an operator can see what a
+// forgotten/orphaned session — one whose id fell out of the frontend's pane
+// layout — is still doing, or kill it.
+type TerminalSession struct {
+	ID  string `json:"id"`
+	PID int    `json:"pid"`
+	// Command is the resolved binary the PTY is running (sess.cmd.Path).
+	Command string `json:"command"`
+	// WorktreeID is the part of the id before "::" when the id starts with
+	// "w-", otherwise empty.
+	WorktreeID string `json:"worktreeId,omitempty"`
+	// Primary is true when the id has no "::" suffix, i.e. it backs a
+	// worktree itself rather than one spawned pane.
+	Primary bool `json:"primary"`
+	// Attached is true when a WebSocket is currently bound (sess.conn != nil).
+	Attached bool `json:"attached"`
+	// StartedAt is when the PTY process was spawned.
+	StartedAt time.Time `json:"startedAt"`
+	// LastOutputAt is nil when the session has never produced output. Nil
+	// rather than the zero time because "never" and "at the epoch" must not
+	// look alike to the UI.
+	LastOutputAt *time.Time `json:"lastOutputAt"`
+	// BufferBytes is the current ring-buffer occupancy, so an operator can
+	// see what a forgotten session is holding.
+	BufferBytes int `json:"bufferBytes"`
+}
+
 // Bookmark is a saved page in the machine-proxied Browser tile. Bookmarks are
 // scoped to the Machine they were saved from and stored server-side rather than
 // in localStorage: a `localhost:3000` bookmark only resolves on the runtime that

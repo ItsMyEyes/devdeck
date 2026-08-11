@@ -340,28 +340,7 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		// side effect (spawning a CLI process). The commit already happened —
 		// EvtThreadCreated is durable — so a failure here is a visible error
 		// via reportError, never a lost thread.
-		id, sessionIn, err := r.InstanceFor(e.ThreadID)
-		if err != nil {
-			return err
-		}
-		if err := r.ensureInstanceStarted(ctx, id); err != nil {
-			return err
-		}
-		// StartInstance -> Bind -> StartSession, in that order: the instance
-		// must exist before anything is bound to it, and it must be bound
-		// before a session is started against it.
-		r.Provider.Dir.Bind(e.ThreadID, id)
-		a, err := r.Provider.Registry.Adapter(id)
-		if err != nil {
-			return err
-		}
-		sessionIn.ThreadID = e.ThreadID
-		if t, ok := r.Engine.State().Thread(e.ThreadID); ok {
-			sessionIn.Mode = t.Mode
-			sessionIn.Interact = t.Interact
-		}
-		_, err = a.StartSession(ctx, sessionIn)
-		return err
+		return r.ensureSession(ctx, e.ThreadID, "")
 
 	case EvtThreadTurnStartRequested:
 		var p TurnStartPayload
@@ -372,6 +351,23 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		t, ok := st.Thread(e.ThreadID)
 		if !ok {
 			return nil
+		}
+		// A turn cannot assume a session is already running, for two reasons:
+		//
+		//  1. ThreadDirectory is in-memory and Bind only ever happened on the
+		//     one-time EvtThreadCreated. After a server restart that event is
+		//     long since committed and never replays, so a thread that looks
+		//     perfectly healthy — its log intact, its state rehydrated — has
+		//     no adapter bound and every turn fails "not bound to an instance".
+		//  2. The composer can now name an agent (ModelSelection.InstanceID).
+		//     Switching agents mid-thread means binding and starting a session
+		//     on the new one; the provider has no memory of the conversation
+		//     either way, since each CLI owns its own session.
+		//
+		// ensureSession is a no-op when the thread is already on the requested
+		// instance, so the common turn pays one map lookup.
+		if err := r.ensureSession(ctx, e.ThreadID, p.Model.InstanceID); err != nil {
+			return err
 		}
 		_, err := r.Provider.SendTurn(ctx, provider.SendTurnInput{
 			ThreadID:    e.ThreadID,
@@ -431,6 +427,56 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		return a.StopSession(ctx, e.ThreadID)
 	}
 	return nil
+}
+
+// ensureSession makes a thread ready to receive a turn: the instance running,
+// the thread bound to it, and a provider session started against it.
+//
+// `want` names the instance to use. Empty means "whatever this worktree is
+// configured for", which is the only answer EvtThreadCreated has; a turn may
+// instead pass an explicit instance, which is how the composer's agent picker
+// switches a thread from one CLI to another.
+//
+// Idempotent by design — it is called on every turn. When the thread is
+// already bound to `want` AND that instance's adapter is alive, it does
+// nothing. The adapter check is not redundant with the binding: the directory
+// is in-memory and the registry is too, but they are separate maps and an
+// instance can die (or a restart can empty both) independently of what the
+// directory remembers. Re-binding without a live adapter is exactly the
+// "not bound to an instance" failure this exists to prevent.
+func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provider.InstanceID) error {
+	id, sessionIn, err := r.InstanceFor(threadID)
+	if err != nil {
+		return err
+	}
+	if want != "" {
+		id = want
+	}
+
+	if bound, ok := r.Provider.Dir.InstanceFor(threadID); ok && bound == id {
+		if _, err := r.Provider.Registry.Adapter(id); err == nil {
+			return nil
+		}
+	}
+
+	if err := r.ensureInstanceStarted(ctx, id); err != nil {
+		return err
+	}
+	// StartInstance -> Bind -> StartSession, in that order: the instance must
+	// exist before anything is bound to it, and it must be bound before a
+	// session is started against it.
+	r.Provider.Dir.Bind(threadID, id)
+	a, err := r.Provider.Registry.Adapter(id)
+	if err != nil {
+		return err
+	}
+	sessionIn.ThreadID = threadID
+	if t, ok := r.Engine.State().Thread(threadID); ok {
+		sessionIn.Mode = t.Mode
+		sessionIn.Interact = t.Interact
+	}
+	_, err = a.StartSession(ctx, sessionIn)
+	return err
 }
 
 // ensureInstanceStarted starts the instance if it is not already running.

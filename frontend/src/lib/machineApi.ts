@@ -18,6 +18,7 @@ import type {
   Machine,
   PublishedSOCKSStatus,
   TermLine,
+  TerminalSession,
   Worktree,
 } from '@/store/types'
 import { machineRequest, machineXhr, type TransferProgress } from './machineClient'
@@ -384,12 +385,23 @@ export function fetchProjectBranches(machine: Machine, projectId: string, path: 
 
 // ---- Terminal sessions ----
 
-/** Immediately kills a spawned terminal pane's PTY process. A pane's tab
- *  closing in the UI only removes it from the layout — left alone, the PTY
- *  lingers for the reconnect grace period (see registry.detach on the Go
- *  side) instead of exiting right away. The backend refuses this for a
- *  worktree's primary session (bare worktree id, no "::term-N" suffix),
- *  since that one backs the worktree itself and must survive a pane close. */
+/** Lists every live PTY session on this machine — worktree primaries and
+ *  spawned panes alike, including any orphan whose id fell out of the
+ *  persisted pane layout. The only way to see what the backend's
+ *  keep-alive-forever policy is actually holding onto; see
+ *  killTerminalSession below to end one. */
+export function fetchTerminalSessions(machine: Machine): Promise<TerminalSession[]> {
+  return machineRequest<TerminalSession[]>(machine, 'GET', '/terminal/sessions')
+}
+
+/** Immediately kills a terminal session's PTY process. A pane's tab closing
+ *  in the UI only removes it from the layout — left alone, the PTY lingers
+ *  for the reconnect grace period (see registry.detach on the Go side)
+ *  instead of exiting right away. This also accepts a worktree's *primary*
+ *  session (bare worktree id, no "::term-N" suffix) — the backend no longer
+ *  refuses it — which terminates that worktree's own agent process, so
+ *  callers must confirm before sending a primary id (see
+ *  TerminalSessionsDialog). */
 export function killTerminalSession(machine: Machine, sessionId: string): Promise<void> {
   return machineRequest<void>(machine, 'DELETE', `/terminal/sessions/${encodeURIComponent(sessionId)}`)
 }

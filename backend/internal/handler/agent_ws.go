@@ -118,15 +118,26 @@ func (h *AgentWSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		if err := h.writeEvents(ctx, conn, missed); err != nil {
 			return
 		}
-	} else if err := h.autoCreateThread(ctx, threadID); err != nil {
-		// Non-fatal: the thread may in fact already exist under the same
-		// derived CommandID (SeenCommand absorbs that silently and this
-		// branch is never reached), so a genuine failure here is almost
-		// always an unresolvable worktree/agent. Surface it and keep the
-		// socket open rather than kill a connection that might still be
-		// useful for retries.
-		log.Printf("agent: thread %s auto-create: %v", threadID, err)
-		h.writeError(ctx, conn, "failed to initialize thread")
+	}
+
+	// Auto-create is gated on the ENGINE, not on whether the replay came back
+	// empty. Those are different questions, and conflating them is what made
+	// a restarted server reject every turn with "thread X does not exist":
+	// the log still held the thread's events, so `missed` was non-empty and
+	// this branch was skipped — while the engine, whose State is derived and
+	// was rebuilt empty, had never heard of the thread. Asking the engine
+	// directly is the question that actually matters, and it is also cheaper
+	// in the common case (a thread already in state skips the dispatch and
+	// its receipt lookup entirely).
+	if _, known := h.engine.State().Thread(threadID); !known {
+		if err := h.autoCreateThread(ctx, threadID); err != nil {
+			// Non-fatal: a genuine failure here is almost always an
+			// unresolvable worktree/agent. Surface it and keep the socket
+			// open rather than kill a connection that might still be useful
+			// for retries.
+			log.Printf("agent: thread %s auto-create: %v", threadID, err)
+			h.writeError(ctx, conn, "failed to initialize thread")
+		}
 	}
 
 	var wg sync.WaitGroup

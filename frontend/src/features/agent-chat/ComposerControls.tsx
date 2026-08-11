@@ -30,29 +30,20 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
-import { Gauge, Hammer, Lock, Sparkles } from 'lucide-react'
+import { Check, Gauge, Hammer, Lock } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from '@/features/agent-chat/ComposerControl'
+import { ModelPicker } from '@/features/agent-chat/ModelPicker'
+import type { ModelChoice } from '@/features/agent-chat/ModelPicker'
 import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
+import type { Machine } from '@/store/types'
 
 export interface Option<T extends string> {
   value: T
   label: string
 }
-
-/** Mirrors `registry.StaticRegistry`'s `claude` agent
- *  (`backend/internal/registry/static.go`) — the models actually offered for
- *  the default agent. Not fetched from `useAgentModels()` here: this
- *  component isn't wired to a worktree/agent yet (see the file's doc
- *  comment), so the catalog is the same static list the backend ships. */
-export const MODEL_OPTIONS: Option<string>[] = [
-  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { value: 'claude-opus-4-7', label: 'Opus 4.7' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-]
 
 /** `effort · thinking`, one control per the design spec's control table.
  *  `provider.ModelSelection.Options` is a free-form `map[string]any`
@@ -81,8 +72,15 @@ export const RUNTIME_MODE_OPTIONS: Option<RuntimeMode>[] = [
 ]
 
 export interface ComposerControlsProps {
-  model: string
-  onModelChange: (model: string) => void
+  /** The picked agent + model, or null to run the worktree's own default.
+   *  Replaces the old `model: string` over a hardcoded four-id list, which
+   *  never reached the backend at all. */
+  model: ModelChoice | null
+  onModelChange: (choice: ModelChoice) => void
+  /** Needed by the picker to read the machine's real agent/model catalog. */
+  machine: Machine
+  /** The agent this worktree runs — the picker's default rail. */
+  worktreeAgentId: string
   effort: string
   onEffortChange: (effort: string) => void
   interactionMode: InteractionMode
@@ -109,7 +107,7 @@ function optionLabel<T extends string>(options: Option<T>[], value: T): string {
 function PillWrap({ variant, first, children }: { variant: 'inline' | 'menu'; first?: boolean; children: ReactNode }) {
   return (
     <span className={cn('flex min-w-0 items-center', variant === 'inline' ? 'flex-none' : 'w-full')}>
-      {variant === 'inline' && !first ? <span aria-hidden="true" className="mx-0.5 h-4 w-px flex-none bg-devdeck-line" /> : null}
+      {variant === 'inline' && !first ? <span aria-hidden="true" className="mx-1 h-3.5 w-px flex-none bg-devdeck-hairline" /> : null}
       {children}
     </span>
   )
@@ -186,12 +184,16 @@ function Pill<T extends string>({ icon, options, value, dispatch, error, variant
                   type="button"
                   onClick={() => choose(option.value)}
                   className={cn(
-                    'flex h-8 w-full cursor-pointer select-none items-center rounded-md px-2.5 text-left font-mono text-xs outline-none',
-                    'text-devdeck-fg-2 hover:bg-white/[0.05] hover:text-devdeck-fg',
-                    option.value === displayed && 'text-devdeck-fg',
+                    'flex h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2.5 text-left text-[13px] outline-none',
+                    'text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu hover:text-devdeck-fg',
+                    option.value === displayed && 'bg-devdeck-hover-wash text-devdeck-fg',
                   )}
                 >
-                  {option.label}
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {/* A tick, not a filled row: the row a pointer is on is
+                      already washed on hover, so "selected" needs a mark of
+                      its own to stay legible under the cursor. */}
+                  <Check aria-hidden="true" className={cn('size-3.5 flex-none', option.value === displayed ? 'opacity-100' : 'opacity-0')} />
                 </button>
               ))}
             </Popover.Popup>
@@ -207,6 +209,8 @@ function Pill<T extends string>({ icon, options, value, dispatch, error, variant
 export function ComposerControls({
   model,
   onModelChange,
+  machine,
+  worktreeAgentId,
   effort,
   onEffortChange,
   interactionMode,
@@ -218,7 +222,15 @@ export function ComposerControls({
 }: ComposerControlsProps) {
   return (
     <>
-      <Pill icon={Sparkles} options={MODEL_OPTIONS} value={model} dispatch={onModelChange} error={null} variant={variant} first />
+      <PillWrap variant={variant} first>
+        <ModelPicker
+          machine={machine}
+          worktreeAgentId={worktreeAgentId}
+          value={model}
+          onChange={onModelChange}
+          variant={variant}
+        />
+      </PillWrap>
       <Pill icon={Gauge} options={EFFORT_OPTIONS} value={effort} dispatch={onEffortChange} error={null} variant={variant} />
       <Pill
         icon={Hammer}

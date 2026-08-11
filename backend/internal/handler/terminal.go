@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 
 	"devdeck/backend/internal/terminal"
 )
@@ -14,21 +13,35 @@ type TerminalHandler struct{}
 // NewTerminalHandler creates a terminal-session handler.
 func NewTerminalHandler() *TerminalHandler { return &TerminalHandler{} }
 
+// GetSessions handles GET /api/terminal/sessions: lists every PTY session
+// this process is currently running, including ones whose id fell out of
+// the frontend's pane layout and are otherwise invisible (the only prior
+// observability was the bare activeSessions count on /api/self). Always
+// `[]`, never `null`, when nothing is running — see terminal.ActiveSessions.
+func (h *TerminalHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, terminal.ActiveSessions())
+}
+
 // DeleteSession handles DELETE /api/terminal/sessions/{id}: immediately
-// kills a spawned terminal pane's PTY process. Closing a pane's tab in the
-// UI only removes it from the layout — left alone, the PTY lingers for the
+// kills a terminal session's PTY process. Closing a pane's tab in the UI
+// only removes it from the layout — left alone, the PTY lingers for the
 // reconnect grace period (registry.detach) instead of exiting right away.
 // This lets the frontend force the kill the moment the user actually closes
-// the tab.
+// a spawned pane's tab.
 //
-// A worktree's primary session (id has no "::term-N" suffix — see
-// frontend/src/features/terminal/paneTree.ts) is refused: it backs the
-// worktree itself, not one pane's tab, and must survive a spawned pane's tab
-// being closed.
+// Any live session id is accepted, including a worktree's primary (no
+// "::term-N" suffix — see frontend/src/features/terminal/paneTree.ts). The
+// guard against a spawned pane's tab-close tearing down its owning
+// worktree's primary session lives in the frontend now
+// (killIfSpawnedTerminal in ExpandedTerminal.tsx, which only auto-kills when
+// `content.sessionKey !== worktree.id`); this endpoint also serves an
+// explicit operator "kill this orphan" action from the session list, which
+// must be able to reach a primary session — otherwise a runaway/forgotten
+// primary session would be unreachable short of a backend restart.
 func (h *TerminalHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if id == "" || !strings.Contains(id, "::") {
-		writeErr(w, http.StatusBadRequest, "cannot kill a worktree's primary terminal session")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "session id is required")
 		return
 	}
 	if err := terminal.KillSession(id); err != nil {

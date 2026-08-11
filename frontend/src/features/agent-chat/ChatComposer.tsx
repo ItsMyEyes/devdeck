@@ -8,6 +8,13 @@
  * gating Send on idle would silently reject something the backend already
  * supports.
  *
+ * Two placements, one component. `variant="docked"` is the composer a live
+ * thread scrolls above; `variant="hero"` is the same box parked in the middle
+ * of an empty thread under "What should we build in …?" — no top border, no
+ * status strip, nothing to divide it from the heading it belongs to. Both
+ * share the transcript's `max-w-3xl` measure so the box never sits wider than
+ * the messages it produces.
+ *
  * The mode/model pills come from `ComposerControls`, which owns their
  * options and dispatches the real commands. The row is rendered twice —
  * once inline (shown above the `@sm/composer` container breakpoint) and
@@ -33,7 +40,7 @@
  * `useNativeOverlayBlocker` for the Tauri webview.
  */
 import { useState } from 'react'
-import { MoreHorizontal, Square } from 'lucide-react'
+import { ArrowUp, MoreHorizontal, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   PromptInput,
@@ -60,6 +67,9 @@ export interface ChatComposerProps {
   onAbort: () => void
   worktree?: string
   branch?: string | null
+  /** `'docked'` (default) pins the composer under a live transcript;
+   *  `'hero'` centres it in an empty thread. See the file's doc comment. */
+  variant?: 'docked' | 'hero'
   /** Everything `ComposerControls` needs except `variant`, which this
    *  component sets per copy of the row. Passed as one object rather than
    *  eight flat props so adding a control doesn't ripple through
@@ -67,17 +77,75 @@ export interface ChatComposerProps {
   controls: Omit<ComposerControlsProps, 'variant'>
 }
 
-export function ChatComposer({ status, onSend, onAbort, worktree, branch, controls }: ChatComposerProps) {
+/** The vendored `InputGroup` hardcodes its own `className` (`rounded-md`,
+ *  `border-input`, `dark:bg-input/30`, `shadow-xs`) and `PromptInput` spreads
+ *  ours onto the `<form>` only — so the box the user actually sees is out of
+ *  reach from here and has to be re-pointed through descendant utilities.
+ *  Left alone it painted two concentric borders, the inner one a hard 3:1
+ *  grey over a washed-out fill.
+ *
+ *  `bg` carries the important flag because `dark:bg-input/30` has the same
+ *  specificity as the override; the others out-specify their base rule, which
+ *  leaves the focus ring (`has-[…:focus-visible]:`) intact. */
+const BOX = [
+  '[&>[data-slot=input-group]]:rounded-xl',
+  '[&>[data-slot=input-group]]:border-devdeck-hairline',
+  '[&>[data-slot=input-group]]:bg-devdeck-raised!',
+  '[&>[data-slot=input-group]]:shadow-none',
+  // The vendored padding is tuned for a one-line input; this is a message box.
+  '[&_[data-slot=input-group-control]]:px-4',
+  '[&_[data-slot=input-group-control]]:pt-3.5',
+  // The vendored focus state is a 3px ring PLUS an accent border. On a
+  // control this large that is a glowing slab, not a focus indicator — the
+  // accent border alone already reads at a glance. 1px keeps the ring
+  // visible for anyone who needs the extra edge without the halo.
+  '[&>[data-slot=input-group]]:has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+].join(' ')
+
+/** The action button: a filled circle, the single primary action on this
+ *  surface and the one place the accent is allowed to fill a shape. Empty
+ *  keeps the circle and drops its saturation rather than going grey — the
+ *  affordance has to stay findable when the box is empty, which is exactly
+ *  when the user is looking for it. */
+const SEND = [
+  'size-8 rounded-full p-0',
+  'bg-devdeck-accent text-devdeck-accent-ink',
+  'hover:bg-devdeck-accent-hover hover:text-devdeck-accent-ink',
+  'disabled:bg-devdeck-accent/30 disabled:text-devdeck-fg-2 disabled:opacity-100',
+].join(' ')
+
+/** The same circle in its interrupt state: destructive fill, so "stop" is
+ *  never mistaken for "send" at a glance. */
+const STOP = 'size-8 rounded-full bg-devdeck-err p-0 text-devdeck-accent-ink hover:bg-devdeck-err hover:opacity-90'
+
+export function ChatComposer({ status, onSend, onAbort, worktree, branch, controls, variant = 'docked' }: ChatComposerProps) {
   const [text, setText] = useState('')
+  const hero = variant === 'hero'
 
   // The adapter owns the thread-status → ChatStatus mapping, so "is the agent
-  // generating" has one definition. `PromptInputSubmit` is deliberately NOT
-  // given it: that component makes itself the stop control for both generating
-  // states, and a click must always send — the backend allows a follow-up
-  // message to steer an in-flight turn, and `waiting` is precisely the state
-  // where the user has something to say. The interrupt is its own control.
+  // generating" has one definition.
   const chatStatus = promptChatStatus({ ...emptyThreadView(), status })
   const generating = chatStatus === 'streaming' || chatStatus === 'submitted'
+  const draft = text.trim()
+
+  // ── One button, not two ──
+  //
+  // The composer used to show Stop AND Send side by side whenever the agent
+  // was busy. Two circular buttons 8px apart, one red one teal, both live, is
+  // a coin flip at a glance — and it was there to solve a real problem, so it
+  // cannot simply be deleted: the backend explicitly allows a follow-up
+  // message to STEER an in-flight turn (see the design note on
+  // `CmdThreadTurnStart` in the engine's `Decide`), and `waiting` is the state
+  // where the agent is asking the user something, i.e. exactly when a click
+  // must send rather than abort.
+  //
+  // The draft settles it. Having typed something, the only thing that button
+  // can sensibly mean is "send it" — steering and answering both stay reachable
+  // while the agent runs. With an empty box there is nothing to send, so the
+  // button is the interrupt. That is also why the vendored `PromptInputSubmit`
+  // can't decide this on its own: it flips on status alone and would abort a
+  // typed answer.
+  const interrupting = generating && draft.length === 0
 
   function handleSubmit(message: PromptInputMessage) {
     const trimmed = (message.text ?? '').trim()
@@ -87,34 +155,21 @@ export function ChatComposer({ status, onSend, onAbort, worktree, branch, contro
   }
 
   return (
-    <div className="flex flex-none flex-col border-t border-devdeck-line bg-devdeck-pane">
-      {/* `PromptInput` spreads className onto its <form> only — its child
-          `InputGroup` is hardcoded to `overflow-hidden`, so the box the user
-          actually sees is out of reach from here. Styling the form as well
-          produced two concentric borders with the inner one on `--input`
-          (`--devdeck-line`, a hard 3:1 grey) over a `bg-input/30` wash. So the
-          form paints nothing and the vendored box is re-pointed through
-          descendant utilities. `bg` carries the important flag because
-          `dark:bg-input/30` has the same specificity as the override; the
-          others out-specify their base rule and leave the focus ring intact. */}
+    <div className={cn('flex flex-none flex-col', hero ? 'w-full' : 'border-t border-devdeck-hairline bg-devdeck-pane')}>
       <PromptInput
         onSubmit={handleSubmit}
-        className={cn(
-          '@container/composer mx-3 mt-2.5 mb-2',
-          '[&>[data-slot=input-group]]:rounded-lg [&>[data-slot=input-group]]:border-devdeck-hairline',
-          '[&>[data-slot=input-group]]:bg-devdeck-raised! [&>[data-slot=input-group]]:shadow-none',
-        )}
+        className={cn('@container/composer mx-auto w-full max-w-3xl', hero ? 'px-0' : 'px-5 pt-3 pb-2', BOX)}
       >
         <PromptInputBody>
           <PromptInputTextarea
             value={text}
             onChange={(event) => setText(event.target.value)}
-            placeholder="Ask for follow-up changes… (Enter to send, Shift+Enter for a new line)"
-            className="font-mono text-[12.5px]"
+            placeholder={hero ? 'Ask for changes, or describe what to build' : 'Ask anything…'}
+            className="text-[14px] leading-relaxed placeholder:text-devdeck-fg-2"
           />
         </PromptInputBody>
 
-        <PromptInputFooter>
+        <PromptInputFooter className="gap-2">
           <PromptInputTools className="min-w-0 flex-1 overflow-hidden">
             <div
               data-testid="composer-controls-inline"
@@ -137,22 +192,27 @@ export function ChatComposer({ status, onSend, onAbort, worktree, branch, contro
             </div>
           </PromptInputTools>
 
-          {generating ? (
-            <PromptInputButton
-              aria-label="Stop"
-              className="bg-devdeck-red-tint text-devdeck-err hover:bg-devdeck-red-tint-hover hover:text-devdeck-err"
-              onClick={onAbort}
-              title="Interrupt this turn"
-            >
-              <Square size={12} aria-hidden="true" />
+          {interrupting ? (
+            <PromptInputButton aria-label="Stop" className={STOP} onClick={onAbort} title="Interrupt this turn">
+              <Square size={11} fill="currentColor" aria-hidden="true" />
             </PromptInputButton>
-          ) : null}
-
-          <PromptInputSubmit status={chatStatus === 'error' ? 'error' : 'ready'} disabled={text.trim().length === 0} />
+          ) : (
+            /* `undefined` children on error is deliberate: `PromptInputSubmit`
+               falls back to its own icon set, so a rejected turn shows the
+               vendored ✕ rather than an arrow that looks ready to send. */
+            <PromptInputSubmit
+              className={SEND}
+              status={chatStatus === 'error' ? 'error' : 'ready'}
+              disabled={draft.length === 0}
+              title={generating ? 'Send — steers the turn in flight' : 'Send'}
+            >
+              {chatStatus === 'error' ? undefined : <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />}
+            </PromptInputSubmit>
+          )}
         </PromptInputFooter>
       </PromptInput>
 
-      <ChatStatusStrip worktree={worktree ?? '—'} branch={branch} />
+      {hero ? null : <ChatStatusStrip worktree={worktree ?? '—'} branch={branch} />}
     </div>
   )
 }

@@ -8,6 +8,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+vi.mock('@/features/data/queries', () => ({
+  useAgents: () => ({ data: [{ id: 'claude', name: 'Claude', installed: true }], isLoading: false, error: null }),
+  useAgentModels: () => ({
+    data: [
+      { id: 'claude-sonnet-5', name: 'Sonnet 5', contextWindow: 200000 },
+      { id: 'claude-opus-5', name: 'Opus 5', contextWindow: 1000000 },
+    ],
+    isLoading: false,
+    error: null,
+  }),
+}))
+
 import { ComposerControls } from '@/features/agent-chat/ComposerControls'
 import type { ComposerControlsProps } from '@/features/agent-chat/ComposerControls'
 
@@ -17,8 +29,10 @@ afterEach(() => {
 
 function baseProps(overrides: Partial<ComposerControlsProps> = {}): ComposerControlsProps {
   return {
-    model: 'claude-sonnet-5',
+    model: { agentId: 'claude', modelId: 'claude-sonnet-5', modelName: 'Sonnet 5' },
     onModelChange: vi.fn(),
+    machine: { id: 'm1', name: 'dev', url: '', key: '', isLocal: false, signingPublicKey: '' },
+    worktreeAgentId: 'claude',
     effort: 'high:normal',
     onEffortChange: vi.fn(),
     interactionMode: 'default',
@@ -61,18 +75,31 @@ describe('ComposerControls — wired to real commands', () => {
     expect(setRuntimeMode).toHaveBeenCalledWith('approval-required')
   })
 
-  it('updates model and effort locally, without dispatching a socket command', async () => {
-    const onModelChange = vi.fn()
+  it('updates effort locally, without dispatching a socket command', async () => {
     const onEffortChange = vi.fn()
-    render(<ComposerControls {...baseProps({ onModelChange, onEffortChange })} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Sonnet 5' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Opus 4.8' }))
-    expect(onModelChange).toHaveBeenCalledWith('claude-opus-4-8')
+    render(<ComposerControls {...baseProps({ onEffortChange })} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'High · Normal' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Low · Normal' }))
     expect(onEffortChange).toHaveBeenCalledWith('low:normal')
+  })
+
+  // The model pill used to be a ghost pill over four hardcoded ids that never
+  // reached the backend. It is now the real picker over the machine's catalog,
+  // and it reports the agent alongside the model — running a model IS running
+  // its agent.
+  it('picks a model from the machine catalog, carrying its agent', async () => {
+    const onModelChange = vi.fn()
+    render(<ComposerControls {...baseProps({ onModelChange })} />)
+
+    await userEvent.click(screen.getByRole('button', { name: /Sonnet 5/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Opus 5/ }))
+
+    expect(onModelChange).toHaveBeenCalledWith({
+      agentId: 'claude',
+      modelId: 'claude-opus-5',
+      modelName: 'Opus 5',
+    })
   })
 
   it('shows the picked runtime mode optimistically before the engine confirms it', async () => {

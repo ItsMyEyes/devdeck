@@ -200,6 +200,17 @@ func (h *reactorHarness) consumedSnapshot() []provider.InstanceID {
 // calls on that same recorder.
 func newReactorHarness(t *testing.T, brokerFn func(rec *callRecorder) approval.Broker) *reactorHarness {
 	t.Helper()
+	return newReactorHarnessWithState(t, brokerFn, nil)
+}
+
+// newReactorHarnessWithState is newReactorHarness plus a pre-seeded engine
+// State — i.e. a thread the decider knows about that the REACTOR has never
+// seen an EvtThreadCreated for. That is precisely what a server restart looks
+// like: main.go replays the durable log into State on boot, but the one-time
+// creation event does not re-fire, so nothing re-binds the thread to a
+// provider instance.
+func newReactorHarnessWithState(t *testing.T, brokerFn func(rec *callRecorder) approval.Broker, initial *State) *reactorHarness {
+	t.Helper()
 	rec := &callRecorder{}
 	adapter := &fakeAdapter{rec: rec, ch: make(chan event.Event, 4)}
 	registry := provider.NewRegistry(&fakeDriver{rec: rec, adapter: adapter})
@@ -209,7 +220,7 @@ func newReactorHarness(t *testing.T, brokerFn func(rec *callRecorder) approval.B
 	store := NewMemStore()
 	h := &reactorHarness{adapter: adapter, rec: rec, store: store}
 	h.engine = NewEngine(EngineOptions{
-		Store: store, Now: func() int64 { return 1000 }, QueueSize: 16,
+		Store: store, Initial: initial, Now: func() int64 { return 1000 }, QueueSize: 16,
 		NewID: func() string { h.idSeq++; return fmt.Sprintf("ae-%d", h.idSeq) },
 	})
 
@@ -428,4 +439,84 @@ func TestUnresolvedAgentReportsAConfigurationError(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// A restarted server replays its event log into State but never re-fires
+// EvtThreadCreated, so nothing re-binds the thread to a provider instance.
+// The thread then looks perfectly healthy — log intact, decider accepts the
+// turn — while every turn dies in adapterFor at "not bound to an instance".
+// The reactor has to provision on the turn, not only on creation.
+func TestReactorStartsASessionForATurnOnAThreadItNeverSawCreated(t *testing.T) {
+	created := Event{
+		EventID: "ae-seed", Type: EvtThreadCreated, ThreadID: "w-abc",
+		CreatedAt: 1000, Payload: mustRaw(t, map[string]any{}),
+	}
+	h := newReactorHarnessWithState(t, noopBrokerFn, Apply(NewState(), []Event{created}))
+	defer h.cancel()
+
+	// No CmdThreadCreate: the thread already exists, exactly as after a boot.
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "fix the auth redirect"}))
+
+	h.waitForCall(t, "StartSession")
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 1 })
+	if n := countErrorEntries(h.store.All()); n != 0 {
+		t.Fatalf("turn reported %d errors, want none", n)
+	}
+}
+
+// ensureSession runs on every turn, so it must be a no-op once the thread is
+// already bound and its adapter is alive — restarting the CLI session under a
+// running conversation would silently drop the agent's context.
+func TestReactorDoesNotRestartTheSessionOnEveryTurn(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "one"}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 1 })
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "two"}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 2 })
+
+	starts := 0
+	for _, c := range h.rec.snapshot() {
+		if c == "StartSession" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("StartSession called %d times across two turns, want 1", starts)
+	}
+}
+
+// The composer's picker names an instance on the turn. Selecting the one the
+// thread is already on must not churn the session.
+func TestReactorKeepsTheSessionWhenTheTurnNamesTheBoundInstance(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{
+		Text:  "stay put",
+		Model: provider.ModelSelection{InstanceID: "fake:default", Model: "fake-mini"},
+	}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 1 })
+
+	starts := 0
+	for _, c := range h.rec.snapshot() {
+		if c == "StartSession" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("StartSession called %d times, want 1 — naming the bound instance must be a no-op", starts)
+	}
+	// And the chosen model actually reaches the adapter, which is the whole
+	// point: the pill was decorative before this.
+	if got := h.adapter.turnCalls()[0].Model.Model; got != "fake-mini" {
+		t.Fatalf("SendTurn model = %q, want fake-mini", got)
+	}
 }

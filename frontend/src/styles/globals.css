@@ -250,7 +250,12 @@
   --color-devdeck-hover-wash: var(--devdeck-hover-wash);
   --color-devdeck-hover-wash-menu: var(--devdeck-hover-wash-menu);
 
-  --font-sans: 'Geist', system-ui, -apple-system, sans-serif;
+  /* Arial everywhere for UI text — one family, no webfont fetch, identical
+     metrics on every machine the app runs on. Helvetica/Liberation Sans are
+     the metric-compatible fallbacks for macOS-without-Arial and Linux.
+     --font-mono stays a real monospace: code, diffs, line numbers and the
+     xterm grid are column-aligned by definition and Arial would break them. */
+  --font-sans: Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
 
   /* Tailwind's named radius scale is COLLAPSED onto the three design steps
@@ -424,6 +429,173 @@
   textarea::placeholder {
     color: var(--devdeck-fg-2);
   }
+}
+
+/* ── chat transcript markdown ──────────────────────────────────────────────
+   Streamdown v2 emits BARE elements — `<h2>`, `<ul>`, `<p>`, each carrying
+   only a `data-streamdown="…"` marker — and ships no stylesheet of its own
+   beyond three keyframes. Tailwind's preflight has already stripped every
+   one of those elements of its margin, its list marker and its heading size,
+   so an agent reply rendered "as markdown" arrived as one undifferentiated
+   wall of text: no bullets, no numbering, no paragraph rhythm, headings the
+   same size as body copy.
+
+   This is that missing stylesheet. It is scoped to `.chat-md` rather than
+   applied to the transcript's container so it cannot reach the tool cards,
+   reasoning chrome or code blocks rendered alongside a reply — those are
+   components with their own styling, not markdown.
+
+   Sizes are all `em`, so the one `text-[…]` on the message row sets the
+   scale and everything here follows it. */
+.chat-md {
+  line-height: 1.65;
+}
+.chat-md > :first-child {
+  margin-top: 0;
+}
+.chat-md > :last-child {
+  margin-bottom: 0;
+}
+.chat-md p {
+  margin: 0 0 0.85em;
+}
+.chat-md h1,
+.chat-md h2,
+.chat-md h3,
+.chat-md h4,
+.chat-md h5,
+.chat-md h6 {
+  margin: 1.4em 0 0.55em;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--devdeck-fg);
+}
+.chat-md h1 {
+  font-size: 1.32em;
+}
+.chat-md h2 {
+  font-size: 1.16em;
+}
+.chat-md h3 {
+  font-size: 1.05em;
+}
+.chat-md h4,
+.chat-md h5,
+.chat-md h6 {
+  font-size: 1em;
+}
+.chat-md ul,
+.chat-md ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.5em;
+}
+.chat-md ul {
+  list-style: disc;
+}
+.chat-md ol {
+  list-style: decimal;
+}
+.chat-md li {
+  margin: 0.28em 0;
+}
+.chat-md li::marker {
+  color: var(--devdeck-fg-2);
+}
+.chat-md li > ul,
+.chat-md li > ol {
+  margin: 0.28em 0 0;
+}
+/* A task list is a list of checkboxes, not of bullets. */
+.chat-md li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.25em;
+}
+.chat-md li > input[type='checkbox'] {
+  margin-right: 0.5em;
+  accent-color: var(--devdeck-accent);
+}
+.chat-md strong,
+.chat-md b {
+  font-weight: 700;
+  color: var(--devdeck-fg);
+}
+.chat-md em,
+.chat-md i {
+  font-style: italic;
+}
+.chat-md del {
+  text-decoration: line-through;
+  color: var(--devdeck-fg-2);
+}
+.chat-md a {
+  color: var(--devdeck-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-md a:hover {
+  color: var(--devdeck-accent-hover);
+}
+/* Inline code only: the fenced blocks come from `@streamdown/code`, which
+   renders its own highlighted, chrome-bearing component — the `pre code`
+   reset below hands those straight back to it. */
+.chat-md code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--devdeck-raised);
+  border: 1px solid var(--devdeck-hairline);
+  border-radius: var(--r-micro);
+  padding: 0.12em 0.4em;
+  word-break: break-word;
+}
+.chat-md pre {
+  margin: 0 0 0.85em;
+}
+.chat-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  word-break: normal;
+}
+.chat-md blockquote {
+  margin: 0 0 0.85em;
+  padding-left: 0.9em;
+  border-left: 2px solid var(--devdeck-line);
+  color: var(--devdeck-fg-2);
+}
+.chat-md hr {
+  margin: 1.3em 0;
+  border: 0;
+  border-top: 1px solid var(--devdeck-hairline);
+}
+/* Full width on purpose. `display: block` + `overflow-x: auto` looks like the
+   safer choice for a wide table, but it turns the table box into a block one
+   whose contents shrink-wrap: the borders then stop a third of the way across
+   a full-width card, with dead space beside them. Streamdown already wraps
+   every table in its own scrolling card (the one carrying the copy / download
+   / expand controls), so the overflow is handled a level up and this can stay
+   a real table. */
+.chat-md table {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 0.85em;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+.chat-md th,
+.chat-md td {
+  border: 1px solid var(--devdeck-hairline);
+  padding: 0.4em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.chat-md th {
+  font-weight: 700;
+  background: var(--devdeck-raised);
+}
+.chat-md img {
+  max-width: 100%;
+  border-radius: var(--r-control);
 }
 
 .devdeck-markdown h1,

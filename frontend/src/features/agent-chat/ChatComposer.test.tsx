@@ -8,6 +8,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+// The model pill is now a real picker over the machine's agent/model catalog,
+// so the composer transitively needs react-query. These tests are about the
+// composer's own behaviour, not the catalog — stub it, as
+// ComposerControls.test.tsx does.
+vi.mock('@/features/data/queries', () => ({
+  useAgents: () => ({ data: [{ id: 'claude', name: 'Claude', installed: true }], isLoading: false, error: null }),
+  useAgentModels: () => ({ data: [{ id: 'claude-sonnet-5', name: 'Sonnet 5', contextWindow: 200000 }], isLoading: false, error: null }),
+}))
+
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
 import type { ChatComposerProps } from '@/features/agent-chat/ChatComposer'
 
@@ -19,8 +28,10 @@ afterEach(() => {
  *  tests only care that the row is present, unwrappable, and collapsible, so
  *  the control wiring is a static fixture. */
 const controls: ChatComposerProps['controls'] = {
-  model: 'claude-sonnet-5',
+  model: { agentId: 'claude', modelId: 'claude-sonnet-5', modelName: 'Sonnet 5' },
   onModelChange: () => {},
+  machine: { id: 'm1', name: 'dev', url: '', key: '', isLocal: false, signingPublicKey: '' },
+  worktreeAgentId: 'claude',
   effort: 'high:normal',
   onEffortChange: () => {},
   interactionMode: 'default',
@@ -118,6 +129,61 @@ describe('ChatComposer — t3code layout', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /stop/i }))
     expect(onAbort).toHaveBeenCalledTimes(1)
+  })
+
+  // ── One button ──
+  // Two live circular buttons 8px apart, one red one teal, was a coin flip at
+  // a glance. The draft decides which one it is.
+  it('shows exactly one action button in every state', () => {
+    for (const status of ['idle', 'running', 'waiting', 'stopped'] as const) {
+      const { unmount } = render(<ChatComposer status={status} onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+      const actions = screen.queryAllByRole('button', { name: /stop|submit/i })
+      expect(actions, `status=${status}`).toHaveLength(1)
+      unmount()
+    }
+  })
+
+  it('is a Stop while the agent runs and the box is empty', () => {
+    render(<ChatComposer status="running" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull()
+  })
+
+  // Typing turns the interrupt back into a send, which is what keeps steering
+  // an in-flight turn (and answering a `waiting` prompt) reachable at all.
+  it('becomes a Send as soon as something is typed, mid-turn', async () => {
+    const onSend = vi.fn()
+    const onAbort = vi.fn()
+    render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={controls} />)
+
+    await userEvent.type(screen.getByRole('textbox'), 'also add tests')
+
+    expect(screen.queryByRole('button', { name: /stop/i })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /submit/i }))
+    expect(onSend).toHaveBeenCalledWith('also add tests')
+    expect(onAbort).not.toHaveBeenCalled()
+  })
+
+  // ...and clearing it back to empty hands the interrupt back.
+  it('returns to Stop when the draft is cleared again', async () => {
+    render(<ChatComposer status="running" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    const box = screen.getByRole('textbox')
+    await userEvent.type(box, 'x')
+    expect(screen.queryByRole('button', { name: /stop/i })).toBeNull()
+
+    await userEvent.clear(box)
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
+  })
+
+  // Whitespace is not a draft — it cannot send, so it must not steal the
+  // interrupt either.
+  it('treats a whitespace-only draft as empty', async () => {
+    render(<ChatComposer status="running" onSend={vi.fn()} onAbort={vi.fn()} controls={controls} />)
+
+    await userEvent.type(screen.getByRole('textbox'), '   ')
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
   })
 
   it('offers no interrupt while the thread is idle', () => {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"devdeck/backend/internal/agentcore/orchestration"
@@ -273,5 +274,161 @@ func TestPayloadSurvivesRoundTrip(t *testing.T) {
 	}
 	if decoded["k"] != "v" {
 		t.Fatalf("payload = %v, want {k:v}", decoded)
+	}
+}
+
+// The sessions sidebar read "Untitled session" forever: EvtThreadCreated is
+// committed on the WebSocket's hello, before any message exists, so it has
+// nothing to name a thread with and the row was inserted with title ''.
+func TestCommitProjectsThreadTitleFromFirstMessage(t *testing.T) {
+	st := NewTestStore(t)
+
+	sent := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadMessageSent)
+	sent.Payload = json.RawMessage(`{"text":"add rate limiting to the upload endpoint"}`)
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+		sent,
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	threads, err := st.AgentThreads("w-abc")
+	if err != nil {
+		t.Fatalf("threads: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("want 1 thread, got %d", len(threads))
+	}
+	if threads[0].Title != "add rate limiting to the upload endpoint" {
+		t.Fatalf("title = %q", threads[0].Title)
+	}
+}
+
+// First message only. A thread is named once; later turns must not rename it
+// out from under the user.
+func TestCommitKeepsTheFirstMessageAsTheTitle(t *testing.T) {
+	st := NewTestStore(t)
+
+	first := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadMessageSent)
+	first.Payload = json.RawMessage(`{"text":"first"}`)
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+		first,
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	second := evt("ae-3", "w-abc", "ac-2", orchestration.EvtThreadMessageSent)
+	second.Payload = json.RawMessage(`{"text":"second"}`)
+	if _, err := st.CommitAgentEvents("ac-2", []orchestration.Event{second}); err != nil {
+		t.Fatalf("commit 2: %v", err)
+	}
+
+	threads, _ := st.AgentThreads("w-abc")
+	if threads[0].Title != "first" {
+		t.Fatalf("title = %q, want it pinned to the first message", threads[0].Title)
+	}
+}
+
+// A pasted multi-line prompt has to become one short label, not a wall of
+// text in a 240px sidebar.
+func TestThreadTitleIsOneCollapsedLine(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"\n\n  fix   the   auth  redirect \n more", "fix the auth redirect"},
+		{"", ""},
+		{"   \n  \t ", ""},
+		{strings.Repeat("x", 80), strings.Repeat("x", 60) + "…"},
+	}
+	for _, c := range cases {
+		payload, _ := json.Marshal(struct {
+			Text string `json:"text"`
+		}{Text: c.in})
+		if got := summarizeThreadTitle(payload); got != c.want {
+			t.Fatalf("summarizeThreadTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := summarizeThreadTitle(json.RawMessage(`not json`)); got != "" {
+		t.Fatalf("unparseable payload should yield %q, got %q", "", got)
+	}
+}
+
+// The engine's State is derived, so it has to be replayed from the log on
+// boot. Without this the decider rejects every command against a thread whose
+// events are all still on disk.
+func TestAllAgentEventsReplaysEveryThreadInSeqOrder(t *testing.T) {
+	st := NewTestStore(t)
+
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if _, err := st.CommitAgentEvents("ac-2", []orchestration.Event{
+		evt("ae-2", "w-xyz", "ac-2", orchestration.EvtThreadCreated),
+	}); err != nil {
+		t.Fatalf("commit 2: %v", err)
+	}
+
+	all, err := st.AllAgentEvents()
+	if err != nil {
+		t.Fatalf("all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("want events from both threads, got %d", len(all))
+	}
+	if all[0].ThreadID != "w-abc" || all[1].ThreadID != "w-xyz" || all[1].Seq <= all[0].Seq {
+		t.Fatalf("not in global seq order: %+v", all)
+	}
+
+	// The point of the replay: Apply must reconstruct both threads.
+	state := orchestration.Apply(orchestration.NewState(), all)
+	for _, id := range []string{"w-abc", "w-xyz"} {
+		if _, ok := state.Thread(id); !ok {
+			t.Fatalf("thread %s missing from replayed state", id)
+		}
+	}
+}
+
+// Delete is an erase, not a tombstone — the id has to stay reusable, because
+// the primary chat pane IS the bare worktree id.
+func TestDeleteAgentThreadErasesRowEventsAndReceipts(t *testing.T) {
+	st := NewTestStore(t)
+
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if _, err := st.CommitAgentEvents("ac-keep", []orchestration.Event{
+		evt("ae-9", "w-other", "ac-keep", orchestration.EvtThreadCreated),
+	}); err != nil {
+		t.Fatalf("commit other: %v", err)
+	}
+
+	if err := st.DeleteAgentThread("w-abc"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if threads, _ := st.AgentThreads("w-abc"); len(threads) != 0 {
+		t.Fatalf("row survived the delete: %+v", threads)
+	}
+	if evts, _ := st.AgentEventsSince("w-abc", 0); len(evts) != 0 {
+		t.Fatalf("events survived the delete: %+v", evts)
+	}
+	// The receipt is the one that bites: leave it and the auto-create command
+	// for this id is "already seen" forever, so the thread can never come back.
+	if _, seen, _ := st.SeenAgentCommand("ac-1"); seen {
+		t.Fatal("receipt survived the delete, so the thread id is now unusable")
+	}
+	// A neighbouring thread is untouched.
+	if threads, _ := st.AgentThreads("w-other"); len(threads) != 1 {
+		t.Fatalf("delete leaked into another thread: %+v", threads)
+	}
+
+	// And the id can be used again.
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+	}); err != nil {
+		t.Fatalf("recreate after delete: %v", err)
 	}
 }

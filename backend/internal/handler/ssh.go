@@ -12,16 +12,39 @@ import (
 	"devdeck/backend/internal/store"
 )
 
+// forwardStopper is the subset of *sshmgr.Forwarder that SSHHandler needs:
+// tearing down a live port-forward's listener/client when the saved
+// connection it belongs to is deleted. A narrow interface (rather than the
+// concrete type) keeps this package free of an sshmgr import and lets tests
+// fake it. Stop is idempotent and always returns nil.
+type forwardStopper interface {
+	Stop(forwardID string) error
+}
+
+// poolEvicter is the subset of *sshmgr.FilePool that SSHHandler needs:
+// dropping a cached SSH+SFTP pair so the next pooled operation (SFTP,
+// stats, RunCommand) dials fresh instead of reusing a client that points at
+// a host/credential/host-key this connection no longer has.
+type poolEvicter interface {
+	Evict(connectionID string)
+}
+
 // SSHHandler handles the hub's saved-SSH-connection registry. Secrets ride
 // in on create/update bodies, are encrypted at rest via SSHSecretService,
 // and never serialize back out (domain.SSHSecret is json:"-" throughout).
+//
+// forwarder and pool are nil-tolerant: existing tests/constructions that
+// don't care about live forwards or pooled connections may pass nil, in
+// which case the corresponding cleanup step is simply skipped.
 type SSHHandler struct {
-	st      *store.Store
-	secrets *service.SSHSecretService
+	st        *store.Store
+	secrets   *service.SSHSecretService
+	forwarder forwardStopper
+	pool      poolEvicter
 }
 
-func NewSSHHandler(st *store.Store, secrets *service.SSHSecretService) *SSHHandler {
-	return &SSHHandler{st: st, secrets: secrets}
+func NewSSHHandler(st *store.Store, secrets *service.SSHSecretService, forwarder forwardStopper, pool poolEvicter) *SSHHandler {
+	return &SSHHandler{st: st, secrets: secrets, forwarder: forwarder, pool: pool}
 }
 
 func validSSHAuthType(t string) bool {
@@ -279,11 +302,45 @@ func (h *SSHHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, h.storeSecrets(conn.ID, body.sshSecretFields)) {
 		return
 	}
+	// Host, port, username, authType or credentials may have just changed.
+	// sshmgr.FilePool keys purely on connection id with a 10-minute idle
+	// TTL, so without this, every pooled REST path (SFTP, stats polling,
+	// RunCommand) would keep hitting the OLD host/credentials for up to 10
+	// minutes. The interactive shell (sshmgr.Server.HandleWS) doesn't need
+	// this: it dials fresh per WebSocket, so it never has a stale entry to
+	// evict.
+	if h.pool != nil {
+		h.pool.Evict(conn.ID)
+	}
 	writeJSON(w, http.StatusOK, conn)
 }
 
+// DeleteConnection removes a saved connection. Its DB row cascades away
+// (ssh_forwards.connection_id ... ON DELETE CASCADE), but that only cleans
+// up the row — sshmgr.Forwarder keeps live listeners/clients in a purely
+// in-memory map, and sshmgr.FilePool keeps a cached SSH+SFTP pair the same
+// way. Neither is touched by a DB delete, so both are torn down explicitly
+// here, BEFORE the row goes away, mirroring SSHForwardHandler.Delete.
 func (h *SSHHandler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
-	if handleStoreErr(w, h.st.DeleteSSHConnection(r.PathValue("id"))) {
+	id := r.PathValue("id")
+	// Stopping forwards for a connection id that turns out not to exist is
+	// harmless: SSHForwards returns an empty list for an unknown id (it's a
+	// plain SELECT ... WHERE, not a single-row lookup that errors), so the
+	// loop below is simply a no-op and Stop is idempotent regardless. That
+	// means no pre-existence check is needed here — the real not-found
+	// signal still comes from DeleteSSHConnection below. A genuine SSHForwards
+	// error is treated as best-effort cleanup and doesn't block the delete.
+	if h.forwarder != nil {
+		if forwards, err := h.st.SSHForwards(id); err == nil {
+			for _, f := range forwards {
+				_ = h.forwarder.Stop(f.ID) // idempotent, always returns nil
+			}
+		}
+	}
+	if h.pool != nil {
+		h.pool.Evict(id)
+	}
+	if handleStoreErr(w, h.st.DeleteSSHConnection(id)) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -293,8 +350,16 @@ func (h *SSHHandler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 // after a host-key-changed block, so the next connect re-pins whatever key
 // the host presents — the operator's explicit "accept new key".
 func (h *SSHHandler) PostAcceptHostKey(w http.ResponseWriter, r *http.Request) {
-	if handleStoreErr(w, h.st.SetSSHHostKey(r.PathValue("id"), nil)) {
+	id := r.PathValue("id")
+	if handleStoreErr(w, h.st.SetSSHHostKey(id, nil)) {
 		return
+	}
+	// Accepting a new host key means the identity of the host changed (or
+	// was just confirmed after a change) — any cached pooled transport to
+	// it, dialed under the old pin, must not be reused. Same nil-tolerance
+	// and TTL rationale as PatchConnection above.
+	if h.pool != nil {
+		h.pool.Evict(id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

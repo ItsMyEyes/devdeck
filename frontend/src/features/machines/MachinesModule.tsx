@@ -1,12 +1,25 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Download, KeyRound, Monitor, Plus, Power, RefreshCw, RotateCw, Server, Settings2, Trash2 } from 'lucide-react'
+import {
+  Download,
+  KeyRound,
+  Monitor,
+  Plus,
+  Power,
+  RefreshCw,
+  RotateCw,
+  Server,
+  Settings2,
+  TerminalSquare,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
 import { useMachineHealth, useMachineUpdateCheck, useMachineVersion, useMachines } from '@/features/data/queries'
+import { TerminalSessionsDialog } from '@/features/machines/TerminalSessionsDialog'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 function RuntimeHealth({ machineId }: { machineId: string }) {
@@ -43,6 +56,7 @@ function MachineRow({ machine }: { machine: Machine }) {
   const build = useMachineVersion(machine.id)
   const check = useMachineUpdateCheck(machine.id)
   const canUpdate = check.data?.updateAvailable === true && check.data.managed === false
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   return (
     <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
       <div className="flex h-9 w-9 items-center justify-center rounded-control bg-devdeck-card-wash text-devdeck-fg-2">
@@ -111,6 +125,20 @@ function MachineRow({ machine }: { machine: Machine }) {
           >
             <RotateCw size={13} />
           </button>
+          {/* PTY sessions are deliberately never reaped, so one whose id has
+              fallen out of the persisted pane layout is otherwise invisible
+              and unkillable. This is the way to find and reap it. The dialog
+              portals out, so it renders inside the row without affecting it. */}
+          <button
+            type="button"
+            aria-label={`Terminal sessions on ${machine.name}`}
+            title="Terminal sessions"
+            onClick={() => setSessionsOpen(true)}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <TerminalSquare size={13} />
+          </button>
+          <TerminalSessionsDialog machine={machine} open={sessionsOpen} onOpenChange={setSessionsOpen} />
           {machine.isLocal ? null : (
             <>
               <button

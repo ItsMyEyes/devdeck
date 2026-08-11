@@ -54,11 +54,25 @@ describe('MessagesTimeline', () => {
     render(<MessagesTimeline view={view([item({ id: 'r1', kind: 'reasoning', text: 'thinking about the limiter' })])} />)
 
     expect(screen.queryByText(/thinking about the limiter/)).not.toBeInTheDocument()
-    // The vendored ReasoningTrigger's default label is "Thought for a few
-    // seconds" (from `defaultGetThinkingMessage` in reasoning.tsx), not
-    // anything containing the word "reasoning".
-    await userEvent.click(screen.getByRole('button', { name: /thought for a few seconds/i }))
+    // The trigger reads "Worked for Ns" (t3code's wording), falling back to
+    // "a few seconds" for a block with no timestamps — the vendored default,
+    // a brain glyph plus "Thought for…", is replaced outright by
+    // `ReasoningLabel`. Nothing in it contains the word "reasoning".
+    await userEvent.click(screen.getByRole('button', { name: /worked for a few seconds/i }))
     expect(screen.getByText(/thinking about the limiter/)).toBeInTheDocument()
+  })
+
+  // The vendored `Reasoning` can only time a stream it watched itself, so a
+  // thread replayed after a reconnect showed "a few seconds" on every block.
+  // The duration comes from the orchestration event's own stamps instead.
+  it('labels a replayed reasoning block with the duration it actually took', () => {
+    render(
+      <MessagesTimeline
+        view={view([item({ id: 'r1', kind: 'reasoning', text: 'weighing the options', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_011_000 })])}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /worked for 11s/i })).toBeInTheDocument()
   })
 
   it('shows a tool call with its name and its Running badge', () => {

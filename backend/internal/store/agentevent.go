@@ -73,6 +73,27 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 				return nil, fmt.Errorf("insert agent thread %s: %w", e.ThreadID, err)
 			}
 		}
+
+		// The thread's name, projected from the first thing the user actually
+		// said. `EvtThreadCreated` has nothing to name a thread WITH — it
+		// carries only an instance id, and it is committed on the WebSocket's
+		// hello, before any message exists — so every row was inserted with
+		// title '' and stayed that way, which is why the sidebar read
+		// "Untitled session" forever.
+		//
+		// `WHERE title = ''` is what makes this first-message-only: later
+		// turns in the same thread leave the name alone, and a user-supplied
+		// title (should renaming ever land) is never overwritten.
+		if e.Type == orchestration.EvtThreadMessageSent {
+			if title := summarizeThreadTitle(e.Payload); title != "" {
+				if _, err := tx.Exec(
+					`UPDATE agent_thread SET title = ? WHERE id = ? AND title = ''`,
+					title, e.ThreadID,
+				); err != nil {
+					return nil, fmt.Errorf("title agent thread %s: %w", e.ThreadID, err)
+				}
+			}
+		}
 	}
 
 	for threadID, ts := range touched {
@@ -127,6 +148,37 @@ func agentIDFromInstanceID(instanceID string) string {
 	return agentID
 }
 
+// threadTitleMaxRunes bounds a projected title. Runes, not bytes: the sidebar
+// truncates on width and a byte cap would split a multi-byte character.
+const threadTitleMaxRunes = 60
+
+// summarizeThreadTitle derives a thread's name from the user's first message.
+// Best-effort in the same sense as threadCreatedInstanceID: an unparseable or
+// empty payload yields "", the UPDATE is skipped, and the row keeps its blank
+// title rather than failing a commit over a cosmetic projection.
+//
+// The summary is the message's first non-blank line with its inner whitespace
+// collapsed — a pasted stack trace or a Shift+Enter multi-line prompt has to
+// become one short label, not a wall of text in a 240px sidebar.
+func summarizeThreadTitle(payload json.RawMessage) string {
+	var p struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(p.Text, "\n") {
+		if title := strings.Join(strings.Fields(line), " "); title != "" {
+			r := []rune(title)
+			if len(r) > threadTitleMaxRunes {
+				return strings.TrimRight(string(r[:threadTitleMaxRunes]), " ") + "…"
+			}
+			return title
+		}
+	}
+	return ""
+}
+
 // SeenAgentCommand reports whether this command was already processed and, if
 // so, returns the events it produced. Checked before Decide so a client that
 // reconnects and resends gets the original events instead of a second turn.
@@ -172,6 +224,63 @@ func (s *Store) AgentEventsSince(threadID string, seq uint64) ([]orchestration.E
 	}
 	defer rows.Close()
 	return scanAgentEvents(rows)
+}
+
+// AllAgentEvents returns every thread's events, in global Seq order — the
+// input to rebuilding the engine's in-memory read model at startup.
+//
+// This exists because the engine's State is derived, not stored: without
+// replaying the log into it on boot, a restarted process serves a thread whose
+// events are all still on disk but which the decider has never heard of, and
+// every command against it fails "thread X does not exist" — permanently, since
+// the auto-create command's receipt is durable and absorbs the retry.
+//
+// One query, no pagination, deliberately: Apply must see the log from the
+// beginning or the state it produces is not the state the log describes. If
+// this ever grows past comfort the fix is log compaction (a snapshot event to
+// replay from), not a LIMIT here.
+func (s *Store) AllAgentEvents() ([]orchestration.Event, error) {
+	rows, err := s.db.Query(
+		`SELECT seq, event_id, thread_id, type, command_id, created_at, payload
+		 FROM agent_event ORDER BY seq`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgentEvents(rows)
+}
+
+// DeleteAgentThread erases a thread: its sidebar row, its event log, and the
+// command receipts that log was written under — one transaction, all three.
+//
+// A tombstone would be the event-sourced reflex, and it is the wrong call
+// here. Thread ids are addresses, not surrogates: the primary chat pane IS the
+// bare worktree id (see paneTree.ts's createAgentChatPane), so a soft delete
+// would leave that id permanently poisoned — the decider rejects a deleted
+// thread, and the pane for it can never work again. Deleting the receipts
+// matters for the same reason: leave them and the auto-create command for that
+// id is "already seen" forever, so the thread can never be recreated.
+//
+// Deleting a session is a user asking to erase a conversation. Erasing it is
+// the honest implementation, and it leaves the id reusable.
+func (s *Store) DeleteAgentThread(threadID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM agent_command_receipt WHERE thread_id = ?`, threadID); err != nil {
+		return fmt.Errorf("delete agent receipts %s: %w", threadID, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_event WHERE thread_id = ?`, threadID); err != nil {
+		return fmt.Errorf("delete agent events %s: %w", threadID, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_thread WHERE id = ?`, threadID); err != nil {
+		return fmt.Errorf("delete agent thread %s: %w", threadID, err)
+	}
+	return tx.Commit()
 }
 
 // AgentThreads lists a worktree's chat threads for the sessions sidebar,

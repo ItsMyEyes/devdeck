@@ -33,6 +33,13 @@ type FilePool struct {
 
 	mu      sync.Mutex
 	entries map[string]*filePoolEntry
+
+	closeOnce sync.Once
+	// done is closed by Close to stop reapLoop's background goroutine, which
+	// otherwise runs for the life of the process with nothing able to stop
+	// it — a problem for a clean shutdown path that must not leave dangling
+	// SSH/SFTP connections (or goroutines) behind after the server exits.
+	done chan struct{}
 }
 
 // filePoolEntry caches one connectionID's live SSH client plus, lazily, its
@@ -59,7 +66,11 @@ func (e *filePoolEntry) close() {
 }
 
 func NewFilePool(dialer *Dialer) *FilePool {
-	pool := &FilePool{dialer: dialer, entries: make(map[string]*filePoolEntry)}
+	pool := &FilePool{
+		dialer:  dialer,
+		entries: make(map[string]*filePoolEntry),
+		done:    make(chan struct{}),
+	}
 	go pool.reapLoop()
 	return pool
 }
@@ -67,9 +78,36 @@ func NewFilePool(dialer *Dialer) *FilePool {
 func (p *FilePool) reapLoop() {
 	ticker := time.NewTicker(filePoolReapInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		p.reapIdle()
+	for {
+		select {
+		case <-ticker.C:
+			p.reapIdle()
+		case <-p.done:
+			return
+		}
 	}
+}
+
+// Close stops the background reaper and closes every pooled entry, so a
+// clean shutdown doesn't leave live SSH/SFTP connections (or the reaper
+// goroutine) running past the server exiting. Safe to call more than once —
+// only the first call does anything.
+func (p *FilePool) Close() {
+	p.closeOnce.Do(func() {
+		close(p.done)
+
+		p.mu.Lock()
+		entries := make([]*filePoolEntry, 0, len(p.entries))
+		for id, entry := range p.entries {
+			entries = append(entries, entry)
+			delete(p.entries, id)
+		}
+		p.mu.Unlock()
+
+		for _, entry := range entries {
+			entry.close()
+		}
+	})
 }
 
 func (p *FilePool) reapIdle() {

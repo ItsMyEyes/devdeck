@@ -129,6 +129,32 @@ func (f *Forwarder) Stop(forwardID string) error {
 	return nil
 }
 
+// StopAll tears down every currently active forward, for a graceful-shutdown
+// path that must not leave forwarded listeners (or their SSH transports)
+// running past the server exiting. Ids are snapshotted under f.mu, then
+// stopped CONCURRENTLY — Stop blocks on entry.done until its supervisor
+// goroutine fully exits, so stopping many forwards one at a time would sum
+// each one's teardown latency instead of paying it once in parallel, the
+// same reasoning as registry.killAll on the terminal side.
+func (f *Forwarder) StopAll() {
+	f.mu.Lock()
+	ids := make([]string, 0, len(f.active))
+	for id := range f.active {
+		ids = append(ids, id)
+	}
+	f.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(len(ids))
+	for _, id := range ids {
+		go func(id string) {
+			defer wg.Done()
+			_ = f.Stop(id)
+		}(id)
+	}
+	wg.Wait()
+}
+
 // StateOf reports one forward's live status; an unknown id is "off".
 func (f *Forwarder) StateOf(forwardID string) domain.SSHForwardState {
 	f.mu.Lock()

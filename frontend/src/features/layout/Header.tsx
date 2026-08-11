@@ -1,18 +1,15 @@
-import { Check, Plus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { DevDeckLogo } from '@/features/branding/DevDeckLogo'
 import { useScope } from '@/features/useScope'
-import { useMarkAllNewsRead, useSettings, useWorkspace } from '@/features/data/queries'
+import { useWorkspace } from '@/features/data/queries'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
+/** Web-build top bar: brand, mobile sidebar toggle, and live agent counts.
+ *  Its only render site is currently commented out in `routes/w.$wsId.tsx` —
+ *  the tab strip serves as the top bar on every workspace route. */
 export function Header() {
-  const { wsId, projectId, view } = useScope()
+  const { wsId, view } = useScope()
   const ws = useWorkspace(wsId).data
-  const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
   const setSidebarOpen = useDevDeckStore((s) => s.setSidebarOpen)
-  const openSpawn = useDevDeckStore((s) => s.openSpawn)
-  const showToast = useDevDeckStore((s) => s.showToast)
-  const markAll = useMarkAllNewsRead()
 
   const worktrees = ws ? ws.projects.flatMap((p) => p.worktrees) : []
   const running = worktrees.filter((w) => w.state === 'running').length
@@ -20,20 +17,6 @@ export function Header() {
   const errors = worktrees.filter((w) => w.state === 'error').length
 
   const agents = view === 'agents'
-
-  function spawnWorktree() {
-    if (!ws?.projects.length) {
-      showToast('Add a project first')
-      return
-    }
-    const selectedProject = ws.projects.find((project) => project.id === projectId)
-    openSpawn(selectedProject?.id ?? null, 'branch', defaultModel)
-  }
-
-  function markRead() {
-    if (!wsId) return
-    markAll.mutate(wsId, { onSuccess: () => showToast('All caught up') })
-  }
 
   return (
     <header className="flex h-[54px] flex-none items-center gap-3.5 border-b border-devdeck-border bg-devdeck-pane px-3.5">
@@ -77,38 +60,5 @@ export function Header() {
 
       <div className="flex-1" />
     </header>
-  )
-}
-
-interface PrimaryActionProps {
-  view: string
-  newsCount: number
-  onWorktree: () => void
-  onMarkRead: () => void
-}
-
-function PrimaryAction({ view, newsCount, onWorktree, onMarkRead }: PrimaryActionProps) {
-  if (view === 'todos' || view === 'management' || view === 'tools') return null
-  // Invoice creation is owned by the invoices module (local form state), so the
-  // top header exposes no primary action on that view.
-  if (view === 'invoices') return null
-  if (view === 'news') {
-    if (newsCount === 0) return null
-    return (
-      <Button variant="secondary" onClick={onMarkRead}>
-        <Check size={14} />
-        Mark all read
-      </Button>
-    )
-  }
-  return (
-    /* accent-soft, not solid: this button is on screen on every route, so a
-       saturated fill here competes with whatever action the current module is
-       actually for (Add runtime, New connection). The solid accent belongs to
-       the page; this keeps the accent identity one step down. */
-    <Button variant="accent-soft" onClick={onWorktree}>
-      <Plus size={15} />
-      Worktree
-    </Button>
   )
 }

@@ -4,12 +4,15 @@ import (
 	"context"
 	"log"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	crosspty "github.com/aymanbagabas/go-pty"
 	"nhooyr.io/websocket"
+
+	"devdeck/backend/internal/domain"
 )
 
 const (
@@ -37,6 +40,14 @@ const (
 	// can't accept a frame within this window is dead or hopelessly backed
 	// up; it gets closed so the client reconnects and replays history.
 	connWriteTimeout = 15 * time.Second
+	// killNoticeWriteTimeout bounds the best-effort "[process terminated]"
+	// banner kill() writes before tearing down the PTY. It is deliberately
+	// much shorter than connWriteTimeout: this isn't stream data a client
+	// needs delivered intact, it's a courtesy notice, and it sits on a
+	// synchronous teardown path that killByWorktree walks once per pane —
+	// an unbounded (or 15s-bounded) write here against one dead/stalled peer
+	// would stall worktree deletion for every remaining pane behind it.
+	killNoticeWriteTimeout = 2 * time.Second
 	// replayChunkBytes caps how much goes into any one WebSocket message, so
 	// connWriteTimeout always covers a bounded payload. Writing a whole
 	// reattach replay at once put the entire ring buffer — up to
@@ -111,6 +122,14 @@ func (b *ringBuffer) contents() []byte {
 	return out
 }
 
+// size reports the buffer's current byte occupancy under its own lock,
+// rather than making callers reach into the unexported total field directly.
+func (b *ringBuffer) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.total
+}
+
 // ptySession is a live PTY whose lifetime is decoupled from any single
 // WebSocket connection, so a client that reattaches (e.g. after navigating
 // away and back) resumes the same shell/agent process instead of a fresh
@@ -124,6 +143,11 @@ type ptySession struct {
 	// e.g. so a freshly attached connection gets its replay without waiting
 	// out the flush interval.
 	flushCh chan struct{}
+	// startedAt is when spawn started this session's process. Set once in
+	// spawn before the session is published to the registry, so — unlike
+	// lastOutput — it's immutable for the life of the session and safe to
+	// read without sess.mu.
+	startedAt time.Time
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -135,6 +159,12 @@ type ptySession struct {
 	// pump's writer to send before any live output, so a reattaching client
 	// sees history and new output in order on a single writer.
 	replay []byte
+	// lastOutput is when the session last flushed newly-read PTY output into
+	// the ring buffer. Zero means the session has never produced output —
+	// distinct from "produced output at the zero time" (see
+	// domain.TerminalSession.LastOutputAt). Stamped only for real output, not
+	// for a reattach's replay of already-buffered history.
+	lastOutput time.Time
 }
 
 func (sess *ptySession) write(p []byte) {
@@ -231,6 +261,82 @@ func (r *registry) count() int {
 	return len(r.sessions)
 }
 
+// snapshot returns every live session's current observable state, sorted by
+// ID for a stable UI order.
+//
+// Lock order: r.mu is held only long enough to copy the session pointers
+// into a local slice, then released — so a slow reader here can never block
+// spawn/kill/detach on the registry lock. Each session's own fields are then
+// read under that session's own sess.mu (never while r.mu is also held).
+// sess.buf.size() is called from inside that same sess.mu critical section;
+// that nests sess.mu -> buf.mu, which is the same order flush() and
+// attachConn() already use elsewhere in this file (sess.buf.append/contents
+// while holding sess.mu), so it introduces no new lock-ordering edge and
+// cannot deadlock against them.
+func (r *registry) snapshot() []domain.TerminalSession {
+	r.mu.Lock()
+	sessions := make([]*ptySession, 0, len(r.sessions))
+	for _, sess := range r.sessions {
+		sessions = append(sessions, sess)
+	}
+	r.mu.Unlock()
+
+	out := make([]domain.TerminalSession, 0, len(sessions))
+	for _, sess := range sessions {
+		out = append(out, sess.toDomain())
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// toDomain reads this session's own fields under sess.mu and builds the
+// external observability snapshot. See registry.snapshot for the lock-order
+// rationale (sess.mu, with buf.size() nested inside it).
+func (sess *ptySession) toDomain() domain.TerminalSession {
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+
+	var pid int
+	var command string
+	if sess.cmd != nil {
+		command = sess.cmd.Path
+		if sess.cmd.Process != nil {
+			pid = sess.cmd.Process.Pid
+		}
+	}
+
+	var worktreeID string
+	if strings.HasPrefix(sess.id, "w-") {
+		worktreeID = sess.id
+		if idx := strings.Index(sess.id, "::"); idx != -1 {
+			worktreeID = sess.id[:idx]
+		}
+	}
+
+	var lastOutputAt *time.Time
+	if !sess.lastOutput.IsZero() {
+		t := sess.lastOutput
+		lastOutputAt = &t
+	}
+
+	var bufferBytes int
+	if sess.buf != nil {
+		bufferBytes = sess.buf.size()
+	}
+
+	return domain.TerminalSession{
+		ID:           sess.id,
+		PID:          pid,
+		Command:      command,
+		WorktreeID:   worktreeID,
+		Primary:      !strings.Contains(sess.id, "::"),
+		Attached:     sess.conn != nil,
+		StartedAt:    sess.startedAt,
+		LastOutputAt: lastOutputAt,
+		BufferBytes:  bufferBytes,
+	}
+}
+
 // spawn starts a new PTY session for cmd (not yet started) and registers it.
 func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySession, error) {
 	ptmx, err := crosspty.New()
@@ -262,13 +368,14 @@ func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySessi
 	}
 
 	sess := &ptySession{
-		id:      id,
-		ptmx:    ptmx,
-		cmd:     cmd,
-		buf:     newRingBuffer(ringBufferMaxBytes),
-		flushCh: make(chan struct{}, 1),
-		cols:    cols,
-		rows:    rows,
+		id:        id,
+		ptmx:      ptmx,
+		cmd:       cmd,
+		buf:       newRingBuffer(ringBufferMaxBytes),
+		flushCh:   make(chan struct{}, 1),
+		cols:      cols,
+		rows:      rows,
+		startedAt: time.Now(),
 	}
 
 	r.mu.Lock()
@@ -325,6 +432,9 @@ func (r *registry) pump(sess *ptySession) {
 		sess.replay = nil
 		if len(pending) > 0 {
 			sess.buf.append(pending)
+			// Real output only — a reattach's replay of history already in
+			// the buffer must not look like fresh activity.
+			sess.lastOutput = time.Now()
 		}
 		sess.mu.Unlock()
 
@@ -447,8 +557,18 @@ func (r *registry) kill(id string) {
 	sess.mu.Unlock()
 
 	if conn != nil {
-		_ = conn.Write(context.Background(), websocket.MessageText,
+		// Bounded write, not context.Background(): a dead or stalled peer
+		// (mobile network drop, tunnel stall) must not block this notice
+		// forever. sess.close()/terminateProcess below run unconditionally
+		// after this — regardless of whether the write succeeds, times out,
+		// or the peer is simply gone — because the session was already
+		// deleted from r.sessions above; if teardown didn't happen here, the
+		// PTY and its child process would leak with nothing left able to
+		// reach them again.
+		ctx, cancel := context.WithTimeout(context.Background(), killNoticeWriteTimeout)
+		_ = conn.Write(ctx, websocket.MessageText,
 			[]byte("\r\n\x1b[38;5;102m■ [process terminated]\x1b[0m\r\n"))
+		cancel()
 	}
 
 	// Closing a ConPTY tears down the attached console. Unix additionally
@@ -474,4 +594,31 @@ func (r *registry) killByWorktree(worktreeID string) {
 	for _, id := range ids {
 		r.kill(id)
 	}
+}
+
+// killAll kills every currently registered session and returns how many were
+// killed. Ids are snapshotted under r.mu, then killed CONCURRENTLY — not in
+// the sequential style of killByWorktree — because terminateProcess waits up
+// to 2s per session for SIGTERM before escalating to SIGKILL: killing, say,
+// 20 sessions one at a time on a shutdown path would take up to 40s. Each
+// kill() call takes r.mu itself again internally, so releasing r.mu before
+// fanning out is required, not just an optimization.
+func (r *registry) killAll() int {
+	r.mu.Lock()
+	ids := make([]string, 0, len(r.sessions))
+	for id := range r.sessions {
+		ids = append(ids, id)
+	}
+	r.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(len(ids))
+	for _, id := range ids {
+		go func(id string) {
+			defer wg.Done()
+			r.kill(id)
+		}(id)
+	}
+	wg.Wait()
+	return len(ids)
 }

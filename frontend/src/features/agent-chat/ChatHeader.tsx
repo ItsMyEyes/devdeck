@@ -54,15 +54,13 @@ export function ChatHeader({ worktreeId, threadKey, socketStatus, threadStatus }
   const threadSuffix = extraThreadSuffix(worktreeId, threadKey)
 
   return (
-    <div className="flex min-w-0 flex-none items-center gap-2 border-b border-devdeck-line bg-devdeck-pane px-3 py-2">
+    <div className="flex min-w-0 flex-none items-center gap-2 border-b border-devdeck-hairline bg-devdeck-pane px-4 py-2.5">
       <MessageSquare size={14} className="flex-none text-devdeck-fg-2" />
-      <span className="truncate font-mono text-[12.5px] font-medium text-devdeck-fg">Chat</span>
+      <span className="truncate text-[13px] font-medium text-devdeck-fg">Chat</span>
       {threadSuffix ? (
-        <span className="flex-none rounded-full border border-devdeck-line bg-devdeck-on px-1.5 py-0.5 font-mono text-[10px] text-devdeck-fg-2">
-          {threadSuffix}
-        </span>
+        <span className="flex-none rounded-full bg-devdeck-raised px-2 py-0.5 text-[11px] text-devdeck-fg-2">{threadSuffix}</span>
       ) : null}
-      <span className="ml-auto flex flex-none items-center gap-1.5 font-mono text-[11px] text-devdeck-fg-2">
+      <span className="ml-auto flex flex-none items-center gap-1.5 text-[12px] text-devdeck-fg-2">
         <StatusDot color={SOCKET_DOT_COLOR[socketStatus]} size={7} />
         {THREAD_STATUS_LABEL[threadStatus]}
       </span>
