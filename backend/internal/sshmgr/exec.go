@@ -3,6 +3,7 @@ package sshmgr
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -163,4 +164,65 @@ func CommandExists(ctx context.Context, pool *FilePool, connectionID string, nam
 		return false, nil
 	}
 	return len(bytes.TrimSpace(stdout)) > 0, nil
+}
+
+// RunShell runs command on connectionID's pooled SSH connection exactly as
+// written — no shellQuote, no shellJoin, no argv assembly. This is the
+// deliberate opposite of RunCommand/RunPipeline: those exist so that an
+// argument's *value* can never be reinterpreted as shell syntax; RunShell
+// exists because pipelines, redirection, and chaining (`|`, `>`, `&&`, `;`,
+// ...) are the entire point of the call — a devops chat agent asking to run
+// `journalctl -u nginx --since '1 hour ago' | tail -n 50` needs the pipe to
+// mean pipe. Nothing in this function decides whether command is safe to
+// run on the remote host; that classification (read-only vs. mutating) and
+// any user-approval gating happens in the caller (internal/sshtool,
+// internal/service) before RunShell is ever invoked. RunShell itself trusts
+// command completely.
+//
+// A nonzero remote exit is not a Go error: it is reported as exitCode with
+// err == nil, so a failing command reads as data ("the agent's command
+// exited 1") rather than forcing every caller to unwrap an error just to
+// learn the exit status RunCommand would have buried inside one. Signal
+// termination without a reported exit status — *ssh.ExitMissingError —
+// reports exitCode -1 with err still nil, since that too is a legitimate
+// remote outcome (killed process, connection torn down mid-command) rather
+// than a local transport failure. Anything else (failure to open the SSH
+// session, ...) is a genuine transport error and is returned as a non-nil
+// err with exitCode 0.
+func RunShell(ctx context.Context, pool *FilePool, connectionID, command string) ([]byte, []byte, int, error) {
+	type output struct {
+		stdout []byte
+		stderr []byte
+		code   int
+	}
+	out, err := WithSSHClient(ctx, pool, connectionID, func(client *ssh.Client) (output, error) {
+		sess, err := client.NewSession()
+		if err != nil {
+			return output{}, fmt.Errorf("open session: %w", err)
+		}
+		defer sess.Close()
+
+		var stdout, stderr bytes.Buffer
+		sess.Stdout = &stdout
+		sess.Stderr = &stderr
+
+		runErr := sess.Run(command)
+		res := output{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
+		if runErr == nil {
+			return res, nil
+		}
+
+		var exitErr *ssh.ExitError
+		if errors.As(runErr, &exitErr) {
+			res.code = exitErr.ExitStatus()
+			return res, nil
+		}
+		var missingErr *ssh.ExitMissingError
+		if errors.As(runErr, &missingErr) {
+			res.code = -1
+			return res, nil
+		}
+		return res, runErr
+	})
+	return out.stdout, out.stderr, out.code, err
 }

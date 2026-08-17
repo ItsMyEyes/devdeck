@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -362,5 +363,39 @@ func TestFilePoolHomeReresolvesAfterEvict(t *testing.T) {
 	}
 	if home == "/sentinel" {
 		t.Error("Home returned the evicted connection's cached value instead of re-resolving")
+	}
+}
+
+// TestRunShellCapturesExitCodeWithoutError proves RunShell's key departure
+// from RunCommand: a nonzero remote exit is data, not a Go error, so a
+// caller (an agent classifying/gating commands upstream) can inspect the
+// exit code without also having to unwrap an error.
+func TestRunShellCapturesExitCodeWithoutError(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	_, _, code, err := RunShell(context.Background(), pool, "sc-test", "exit 3")
+	if err != nil {
+		t.Fatalf("RunShell returned a transport error for a non-zero exit: %v", err)
+	}
+	if code != 3 {
+		t.Fatalf("exitCode = %d, want 3", code)
+	}
+}
+
+// TestRunShellPassesPipelinesThrough proves RunShell hands the command
+// string to the remote shell verbatim: unlike RunCommand/RunPipeline, a
+// pipe in the command is interpreted by the remote shell instead of being
+// quoted away.
+func TestRunShellPassesPipelinesThrough(t *testing.T) {
+	addr, _ := startTestSSHServer(t, nil)
+	pool := newTestPool(t, addr)
+
+	stdout, _, code, err := RunShell(context.Background(), pool, "sc-test", "echo hello | tr a-z A-Z")
+	if err != nil || code != 0 {
+		t.Fatalf("RunShell: err=%v code=%d", err, code)
+	}
+	if got := strings.TrimSpace(string(stdout)); got != "HELLO" {
+		t.Fatalf("stdout = %q, want %q", got, "HELLO")
 	}
 }
