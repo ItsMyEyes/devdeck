@@ -12,6 +12,16 @@
  * longer reads it: `AgentChatPane.tsx` isn't in Task 6's file list and
  * still passes it down, and dropping it from the type would require
  * touching that file. See Task 6's `deviationsFromPlan`.
+ *
+ * SSH DevOps chat wrinkle (plan Task 12): `AgentChatPane` passes
+ * `worktreeId={worktreeId ?? ''}` for every thread, and an SSH thread
+ * (design spec `2026-08-17-ssh-devops-chat-design.md` §3.3/§7) truly has
+ * none. `extraThreadSuffix('', threadKey)` would then slice the *entire*
+ * `ssh:<connectionId>` thread key into the badge — not a suffix, the whole
+ * id. `worktreeId === ''` is treated as "no worktree at all" rather than
+ * "an empty-string worktree id" (no real worktree ever has one), and
+ * `subjectLabel` — the connection's own name, the honest thing to show for
+ * a server-scoped chat — takes the badge slot instead.
  */
 import { MessageSquare } from 'lucide-react'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -27,6 +37,9 @@ const THREAD_STATUS_LABEL: Record<AgentThreadView['status'], string> = {
 }
 
 const SOCKET_DOT_COLOR: Record<AgentSocketStatus, string> = {
+  // Idle/dim token, not the connecting amber — nothing is pending for a
+  // thread that doesn't exist on the server yet (spec §4).
+  draft: 'var(--devdeck-fg-2)',
   connecting: 'var(--devdeck-wait)',
   open: 'var(--devdeck-run)',
   closed: 'var(--devdeck-err)',
@@ -48,10 +61,16 @@ export interface ChatHeaderProps {
   threadKey: string
   socketStatus: AgentSocketStatus
   threadStatus: AgentThreadView['status']
+  /** Shown in the badge slot in place of the worktree-derived suffix for a
+   *  thread with no worktree at all (`worktreeId === ''`) — an SSH thread,
+   *  design spec §3.3. `undefined` renders no badge rather than a false one.
+   *  Every worktree call site leaves this unset, so `worktreeId` being
+   *  non-empty there keeps today's `extraThreadSuffix` path byte-for-byte. */
+  subjectLabel?: string
 }
 
-export function ChatHeader({ worktreeId, threadKey, socketStatus, threadStatus }: ChatHeaderProps) {
-  const threadSuffix = extraThreadSuffix(worktreeId, threadKey)
+export function ChatHeader({ worktreeId, threadKey, socketStatus, threadStatus, subjectLabel }: ChatHeaderProps) {
+  const threadSuffix = worktreeId ? extraThreadSuffix(worktreeId, threadKey) : (subjectLabel ?? null)
 
   return (
     <div className="flex min-w-0 flex-none items-center gap-2 border-b border-devdeck-hairline bg-devdeck-pane px-4 py-2.5">

@@ -3,7 +3,11 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { toast as sonnerToast } from 'sonner'
 import type { BrowserLoadError } from '@/features/browser/browserLoadError'
+import { clearDraft, setDraft } from '@/features/agent-chat/composerDrafts'
+import type { ComposerDraft } from '@/features/agent-chat/composerDrafts'
 import { emptyThreadView, reduceAgentEvents } from '@/features/agent-chat/eventReducer'
+import { addStashEntry, loadStash, removeStashEntryFrom, saveStash, takeStashEntryFrom } from '@/features/agent-chat/promptStash'
+import type { PromptStashEntry } from '@/features/agent-chat/promptStash'
 import type { AgentEvent, AgentThreadView } from '@/features/agent-chat/types'
 import type { GitDiffTarget, WorktreeLayout } from '@/features/terminal/paneTree'
 import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, type DBTabDraft, type DBTabState } from '@/features/database/dbTabs'
@@ -233,7 +237,7 @@ export function shellSidebarState(shellSidebars: Record<string, ShellSidebarStat
   return shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR
 }
 
-export type SSHRightSidebarPanel = 'forwards' | 'stats'
+export type SSHRightSidebarPanel = 'forwards' | 'stats' | 'chat'
 
 /** The SSH pane's right sidebar: Port Forwarding + Stats, mirroring
  *  ShellSidebar's left-side Explorer/Git sidebar. Keyed by the same
@@ -369,6 +373,18 @@ interface DevDeckState {
    *  persisting it would resurrect stale half-written messages across a
    *  reload. */
   agentThreads: Record<string, AgentThreadView>
+  /** Per-thread composer draft text, keyed by `threadKey` — a mirror of the
+   *  composer's own `useState`, written on a 300ms trailing debounce (see
+   *  `ChatComposer.tsx`). Persisted through `partialize`; unbounded growth is
+   *  guarded by `composerDrafts.ts`'s own `MAX_COMPOSER_DRAFTS` cap. */
+  composerDrafts: Record<string, ComposerDraft>
+  /** Global, flat prompt-stash queue — deliberately NOT keyed by thread
+   *  (moving a prompt to another thread is the point of the feature). Its own
+   *  localStorage key (`promptStash.ts`'s `STASH_STORAGE_KEY`), deliberately
+   *  outside `partialize` — see `promptStash.ts`'s `saveStash` doc comment for
+   *  why a boolean-returning write belongs outside zustand's persist
+   *  middleware. */
+  promptStash: PromptStashEntry[]
   /** Currently-open DOM overlays that must render above the entire app DOM
    *  (command palettes, dialogs, dropdowns) — Tauri's native child webviews
    *  (Browser tiles) are separate OS-composited surfaces the window manager
@@ -441,6 +457,24 @@ interface DevDeckState {
   /** Drops a thread's view model entirely — used when a chat pane closes for
    *  good (not on a mere reconnect, which replays instead of resetting). */
   resetAgentThread: (threadKey: string) => void
+
+  // composer drafts & prompt stash (feature E)
+  /** Wraps `composerDrafts.ts`'s `setDraft` — empty/whitespace-only text
+   *  deletes the key rather than storing `''`. */
+  setComposerDraft: (threadKey: string, text: string) => void
+  /** Wraps `composerDrafts.ts`'s `clearDraft`. */
+  clearComposerDraft: (threadKey: string) => void
+  /** Wraps `promptStash.ts`'s `addStashEntry` + `saveStash`. Only commits the
+   *  in-memory queue when `saveStash` returns `true` — a rejected write
+   *  leaves `promptStash` exactly as it was, and `ok: false` tells the caller
+   *  not to clear the composer. */
+  stashPrompt: (text: string) => { ok: boolean; evicted: PromptStashEntry | null }
+  /** Restore = remove + return. Wraps `promptStash.ts`'s `takeStashEntryFrom`
+   *  + `saveStash`, same commit-only-on-success gate as `stashPrompt`. */
+  takeStashEntry: (id: string) => PromptStashEntry | null
+  /** Per-row delete in the stash menu. Wraps `promptStash.ts`'s
+   *  `removeStashEntryFrom` + `saveStash`, same commit-only-on-success gate. */
+  deleteStashEntry: (id: string) => void
 
   pushNativeOverlayBlocker: (id: string, region: OverlayBlockerRegion) => void
   popNativeOverlayBlocker: (id: string) => void
@@ -593,7 +627,7 @@ function browsePathSegments(path: string | undefined) {
 
 export const useDevDeckStore = create<DevDeckState>()(
   persist(
-    immer((set) => ({
+    immer((set, get) => ({
       sidebarOpen: false,
       wsMenuOpen: false,
       desktopSettingsOpen: false,
@@ -666,6 +700,10 @@ export const useDevDeckStore = create<DevDeckState>()(
       workspaceTileLayouts: {},
       browserTiles: {},
       agentThreads: {},
+      composerDrafts: {},
+      // Hydrated once at module init from its own localStorage key — not
+      // part of the persist middleware's blob (see the field's doc comment).
+      promptStash: loadStash(),
       nativeOverlayBlockers: {},
       tileDragActive: false,
 
@@ -825,6 +863,29 @@ export const useDevDeckStore = create<DevDeckState>()(
           if (next !== current) s.agentThreads[threadKey] = next
         }),
       resetAgentThread: (threadKey) => set((s) => void delete s.agentThreads[threadKey]),
+
+      setComposerDraft: (threadKey, text) =>
+        set((s) => void (s.composerDrafts = setDraft(s.composerDrafts, threadKey, text, Date.now()))),
+      clearComposerDraft: (threadKey) =>
+        set((s) => void (s.composerDrafts = clearDraft(s.composerDrafts, threadKey))),
+      stashPrompt: (text) => {
+        const { entries, evicted } = addStashEntry(get().promptStash, text, () => new Date().toISOString())
+        const ok = saveStash(entries)
+        if (ok) set((s) => void (s.promptStash = entries))
+        return { ok, evicted: ok ? evicted : null }
+      },
+      takeStashEntry: (id) => {
+        const { entries, entry } = takeStashEntryFrom(get().promptStash, id)
+        if (!entry) return null
+        if (!saveStash(entries)) return null
+        set((s) => void (s.promptStash = entries))
+        return entry
+      },
+      deleteStashEntry: (id) => {
+        const next = removeStashEntryFrom(get().promptStash, id)
+        if (saveStash(next)) set((s) => void (s.promptStash = next))
+      },
+
       pushNativeOverlayBlocker: (id, region) => set((s) => void (s.nativeOverlayBlockers[id] = region)),
       popNativeOverlayBlocker: (id) => set((s) => void delete s.nativeOverlayBlockers[id]),
       setTileDragActive: (active) => set((s) => void (s.tileDragActive = active)),
@@ -1078,6 +1139,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         workspaceTileLayouts: s.workspaceTileLayouts,
         dbActiveConnectionId: s.dbActiveConnectionId,
         dbTabs: s.dbTabs,
+        composerDrafts: s.composerDrafts,
       }),
       // v2 -> v3 retires the flat `openTabs` shape for `workspaceTileLayouts`.
       // A bare version bump with no `migrate` discards the *entire*

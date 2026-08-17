@@ -25,6 +25,7 @@ import type { PlanFollowUpSubmission } from '@/features/agent-chat/planMarkdown'
 import { useAgentChatSocket } from '@/features/agent-chat/useAgentChatSocket'
 import type { AgentChatTarget, InteractionMode, RuntimeMode, TurnModelSelection } from '@/features/agent-chat/useAgentChatSocket'
 import { useAgents, useAgentThreads } from '@/features/data/queries'
+import type { MentionSource } from '@/features/agent-chat/composerMention'
 import type { Machine } from '@/store/types'
 
 /** icon key → glyph — the only place `composerBanners`' output (icon-agnostic
@@ -70,6 +71,13 @@ export interface AgentChatPaneProps {
    *  default rail, and the agent a turn runs on unless the picker names
    *  another one. */
   agentId?: string
+  /** Overrides the composer's `@` mention source (plan Task 13's
+   *  `composerMention.ts`) — `SSHAgentChatPanel` passes
+   *  `sshMentionSource(connectionId)` here so `@` completes absolute remote
+   *  paths instead of worktree-relative ones. Optional; when unset,
+   *  `ChatComposer` falls through to its own worktree-mention default, so
+   *  every worktree call site is unaffected. */
+  mentionSource?: MentionSource
 }
 
 /**
@@ -150,7 +158,16 @@ function EmptyThread({ subject, composer }: { subject?: string; composer: ReactN
   )
 }
 
-export function AgentChatPane({ target, worktreeId, threadKey, machine, worktreeLabel, branch, agentId = 'claude' }: AgentChatPaneProps) {
+export function AgentChatPane({
+  target,
+  worktreeId,
+  threadKey,
+  machine,
+  worktreeLabel,
+  branch,
+  agentId = 'claude',
+  mentionSource,
+}: AgentChatPaneProps) {
   // Draft-thread connect gate (design spec §4, plan Task 10). `threadExists`
   // reads the same sidebar-backing query `SessionsPanel` already populates
   // (`features/data/queries.ts:1380`), so the path that matters — the
@@ -338,6 +355,7 @@ export function AgentChatPane({ target, worktreeId, threadKey, machine, worktree
       controls={controls}
       machine={machine}
       worktreeId={worktreeId}
+      mentionSource={mentionSource}
       worktree={worktreeLabel}
       branch={branch}
       variant={isEmpty ? 'hero' : 'docked'}
@@ -358,12 +376,14 @@ export function AgentChatPane({ target, worktreeId, threadKey, machine, worktree
         machine={machine}
         // ChatHeader's suffix badge (`extraThreadSuffix`) compares this
         // against `threadKey`; an SSH thread has no worktree, so `''` reads
-        // as "no primary id to strip" rather than a false badge. ChatHeader
-        // itself is out of scope here — see Task 12 for a real SSH header.
+        // as "no primary id to strip" rather than a false badge. `''` also
+        // tells ChatHeader to show `subjectLabel` in the badge's place
+        // instead (Task 12) — see that prop's own doc comment.
         worktreeId={worktreeId ?? ''}
         threadKey={threadKey}
         socketStatus={status}
         threadStatus={view.status}
+        subjectLabel={worktreeId ? undefined : worktreeLabel}
       />
 
       {isEmpty ? (

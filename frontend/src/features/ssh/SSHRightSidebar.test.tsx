@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { SSHRightSidebar } from './SSHRightSidebar'
@@ -24,6 +25,20 @@ vi.mock('@/features/stats/StatsPane', () => ({
       stats:{props.target.kind === 'ssh' ? props.target.connectionId : ''}
     </div>
   ),
+}))
+
+// Task 12: the DevOps Chat panel wraps AgentChatPane, which owns a real
+// WebSocket (useAgentChatSocket) — mocked here so mounting it in a test never
+// opens one. useSSHConnections is mocked alongside it: SSHAgentChatPanel
+// (real, unmocked) calls it to resolve the connection's name for ChatHeader's
+// subject label, and this test file has no QueryClientProvider for a real
+// react-query call to attach to.
+vi.mock('@/features/agent-chat/AgentChatPane', () => ({
+  AgentChatPane: (props: { threadKey: string }) => <div data-testid="mock-agent-chat-pane">{props.threadKey}</div>,
+}))
+
+vi.mock('@/features/data/queries', () => ({
+  useSSHConnections: () => ({ data: [] }),
 }))
 
 if (typeof window.PointerEvent === 'undefined') {
@@ -96,5 +111,21 @@ describe('SSHRightSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: /port forwarding/i })) // reopens
 
     expect(forwardsMounts).toBe(1)
+  })
+
+  it('opens the chat panel when the DevOps Chat rail button is pressed', async () => {
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    const button = screen.getByRole('button', { name: 'DevOps Chat' })
+    expect(button).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(button)
+    expect(button).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('keeps the chat panel mounted when switching to Stats', async () => {
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'DevOps Chat' }))
+    const panel = screen.getByTestId('ssh-chat-panel')
+    await userEvent.click(screen.getByRole('button', { name: 'Stats' }))
+    expect(screen.getByTestId('ssh-chat-panel')).toBe(panel)
   })
 })

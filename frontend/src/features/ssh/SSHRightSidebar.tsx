@@ -1,10 +1,11 @@
 import { useCallback, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { Activity, Waypoints } from 'lucide-react'
+import { Activity, Bot, Waypoints } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SSHRightSidebarPanel } from '@/store/useDevDeckStore'
 import { SSH_RIGHT_SIDEBAR_MAX_WIDTH, SSH_RIGHT_SIDEBAR_MIN_WIDTH, sshRightSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { StatsPane } from '@/features/stats/StatsPane'
+import { SSHAgentChatPanel } from './SSHAgentChatPanel'
 import { SSHForwardsPanel } from './SSHForwardsPanel'
 
 /** Width the drag strip's dblclick restores — mirrors the store's own
@@ -15,12 +16,13 @@ const DEFAULT_WIDTH = 300
 const RESIZE_STEP = 16
 
 /**
- * The SSH pane's right sidebar (Task 8): an always-visible icon rail (Stats +
- * Port Forwarding) docked at the pane's right edge, mirroring ShellSidebar's
- * left-side Explorer/Git switcher. Unlike ShellSidebar, the rail here IS the
- * switcher — a right-docked panel with its own header row would put the
- * switcher on the wrong edge, so each icon both opens/closes the sidebar and
- * picks which panel it shows.
+ * The SSH pane's right sidebar (Task 8, +Task 12's DevOps Chat): an
+ * always-visible icon rail (DevOps Chat + Stats + Port Forwarding) docked at
+ * the pane's right edge, mirroring ShellSidebar's left-side Explorer/Git
+ * switcher. Unlike ShellSidebar, the rail here IS the switcher — a
+ * right-docked panel with its own header row would put the switcher on the
+ * wrong edge, so each icon both opens/closes the sidebar and picks which
+ * panel it shows.
  *
  * Open state, selected panel, and width all live in the store
  * (`sshRightSidebars`, keyed by `shellKey`) — this component holds no state
@@ -28,8 +30,9 @@ const RESIZE_STEP = 16
  *
  * The panel section hides rather than unmounts: it renders with
  * `display: none` when closed instead of being torn down, so StatsPane's
- * internal state/subscriptions and SSHForwardsPanel's scroll position
- * survive a toggle — same reasoning as ShellSidebar's own doc comment.
+ * internal state/subscriptions, SSHForwardsPanel's scroll position, and the
+ * DevOps chat pane's WebSocket + transcript position all survive a toggle —
+ * same reasoning as ShellSidebar's own doc comment.
  */
 export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; connectionId: string }) {
   const sshRightSidebars = useDevDeckStore((s) => s.sshRightSidebars)
@@ -124,11 +127,21 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
           onKeyDown={handleKeyDown}
         />
         <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-card-wash" style={{ width }}>
-          {/* Both panels stay mounted (hidden, not torn down) so switching
-           *  between Stats and Port Forwarding doesn't wipe StatsPane's
-           *  component-local sparkline history — the same hide-not-unmount
-           *  reasoning ShellSidebar already applies to Explorer/Git. `visible`
-           *  drives each panel's own polling pause independently. */}
+          {/* All three panels stay mounted (hidden, not torn down) so
+           *  switching away from Stats/Port Forwarding/DevOps Chat and back
+           *  doesn't wipe StatsPane's component-local sparkline history, lose
+           *  SSHForwardsPanel's scroll position, or drop the chat pane's
+           *  WebSocket and its place in the transcript — the same
+           *  hide-not-unmount reasoning ShellSidebar already applies to
+           *  Explorer/Git. `visible` drives each panel's own polling pause
+           *  independently (the chat pane has no poll to pause — its socket
+           *  stays open regardless, by design). */}
+          <div
+            data-testid="ssh-chat-panel"
+            className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'chat' ? 'flex' : 'hidden')}
+          >
+            <SSHAgentChatPanel connectionId={connectionId} visible={open && panel === 'chat'} />
+          </div>
           <div className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'forwards' ? 'flex' : 'hidden')}>
             <SSHForwardsPanel connectionId={connectionId} visible={open && panel === 'forwards'} />
           </div>
@@ -139,6 +152,12 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
       </div>
 
       <div className="flex w-9 flex-none flex-col items-center gap-1 border-l border-devdeck-border bg-devdeck-pane py-1.5">
+        <RailButton
+          label="DevOps Chat"
+          icon={<Bot size={15} />}
+          active={open && panel === 'chat'}
+          onClick={() => handleIconClick('chat')}
+        />
         <RailButton
           label="Stats"
           icon={<Activity size={15} />}
