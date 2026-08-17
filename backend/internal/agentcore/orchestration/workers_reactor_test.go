@@ -78,9 +78,29 @@ type fakeAdapter struct {
 	rec *callRecorder
 	ch  chan event.Event
 
-	mu            sync.Mutex
-	failSendTurn  bool
-	sendTurnCalls []provider.SendTurnInput
+	mu                   sync.Mutex
+	failSendTurn         bool
+	sendTurnCalls        []provider.SendTurnInput
+	userInputCalls       []userInputCall
+	interactionModeCalls []interactionModeCall
+}
+
+// What the Reactor forwarded to the provider when the user answered. Recorded
+// rather than merely counted, because the whole point of the case is that the
+// answers reach the adapter intact.
+type userInputCall struct {
+	threadID  string
+	requestID string
+	answers   map[string]any
+}
+
+// What the Reactor forwarded when the composer's Plan pill flips —
+// TestReactorSetsInteractionModeOnModeChange asserts both fields, not just
+// that a call happened, because a wrong threadID or mode would silently
+// switch the wrong thread's live session.
+type interactionModeCall struct {
+	threadID string
+	mode     provider.InteractionMode
 }
 
 func (a *fakeAdapter) Kind() provider.Kind             { return fakeKind }
@@ -110,8 +130,30 @@ func (a *fakeAdapter) InterruptTurn(context.Context, string, string) error {
 func (a *fakeAdapter) RespondToRequest(context.Context, string, string, event.Decision) error {
 	return nil
 }
-func (a *fakeAdapter) RespondToUserInput(context.Context, string, string, map[string]any) error {
+func (a *fakeAdapter) RespondToUserInput(_ context.Context, threadID, requestID string, answers map[string]any) error {
+	a.rec.record("RespondToUserInput")
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.userInputCalls = append(a.userInputCalls, userInputCall{threadID, requestID, answers})
 	return nil
+}
+
+func (a *fakeAdapter) userInputSnapshot() []userInputCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]userInputCall(nil), a.userInputCalls...)
+}
+func (a *fakeAdapter) SetInteractionMode(_ context.Context, threadID string, mode provider.InteractionMode) error {
+	a.rec.record("SetInteractionMode")
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.interactionModeCalls = append(a.interactionModeCalls, interactionModeCall{threadID, mode})
+	return nil
+}
+func (a *fakeAdapter) interactionModeSnapshot() []interactionModeCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]interactionModeCall(nil), a.interactionModeCalls...)
 }
 func (a *fakeAdapter) StopSession(context.Context, string) error { return nil }
 func (a *fakeAdapter) StopAll(context.Context) error             { return nil }
@@ -163,6 +205,7 @@ var _ provider.ThreadDirectory = (*recordingDir)(nil)
 // the adapter's InterruptTurn call.
 type orderingBroker struct{ rec *callRecorder }
 
+func (b orderingBroker) Open(string, string)                  {}
 func (b orderingBroker) Resolve(string, event.Decision) error { return approval.ErrUnknownRequest }
 func (b orderingBroker) CancelThread(string)                  { b.rec.record("CancelThread") }
 
@@ -518,5 +561,166 @@ func TestReactorKeepsTheSessionWhenTheTurnNamesTheBoundInstance(t *testing.T) {
 	// point: the pill was decorative before this.
 	if got := h.adapter.turnCalls()[0].Model.Model; got != "fake-mini" {
 		t.Fatalf("SendTurn model = %q, want fake-mini", got)
+	}
+}
+
+// threadStatus reads the thread's current status out of engine State.
+func threadStatus(t *testing.T, h *reactorHarness, threadID string) ThreadStatus {
+	t.Helper()
+	th, ok := h.engine.State().Thread(threadID)
+	if !ok {
+		t.Fatalf("thread %s not in state", threadID)
+	}
+	return th.Status
+}
+
+// A reactor error is a side effect that did NOT happen — the turn was never
+// delivered — so nothing downstream will ever move the thread off Running.
+// Reporting the error alone left the transcript showing "Working for 1877s"
+// under a failed turn, with the composer stuck on Stop.
+func TestReactorSettlesThreadAfterReportingError(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+	h.adapter.setFailSendTurn(true)
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "hi"}))
+	waitFor(t, func() bool { return countErrorEntries(h.store.All()) == 1 })
+
+	// The error is reported AND the thread is no longer running.
+	waitFor(t, func() bool {
+		th, ok := h.engine.State().Thread("w-abc")
+		return ok && th.Status != ThreadRunning
+	})
+	if got := threadStatus(t, h, "w-abc"); got != ThreadIdle {
+		t.Fatalf("status = %s, want idle after a failed turn", got)
+	}
+}
+
+// Stop has to be a way OUT of running, not a request that may be ignored.
+// `InterruptTurn` is best-effort by contract — the claude adapter returns nil
+// both when it delivered the control_request and when it holds no session for
+// the thread at all — so without this a thread whose process had already died
+// stayed Running forever with Stop as its only, useless, control.
+func TestInterruptSettlesThreadEvenWhenTheProviderIgnoresIt(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "hi"}))
+	waitFor(t, func() bool { return threadStatus(t, h, "w-abc") == ThreadRunning })
+
+	// fakeAdapter.InterruptTurn only records the call — it never answers with
+	// TurnAborted, which is exactly the wedged-provider case.
+	h.dispatch(t, "w-abc", CmdThreadTurnInterrupt, nil)
+	h.waitForCall(t, "InterruptTurn")
+
+	waitFor(t, func() bool { return threadStatus(t, h, "w-abc") != ThreadRunning })
+	if got := threadStatus(t, h, "w-abc"); got != ThreadIdle {
+		t.Fatalf("status = %s, want idle after an ignored interrupt", got)
+	}
+}
+
+// Regression for a silent no-op: EvtThreadUserInputResponseRequested fell
+// through react's switch to `return nil`. The pending flag cleared and the
+// thread flipped waiting -> running, so the UI looked answered — while the
+// provider was never told anything and the agent stayed blocked forever.
+func TestReactorRespondsToUserInput(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+	h.dispatch(t, "w-abc", CmdThreadSessionSet, mustRaw(t, map[string]any{
+		"status": string(ThreadWaiting), "pendingRequestAdd": "req-1",
+	}))
+
+	h.dispatch(t, "w-abc", CmdThreadUserInputRespond, mustRaw(t, UserInputRespondPayload{
+		RequestID: "req-1",
+		Answers:   map[string]any{"Tabs or spaces?": "Tabs"},
+	}))
+
+	h.waitForCall(t, "RespondToUserInput")
+	calls := h.adapter.userInputSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("userInputCalls = %+v, want exactly one", calls)
+	}
+	if calls[0].threadID != "w-abc" || calls[0].requestID != "req-1" {
+		t.Fatalf("call routed wrong: %+v", calls[0])
+	}
+	// Keyed by the full question text — the CLI looks answers up by it, so a
+	// re-keyed map reaches the agent as no answer at all.
+	if got := calls[0].answers["Tabs or spaces?"]; got != "Tabs" {
+		t.Fatalf("answers = %+v, want the answer under its question text", calls[0].answers)
+	}
+}
+
+// T1's capture verdict (capture/README.md "Open question 2"): set_permission_mode
+// is accepted on an already-running session, so §4's path (a) is what ships —
+// no restart, no StopSession/Unbind/StartSession sequence. Before this case
+// existed, EvtThreadInteractionModeSet fell through react's switch to `return
+// nil`: the composer's Plan pill flipped Thread.Interact in the read model but
+// the live CLI process never heard about it, so --permission-mode plan only
+// ever reached a session that happened to start AFTER the flag was already
+// set (a restart, or a dead-and-reprovisioned process) — never the ordinary
+// "open a chat, press Plan, type" flow the spec's problem #2 describes.
+func TestReactorSetsInteractionModeOnModeChange(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadInteractionModeSet, mustRaw(t, InteractionModeSetPayload{
+		Mode: provider.InteractionPlan,
+	}))
+	h.waitForCall(t, "SetInteractionMode")
+
+	calls := h.adapter.interactionModeSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("interactionModeCalls = %+v, want exactly one", calls)
+	}
+	if calls[0].threadID != "w-abc" || calls[0].mode != provider.InteractionPlan {
+		t.Fatalf("call = %+v, want {threadID: w-abc, mode: plan}", calls[0])
+	}
+}
+
+// The decider's double-tap guard has to cover user input the same way it
+// covers approvals: a second device answering an already-retired request must
+// not reach the provider a second time.
+func TestReactorIgnoresUserInputForARetiredRequest(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+	h.dispatch(t, "w-abc", CmdThreadSessionSet, mustRaw(t, map[string]any{
+		"status": string(ThreadWaiting), "pendingRequestAdd": "req-1",
+	}))
+
+	payload := mustRaw(t, UserInputRespondPayload{
+		RequestID: "req-1", Answers: map[string]any{"q": "a"},
+	})
+	h.dispatch(t, "w-abc", CmdThreadUserInputRespond, payload)
+	h.waitForCall(t, "RespondToUserInput")
+
+	// Same request, a fresh command id — this is what a second device looks
+	// like, and SeenCommand cannot catch it. The decider must reject it, so
+	// this dispatch is EXPECTED to error; h.dispatch would call t.Fatal on it.
+	h.cmdSeq++
+	_, err := h.engine.Dispatch(context.Background(), Command{
+		CommandID: fmt.Sprintf("ac-%d", h.cmdSeq),
+		Type:      CmdThreadUserInputRespond, ThreadID: "w-abc", Payload: payload,
+	})
+	if err == nil {
+		t.Fatal("answering an already-retired request should be rejected by the decider")
+	}
+
+	if calls := h.adapter.userInputSnapshot(); len(calls) != 1 {
+		t.Fatalf("userInputCalls = %+v, want the second answer never to reach the provider", calls)
 	}
 }

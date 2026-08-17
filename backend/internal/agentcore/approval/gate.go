@@ -3,29 +3,47 @@ package approval
 import (
 	"context"
 	"sync"
+	"time"
 
 	"devdeck/backend/internal/agentcore/event"
 )
 
-// Gate is the blocking Broker implementation used by the SSH tool handlers
+// defaultTombstoneTTL bounds how long a decision nobody has collected is kept
+// (see gateEntry.decided). Long enough to cover the one engine round-trip
+// between publishing an approval card and parking on it, short enough that a
+// provider-driven request — which is opened and resolved with no Await
+// anywhere — costs a map entry for seconds, not for the process's life.
+const defaultTombstoneTTL = 2 * time.Minute
+
+// Gate is the blocking Broker implementation behind the SSH tool handlers
 // (see backend/internal/service/ssh_tool.go and the design spec's §4.4). It
-// satisfies the existing Broker interface for compatibility with the
-// provider-driven approval flow, and additionally exposes Await: a call that
-// genuinely blocks the calling goroutine until a decision arrives, the
-// thread is cancelled, or ctx ends. That blocking primitive doesn't exist on
-// MemoryBroker because nothing needed it there — DevDeck drives the claude
-// CLI over stdin/stdout RPC. Here, an HTTP handler goroutine is parked
-// waiting on a human, so something has to be able to actually block it.
+// satisfies Broker, so it drops into the provider-driven approval flow
+// unchanged, and adds Await: a call that genuinely blocks its goroutine until
+// a decision arrives, the thread is cancelled, or ctx ends.
+//
+// That blocking primitive did not exist on the broker Gate replaces, because
+// nothing needed it: DevDeck answers a provider's approval by writing to a
+// CLI's stdin, which is a write, not a hand-off. Here the caller is an HTTP
+// handler holding an SSH connection open while it waits on a human, so
+// something has to actually park it.
+//
+// The subtlety worth knowing before changing anything here: a request is
+// registered (Open, called by Ingestion when the card is published) strictly
+// BEFORE the goroutine that will wait on it reaches Await. Anything that
+// resolves the request inside that gap — a second device, or an interrupt
+// firing CancelThread — must still be delivered to the Await that arrives
+// afterwards. That is what the decided/tombstone half of gateEntry is for.
+// Deleting a resolved entry outright, the obvious implementation, strands the
+// waiter until its context expires.
 type Gate struct {
 	mu sync.Mutex
 
-	// waiters holds one buffered (size 1) channel per pending requestID.
-	// Buffered so Resolve never blocks handing off to a waiter that has
-	// already given up (context cancelled, thread cancelled) and gone.
-	waiters map[string]chan event.Decision
+	// entries holds one record per known requestID: a live waiter, a decision
+	// waiting to be collected, or both.
+	entries map[string]*gateEntry
 
-	// byThread indexes pending requestIDs by thread, so CancelThread can
-	// find and decline every one of them.
+	// byThread indexes requestIDs by thread so CancelThread can find every
+	// request a dying thread leaves behind.
 	byThread map[string]map[string]bool
 
 	// sessionAccepted marks threads where the user answered
@@ -33,159 +51,216 @@ type Gate struct {
 	// skip the prompt until ClearSession.
 	sessionAccepted map[string]bool
 
+	// tombstoneTTL is defaultTombstoneTTL outside tests.
+	tombstoneTTL time.Duration
+
 	// OnCancel is called once per request CancelThread abandons — inherited
-	// wholesale from MemoryBroker, which this type replaces in main.go. It is
-	// how a request nobody can answer any more still gets a wire reply, so
-	// the UI's RequestResolved event clears instead of leaving a ghost prompt.
+	// wholesale from the MemoryBroker this type replaces. It is how a request
+	// nobody can answer any more still gets a wire reply, so the UI's
+	// RequestResolved event clears instead of leaving a ghost prompt.
 	//
-	// It fires for EVERY abandoned request, including this package's own
-	// blocking ones. Requests that have no provider counterpart (the
-	// tool-gate's "tool-" ids) are filtered by the callback main.go installs,
-	// not here: which id shapes exist is orchestration's vocabulary, not the
-	// gate's.
+	// It fires for every request CancelThread actually abandons, including
+	// this package's own blocking ones. Requests that have no provider
+	// counterpart (the tool gate's "tool-" ids) are filtered by the callback
+	// main.go installs, not here: which id shapes exist is orchestration's
+	// vocabulary, not the gate's.
 	OnCancel func(threadID, requestID string)
+}
+
+// gateEntry is one request's state. A request is created by Open or Await,
+// and lives until either a waiter collects its decision or its tombstone
+// expires.
+type gateEntry struct {
+	// ch is buffered (size 1) so delivering a decision never blocks on a
+	// waiter that has already given up and gone.
+	ch       chan event.Decision
+	threadID string
+
+	// decided records a decision that has been delivered but not necessarily
+	// collected. decidedAt starts the tombstone's clock.
+	decided   bool
+	decision  event.Decision
+	decidedAt time.Time
 }
 
 // NewGate returns a ready-to-use Gate.
 func NewGate() *Gate {
 	return &Gate{
-		waiters:         make(map[string]chan event.Decision),
+		entries:         make(map[string]*gateEntry),
 		byThread:        make(map[string]map[string]bool),
 		sessionAccepted: make(map[string]bool),
+		tombstoneTTL:    defaultTombstoneTTL,
 	}
 }
 
 // Open registers a request as pending on a thread, so a later CancelThread
-// can find and deny it. It is also implicitly called by Await; handlers that
-// only need Broker semantics (no blocking wait) can call it directly.
+// can find and deny it. Await opens implicitly; this exists for the Broker
+// path, where Ingestion registers a provider's request that no goroutine in
+// this process is waiting on.
 func (g *Gate) Open(threadID, requestID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.open(threadID, requestID)
+	g.sweepLocked()
+	g.openLocked(threadID, requestID)
 }
 
-// open registers requestID as pending on threadID and ensures a waiter
-// channel exists for it. Callers must hold g.mu.
-func (g *Gate) open(threadID, requestID string) chan event.Decision {
-	ch, ok := g.waiters[requestID]
+// openLocked returns requestID's entry, creating it if needed. Callers must
+// hold g.mu.
+func (g *Gate) openLocked(threadID, requestID string) *gateEntry {
+	e, ok := g.entries[requestID]
 	if !ok {
-		ch = make(chan event.Decision, 1)
-		g.waiters[requestID] = ch
+		e = &gateEntry{ch: make(chan event.Decision, 1), threadID: threadID}
+		g.entries[requestID] = e
 	}
 	if g.byThread[threadID] == nil {
 		g.byThread[threadID] = make(map[string]bool)
 	}
 	g.byThread[threadID][requestID] = true
-	return ch
+	return e
 }
 
-// Resolve delivers a decision to a waiting caller. It returns
-// ErrUnknownRequest if requestID is not (or is no longer) pending — the
-// benign shape of a double-tap from a second device, or a decision that
-// arrived after the waiter's context already ended.
+// dropLocked removes a request from both indexes. Callers must hold g.mu.
+func (g *Gate) dropLocked(requestID string) {
+	e, ok := g.entries[requestID]
+	if !ok {
+		return
+	}
+	delete(g.entries, requestID)
+	if reqs := g.byThread[e.threadID]; reqs != nil {
+		delete(reqs, requestID)
+		if len(reqs) == 0 {
+			delete(g.byThread, e.threadID)
+		}
+	}
+}
+
+// sweepLocked discards decisions nobody collected within tombstoneTTL. Called
+// from every public method, so the map stays bounded without a goroutine or a
+// timer. Callers must hold g.mu.
+func (g *Gate) sweepLocked() {
+	if g.tombstoneTTL <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-g.tombstoneTTL)
+	for id, e := range g.entries {
+		if e.decided && e.decidedAt.Before(cutoff) {
+			g.dropLocked(id)
+		}
+	}
+}
+
+// Resolve delivers a decision to requestID. It returns ErrUnknownRequest when
+// the request is unknown or was already decided — the benign shape of a
+// double-tap from a second device.
+//
+// The entry is deliberately NOT removed here. An Await that has not yet
+// reached its select must still be able to collect this decision; the
+// tombstone is what makes that work, and sweepLocked is what keeps it from
+// accumulating.
 func (g *Gate) Resolve(requestID string, d event.Decision) error {
 	g.mu.Lock()
-	ch, ok := g.waiters[requestID]
-	if !ok {
+	g.sweepLocked()
+	e, ok := g.entries[requestID]
+	if !ok || e.decided {
 		g.mu.Unlock()
 		return ErrUnknownRequest
 	}
-	delete(g.waiters, requestID)
-	for threadID, reqs := range g.byThread {
-		if reqs[requestID] {
-			delete(reqs, requestID)
-			if len(reqs) == 0 {
-				delete(g.byThread, threadID)
-			}
-			if d == event.DecisionAcceptForSession {
-				g.sessionAccepted[threadID] = true
-			}
-			break
-		}
+	e.decided, e.decision, e.decidedAt = true, d, time.Now()
+	if d == event.DecisionAcceptForSession {
+		g.sessionAccepted[e.threadID] = true
 	}
+	ch := e.ch
 	g.mu.Unlock()
 
-	// Buffered size 1: this never blocks, even if Await already returned
-	// (e.g. via context cancellation) and nobody will ever read ch again.
+	// Buffered size 1, and each entry is decided exactly once, so this never
+	// blocks — with or without a live waiter.
 	ch <- d
 	return nil
 }
 
-// CancelThread abandons every pending request on a thread, resolving each
-// as event.DecisionDecline, and clears the thread's session-accept flag.
-// Called when a session exits or a turn is interrupted — without it, an
-// Await goroutine (and the HTTP request parked on it) would hang forever.
+// CancelThread abandons every request still open on a thread, declining each
+// one, and clears the thread's session-accept flag. Called when a session
+// exits or a turn is interrupted: without it, an Await goroutine — and the
+// HTTP request parked on it — would wait out its whole ceiling for an answer
+// that can no longer come.
 func (g *Gate) CancelThread(threadID string) {
 	g.mu.Lock()
-	reqs := g.byThread[threadID]
-	ids := make([]string, 0, len(reqs))
-	for id := range reqs {
-		ids = append(ids, id)
-	}
-	delete(g.byThread, threadID)
+	g.sweepLocked()
 	delete(g.sessionAccepted, threadID)
 
-	chans := make([]chan event.Decision, 0, len(ids))
-	for _, id := range ids {
-		if ch, ok := g.waiters[id]; ok {
-			chans = append(chans, ch)
-			delete(g.waiters, id)
+	now := time.Now()
+	abandoned := make([]string, 0, len(g.byThread[threadID]))
+	chans := make([]chan event.Decision, 0, len(g.byThread[threadID]))
+	for id := range g.byThread[threadID] {
+		e := g.entries[id]
+		if e == nil || e.decided {
+			continue // already answered; its tombstone expires on its own
 		}
+		e.decided, e.decision, e.decidedAt = true, event.DecisionDecline, now
+		abandoned = append(abandoned, id)
+		chans = append(chans, e.ch)
 	}
-	cb := g.OnCancel
 	g.mu.Unlock()
 
 	for _, ch := range chans {
 		ch <- event.DecisionDecline
 	}
-	if cb == nil {
+	if g.OnCancel == nil {
 		return
 	}
-	for _, id := range ids {
-		cb(threadID, id)
+	for _, id := range abandoned {
+		g.OnCancel(threadID, id)
 	}
 }
 
-// Await registers requestID as pending on threadID (if not already, e.g. via
-// a prior Open) and blocks until Resolve delivers a decision, CancelThread
-// declines it, or ctx ends. Either way the request is removed before Await
-// returns — a context timeout does not leak a pending waiter; a later
-// Resolve for the same requestID returns ErrUnknownRequest.
+// Await registers requestID on threadID (if Open has not already) and blocks
+// until a decision arrives, the thread is cancelled, or ctx ends. A decision
+// that landed before this call collects immediately. The request is removed
+// on every exit path, so a timed-out Await leaks nothing and a later Resolve
+// for the same id reports ErrUnknownRequest.
 func (g *Gate) Await(ctx context.Context, threadID, requestID string) (event.Decision, error) {
 	g.mu.Lock()
-	ch := g.open(threadID, requestID)
+	g.sweepLocked()
+	e := g.openLocked(threadID, requestID)
+	if e.decided {
+		d := e.decision
+		g.dropLocked(requestID)
+		g.mu.Unlock()
+		return d, nil
+	}
+	ch := e.ch
 	g.mu.Unlock()
 
 	select {
 	case d := <-ch:
+		g.mu.Lock()
+		g.dropLocked(requestID)
+		g.mu.Unlock()
 		return d, nil
 	case <-ctx.Done():
-		g.remove(threadID, requestID)
+		g.mu.Lock()
+		g.dropLocked(requestID)
+		g.mu.Unlock()
 		return "", ctx.Err()
 	}
 }
 
-// remove drops requestID from the pending sets without delivering a
-// decision — used when Await gives up because ctx ended.
-func (g *Gate) remove(threadID, requestID string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	delete(g.waiters, requestID)
-	if reqs := g.byThread[threadID]; reqs != nil {
-		delete(reqs, requestID)
-		if len(reqs) == 0 {
-			delete(g.byThread, threadID)
-		}
-	}
-}
-
-// pending reports whether requestID currently has a waiter registered.
-// Unexported: it exists to let tests synchronize on Await having registered
-// its request before they act on it (e.g. before calling CancelThread).
+// pending reports whether requestID is registered and still unanswered.
+// Unexported: it lets tests synchronize on Await having registered its
+// request before they act on it.
 func (g *Gate) pending(requestID string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	_, ok := g.waiters[requestID]
+	e, ok := g.entries[requestID]
+	return ok && !e.decided
+}
+
+// tracked reports whether requestID is known at all, answered or not.
+// Unexported: it lets a test prove tombstones are actually reclaimed.
+func (g *Gate) tracked(requestID string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok := g.entries[requestID]
 	return ok
 }
 

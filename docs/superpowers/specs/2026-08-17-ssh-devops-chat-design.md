@@ -101,10 +101,19 @@ listed in `RequireAuth`'s `publicPaths` so the outer middleware defers to it.
 | Method + path | Body / query | Response |
 |---|---|---|
 | `POST /api/agent-tools/ssh/exec` | `{"command":"…","timeoutSec":60}` | `{"stdout","stderr","exitCode","durationMs"}` |
-| `GET /api/agent-tools/ssh/file` | `?path=&start=&end=` | `{"path","content","truncated"}` |
-| `GET /api/agent-tools/ssh/files` | `?path=` | `{"entries":[{"name","path","isDir","size"}]}` |
-| `GET /api/agent-tools/ssh/grep` | `?q=&path=` | `service.GrepResult` (reused verbatim) |
-| `PUT /api/agent-tools/ssh/file` | `{"path":"…","content":"…"}` | `{"path","bytesWritten"}` |
+| `GET /api/agent-tools/ssh/file` | `?path=` | `service.SSHFileContent` (reused verbatim) |
+| `GET /api/agent-tools/ssh/files` | `?path=` | `{"entries":[…]}` wrapping `[]service.SSHFileEntry` |
+| `GET /api/agent-tools/ssh/grep` | `?q=` | `service.GrepResult` (reused verbatim) |
+| `PUT /api/agent-tools/ssh/file` | `{"path":"…","content":"…"}` | `service.SSHFileContent` (reused verbatim) |
+
+The four file routes deliberately expose no options beyond `path`/`q`: line
+ranges, scoped searches, and every other flag go through `exec` (`sed -n
+'40,80p'`, `tail -n 200`, `grep -rn PATTERN /etc/nginx`), which classifies
+read-only and therefore runs ungated. Adding range and scope parameters here
+would duplicate, less well, what the shell already does — and would widen the
+one surface every remote action passes through. The response shapes are the
+`SSHFileService` types verbatim, so this group can never drift from the
+explorer's own view of the same filesystem.
 
 **The connection id is never a parameter.** It is read from the token. An agent
 holding one thread's token cannot reach another connection — the tool surface
@@ -154,6 +163,14 @@ Read from the thread's `RuntimeMode` in engine state at call time:
 blocking `Await`. The existing UI is reused wholesale — `ComposerPendingApprovalPanel`
 already renders `request.opened` and dispatches `thread.approval.respond`.
 
+`Gate` **replaces** `approval.MemoryBroker`, which is what `main.go:456` wires
+today. MemoryBroker already tracks open requests per thread and fans
+cancellation out through `OnCancel`; what it cannot do is block, because
+nothing needed blocking when every approval was answered by writing to a CLI's
+stdin. An HTTP handler parked on a human does need it. `Gate` therefore carries
+MemoryBroker's `OnCancel` verbatim and adds `Await` + the session-accept flag,
+and MemoryBroker is deleted rather than left as a second, subtly weaker broker.
+
 1. Handler mints `requestID = "tool-" + randomHex(8)`.
 2. It injects a synthetic `event.Event{Type: event.RequestOpened, ThreadID,
    RequestID, Payload: &event.RequestOpenedPayload{…}}` through the **existing**
@@ -195,12 +212,17 @@ New binary `backend/cmd/devdeck-ssh` (sibling of the existing
 `./.devdeck/session.json`.
 
 ```
-devdeck-ssh exec  <command...>          # runs remotely, streams stdout/stderr
-devdeck-ssh read  <path> [--start N --end M]
+devdeck-ssh exec  <command...>          # runs remotely, prints stdout/stderr
+devdeck-ssh read  <path>
 devdeck-ssh list  <path>
-devdeck-ssh grep  <pattern> [--path P]
+devdeck-ssh grep  <pattern>
 devdeck-ssh write <path>                # content on stdin
 ```
+
+No flags beyond those shown, mirroring §4.1: ranges and scoping belong to
+`exec`. `exec` is request/response, not streaming — there is no follow mode,
+and the skill file says so, because an agent that expects `tail -f` to return
+will hang on its own.
 
 Exit codes: `0` ok · `1` usage/transport/auth failure · `2` remote command
 exited non-zero (stdout/stderr still printed) · `77` denied by the user.

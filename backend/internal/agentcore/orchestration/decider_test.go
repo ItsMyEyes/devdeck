@@ -182,6 +182,10 @@ func TestClientDispatchableExcludesServerOnlyCommands(t *testing.T) {
 	serverOnly := []CommandType{
 		CmdThreadAssistantDelta, CmdThreadAssistantComplete,
 		CmdThreadSessionSet, CmdThreadActivityAppend, CmdThreadTurnDiffComplete,
+		// A client that could dispatch thread.plan.propose could forge an
+		// agent's proposed plan — same class of forgery assistant.delta is
+		// excluded for.
+		CmdThreadPlanPropose,
 	}
 	for _, c := range serverOnly {
 		if ClientDispatchable[c] {
@@ -202,7 +206,7 @@ func TestEveryCommandTypeHasADeciderRule(t *testing.T) {
 		CmdThreadApprovalRespond, CmdThreadUserInputRespond, CmdThreadSessionStop,
 		CmdThreadRuntimeModeSet, CmdThreadInteractionModeSet, CmdThreadDelete,
 		CmdThreadAssistantDelta, CmdThreadAssistantComplete, CmdThreadSessionSet,
-		CmdThreadActivityAppend, CmdThreadTurnDiffComplete,
+		CmdThreadActivityAppend, CmdThreadTurnDiffComplete, CmdThreadPlanPropose,
 	}
 
 	for _, ct := range all {
@@ -298,5 +302,128 @@ func TestUserInputResponseClearsPendingAndRejectsDoubleTap(t *testing.T) {
 	// only defence.
 	if _, err := Decide(s, respond("ac-resp-2"), 5001, seqIDs()); err == nil {
 		t.Fatal("answering an already-resolved request should be rejected")
+	}
+}
+
+// EvtThreadPlanProposed puts a plan "on the table"; the next
+// EvtThreadTurnStartRequested takes it back off, because any following turn
+// supersedes it (spec: "cleared by the next
+// EvtThreadTurnStartRequested"). Table-test style matching
+// TestInteractionModeSetAppliesToState above.
+func TestPlanProposedSetsThreadProposedPlanAndTurnStartClearsIt(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+
+	evts, err := Decide(s, Command{
+		CommandID: "ac-plan", Type: CmdThreadPlanPropose, ThreadID: "w-abc",
+		Payload: mustRaw(t, PlanProposePayload{
+			PlanMarkdown: "# Plan\n\n1. Do the thing",
+			PlanFilePath: "/Users/agent/.claude/plans/do-the-thing.md",
+			ToolUseID:    "toolu_01abc",
+		}),
+	}, 3000, seqIDs())
+	if err != nil {
+		t.Fatalf("plan propose: %v", err)
+	}
+	if len(evts) != 1 || evts[0].Type != EvtThreadPlanProposed {
+		t.Fatalf("got %+v, want exactly one thread.plan-proposed", evts)
+	}
+	s = Apply(s, evts)
+
+	th, _ := s.Thread("w-abc")
+	if th.ProposedPlan == nil {
+		t.Fatal("ProposedPlan not set")
+	}
+	if th.ProposedPlan.PlanMarkdown != "# Plan\n\n1. Do the thing" {
+		t.Fatalf("PlanMarkdown = %q, want the proposed markdown", th.ProposedPlan.PlanMarkdown)
+	}
+	if th.ProposedPlan.PlanFilePath != "/Users/agent/.claude/plans/do-the-thing.md" {
+		t.Fatalf("PlanFilePath = %q, want the proposed path", th.ProposedPlan.PlanFilePath)
+	}
+	if th.ProposedPlan.ToolUseID != "toolu_01abc" {
+		t.Fatalf("ToolUseID = %q, want toolu_01abc", th.ProposedPlan.ToolUseID)
+	}
+
+	// A following turn supersedes the plan on the table.
+	turnEvts, err := Decide(s, Command{
+		CommandID: "ac-turn", Type: CmdThreadTurnStart, ThreadID: "w-abc",
+		Payload: mustRaw(t, TurnStartPayload{Text: "please implement this plan"}),
+	}, 4000, seqIDs())
+	if err != nil {
+		t.Fatalf("turn start: %v", err)
+	}
+	s = Apply(s, turnEvts)
+
+	th, _ = s.Thread("w-abc")
+	if th.ProposedPlan != nil {
+		t.Fatalf("ProposedPlan = %+v, want nil after a following turn starts", th.ProposedPlan)
+	}
+}
+
+// CmdThreadPlanPropose is server-only: it must never reach Decide with an
+// invalid or missing payload from a client. This pins that a malformed
+// payload is still handled explicitly (not the "unrecognized command"
+// fallthrough) — TestEveryCommandTypeHasADeciderRule already covers the
+// zero-value payload; this covers the field-for-field decode.
+func TestPlanProposedPayloadDecodesFieldForField(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+	evts, err := Decide(s, Command{
+		CommandID: "ac-plan", Type: CmdThreadPlanPropose, ThreadID: "w-abc",
+		Payload: mustRaw(t, PlanProposePayload{PlanMarkdown: "bare plan, no file path or tool id"}),
+	}, 3000, seqIDs())
+	if err != nil {
+		t.Fatalf("plan propose: %v", err)
+	}
+	s = Apply(s, evts)
+	th, _ := s.Thread("w-abc")
+	if th.ProposedPlan == nil || th.ProposedPlan.PlanMarkdown != "bare plan, no file path or tool id" {
+		t.Fatalf("ProposedPlan = %+v, want the markdown carried through with empty optional fields", th.ProposedPlan)
+	}
+	if th.ProposedPlan.PlanFilePath != "" || th.ProposedPlan.ToolUseID != "" {
+		t.Fatalf("ProposedPlan = %+v, want empty optional fields left unset", th.ProposedPlan)
+	}
+}
+
+// clone() must give every derived State its own Thread struct so that field
+// REASSIGNMENT (t.ProposedPlan = nil, or := &newPlan) on one snapshot never
+// leaks into another — the same "State == Apply(log), never mutated in
+// place" invariant TestApplyDoesNotMutateInput pins for other fields.
+// ProposedPlan itself is only ever replaced wholesale (never mutated
+// in-place through its pointer), so clone() sharing the *ProposedPlan value
+// across snapshots is deliberate — this test pins exactly that: the pointER
+// FIELD is independent per snapshot, but an unmodified pointer VALUE may be
+// shared, and that must not become a footgun later.
+func TestCloneGivesEachSnapshotAnIndependentProposedPlanField(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+	evts, err := Decide(s, Command{
+		CommandID: "ac-plan", Type: CmdThreadPlanPropose, ThreadID: "w-abc",
+		Payload: mustRaw(t, PlanProposePayload{PlanMarkdown: "# Plan"}),
+	}, 3000, seqIDs())
+	if err != nil {
+		t.Fatalf("plan propose: %v", err)
+	}
+	before := Apply(s, evts)
+	beforeThread, _ := before.Thread("w-abc")
+	if beforeThread.ProposedPlan == nil {
+		t.Fatal("ProposedPlan not set on the snapshot before the turn starts")
+	}
+
+	// Deriving a new snapshot (clone() + applyOne) that clears ProposedPlan
+	// must not reach back and clear it on the snapshot already handed out.
+	turnEvts, err := Decide(before, Command{
+		CommandID: "ac-turn", Type: CmdThreadTurnStart, ThreadID: "w-abc",
+		Payload: mustRaw(t, TurnStartPayload{Text: "go"}),
+	}, 4000, seqIDs())
+	if err != nil {
+		t.Fatalf("turn start: %v", err)
+	}
+	after := Apply(before, turnEvts)
+
+	beforeThread, _ = before.Thread("w-abc")
+	if beforeThread.ProposedPlan == nil {
+		t.Fatal("deriving a new snapshot mutated the ProposedPlan field on the prior snapshot")
+	}
+	afterThread, _ := after.Thread("w-abc")
+	if afterThread.ProposedPlan != nil {
+		t.Fatalf("ProposedPlan = %+v, want nil on the snapshot after the turn starts", afterThread.ProposedPlan)
 	}
 }

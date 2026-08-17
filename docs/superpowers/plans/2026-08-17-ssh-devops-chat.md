@@ -1083,7 +1083,7 @@ git commit -m "feat(sshthread): per-thread workspace seeded with agent skill fil
 
 Changes, in order:
 
-1. Replace both `approval.NoopBroker{}` uses (`main.go:446` and `main.go:464`) with a single shared `agentGate := approval.NewGate()`.
+1. Replace the broker. `main.go:456` currently builds `agentBroker := &approval.MemoryBroker{}` and assigns `agentBroker.OnCancel` (line 457-463); that one value is shared by `NewIngestion` and the `Reactor`. Swap the constructor for `approval.NewGate()` and keep the `OnCancel` assignment as-is — `Gate` carries the same field — but add one guard to the callback body: skip request ids with the `orchestration.ToolRequestPrefix` prefix, because a tool-gate request has no provider counterpart to deny. Then delete `backend/internal/agentcore/approval/memory_broker.go` and `memory_broker_test.go`: `Gate` is a strict superset (same `Broker` methods, same `OnCancel`, plus `Await` and the session flags), nothing else in the repo references `MemoryBroker`, and leaving two brokers side by side invites wiring the wrong one.
 2. Build `tokenStore := sshtool.NewTokenStore()`, `toolPrompter := &orchestration.ToolApprovalPrompter{Ingestion: agentIngestion, Gate: agentGate}`, a `ShellRunner` adapter closing over `sshFilePool` and calling `sshmgr.RunShell`, a `ThreadPolicy` adapter reading `agentEngine.State().Thread(id).Mode`, and `sshToolSvc := service.NewSSHToolService(...)` + `handler.NewSSHToolHandler(sshToolSvc)`.
 3. In `Reactor.InstanceFor`, branch on `orchestration.IsSSHThread(threadID)`:
    - resolve the connection via `st.SSHConnectionByID(...)` (use the store method the SSH handler already uses — check `handler/ssh.go` for its name),
@@ -1169,7 +1169,9 @@ git commit -m "feat(agent): host SSH chat threads on the hub with tool routes wi
 - Consumes: the REST contract from Task 6 and `sshthread.Binding`'s JSON shape from Task 8.
 - Produces: a binary. Internally: `func loadBinding(dir string) (binding, error)`, `func (c *client) exec(command string) (execResult, int, error)`, plus `read`, `list`, `grep`, `write`.
 
-Commands and exit codes are exactly as the spec's §6 table states. `exec` prints stdout to stdout and stderr to stderr, then exits with the mapped code. Every error message the CLI prints is written for an **agent** to read, e.g. `denied by user: the operator declined "systemctl restart nginx" — stop and ask them what to do instead`.
+Commands and exit codes are exactly as the spec's §6 table states — five subcommands, and **no flags on any of them** beyond the positional arguments shown (`read <path>`, `grep <pattern>`, …). Ranges and scoped searches are `exec`'s job; the API has no parameters for them, and the skill files already tell the agent that. `exec` prints stdout to stdout and stderr to stderr, then exits with the mapped code. Every error message the CLI prints is written for an **agent** to read, e.g. `denied by user: the operator declined "systemctl restart nginx" — stop and ask them what to do instead`.
+
+The exact request shapes to code against (already implemented and committed in Tasks 5-6, read `backend/internal/handler/ssh_tool.go` before writing the client): `POST /api/agent-tools/ssh/exec` with `{"command":"…","timeoutSec":N}`; `GET /api/agent-tools/ssh/file?path=`; `GET /api/agent-tools/ssh/files?path=`; `GET /api/agent-tools/ssh/grep?q=`; `PUT /api/agent-tools/ssh/file` with `{"path":"…","content":"…"}`. Auth is `Authorization: Bearer <token from .devdeck/session.json>`.
 
 Read `backend/cmd/mcp-server/main.go` first and follow its structure (flag parsing, `envOr`, `log.Fatalf` style).
 

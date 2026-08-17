@@ -11,6 +11,7 @@ import (
 	"devdeck/backend/internal/agentcore/approval"
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/domain"
 )
 
 // Two workers connect the engine to the provider, and their directions are
@@ -97,6 +98,16 @@ func (in *Ingestion) Consume(ctx context.Context, a provider.Adapter) {
 	}
 }
 
+// Inject delivers a synthetic event.Event through the same path Consume
+// feeds real adapter events through. ToolApprovalPrompter (sshthread.go,
+// toolprompt.go) uses this to raise and resolve approval cards that
+// originate in DevDeck's own tool layer rather than from a provider, so the
+// resulting status bookkeeping is byte-for-byte what a provider event
+// produces and can never drift from that path.
+func (in *Ingestion) Inject(ctx context.Context, ev event.Event) error {
+	return in.handle(ctx, ev)
+}
+
 func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 	switch ev.Type {
 
@@ -111,11 +122,31 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		return in.emitDelta(ctx, ev, p.Text, p.Stream, p.Sequence)
 
 	case event.RequestOpened, event.UserInputRequested:
-		// Flush first, then record the request. The order determines what
-		// the user sees.
+		// Three steps, and the order is the whole point.
+		//
+		// Flush first, so the reasoning that led to the question is already on
+		// screen when the question appears — a prompt with no context above it
+		// is unanswerable.
 		if err := in.flushThread(ctx, ev.ThreadID); err != nil {
 			return err
 		}
+		if ev.Type == event.RequestOpened {
+			in.Broker.Open(ev.ThreadID, ev.RequestID)
+		}
+		// Then the event itself. Without this the request's PAYLOAD — the
+		// questions, the tool and its arguments — reached nobody: only the id
+		// travelled, on the session-set below, so a waiting thread arrived at
+		// the client indistinguishable from a running one and no panel had
+		// anything to render.
+		if err := in.dispatch(ctx, Command{
+			Type:     CmdThreadActivityAppend,
+			ThreadID: ev.ThreadID,
+			Payload:  mustJSON(ev),
+		}); err != nil {
+			return err
+		}
+		// Status last. A client that paints its panel on status === waiting
+		// must never find that panel empty for a frame.
 		return in.dispatch(ctx, Command{
 			Type:     CmdThreadSessionSet,
 			ThreadID: ev.ThreadID,
@@ -141,9 +172,30 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		if err := in.flushThread(ctx, ev.ThreadID); err != nil {
 			return err
 		}
+		payload := map[string]any{"status": string(ThreadIdle)}
+		// The context window's actual occupancy after this turn — not a sum
+		// across turns, which would double-count history that is already
+		// folded into every request's own input/cache-read/cache-creation
+		// counts. This is what the composer's context-window indicator reads
+		// (Thread.ContextTokens); the CLI reports no "max" alongside it, so the
+		// denominator the UI divides by is whatever context-window size the
+		// user has selected on their end, not anything from this payload.
+		if p, ok := ev.Payload.(*event.TurnCompletedPayload); ok && p.Usage != nil {
+			payload["contextTokens"] = p.Usage.InputTokens + p.Usage.CacheReadTokens + p.Usage.CacheCreationTokens
+			// What THIS turn cost, alongside the running occupancy above. The
+			// two answer different questions and neither derives from the
+			// other: contextTokens is a level (and can fall when history is
+			// compacted), this is a flow. The transcript stamps each turn with
+			// it, so `turnTokens` is a sum the UI can show as-is and
+			// `turnOutputTokens` is the generated half, which is the only one
+			// a tokens-per-second rate may be computed from.
+			payload["turnTokens"] = p.Usage.InputTokens + p.Usage.OutputTokens +
+				p.Usage.CacheReadTokens + p.Usage.CacheCreationTokens
+			payload["turnOutputTokens"] = p.Usage.OutputTokens
+		}
 		return in.dispatch(ctx, Command{
 			Type: CmdThreadSessionSet, ThreadID: ev.ThreadID,
-			Payload: mustJSON(map[string]any{"status": string(ThreadIdle)}),
+			Payload: mustJSON(payload),
 		})
 
 	case event.SessionExited:
@@ -152,6 +204,28 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		return in.dispatch(ctx, Command{
 			Type: CmdThreadSessionSet, ThreadID: ev.ThreadID,
 			Payload: mustJSON(map[string]any{"status": string(ThreadStopped)}),
+		})
+
+	case event.TurnProposedCompleted:
+		// Puts the captured plan "on the table" (Thread.ProposedPlan). No
+		// defensive idle-dispatch here, unlike RequestOpened/
+		// UserInputRequested above: T1's live capture proved denying
+		// ExitPlanMode's control_request still lets the CLI settle the turn
+		// to a terminal `result` on its own (capture/README.md "Open
+		// question 1") — the normal TurnCompleted/TurnAborted case above
+		// already closes the thread out, so adding a second idle-dispatch
+		// here would just be a redundant write.
+		p, ok := ev.Payload.(*event.ProposedPlanPayload)
+		if !ok {
+			return nil
+		}
+		return in.dispatch(ctx, Command{
+			Type: CmdThreadPlanPropose, ThreadID: ev.ThreadID,
+			Payload: mustJSON(PlanProposePayload{
+				PlanMarkdown: p.PlanMarkdown,
+				PlanFilePath: p.PlanFilePath,
+				ToolUseID:    p.ToolUseID,
+			}),
 		})
 
 	default:
@@ -232,8 +306,74 @@ func (in *Ingestion) dispatch(ctx context.Context, cmd Command) error {
 }
 
 // ---------------------------------------------------------------------------
+// Boot reconciliation: orphaned in-flight threads -> idle
+// ---------------------------------------------------------------------------
+
+// ReconcileOrphanedThreads closes out every thread the just-replayed event
+// log left non-terminal (ThreadRunning or ThreadWaiting).
+//
+// Every adapter — and the real process behind it — lives only as long as the
+// server that started it: the provider registry and threadDirectory are
+// rebuilt empty on every boot (see main.go's comment on agentLog). A turn
+// that was in flight, or an approval that was still pending, at the moment
+// the previous process exited therefore has nothing left that can ever
+// resolve it. Nobody will send the SessionStarted/TurnCompleted/
+// SessionExited event that normally closes a turn out via the cases above —
+// that event came from the now-dead subprocess. Left alone, Status stays
+// exactly what it was at shutdown forever, because every future boot replays
+// the same unresolved event again. On screen this is a chat pane stuck
+// showing "Running", with a "Working for Ns" counter climbing from whenever
+// the turn was interrupted — hours or days ago — with the agent doing
+// nothing and never going to.
+//
+// This dispatches the same CmdThreadSessionSet a real session exit would
+// (SessionExited, above) through the full engine pipeline, so the fix is a
+// durably persisted event, not a one-off patch to the freshly-replayed
+// in-memory state — it has to survive the NEXT replay too, or the bug just
+// comes back on the following restart. clearPending empties out any approval
+// the dead process can no longer honor, the same way SessionExited does via
+// Broker.CancelThread — there is no live broker request to cancel here
+// (nothing asked for one across a restart), so this clears the engine's own
+// PendingRequests bookkeeping directly instead.
+//
+// Call once, right after Engine.Run starts. Partial failure does not abort
+// startup — a thread this can't fix stays exactly as broken as it already
+// was, which is what "best-effort cleanup" means; the caller decides whether
+// to log it.
+func ReconcileOrphanedThreads(ctx context.Context, e *Engine, newID func() string) (int, error) {
+	reconciled := 0
+	for id, t := range e.State().Threads {
+		if t.Deleted || (t.Status != ThreadRunning && t.Status != ThreadWaiting) {
+			continue
+		}
+		if _, err := e.Dispatch(ctx, Command{
+			CommandID: newID(),
+			Type:      CmdThreadSessionSet,
+			ThreadID:  id,
+			Payload: mustJSON(map[string]any{
+				"status":       string(ThreadIdle),
+				"clearPending": true,
+			}),
+		}); err != nil {
+			return reconciled, fmt.Errorf("reconcile thread %s: %w", id, err)
+		}
+		reconciled++
+	}
+	return reconciled, nil
+}
+
+// ---------------------------------------------------------------------------
 // Reactor: engine event -> provider call
 // ---------------------------------------------------------------------------
+
+// AttachmentReader is the narrow slice of persistence the Reactor needs to
+// resolve an attachment id into bytes before handing it to the provider —
+// declared here, not imported from port, mirroring portstore.go's
+// EventStore. domain.AgentAttachment matches store.Store's method exactly,
+// so the concrete store satisfies this with no adapter.
+type AttachmentReader interface {
+	AgentAttachmentData(id string) (domain.AgentAttachment, []byte, error)
+}
 
 // Reactor listens for committed intent events and performs the actual
 // provider call. It runs AFTER commit, so the user's intent is already
@@ -245,6 +385,15 @@ type Reactor struct {
 	Engine   *Engine
 	Provider *provider.Service
 	Broker   approval.Broker
+
+	// Attachments resolves an attachment id (all a TurnStartPayload ever
+	// carries over the wire — see provider.Attachment's `json:"-"` Data tag)
+	// into its bytes, right before the turn reaches the provider. Left nil
+	// (the zero value) is a valid, tested configuration: a turn with no
+	// attachments never touches this field, which is what keeps every
+	// pre-existing bare Reactor{} literal in this package's own tests
+	// compiling and passing unmodified.
+	Attachments AttachmentReader
 
 	// InstanceFor resolves a thread to the worktree's configured agent, its
 	// cwd, and the instance that should run it. Injected so the Reactor stays
@@ -331,6 +480,25 @@ func (r *Reactor) reportError(ctx context.Context, e Event, cause error) {
 	if _, err := r.Engine.Dispatch(ctx, cmd); err != nil {
 		log.Printf("agentcore: failed to report reactor error to thread=%s err=%v", e.ThreadID, err)
 	}
+
+	// Settle the thread as well as reporting the failure. A reactor error is a
+	// side effect that did NOT happen — the CLI never spawned, the turn was
+	// never delivered — so nothing is coming to move the thread off
+	// ThreadRunning later. Reporting the error alone left the transcript
+	// showing "Working for 1877s" under a turn that had already failed, with
+	// the composer stuck on Stop and no way back.
+	//
+	// Separate command, and dispatched even if the append above failed: the
+	// status is the half the user cannot work around.
+	status := Command{
+		CommandID: "ac-reactor-err-idle-" + e.EventID,
+		Type:      CmdThreadSessionSet,
+		ThreadID:  e.ThreadID,
+		Payload:   mustJSON(map[string]any{"status": string(ThreadIdle)}),
+	}
+	if _, err := r.Engine.Dispatch(ctx, status); err != nil {
+		log.Printf("agentcore: failed to settle thread=%s after reactor error err=%v", e.ThreadID, err)
+	}
 }
 
 func (r *Reactor) react(ctx context.Context, e Event) error {
@@ -369,6 +537,22 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		if err := r.ensureSession(ctx, e.ThreadID, p.Model.InstanceID); err != nil {
 			return err
 		}
+		// The command payload only ever carries an attachment's id — Data is
+		// `json:"-"` on provider.Attachment specifically so raw bytes never
+		// enter the durable event log or the 1MB command-frame cap (T3's
+		// regression test guards this). Load the real bytes here, the one
+		// place they are needed, immediately before the provider call — a
+		// failed load must return before SendTurn ever runs, not hand the
+		// provider a silently-empty attachment.
+		if r.Attachments != nil {
+			for i := range p.Attachments {
+				_, data, err := r.Attachments.AgentAttachmentData(p.Attachments[i].ID)
+				if err != nil {
+					return err
+				}
+				p.Attachments[i].Data = data
+			}
+		}
 		_, err := r.Provider.SendTurn(ctx, provider.SendTurnInput{
 			ThreadID:    e.ThreadID,
 			TurnID:      e.EventID,
@@ -396,7 +580,31 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 			err != approval.ErrUnknownRequest {
 			return err
 		}
+		// A "tool-" request id was raised by DevDeck's own tool layer (see
+		// orchestration.ToolApprovalPrompter), not by a provider — there is
+		// no provider-side request to answer, so calling RespondToRequest
+		// for one could only fail or reply to whatever unrelated request
+		// the provider itself has open. The Broker resolution above is the
+		// whole answer for these.
+		if strings.HasPrefix(p.RequestID, ToolRequestPrefix) {
+			return nil
+		}
 		return r.Provider.RespondToRequest(ctx, e.ThreadID, p.RequestID, p.Decision)
+
+	case EvtThreadUserInputResponseRequested:
+		var p UserInputRespondPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		// No Broker.Resolve here, unlike the approval case above, because
+		// there is no blocked goroutine to unblock: DevDeck drives the raw CLI
+		// over the stdin/stdout control channel, not the TypeScript SDK's
+		// canUseTool callback. The answer is a write, not a hand-off.
+		//
+		// Without this case the event fell through to `return nil`: the
+		// pending flag cleared and the thread flipped waiting -> running, so
+		// the UI looked answered while the agent stayed blocked forever.
+		return r.Provider.RespondToUserInput(ctx, e.ThreadID, p.RequestID, p.Answers)
 
 	case EvtThreadTurnInterruptRequested:
 		st := r.Engine.State()
@@ -407,7 +615,49 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		// Cancel pending approvals FIRST. Otherwise the interrupt would wait
 		// on a turn that is itself waiting on the user.
 		r.Broker.CancelThread(e.ThreadID)
-		return r.Provider.InterruptTurn(ctx, e.ThreadID, t.CurrentTurn)
+		interruptErr := r.Provider.InterruptTurn(ctx, e.ThreadID, t.CurrentTurn)
+
+		// Settle the thread regardless of what the provider did with the
+		// request. `InterruptTurn` is best-effort by contract — the claude
+		// adapter returns nil both when it wrote the control_request AND when
+		// it holds no session for this thread at all — so a thread whose
+		// process has already died would otherwise stay ThreadRunning with
+		// Stop as its only control, and Stop having no effect. Pressing Stop
+		// has to be a way OUT of running, not a request that may be ignored.
+		//
+		// Safe when the provider is healthy: it answers with TurnAborted a
+		// moment later, which sets the same status. Any output still in flight
+		// keeps appending to the transcript either way.
+		if _, err := r.Engine.Dispatch(ctx, Command{
+			CommandID: "ac-interrupt-idle-" + e.EventID,
+			Type:      CmdThreadSessionSet,
+			ThreadID:  e.ThreadID,
+			Payload:   mustJSON(map[string]any{"status": string(ThreadIdle)}),
+		}); err != nil {
+			log.Printf("agentcore: failed to settle thread=%s after interrupt err=%v", e.ThreadID, err)
+		}
+		return interruptErr
+
+	case EvtThreadInteractionModeSet:
+		var p InteractionModeSetPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		// Resolved the same way EvtThreadSessionStopRequested resolves its
+		// adapter below, not through r.Provider.Service — this is the exact
+		// gap the spec's problem #2 names: before this case existed,
+		// EvtThreadInteractionModeSet (already in IntentEvents) fell through
+		// this switch to `return nil`, so flipping the composer's Plan pill
+		// updated the read model but never reached the live CLI process.
+		id, ok := r.Provider.Dir.InstanceFor(e.ThreadID)
+		if !ok {
+			return fmt.Errorf("provider: thread %s is not bound to an instance", e.ThreadID)
+		}
+		a, err := r.Provider.Registry.Adapter(id)
+		if err != nil {
+			return err
+		}
+		return a.SetInteractionMode(ctx, e.ThreadID, p.Mode)
 
 	case EvtThreadSessionStopRequested:
 		r.Broker.CancelThread(e.ThreadID)

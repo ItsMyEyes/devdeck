@@ -11,9 +11,9 @@ import (
 // terminal handles that by opening a plain shell; chat has no such fallback
 // and must name an agent or nothing can run.
 //
-// Claude is the only agent with a ported agentcore Driver today, and the
-// settings default_model is a Claude model, so this matches what the
-// composer's model picker already shows.
+// Claude is the default agentcore Driver (alongside pi — see
+// provider/pi), and the settings default_model is a Claude model, so this
+// matches what the composer's model picker already shows.
 const DefaultAgent = "claude"
 
 // WorktreeIDForThread strips a thread's chat-pane suffix. A threadID is either

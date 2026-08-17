@@ -92,6 +92,67 @@ func TestResolveUnknownRequest(t *testing.T) {
 	}
 }
 
+// The gap these two tests close is structural, not hypothetical: a request is
+// registered by Ingestion.handle (Broker.Open) when the card is published, and
+// the goroutine that will wait on it only reaches Await one engine round-trip
+// later. Anything landing in that gap — a second device answering, or far more
+// realistically an interrupt firing CancelThread — used to delete the
+// registration and hand the decision to a channel nobody would ever read,
+// leaving Await parked on a fresh channel until its 10-minute ceiling. The
+// caller parked there is an HTTP handler holding an SSH exec, so "eventually
+// times out" is not an acceptable answer.
+func TestResolveLandingBeforeAwaitIsStillDelivered(t *testing.T) {
+	g := NewGate()
+	g.Open("ssh:sc-1", "tool-early") // what Ingestion does when the card is published
+	if err := g.Resolve("tool-early", event.DecisionAccept); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	d, err := g.Await(ctx, "ssh:sc-1", "tool-early") // Ask only gets here now
+	if err != nil {
+		t.Fatalf("Await after an early Resolve: %v", err)
+	}
+	if d != event.DecisionAccept {
+		t.Fatalf("decision = %q, want %q", d, event.DecisionAccept)
+	}
+}
+
+func TestCancelLandingBeforeAwaitIsStillDelivered(t *testing.T) {
+	g := NewGate()
+	g.Open("ssh:sc-1", "tool-early")
+	g.CancelThread("ssh:sc-1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	d, err := g.Await(ctx, "ssh:sc-1", "tool-early")
+	if err != nil {
+		t.Fatalf("Await after an early CancelThread blocked instead of returning: %v", err)
+	}
+	if d != event.DecisionDecline {
+		t.Fatalf("decision = %q, want %q", d, event.DecisionDecline)
+	}
+}
+
+// A decision nobody ever waits for must not accumulate: every provider-driven
+// request goes Open -> Resolve with no Await at all.
+func TestUnconsumedDecisionsExpire(t *testing.T) {
+	g := NewGate()
+	g.tombstoneTTL = 10 * time.Millisecond
+
+	g.Open("ssh:sc-1", "tool-orphan")
+	if err := g.Resolve("tool-orphan", event.DecisionAccept); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	g.Open("ssh:sc-1", "tool-other") // any call sweeps
+
+	if g.tracked("tool-orphan") {
+		t.Fatal("an unconsumed decision was retained past its TTL")
+	}
+}
+
 // Gate replaces MemoryBroker in main.go, so it has to carry MemoryBroker's
 // one behaviour that is not on the Broker interface: the OnCancel fan-out
 // that tells whoever writes the wire reply to deny a request the user can no

@@ -35,8 +35,31 @@ type Thread struct {
 	// never reads it.
 	ResumeCursor    json.RawMessage
 	PendingRequests map[string]bool
-	Deleted         bool
-	UpdatedAt       int64
+	// ContextTokens is the context window's occupancy as of the last
+	// completed turn (input + cache-read + cache-creation tokens on that
+	// turn's own usage report — see workers.go's Ingestion.handle). Zero
+	// until the first turn completes. There is no matching "max" here: the
+	// CLI reports none, so the composer divides by whatever context-window
+	// size the user has selected, not a value carried on the thread.
+	ContextTokens int64
+	// ProposedPlan is the plan currently on the table, or nil. Set by
+	// EvtThreadPlanProposed; cleared by the next
+	// EvtThreadTurnStartRequested, because any following turn supersedes it
+	// (t3code spells the same rule as an implementedAt column). Only ever
+	// replaced wholesale — never mutated in place through this pointer — so
+	// clone() below is free to share the pointer value across snapshots; see
+	// TestCloneGivesEachSnapshotAnIndependentProposedPlanField.
+	ProposedPlan *ProposedPlan
+	Deleted      bool
+	UpdatedAt    int64
+}
+
+// ProposedPlan mirrors PlanProposePayload field-for-field — it is the
+// projected, read-model shape of the same data the command payload carries.
+type ProposedPlan struct {
+	PlanMarkdown string `json:"planMarkdown"`
+	PlanFilePath string `json:"planFilePath,omitempty"`
+	ToolUseID    string `json:"toolUseId,omitempty"`
 }
 
 // State is the in-memory read model. Immutable by convention: the projector
@@ -146,9 +169,7 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		if !ok {
 			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
 		}
-		var p struct {
-			RequestID string `json:"requestId"`
-		}
+		var p UserInputRespondPayload
 		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 			return nil, err
 		}
@@ -198,6 +219,13 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 	case CmdThreadDelete:
 		return []Event{mk(EvtThreadDeleted, nil)}, nil
 
+	case CmdThreadPlanPropose:
+		var p PlanProposePayload
+		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+			return nil, err
+		}
+		return []Event{mk(EvtThreadPlanProposed, p)}, nil
+
 	default:
 		return nil, fmt.Errorf("unrecognized command: %s", cmd.Type)
 	}
@@ -241,6 +269,18 @@ func applyOne(s *State, e Event) {
 	case EvtThreadTurnStartRequested:
 		if t, ok := s.Threads[e.ThreadID]; ok {
 			t.Status = ThreadRunning
+			// A following turn supersedes whatever plan was on the table —
+			// see Thread.ProposedPlan.
+			t.ProposedPlan = nil
+			t.UpdatedAt = e.CreatedAt
+		}
+
+	case EvtThreadPlanProposed:
+		if t, ok := s.Threads[e.ThreadID]; ok {
+			var p ProposedPlan
+			if err := json.Unmarshal(e.Payload, &p); err == nil {
+				t.ProposedPlan = &p
+			}
 			t.UpdatedAt = e.CreatedAt
 		}
 
@@ -297,6 +337,18 @@ func applyOne(s *State, e Event) {
 				Status       ThreadStatus    `json:"status"`
 				ResumeCursor json.RawMessage `json:"resumeCursor,omitempty"`
 				PendingAdd   string          `json:"pendingRequestAdd,omitempty"`
+				// ClearPending wipes every pending approval/input request in one
+				// step — used by ReconcileOrphanedThreads (workers.go) to close out
+				// a thread the process that owned its approval prompt can no
+				// longer answer for. Nothing else needs a bulk clear: a real
+				// response resolves requests one at a time via
+				// EvtThreadApprovalResponseRequested/EvtThreadUserInputResponseRequested.
+				ClearPending bool `json:"clearPending,omitempty"`
+				// ContextTokens: see Thread.ContextTokens. Zero is not a valid
+				// reading for any turn that actually completed (there is always
+				// at least a system prompt), so this — like ResumeCursor above —
+				// is a presence check rather than trusting JSON's zero value.
+				ContextTokens int64 `json:"contextTokens,omitempty"`
 			}
 			_ = json.Unmarshal(e.Payload, &p)
 			if p.Status != "" {
@@ -308,6 +360,12 @@ func applyOne(s *State, e Event) {
 			if p.PendingAdd != "" {
 				t.PendingRequests[p.PendingAdd] = true
 				t.Status = ThreadWaiting
+			}
+			if p.ClearPending {
+				t.PendingRequests = map[string]bool{}
+			}
+			if p.ContextTokens > 0 {
+				t.ContextTokens = p.ContextTokens
 			}
 			t.UpdatedAt = e.CreatedAt
 		}

@@ -44,6 +44,10 @@ const (
 	CmdThreadSessionSet        CommandType = "thread.session.set"
 	CmdThreadActivityAppend    CommandType = "thread.activity.append"
 	CmdThreadTurnDiffComplete  CommandType = "thread.turn.diff.complete"
+	// CmdThreadPlanPropose carries a plan the agent proposed (ExitPlanMode) —
+	// server-only for the same reason CmdThreadAssistantDelta is: a client
+	// that could dispatch it could forge an agent's plan.
+	CmdThreadPlanPropose CommandType = "thread.plan.propose"
 )
 
 // ClientDispatchable is the authorization allowlist. Check this at the RPC
@@ -87,6 +91,28 @@ type ApprovalRespondPayload struct {
 	Decision  event.Decision `json:"decision"`
 }
 
+// UserInputRespondPayload answers a question the agent asked (AskUserQuestion).
+//
+// `Answers` is keyed by the FULL QUESTION TEXT, not by any synthetic id: that
+// is the key the claude CLI looks answers up by, verified against captured
+// traffic. Re-keying this map reaches the agent as no answer at all.
+type UserInputRespondPayload struct {
+	RequestID string         `json:"requestId"`
+	Answers   map[string]any `json:"answers"`
+}
+
+// PlanProposePayload carries the plan the agent proposed via ExitPlanMode.
+// Fields mirror event.ProposedPlanPayload field-for-field: Ingestion decodes
+// the provider event straight into this shape and dispatches it verbatim.
+type PlanProposePayload struct {
+	PlanMarkdown string `json:"planMarkdown"`
+	// PlanFilePath is the agent-host path the CLI wrote the plan to
+	// (~/.claude/plans/<slug>.md on the AGENT's machine, not the user's) —
+	// stored as metadata only, never read or linked.
+	PlanFilePath string `json:"planFilePath,omitempty"`
+	ToolUseID    string `json:"toolUseId,omitempty"`
+}
+
 type RuntimeModeSetPayload struct {
 	Mode provider.RuntimeMode `json:"mode"`
 }
@@ -124,6 +150,10 @@ const (
 	EvtThreadTurnDiffCompleted          EventType = "thread.turn-diff-completed"
 	EvtThreadSettled                    EventType = "thread.settled"
 	EvtThreadDeleted                    EventType = "thread.deleted"
+	// EvtThreadPlanProposed puts a plan "on the table" (Thread.ProposedPlan).
+	// Deliberately NOT in IntentEvents below — it records a fact the agent
+	// already reported, it does not trigger a new provider call.
+	EvtThreadPlanProposed EventType = "thread.plan-proposed"
 )
 
 // IntentEvents are events that trigger provider work. ProviderCommandReactor
