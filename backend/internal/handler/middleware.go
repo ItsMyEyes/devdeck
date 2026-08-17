@@ -107,6 +107,17 @@ func RequireAuth(svc *service.AuthService, hubKey string) func(http.Handler) htt
 		// reject or accept them itself.
 		"/api/runtime/catalog":  true,
 		"/api/runtime/projects": true,
+		// The /api/agent-tools/ssh/* routes (four distinct paths — file is
+		// shared by GET and PUT) authenticate via RequireThreadToken
+		// (threadtoken.go), a per-thread token minted for the devdeck-ssh
+		// helper CLI, not this hub's session cookie or hub key. They must
+		// pass through here unauthenticated so RequireThreadToken, which
+		// wraps only this route group in main.go, gets the chance to reject
+		// or accept them itself.
+		"/api/agent-tools/ssh/exec":  true,
+		"/api/agent-tools/ssh/file":  true,
+		"/api/agent-tools/ssh/files": true,
+		"/api/agent-tools/ssh/grep":  true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

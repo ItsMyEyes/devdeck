@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { machineWsUrl } from '@/lib/machineClient'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import type { AgentAttachmentRef } from '@/features/agent-chat/ComposerAttachments'
 import { EMPTY_THREAD_VIEW } from '@/features/agent-chat/eventReducer'
 import type { AgentEvent, AgentThreadView } from '@/features/agent-chat/types'
 import type { Machine } from '@/store/types'
@@ -23,8 +24,14 @@ import type { Machine } from '@/store/types'
 /** Connection status of the socket itself — distinct from
  *  `AgentThreadView.status` (the thread's idle/running/waiting/stopped,
  *  folded from the event log). The engine outlives the socket, so a thread
- *  can be `running` while its socket is `closed` mid-backoff. */
-export type AgentSocketStatus = 'connecting' | 'open' | 'closed'
+ *  can be `running` while its socket is `closed` mid-backoff.
+ *
+ *  `'draft'` means `connect: false` — no socket has ever been opened for
+ *  this thread and none will be until the caller flips the gate. It is a
+ *  socket status, not a thread status: `AgentThreadView.status` has no
+ *  opinion about a thread that doesn't exist on the server yet (spec
+ *  `2026-08-15-composer-drafts-and-stash-design.md` §7). */
+export type AgentSocketStatus = 'draft' | 'connecting' | 'open' | 'closed'
 
 /** Mirrors `Terminal.tsx`'s reconnect tuning: only a connection that stays
  *  up for this long clears the backoff counter, so a handshake that opens
@@ -37,7 +44,13 @@ const MAX_BACKOFF_MS = 8_000
  *  — field names match its `json` tags exactly, one shape on both sides of
  *  the wire. Only the commands this hook issues are named here; the server
  *  rejects anything else a client tries to send via `ClientDispatchable`. */
-type AgentCommandType = 'thread.turn.start' | 'thread.turn.interrupt' | 'thread.runtime-mode.set' | 'thread.interaction-mode.set'
+type AgentCommandType =
+  | 'thread.turn.start'
+  | 'thread.turn.interrupt'
+  | 'thread.runtime-mode.set'
+  | 'thread.interaction-mode.set'
+  | 'thread.user-input.respond'
+  | 'thread.approval.respond'
 
 /** Mirrors `provider.RuntimeMode` (`backend/internal/agentcore/provider/provider.go`)
  *  — string values match exactly, one enum on both sides of the wire. */
@@ -85,10 +98,30 @@ function isErrorFrame(frame: ServerFrame): frame is ErrorFrame {
   return frame.kind === 'error' && typeof (frame as ErrorFrame).error === 'string'
 }
 
+/** Names this thread's backend explicitly instead of handing over a bare
+ *  `Machine` the caller may not have — an SSH thread (spec
+ *  `2026-08-17-ssh-devops-chat-design.md` §3.3) has no worktree and
+ *  therefore no runtime `Machine` at all, since it runs on the hub itself.
+ *
+ *  - `'machine'` — a worktree thread. Its socket dials the named machine's
+ *    runtime, same as every thread before this type existed.
+ *  - `'hub'` — an SSH thread. Its socket dials the hub process directly —
+ *    see `agentChatWsUrl`'s doc comment for why there is no machine to
+ *    resolve here. */
+export type AgentChatTarget = { kind: 'machine'; machine: Machine } | { kind: 'hub' }
+
 export interface UseAgentChatSocketOptions {
-  machine: Machine
+  target: AgentChatTarget
   /** The backend's ThreadID verbatim — see `paneTree.ts`'s `AgentChatContent`. */
   threadKey: string
+  /** `false` gates the socket entirely: no `WebSocket` is constructed, no
+   *  hello is sent, and no thread row is created on the server (the socket
+   *  hello is what lazily creates it, `handler/agent_ws.go:129-141`).
+   *  Defaults to `true` — every existing call site keeps today's behaviour
+   *  unchanged. Commands issued while `false` still queue in `outboxRef` and
+   *  flush once the gate flips and the socket opens; see the connect
+   *  effect's own comment for why the outbox reset must NOT key on this. */
+  connect?: boolean
 }
 
 /** Mirrors the backend's `provider.ModelSelection` (see its json tags —
@@ -107,8 +140,12 @@ export interface UseAgentChatSocketResult {
   status: AgentSocketStatus
   /** Dispatches `thread.turn.start`. `model` rides the payload as the
    *  backend's `provider.ModelSelection`; omit it to let the worktree's own
-   *  agent and its default model decide. Attachments are still to come. */
-  sendTurn: (text: string, model?: TurnModelSelection) => void
+   *  agent and its default model decide. `attachments` mirrors
+   *  `provider.Attachment`'s JSON tags exactly (`id`/`kind`/`mime`/`name`,
+   *  no raw bytes — see `ComposerAttachments.tsx`'s doc comment on why) and
+   *  is omitted from the wire payload entirely when empty, the same
+   *  precedent `model` already sets below. */
+  sendTurn: (text: string, model?: TurnModelSelection, attachments?: AgentAttachmentRef[]) => void
   /** Dispatches `thread.turn.interrupt` for the thread's in-flight turn. */
   abortTurn: () => void
   /** Dispatches `thread.runtime-mode.set` — the composer's runtime-mode
@@ -119,6 +156,25 @@ export interface UseAgentChatSocketResult {
   /** Dispatches `thread.interaction-mode.set` — the composer's
    *  interaction-mode pill (Build/Plan). */
   setInteractionMode: (mode: InteractionMode) => void
+  /** Dispatches `thread.user-input.respond` — already on the server's
+   *  `ClientDispatchable` allowlist (`command.go:56`), no backend
+   *  authorization change needed. */
+  respondToUserInput: (requestId: string, answers: Record<string, unknown>) => void
+  /** Dispatches `thread.approval.respond` — already on `ClientDispatchable`
+   *  (`command.go:55`). `decision` is one of `event.Decision`'s wire values. */
+  respondToApproval: (requestId: string, decision: string) => void
+  /** Clears the transport-level `view.error` (`setTransportError(null)`) —
+   *  the composer banner stack's F2 dismissal (spec
+   *  `2026-08-15-composer-banner-stack-design.md`, Design §4). `view.error`
+   *  is transport-only (see this file's `transportError` doc comment above);
+   *  it never touches the thread's event-derived state.
+   *
+   *  Safe to widen: `usePillState` (`ComposerControls.tsx:227-237`) is the
+   *  only other reader of `view.error`, and its effect is a no-op when
+   *  `error` is `null` (`if (error !== null && pending !== null)`), so
+   *  driving `error` to `null` here cannot spuriously revert a pending
+   *  pill. */
+  clearError: () => void
 }
 
 /** WS URL for one agent-chat thread, direct-first with hub-proxy fallback —
@@ -134,21 +190,49 @@ export interface UseAgentChatSocketResult {
  *  runtime. */
 export const AGENT_WS_PATH = '/agent'
 
-function agentChatWsUrl(machine: Machine): Promise<string> {
-  return machineWsUrl(machine, AGENT_WS_PATH, {})
+/** Resolves `target` (see `AgentChatTarget`'s doc comment) to the actual
+ *  `/ws/agent` URL to open.
+ *
+ *  - `'machine'` keeps calling `machineWsUrl` exactly as before — see
+ *    `AGENT_WS_PATH`'s comment above for the `/agent`-not-`/ws/agent` trap
+ *    that still applies to this branch.
+ *  - `'hub'` builds the URL the same way `sshClient.ts`'s `sshShellWsUrl`
+ *    builds `/ws/ssh`: the page's own origin, no machine resolution, no
+ *    direct/proxy fallback. SSH threads run on the hub process itself — the
+ *    SSH connection pool and its credentials never leave it (design spec
+ *    §3.2) — so there is nothing else to dial. */
+export function agentChatWsUrl(target: AgentChatTarget): Promise<string> {
+  if (target.kind === 'hub') {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return Promise.resolve(`${proto}://${window.location.host}/ws/agent`)
+  }
+  return machineWsUrl(target.machine, AGENT_WS_PATH, {})
 }
 
-export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOptions): UseAgentChatSocketResult {
+export function useAgentChatSocket({ target, threadKey, connect = true }: UseAgentChatSocketOptions): UseAgentChatSocketResult {
   // Select the raw slot and fall back OUTSIDE the selector: returning a fresh
   // object from inside it re-renders forever (see EMPTY_THREAD_VIEW's comment).
   const storedView = useDevDeckStore((s) => s.agentThreads[threadKey])
   const view = storedView ?? EMPTY_THREAD_VIEW
   const applyAgentEvents = useDevDeckStore((s) => s.applyAgentEvents)
-  const [status, setStatus] = useState<AgentSocketStatus>('connecting')
+  const [status, setStatus] = useState<AgentSocketStatus>(connect ? 'connecting' : 'draft')
   /** Transport-level error (an `error` frame, or a socket that never opened)
    *  — kept separate from `view.error`, which `reduceAgentEvents` derives
    *  from the event log itself, and merged into the returned view below. */
   const [transportError, setTransportError] = useState<string | null>(null)
+  /** `lastSeq` at the moment Stop was pressed, or null.
+   *
+   *  Stop is a request over the socket, and the whole point of this goal is
+   *  that it used to be possible for nothing to answer it — a dead CLI, a
+   *  closed socket (the frame only reaches `outboxRef`), a provider that
+   *  ignores the interrupt. The thread then sat on `running` with Stop as its
+   *  only control and Stop doing nothing.
+   *
+   *  So the UI leaves `running` immediately and lets the server correct it:
+   *  the override is scoped to "no event has arrived since", so the first
+   *  event the backend does send — including the status it settles on — wins
+   *  automatically. It expires itself; nothing has to remember to clear it. */
+  const [abortedAtSeq, setAbortedAtSeq] = useState<number | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   /** Commands queued while the socket isn't open, flushed verbatim
@@ -158,7 +242,37 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
    *  new one for the same user action. */
   const outboxRef = useRef<CommandFrame[]>([])
 
+  /** Stable identity for the two effects below — deliberately narrower than
+   *  `target` itself. A caller typically builds `target={{ kind: 'machine',
+   *  machine }}` (or `{ kind: 'hub' }`) as a fresh object literal on every
+   *  render, so depending on `target` directly would tear the socket down
+   *  and reopen it on every unrelated re-render of the caller. `'hub'` has
+   *  one fixed identity (every SSH thread dials the same origin); the
+   *  `'machine'` variant keys off the `Machine` object itself, which — like
+   *  the bare `machine` option this replaces — only changes reference when
+   *  the machine's own data changes (TanStack Query's structural sharing). */
+  const targetIdentity: Machine | 'hub' = target.kind === 'hub' ? 'hub' : target.machine
+
+  /** Owns the outbox reset, and *only* the reset — keyed on thread identity
+   *  alone, not `connect`. A `connect` flip from `false` to `true` is the
+   *  outbox's reason to exist (a queued turn is what triggers the flip in
+   *  `AgentChatPane`); a `target`/`threadKey` change is a genuinely
+   *  different thread, where replaying a stale queued command really would
+   *  be wrong. See the connect effect below for the trap this avoids. */
   useEffect(() => {
+    outboxRef.current = []
+  }, [targetIdentity, threadKey])
+
+  useEffect(() => {
+    // A draft thread opens no socket, sends no hello, and creates no row on
+    // the server (the hello is what lazily creates it). The outbox is
+    // untouched here — see the effect above — so a command queued while
+    // `connect` is `false` survives the flip to `true`.
+    if (!connect) {
+      setStatus('draft')
+      return
+    }
+
     let disposed = false
     let everOpened = false
     let attempts = 0
@@ -167,7 +281,6 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
     let resolvedUrl: string | null = null
 
     setStatus('connecting')
-    outboxRef.current = []
 
     const clearHealthyTimer = () => {
       if (healthyTimer !== undefined) {
@@ -176,7 +289,7 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
       }
     }
 
-    const connect = () => {
+    const openSocket = () => {
       if (disposed || !resolvedUrl) return
       const ws = new WebSocket(resolvedUrl)
       wsRef.current = ws
@@ -239,14 +352,14 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
       retryTimer = window.setTimeout(() => {
         retryTimer = undefined
         setStatus('connecting')
-        connect()
+        openSocket()
       }, delay)
     }
 
-    void agentChatWsUrl(machine).then((url) => {
+    void agentChatWsUrl(target).then((url) => {
       if (disposed) return
       resolvedUrl = url
-      connect()
+      openSocket()
     })
 
     return () => {
@@ -262,12 +375,21 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
         ws.close()
       }
       wsRef.current = null
-      outboxRef.current = []
+      // Deliberately does NOT touch outboxRef — see this effect's own doc
+      // comment and the sibling effect above. Clearing it here was the
+      // outbox trap: a `connect` flip unmounts this run's closure, and
+      // wiping the queue on that transition would silently drop the very
+      // command that caused the flip.
     }
-    // threadKey and machine identity are what a new socket connects to;
-    // applyAgentEvents is a stable store action reference and deliberately
-    // left out of the dependency array.
-  }, [machine, threadKey])
+    // threadKey and targetIdentity are what a new socket connects to; connect
+    // is the draft gate; applyAgentEvents is a stable store action reference
+    // and deliberately left out of the dependency array. `target` itself is
+    // also deliberately excluded — see `targetIdentity`'s doc comment above
+    // for why depending on the wrapper object would reconnect on every
+    // unrelated render of the caller; the `agentChatWsUrl(target)` call
+    // above still gets a fresh `target` every render, it just doesn't retrigger
+    // this effect on its own.
+  }, [targetIdentity, threadKey, connect])
 
   /** Sends `frame` if the socket is open, otherwise queues it for the next
    *  `open` — see `outboxRef`'s doc comment for why this is what keeps a
@@ -294,16 +416,54 @@ export function useAgentChatSocket({ machine, threadKey }: UseAgentChatSocketOpt
   // `model` is omitted entirely when unset rather than sent as `{}`: an empty
   // InstanceID means "whatever this worktree is configured for" on the
   // backend, and sending the key at all would be indistinguishable from a
-  // deliberate blank.
+  // deliberate blank. `attachments` follows the same precedent — an empty
+  // array is indistinguishable from "no attachments" on the wire, so it is
+  // omitted rather than sent as `[]`.
   const sendTurn = useCallback(
-    (text: string, model?: TurnModelSelection) => dispatch('thread.turn.start', model ? { text, model } : { text }),
+    (text: string, model?: TurnModelSelection, attachments?: AgentAttachmentRef[]) => {
+      // Drop a still-live abort override, or a turn sent while the backend is
+      // unreachable would render as idle until its first event lands.
+      setAbortedAtSeq(null)
+      dispatch('thread.turn.start', {
+        text,
+        ...(model ? { model } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      })
+    },
     [dispatch],
   )
-  const abortTurn = useCallback(() => dispatch('thread.turn.interrupt'), [dispatch])
+  const abortTurn = useCallback(() => {
+    dispatch('thread.turn.interrupt')
+    setAbortedAtSeq(view.lastSeq)
+  }, [dispatch, view.lastSeq])
   const setRuntimeMode = useCallback((mode: RuntimeMode) => dispatch('thread.runtime-mode.set', { mode }), [dispatch])
   const setInteractionMode = useCallback((mode: InteractionMode) => dispatch('thread.interaction-mode.set', { mode }), [dispatch])
+  const respondToUserInput = useCallback(
+    (requestId: string, answers: Record<string, unknown>) => dispatch('thread.user-input.respond', { requestId, answers }),
+    [dispatch],
+  )
+  const respondToApproval = useCallback(
+    (requestId: string, decision: string) => dispatch('thread.approval.respond', { requestId, decision }),
+    [dispatch],
+  )
+  const clearError = useCallback(() => setTransportError(null), [])
 
-  const mergedView: AgentThreadView = transportError ? { ...view, error: transportError } : view
+  // Held only until the backend says otherwise — see `abortedAtSeq`.
+  const abortPending = abortedAtSeq !== null && view.lastSeq <= abortedAtSeq && view.status === 'running'
+  const mergedView: AgentThreadView =
+    transportError || abortPending
+      ? { ...view, ...(transportError ? { error: transportError } : {}), ...(abortPending ? { status: 'idle' as const } : {}) }
+      : view
 
-  return { view: mergedView, status, sendTurn, abortTurn, setRuntimeMode, setInteractionMode }
+  return {
+    view: mergedView,
+    status,
+    sendTurn,
+    abortTurn,
+    setRuntimeMode,
+    setInteractionMode,
+    respondToUserInput,
+    respondToApproval,
+    clearError,
+  }
 }

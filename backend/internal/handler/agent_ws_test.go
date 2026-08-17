@@ -214,42 +214,69 @@ func TestResendingCommandIDIsIdempotentOverTheSocket(t *testing.T) {
 // the very first frame off the wire may legitimately be the thread.created
 // event rather than this rejection, so this reads until it finds the error
 // frame instead of assuming it is first.
+//
+// thread.plan.propose is exercised here too — a client that could dispatch
+// it could forge an agent's proposed plan, the same class of forgery
+// assistant.delta is excluded for. No production agent_ws.go change is
+// needed for that case: handleCommand's ClientDispatchable lookup already
+// covers any command absent from the map.
 func TestServerOnlyCommandRejected(t *testing.T) {
-	h, threadID, cleanup := newTestAgentWS(t)
-	defer cleanup()
-
-	srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
-	defer srv.Close()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	c, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer c.Close(websocket.StatusNormalClosure, "")
-
-	writeJSONFrame(t, ctx, c, map[string]any{"kind": "hello", "threadId": threadID, "sinceSeq": 0})
-	writeJSONFrame(t, ctx, c, map[string]any{
-		"kind": "command",
-		"command": orchestration.Command{
-			CommandID: "ac-forge", Type: orchestration.CmdThreadAssistantDelta, ThreadID: threadID,
-			Payload: json.RawMessage(`{"text":"I am the agent"}`),
+	cases := []struct {
+		name    string
+		cmdType orchestration.CommandType
+		payload json.RawMessage
+	}{
+		{
+			name:    "assistant delta",
+			cmdType: orchestration.CmdThreadAssistantDelta,
+			payload: json.RawMessage(`{"text":"I am the agent"}`),
 		},
-	})
-
-	gotError := false
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !gotError {
-		f := readFrame(t, ctx, c)
-		if f.Kind == "error" {
-			gotError = true
-		}
+		{
+			name:    "plan propose",
+			cmdType: orchestration.CmdThreadPlanPropose,
+			payload: json.RawMessage(`{"planMarkdown":"# Forged plan"}`),
+		},
 	}
-	if !gotError {
-		t.Fatal("expected an error frame for a server-only command")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, threadID, cleanup := newTestAgentWS(t)
+			defer cleanup()
+
+			srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
+			defer srv.Close()
+			wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			c, _, err := websocket.Dial(ctx, wsURL, nil)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer c.Close(websocket.StatusNormalClosure, "")
+
+			writeJSONFrame(t, ctx, c, map[string]any{"kind": "hello", "threadId": threadID, "sinceSeq": 0})
+			writeJSONFrame(t, ctx, c, map[string]any{
+				"kind": "command",
+				"command": orchestration.Command{
+					CommandID: "ac-forge", Type: tc.cmdType, ThreadID: threadID,
+					Payload: tc.payload,
+				},
+			})
+
+			gotError := false
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) && !gotError {
+				f := readFrame(t, ctx, c)
+				if f.Kind == "error" {
+					gotError = true
+				}
+			}
+			if !gotError {
+				t.Fatal("expected an error frame for a server-only command")
+			}
+		})
 	}
 }
 
@@ -426,5 +453,45 @@ func TestHelloAutoCreatesThreadWhenNoEventsExist(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("agent_event has %d thread.created events, want 1", count)
+	}
+}
+
+// An SSH chat thread (design spec §3.1, "ssh:<connectionId>") has no
+// worktree at all — resolveInstanceID must recognise the namespace and
+// answer with the default agent instance directly, instead of doing what it
+// does for every other thread id: look up a worktree that, for this thread
+// shape, will never exist.
+func TestHelloOnSSHThreadCreatesThreadWithoutAWorktree(t *testing.T) {
+	h, _, cleanup := newTestAgentWS(t)
+	defer cleanup()
+
+	srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	const threadID = "ssh:sc-1" // no worktree with this id exists, and none should be needed
+	writeJSONFrame(t, ctx, c, map[string]any{"kind": "hello", "threadId": threadID, "sinceSeq": 0})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		f := readFrame(t, ctx, c)
+		if f.Kind == "error" {
+			t.Fatalf("hello on an SSH thread returned an error frame: %s", f.Error)
+		}
+		if len(f.Events) > 0 {
+			break
+		}
+	}
+	if _, known := h.engine.State().Thread(threadID); !known {
+		t.Fatal("engine does not know the SSH thread after hello")
 	}
 }

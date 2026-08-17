@@ -23,9 +23,11 @@ import (
 	"time"
 
 	"devdeck/backend/internal/agentcore/approval"
+	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/agentcore/provider"
 	"devdeck/backend/internal/agentcore/provider/claude"
+	"devdeck/backend/internal/agentcore/provider/pi"
 	"devdeck/backend/internal/config"
 	"devdeck/backend/internal/dbdriver"
 	"devdeck/backend/internal/dbdriver/mysqldrv"
@@ -43,6 +45,8 @@ import (
 	"devdeck/backend/internal/service"
 	"devdeck/backend/internal/setupui"
 	"devdeck/backend/internal/sshmgr"
+	"devdeck/backend/internal/sshthread"
+	"devdeck/backend/internal/sshtool"
 	"devdeck/backend/internal/store"
 	"devdeck/backend/internal/terminal"
 	"devdeck/backend/internal/version"
@@ -225,6 +229,17 @@ func main() {
 
 	st := store.New(db)
 
+	// Agent chat attachments are per-machine, uploaded ahead of the thread
+	// that will reference them (store/agentattachment.go's own doc comment).
+	// An upload whose thumbnail is removed or whose pane closes before send
+	// leaves an orphan row this sweep catches; not gated by !isRuntime since
+	// chat — and its attachments — run on runtimes too.
+	if n, err := st.DeleteOrphanAgentAttachments(); err != nil {
+		log.Printf("agent attachments: startup sweep failed: %v", err)
+	} else if n > 0 {
+		log.Printf("agent attachments: swept %d orphaned upload(s)", n)
+	}
+
 	authKey, err := loadOrCreateAuthKey(*dbPath)
 	if err != nil {
 		log.Fatalf("auth key: %v", err)
@@ -356,9 +371,11 @@ func main() {
 	newsH := handler.NewNewsHandler(st)
 	issueH := handler.NewIssueHandler(st)
 	attH := handler.NewAttachmentHandler(st)
+	agentAttachmentH := handler.NewAgentAttachmentHandler(st)
 	commentH := handler.NewCommentHandler(st)
 	eventH := handler.NewEventHandler(st)
 	settingsH := handler.NewSettingsHandler(st)
+	completionsHandler := handler.NewCompletionsHandler(service.NewCompletionsService(st))
 	seedH := handler.NewSeedHandler(seedSvc)
 	machineH := handler.NewMachineHandler(st, healthCache, authSvc, signingKey)
 	bookmarkH := handler.NewBookmarkHandler(st, service.NewFaviconService(st))
@@ -405,7 +422,7 @@ func main() {
 	// Agent chat harness. Runs on every role, but only a runtime ever has
 	// worktrees to chat about; the hub simply proxies the WebSocket like it
 	// does for /ws/terminal and /ws/ssh.
-	agentRegistry := provider.NewRegistry(claude.NewDriver())
+	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver())
 	// The engine's State is DERIVED from the event log, never stored — so it
 	// has to be rebuilt from that log on every boot. Skipping this was a real
 	// bug, not a theoretical one: the events survived the restart, so the
@@ -435,17 +452,88 @@ func main() {
 	agentDir := orchestration.NewThreadDirectory()
 	agentChatSvc := &provider.Service{Registry: agentRegistry, Dir: agentDir}
 
+	// agentBroker tracks which requestIds (tool approvals + user-input
+	// questions) are open per thread, so a cancelled/reconciled thread can
+	// deny them instead of leaving ghost prompts the UI can never resolve.
+	// Gate, not a plain MemoryBroker: the SSH tool handlers wired below park
+	// an HTTP request on a human via a genuinely blocking Await, which
+	// MemoryBroker never needed to support (see gate.go's doc comment).
+	agentBroker := approval.NewGate()
+	agentBroker.OnCancel = func(threadID, requestID string) {
+		// A "tool-" request was raised by DevDeck's own SSH tool gate
+		// (orchestration.ToolApprovalPrompter below), not by a provider —
+		// there is no provider-side request to cancel, and RespondToRequest
+		// would either fail outright or answer whatever unrelated request
+		// the provider actually has open.
+		if strings.HasPrefix(requestID, orchestration.ToolRequestPrefix) {
+			return
+		}
+		// Best-effort — see Gate.OnCancel's doc comment. Errors here are
+		// swallowed on purpose: a dead session's write failing is expected, not
+		// a bug to surface.
+		_ = agentChatSvc.RespondToRequest(context.Background(), threadID, requestID, event.DecisionCancel)
+	}
+
 	// Ingestion is the provider -> engine direction; the Reactor below is
 	// engine -> provider. Both are required: without Ingestion nothing reads
 	// Adapter.Events(), so the agent's replies and tool calls never reach the
 	// engine, never get persisted, and never reach the client — the chat
 	// echoes the user's own message and then goes quiet.
 	agentIngestion := orchestration.NewIngestion(
-		agentEngine, approval.NoopBroker{}, func() string { return "ac-" + randomHex(8) },
+		agentEngine, agentBroker, func() string { return "ac-" + randomHex(8) },
 	)
 
+	// tokenStore mints the per-thread bearer token an SSH chat thread's
+	// seeded workspace hands to the devdeck-ssh helper CLI. Declared here,
+	// ahead of the Reactor below, because its SSH branch mints from it on
+	// every session start, and the /api/agent-tools/ssh/* routes registered
+	// later verify against the same store.
+	tokenStore := sshtool.NewTokenStore()
+
+	// loopbackHubURL is filled in once the real listener has bound, well
+	// below — --addr may use port 0 and get an OS-assigned port. Declared
+	// here so the SSH branch of Reactor.InstanceFor, built next, can close
+	// over it and read whatever it ends up holding at call time: a session
+	// only ever starts after the listener is up, so by the time this is
+	// read it is always populated. Loopback rather than *publicURL/
+	// --public-url on purpose — the devdeck-ssh helper always runs on this
+	// same host (design spec §3.2), so it is both correct and immune to
+	// whatever tunnel or TLS terminator sits in front of the public URL.
+	var loopbackHubURL string
+
+	// toolPrompter drives an SSH tool's approval card through the exact same
+	// event path a provider's own approval request takes (design spec §4.4),
+	// so it is indistinguishable from a provider's, on the wire and in the
+	// UI, from the moment it is opened.
+	toolPrompter := &orchestration.ToolApprovalPrompter{Ingestion: agentIngestion, Gate: agentBroker}
+	sshToolSvc := service.NewSSHToolService(
+		&sshShellRunner{pool: sshFilePool},
+		sshFileSvc,
+		&engineThreadPolicy{engine: agentEngine},
+		toolPrompter,
+	)
+	sshToolH := handler.NewSSHToolHandler(sshToolSvc)
+
+	// A thread the log replay above left "running" or "waiting" belonged to a
+	// process that no longer exists (see ReconcileOrphanedThreads's doc
+	// comment) — every restart otherwise leaves it stuck that way forever,
+	// which is what a chat pane showing "Working for <huge number>s" is.
+	// Needs the engine's Run loop already started (just above) to dispatch
+	// through it.
+	if n, err := orchestration.ReconcileOrphanedThreads(
+		context.Background(), agentEngine, agentIngestion.NewID,
+	); err != nil {
+		log.Printf("agent: reconcile orphaned threads: %v", err)
+	} else if n > 0 {
+		log.Printf("agent: reconciled %d thread(s) left running/waiting by the previous process", n)
+	}
+
 	agentReactor := &orchestration.Reactor{
-		Engine: agentEngine, Provider: agentChatSvc, Broker: approval.NoopBroker{},
+		Engine: agentEngine, Provider: agentChatSvc, Broker: agentBroker,
+		// *store.Store structurally satisfies AttachmentReader (workers.go)
+		// with no adapter — resolves a turn's attachment ids into bytes right
+		// before the provider call.
+		Attachments: st,
 		// The Reactor is the only component that learns an adapter was just
 		// created, so it is what starts that adapter's Ingestion loop.
 		OnInstanceStarted: func(ctx context.Context, a provider.Adapter) {
@@ -455,7 +543,47 @@ func main() {
 		// A threadID is either a bare worktree id or "<worktreeId>::chat-N"
 		// for extra split chat panes (see paneTree.ts) — both name the same
 		// worktree, so only the prefix before "::" is looked up.
+		//
+		// An SSH thread (design spec §3.1) is checked FIRST and returns
+		// through its own branch entirely: it has no worktree to resolve at
+		// all, and everything below this branch — the worktree lookup, its
+		// error wrapping, its empty-Agent fallback — stays exactly as it was
+		// before this feature existed.
 		InstanceFor: func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
+			if orchestration.IsSSHThread(threadID) {
+				connectionID := orchestration.SSHConnectionIDForThread(threadID)
+				conn, err := st.SSHConnectionByID(connectionID)
+				if err != nil {
+					return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
+				}
+				// Re-minted on every session start (Task 3's TokenStore.Mint
+				// doc comment): a stale token from a previous process, or a
+				// previous session on this same thread, must not keep
+				// working once a fresh one exists.
+				token := tokenStore.Mint(threadID, connectionID)
+				dir, err := sshthread.Seed(filepath.Join(filepath.Dir(*dbPath), "ssh-threads"), sshthread.Binding{
+					HubURL:       loopbackHubURL,
+					ThreadID:     threadID,
+					ConnectionID: connectionID,
+					Label:        conn.Name,
+					Host:         conn.Host,
+					User:         conn.Username,
+					Token:        token,
+				})
+				if err != nil {
+					return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: seed workspace: %w", threadID, err)
+				}
+				// domain.SSHConnection carries no Agent field — an SSH thread
+				// has no per-connection choice the way a worktree does — so
+				// it always takes the same empty-Agent fallback the worktree
+				// branch below logs about.
+				log.Printf("agent: SSH thread %s has no configurable agent; defaulting to %q", threadID, orchestration.DefaultAgent)
+				return orchestration.InstanceIDForAgent(""), provider.SessionStartInput{
+					ThreadID: threadID,
+					Cwd:      dir,
+				}, nil
+			}
+
 			wt, err := st.WorktreeByID(orchestration.WorktreeIDForThread(threadID))
 			if err != nil {
 				return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
@@ -761,6 +889,24 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/forwards/{id}/stop", sshForwardH.PostStop)
 		mux.HandleFunc("GET /api/ssh/forwards/states", sshForwardH.GetStates)
 
+		// Tool routes the devdeck-ssh helper CLI calls from inside an SSH
+		// chat thread's seeded workspace (sshthread.Seed) — authenticated by
+		// a per-thread token (tokenStore), never by this hub's session
+		// cookie or hub key. Same nested-mux pattern as /api/runtime/catalog
+		// above: RequireThreadToken must wrap only this route group, so it
+		// is built on its own mux instead of the shared one.
+		toolMux := http.NewServeMux()
+		toolMux.HandleFunc("POST /api/agent-tools/ssh/exec", sshToolH.Exec)
+		toolMux.HandleFunc("GET /api/agent-tools/ssh/file", sshToolH.ReadFile)
+		toolMux.HandleFunc("PUT /api/agent-tools/ssh/file", sshToolH.WriteFile)
+		toolMux.HandleFunc("GET /api/agent-tools/ssh/files", sshToolH.ListFiles)
+		toolMux.HandleFunc("GET /api/agent-tools/ssh/grep", sshToolH.Grep)
+		mux.Handle("POST /api/agent-tools/ssh/exec", handler.RequireThreadToken(tokenStore)(toolMux))
+		mux.Handle("GET /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
+		mux.Handle("PUT /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
+		mux.Handle("GET /api/agent-tools/ssh/files", handler.RequireThreadToken(tokenStore)(toolMux))
+		mux.Handle("GET /api/agent-tools/ssh/grep", handler.RequireThreadToken(tokenStore)(toolMux))
+
 		// Database connection registry — hub-scoped like the SSH registry.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
 		mux.HandleFunc("POST /api/db/connections", dbH.PostConnection)
@@ -798,6 +944,14 @@ func main() {
 		// Bulk export. Streams its body instead of writing one JSON document,
 		// so it pages through the same read path the grid uses.
 		mux.HandleFunc("POST /api/db/connections/{id}/export", dbExecH.PostExport)
+
+		// AI inline completions (BYOK). Hub-only and worktree-agnostic: the
+		// hub holds the key and everything else (prefix/suffix/grounding
+		// symbols) already lives in the browser — see the design doc's "Hub-
+		// only, worktree-agnostic" section.
+		mux.HandleFunc("GET /api/completions/config", completionsHandler.GetConfig)
+		mux.HandleFunc("PUT /api/completions/config", completionsHandler.PutConfig)
+		mux.HandleFunc("POST /api/completions/inline", completionsHandler.PostInline)
 	}
 
 	// Runtime execution endpoints. These accept a descriptor carrying
@@ -831,6 +985,10 @@ func main() {
 	mux.HandleFunc("/ws/agent", agentWS.HandleWS)
 	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
 	mux.HandleFunc("DELETE /api/agent/threads/{threadId}", agentThreadH.DeleteThread)
+	// Composer image attachments (Composer — Context Attachments, C1). Every
+	// role: chat, and therefore its attachments, run on runtimes too.
+	mux.HandleFunc("POST /api/agent/threads/{threadId}/attachments", agentAttachmentH.PostAttachment)
+	mux.HandleFunc("GET /api/agent/attachments/{id}", agentAttachmentH.GetAttachment)
 	// Listing exists because PTY sessions are deliberately never reaped (see
 	// registry.graceTTL): a session whose id has fallen out of the frontend's
 	// persisted pane layout is otherwise invisible and unkillable, and only a
@@ -882,6 +1040,13 @@ func main() {
 	listener, err := listenWithRetry("tcp", *addr, listenRetryWindow)
 	if err != nil {
 		log.Fatalf("listen on %s: %v", *addr, err)
+	}
+	// Now that the real port is known (it may have been OS-assigned from
+	// --addr ...:0), loopbackHubURL can be filled in for Reactor.InstanceFor's
+	// SSH branch above — see that variable's own doc comment for why it is
+	// loopback rather than *publicURL.
+	if _, port, err := net.SplitHostPort(listener.Addr().String()); err == nil {
+		loopbackHubURL = "http://127.0.0.1:" + port
 	}
 	if publicURLWasDefaulted {
 		// *addr may have used port 0 (OS-assigned); the flag-parse-time
@@ -1290,6 +1455,37 @@ func randomHex(n int) string {
 		return strings.Repeat("0", n*2)
 	}
 	return hex.EncodeToString(b)
+}
+
+// sshShellRunner adapts sshmgr.RunShell to service.ShellRunner by closing
+// over the same *sshmgr.FilePool every other pooled SSH consumer (SFTP,
+// stats polling, RunCommand) already shares — so an SSH chat thread's exec
+// tool dials through the exact same cached *ssh.Client per connection as
+// the file browser and stats poller, instead of opening a second one.
+type sshShellRunner struct {
+	pool *sshmgr.FilePool
+}
+
+func (r *sshShellRunner) RunShell(ctx context.Context, connectionID, command string) ([]byte, []byte, int, error) {
+	return sshmgr.RunShell(ctx, r.pool, connectionID, command)
+}
+
+// engineThreadPolicy adapts the orchestration engine's live thread state to
+// service.ThreadPolicy: the SSH tool gate reads a thread's RuntimeMode from
+// the exact same state the composer's mode pill writes to
+// (CmdThreadRuntimeModeSet), so switching a thread's mode mid-session takes
+// effect on its very next tool call — there is no separate policy store to
+// fall out of sync with it.
+type engineThreadPolicy struct {
+	engine *orchestration.Engine
+}
+
+func (p *engineThreadPolicy) ModeFor(threadID string) (provider.RuntimeMode, bool) {
+	t, ok := p.engine.State().Thread(threadID)
+	if !ok {
+		return "", false
+	}
+	return t.Mode, true
 }
 
 // loadOrCreateAuthKey resolves the AES-256 key used to encrypt TOTP secrets

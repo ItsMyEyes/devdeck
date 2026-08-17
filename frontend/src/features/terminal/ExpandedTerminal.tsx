@@ -24,10 +24,18 @@ import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import { isDocumentPath } from '@/features/documents/documentKind'
 import type { Machine, Worktree } from '@/store/types'
-import { useKillTerminalSession, useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
+import {
+  useAgentThreads,
+  useKillTerminalSession,
+  useMachines,
+  useUpdateWorktree,
+  useWorkspace,
+} from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
 import { agentChatEnabled } from '@/features/agent-chat/enabled'
+import { insertTerminalContext } from '@/features/agent-chat/ChatComposer'
+import { nextFreeThreadKey } from '@/features/agent-chat/SessionsPanel'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
@@ -44,6 +52,7 @@ import {
   addContentToLeaf,
   allocateTerminalContent,
   closeTab,
+  collectOpenChatThreadKeys,
   countUntitledContents,
   createAgentChatPane,
   createDefaultLayout,
@@ -77,7 +86,7 @@ import type {
 } from './paneTree'
 import { GitDiffPane, gitDiffLabel } from './GitDiffPane'
 import { ShellSidebar } from './ShellSidebar'
-import { Terminal, type TerminalHandle } from './Terminal'
+import { Terminal, type TerminalContextSelection, type TerminalHandle } from './Terminal'
 import { TerminalExplorer } from './TerminalExplorer'
 import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 import { UntitledFileEditor } from './UntitledFileEditor'
@@ -296,6 +305,10 @@ function TerminalWorkspace({
   const storedLayout = useDevDeckStore((s) => s.worktreeLayouts[worktree.id])
   const updateWorktree = useUpdateWorktree()
   const killTerminalSession = useKillTerminalSession(machine)
+  // Backs both the "+" menu's "New Chat" action and the Sessions panel it
+  // mirrors — the same query, so a session created from either place is
+  // already in `taken` the moment the other one would ask.
+  const chatSessions = useAgentThreads(machine, worktree.id)
 
   // Per-shell sidebar (spec §1/§3) — keyed the same way for every worktree tab.
   const shellKey = `wt:${worktree.id}`
@@ -658,6 +671,22 @@ function TerminalWorkspace({
     [worktree.id, setWorktreeLayout],
   )
 
+  /** `AgentChatContent` for an arbitrary threadKey. The primary chat pane uses
+   *  the bare worktree id; extras are `<worktreeId>::chat-N` — `createAgentChatPane`
+   *  rebuilds either shape from the seq it's given, so this round-trips a
+   *  threadKey (from a Sessions panel row, or a freshly minted one) back into
+   *  the pane content it names. Shared by `openAgentChatThread` below and the
+   *  "+" menu's "New Chat" action, so the two can never drift apart. */
+  const chatContentFor = useCallback(
+    (threadKey: string) => {
+      const seq = threadKey.startsWith(`${worktree.id}::chat-`)
+        ? Number(threadKey.slice(`${worktree.id}::chat-`.length))
+        : undefined
+      return createAgentChatPane(worktree.id, Number.isFinite(seq) ? seq : undefined)
+    },
+    [worktree.id],
+  )
+
   /** Opens (or refocuses) one agent-chat thread as its own pane tab, from a
    *  row in the sidebar's Sessions panel. Same "one instance per target,
    *  refocus if already open" dedup as `openGitDiff` — `createAgentChatPane`
@@ -667,13 +696,7 @@ function TerminalWorkspace({
   const openAgentChatThread = useCallback(
     (threadKey: string) => {
       const current = layoutRef.current
-      // The primary chat pane uses the bare worktree id; extras are
-      // `<worktreeId>::chat-N`. createAgentChatPane rebuilds either from the
-      // threadKey it was given, so the id round-trips exactly.
-      const seq = threadKey.startsWith(`${worktree.id}::chat-`)
-        ? Number(threadKey.slice(`${worktree.id}::chat-`.length))
-        : undefined
-      const content = createAgentChatPane(worktree.id, Number.isFinite(seq) ? seq : undefined)
+      const content = chatContentFor(threadKey)
       const existingLeaf = findLeafForContent(current.root, content.id)
       if (existingLeaf) {
         setWorktreeLayout(worktree.id, {
@@ -689,7 +712,7 @@ function TerminalWorkspace({
         focusedPaneId: current.focusedPaneId,
       })
     },
-    [worktree.id, setWorktreeLayout],
+    [worktree.id, setWorktreeLayout, chatContentFor],
   )
 
   /** The thread whose pane is currently focused, so the Sessions panel can
@@ -700,6 +723,50 @@ function TerminalWorkspace({
     const active = leaf.tabs.find((tab: PaneContent) => tab.id === leaf.activeTabId)
     return active?.kind === 'agent-chat' ? active.threadKey : undefined
   }, [layout])
+
+  /** Composer-context-attachments plan, T15 (C3) — "the most recently
+   *  focused agent-chat tab in this worktree's layout" (design spec's own
+   *  framing of why this needs a TRACKED field, not a derived one):
+   *  `activeThreadKey` above already derives "is a chat pane focused right
+   *  now" from the live layout; a terminal-selection capture happens while
+   *  the terminal pane is focused, so `activeThreadKey` is always `undefined`
+   *  at exactly the moment `handleSendToChat` below needs a target. This
+   *  just remembers the last time it wasn't. */
+  const lastFocusedChatThreadKeyRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (activeThreadKey) lastFocusedChatThreadKeyRef.current = activeThreadKey
+  }, [activeThreadKey])
+
+  /** Resolves which chat thread a terminal-selection capture reaches: the
+   *  tracked last-focused chat tab, as long as it's still open in this
+   *  layout, falling back to the primary chat thread (the bare worktree id)
+   *  when nothing has ever been focused or the tracked one has since closed
+   *  — `openAgentChatThread` (below) then opens it if it isn't already,
+   *  matching its own "open or refocus" contract (design spec: "if there is
+   *  none, capture opens one"). */
+  const resolveTerminalContextTargetThreadKey = useCallback(() => {
+    const tracked = lastFocusedChatThreadKeyRef.current
+    if (tracked && collectOpenChatThreadKeys(layoutRef.current.root).includes(tracked)) return tracked
+    return worktree.id
+  }, [worktree.id])
+
+  /** `Terminal`'s "Send to chat" affordance (T13) → the composer's
+   *  `terminalContext` chip (T14), via `ChatComposer.tsx`'s own C3 bridge
+   *  (`insertTerminalContext` — a module-level registry, not a ref threaded
+   *  through `AgentChatPane`, because that file belongs to a different
+   *  task's ownership; see that function's doc comment). Focuses/opens the
+   *  target pane first, the same way the Sessions panel does
+   *  (`openAgentChatThread`), so the operator sees where the capture landed. */
+  const handleSendToChat = useCallback(
+    (terminalLabel: string, selection: TerminalContextSelection) => {
+      const threadKey = resolveTerminalContextTargetThreadKey()
+      openAgentChatThread(threadKey)
+      const value = `${selection.sessionKey}/L${selection.startLine}-L${selection.endLine}`
+      const label = `${terminalLabel} lines ${selection.startLine}-${selection.endLine}`
+      insertTerminalContext(threadKey, value, label, selection.text)
+    },
+    [resolveTerminalContextTargetThreadKey, openAgentChatThread],
+  )
 
   /** MarkdownFileEditor's edit-mode "open preview in new tab" button — opens
    *  (or refocuses) `path`'s rendered preview as its own tab, alongside
@@ -741,6 +808,43 @@ function TerminalWorkspace({
       }
     }
     openKindInFocusedPane(kind)
+  }
+
+  /** "+" new-tab button's "New Chat" action — starts a brand-new agent thread in
+   *  `paneId` specifically. Unlike `openAgentChatThread` (which always targets
+   *  whichever pane is currently focused, because a Sessions-panel row has no
+   *  pane of its own to prefer), the "+" button is scoped to the pane the user
+   *  actually clicked it on — see `PanelHeader`'s `newTabActions` doc comment.
+   *
+   *  Mirrors `SessionsPanel`'s own "New session" button: there is no create
+   *  endpoint, a thread only exists once its WebSocket says hello, so "new
+   *  chat" is just "open a pane for a threadKey nobody has used yet"
+   *  (`nextFreeThreadKey`). The existing-leaf check guards the one case that
+   *  can still collide with itself — two clicks before the first thread's
+   *  socket has connected — the same way `handleNewStatsTab` below dedupes. */
+  function handleNewChatTab(paneId: string) {
+    // Union of backend-persisted threads and open-but-unpersisted pane tabs —
+    // see collectOpenChatThreadKeys's doc comment for why the backend list
+    // alone isn't enough.
+    const taken = [
+      ...(chatSessions.data ?? []).map((thread) => thread.id),
+      ...collectOpenChatThreadKeys(layout.root),
+    ]
+    const content = chatContentFor(nextFreeThreadKey(worktree.id, taken))
+    const existingLeaf = findLeafForContent(layout.root, content.id)
+    if (existingLeaf) {
+      commitLayout({
+        ...layout,
+        root: selectTabInTree(layout.root, existingLeaf.id, content.id),
+        focusedPaneId: existingLeaf.id,
+      })
+      return
+    }
+    commitLayout({
+      ...layout,
+      root: addContentToLeaf(layout.root, paneId, content),
+      focusedPaneId: paneId,
+    })
   }
 
   /** "+" new-tab button / `Ctrl+T` — adds a brand-new independent Terminal tab to `paneId`'s
@@ -957,6 +1061,17 @@ function TerminalWorkspace({
   function renderNewTabActions(pane: LeafPane) {
     return (
       <div className="flex min-w-[168px] flex-col gap-0.5">
+        {/* Chat is the default content for a new worktree (see
+            createDefaultWorktreeLayout above), so it leads this menu too —
+            hidden outright rather than disabled when shipped builds have no
+            agent to chat with (@/features/agent-chat/enabled). SSHShellPane's
+            own "+" menu has no agent either, so it never gets this item. */}
+        {agentChatEnabled() ? (
+          <OverflowItem onClick={() => handleNewChatTab(pane.id)}>
+            <MessageSquare size={13} />
+            New Chat
+          </OverflowItem>
+        ) : null}
         <OverflowItem onClick={() => handleNewTerminalTab(pane.id)}>
           <TerminalSquare size={13} />
           New Terminal
@@ -994,6 +1109,7 @@ function TerminalWorkspace({
             ctrlArmed={ctrlArmed && isFocusedTerminal}
             onCtrlConsumed={() => setCtrlArmed(false)}
             onExit={() => handleTerminalExit(content.sessionKey)}
+            onSendToChat={(selection) => handleSendToChat(content.label, selection)}
           />
         </div>
       )
@@ -1061,6 +1177,7 @@ function TerminalWorkspace({
       if (content.kind !== 'agent-chat') return null
       return (
         <AgentChatPane
+          target={{ kind: 'machine', machine }}
           worktreeId={worktree.id}
           threadKey={content.threadKey}
           machine={machine}

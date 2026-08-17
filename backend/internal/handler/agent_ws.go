@@ -267,7 +267,15 @@ func (h *AgentWSHandler) autoCreateThread(ctx context.Context, threadID string) 
 // either a bare worktree id or "<worktreeId>::chat-N" for extra split chat
 // panes (see paneTree.ts) — both name the same worktree, so only the prefix
 // before "::" is looked up.
+//
+// An SSH thread (orchestration.IsSSHThread) has no worktree at all — the
+// WorktreeByID lookup below would simply fail "not found" for it — so it is
+// resolved to the default agent instance directly, the same fallback
+// InstanceIDForAgent("") and Reactor.InstanceFor's SSH branch both take.
 func (h *AgentWSHandler) resolveInstanceID(threadID string) (string, error) {
+	if orchestration.IsSSHThread(threadID) {
+		return string(orchestration.InstanceIDForAgent("")), nil
+	}
 	wt, err := h.store.WorktreeByID(orchestration.WorktreeIDForThread(threadID))
 	if err != nil {
 		return "", fmt.Errorf("agent thread %s: %w", threadID, err)
