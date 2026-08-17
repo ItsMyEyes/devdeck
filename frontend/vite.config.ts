@@ -189,6 +189,7 @@ export default defineConfig({
       'src/features/agent-chat/terminalContext.test.ts',
       'src/features/agent-chat/composerNodes.test.ts',
       'src/features/agent-chat/composerMention.test.ts',
+      'src/features/agent-chat/composerMention.ssh.test.ts',
       'src/features/agent-chat/ComposerSuggestionMenu.test.tsx',
       'src/features/agent-chat/composerSkillTrigger.test.ts',
       'src/features/agent-chat/composerSlashTrigger.test.ts',
