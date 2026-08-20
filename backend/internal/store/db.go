@@ -298,7 +298,41 @@ CREATE TABLE IF NOT EXISTS settings (
   -- docs/superpowers/specs/2026-08-06-published-socks5-design.md
   socks_publish_enabled INTEGER NOT NULL DEFAULT 0,
   socks_publish_port    INTEGER NOT NULL DEFAULT 1080,
-  socks_publish_key     TEXT NOT NULL DEFAULT ''
+  socks_publish_key     TEXT NOT NULL DEFAULT '',
+  -- Telegram remote-chat bridge for THIS machine. One bot token per process:
+  -- Telegram's getUpdates is exclusive per token, so two processes cannot
+  -- share one. See docs/superpowers/plans/2026-08-18-telegram-remote-chat.md
+  telegram_enabled      INTEGER NOT NULL DEFAULT 0,
+  telegram_token        TEXT NOT NULL DEFAULT '',
+  telegram_bot_username TEXT NOT NULL DEFAULT '',
+  -- BYOK configuration for AI inline completions. See
+  -- docs/superpowers/specs/2026-08-14-lsp-grounded-inline-completions-design.md
+  completions_provider  TEXT NOT NULL DEFAULT 'anthropic',
+  completions_base_url  TEXT NOT NULL DEFAULT '',
+  completions_model     TEXT NOT NULL DEFAULT 'claude-haiku-4-5',
+  completions_enabled   INTEGER NOT NULL DEFAULT 0,
+  completions_api_key   TEXT NOT NULL DEFAULT '',
+  -- Persistent agent memory (Hindsight-backed), hub-only — see
+  -- domain.MemoryConfig's doc comment for why a runtime has no copy of this.
+  memory_enabled        INTEGER NOT NULL DEFAULT 0,
+  memory_base_url       TEXT NOT NULL DEFAULT '',
+  memory_bank_id        TEXT NOT NULL DEFAULT 'devdeck',
+  -- "manual" (operator-supplied BaseURL) or "local" (hub manages a
+  -- container on its own machine — see internal/memoryhost).
+  memory_hosting        TEXT NOT NULL DEFAULT 'manual',
+  memory_local_port     INTEGER NOT NULL DEFAULT 8888,
+  -- Persisted intent, not live state: true means "re-start the local
+  -- container on next hub boot", mirroring socks_publish_enabled above.
+  memory_local_running  INTEGER NOT NULL DEFAULT 0,
+  memory_llm_provider   TEXT NOT NULL DEFAULT 'openai',
+  memory_llm_model      TEXT NOT NULL DEFAULT '',
+  memory_llm_base_url   TEXT NOT NULL DEFAULT '',
+  memory_auto_recall    INTEGER NOT NULL DEFAULT 1,
+  memory_auto_retain    INTEGER NOT NULL DEFAULT 1,
+  memory_recall_budget  TEXT NOT NULL DEFAULT 'mid',
+  memory_max_tokens     INTEGER NOT NULL DEFAULT 1536,
+  memory_api_key        TEXT NOT NULL DEFAULT '',
+  memory_llm_api_key    TEXT NOT NULL DEFAULT ''
 );
 
 -- sync_state tracks the runtime replica's last successful catalog apply.
@@ -367,6 +401,79 @@ CREATE TABLE IF NOT EXISTS agent_command_receipt (
   created_at INTEGER NOT NULL
 );
 
+-- No REFERENCES agent_thread(id), deliberately — matching agent_event.thread_id
+-- and agent_command_receipt.thread_id above. Foreign keys are ON, and a hard
+-- FK would reject an upload made before the thread's EvtThreadCreated has
+-- committed a row, which C2's "upload immediately, on add" makes a real
+-- ordering. See store/agentattachment.go.
+CREATE TABLE IF NOT EXISTS agent_attachment (
+  id          TEXT PRIMARY KEY,
+  thread_id   TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  mime_type   TEXT NOT NULL DEFAULT '',
+  size_bytes  INTEGER NOT NULL DEFAULT 0,
+  data        BLOB NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_attachment_thread ON agent_attachment(thread_id);
+
+-- telegram_users is the pairing allowlist for THIS machine's bot. Enrolment
+-- is always /pair — there is no INSERT path that doesn't go through Pairing.
+CREATE TABLE IF NOT EXISTS telegram_users (
+  user_id  INTEGER PRIMARY KEY,
+  label    TEXT NOT NULL DEFAULT '',
+  added_at INTEGER NOT NULL DEFAULT 0
+);
+
+-- telegram_bindings maps one orchestration thread to one Telegram
+-- destination (chat + optional forum topic). One row per thread: publishing
+-- a thread again just moves where it points, via SetTelegramBinding.
+CREATE TABLE IF NOT EXISTS telegram_bindings (
+  thread_id TEXT PRIMARY KEY,
+  chat_id   INTEGER NOT NULL,
+  topic_id  INTEGER NOT NULL DEFAULT 0,
+  model     TEXT NOT NULL DEFAULT '',
+  last_seq  INTEGER NOT NULL DEFAULT 0,
+  -- Which agent the NEXT session in this destination starts on, "" = the
+  -- thread's own. Mirrors telegram_project_bindings.agent for a destination
+  -- publishing a single thread (an SSH connection, typically) rather than a
+  -- project: a thread's agent is fixed at thread.create, so /agents can only
+  -- choose for the session /new creates next.
+  agent             TEXT NOT NULL DEFAULT '',
+  -- The /init confirmation this bridge pinned in the destination chat, 0 when
+  -- nothing is pinned. Stored rather than re-derived because unpinning needs
+  -- the exact message id: Telegram's unpinChatMessage with no id removes the
+  -- MOST RECENT pin in the chat, which may well be something the operator
+  -- pinned themselves.
+  pinned_message_id INTEGER NOT NULL DEFAULT 0
+);
+
+-- telegram_project_bindings publishes a whole PROJECT to one forum-enabled
+-- supergroup: every session in the project gets its own topic in that group,
+-- created on demand, and each of those is an ordinary row in
+-- telegram_bindings. This table only records the group; the per-session rows
+-- are what inbound routing actually reads, so a message still resolves to one
+-- thread by a pure (chat_id, topic_id) lookup with no "active session" state
+-- anywhere.
+--
+-- No topic_id column, unlike telegram_bindings: a project owns the WHOLE
+-- group, not one topic in it.
+CREATE TABLE IF NOT EXISTS telegram_project_bindings (
+  project_id        TEXT PRIMARY KEY,
+  chat_id           INTEGER NOT NULL,
+  -- One project = one TOPIC, not one group. Matching on chat alone made a
+  -- published project answer in every topic of the group at once, which is
+  -- both noisy and impossible to manage; scoping to the destination the
+  -- /init was sent from lets one group hold several projects side by side.
+  topic_id          INTEGER NOT NULL DEFAULT 0,
+  pinned_message_id INTEGER NOT NULL DEFAULT 0,
+  -- Which agent new sessions in this destination start on, "" = the default.
+  -- Stored on the PROJECT rather than the session because a session's agent
+  -- is fixed at thread.create and there is no command to change it
+  -- afterwards, so /agents can only ever choose for the NEXT session.
+  agent             TEXT NOT NULL DEFAULT ''
+);
+
 INSERT OR IGNORE INTO settings (id, active_workspace_id, default_model)
 VALUES (1, NULL, 'claude-sonnet-5');
 `
@@ -432,6 +539,22 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateSettingsCompletions(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateSettingsMemory(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateSettingsTelegram(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateTelegramBindingPin(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := migrateAgentThreadColumns(db); err != nil {
 		db.Close()
 		return nil, err
@@ -467,6 +590,108 @@ func migrateSettingsPublishedSOCKS(db *sql.DB) error {
 			if !strings.Contains(err.Error(), "duplicate column name") {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// migrateSettingsCompletions adds the BYOK inline-completions columns
+// (introduced with LSP-grounded AI inline completions) to pre-existing
+// databases.
+func migrateSettingsCompletions(db *sql.DB) error {
+	cols := []string{
+		"completions_provider TEXT NOT NULL DEFAULT 'anthropic'",
+		"completions_base_url TEXT NOT NULL DEFAULT ''",
+		"completions_model TEXT NOT NULL DEFAULT 'claude-haiku-4-5'",
+		"completions_enabled INTEGER NOT NULL DEFAULT 0",
+		"completions_api_key TEXT NOT NULL DEFAULT ''",
+	}
+	for _, col := range cols {
+		if _, err := db.Exec("ALTER TABLE settings ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migrateSettingsMemory adds the persistent agent-memory columns (introduced
+// when DevDeck gained one shared Hindsight-backed memory across every
+// provider and every runtime) to pre-existing databases.
+func migrateSettingsMemory(db *sql.DB) error {
+	cols := []string{
+		"memory_enabled INTEGER NOT NULL DEFAULT 0",
+		"memory_base_url TEXT NOT NULL DEFAULT ''",
+		"memory_bank_id TEXT NOT NULL DEFAULT 'devdeck'",
+		"memory_hosting TEXT NOT NULL DEFAULT 'manual'",
+		"memory_local_port INTEGER NOT NULL DEFAULT 8888",
+		"memory_local_running INTEGER NOT NULL DEFAULT 0",
+		"memory_llm_provider TEXT NOT NULL DEFAULT 'openai'",
+		"memory_llm_model TEXT NOT NULL DEFAULT ''",
+		"memory_llm_base_url TEXT NOT NULL DEFAULT ''",
+		"memory_auto_recall INTEGER NOT NULL DEFAULT 1",
+		"memory_auto_retain INTEGER NOT NULL DEFAULT 1",
+		"memory_recall_budget TEXT NOT NULL DEFAULT 'mid'",
+		"memory_max_tokens INTEGER NOT NULL DEFAULT 1536",
+		"memory_api_key TEXT NOT NULL DEFAULT ''",
+		"memory_llm_api_key TEXT NOT NULL DEFAULT ''",
+	}
+	for _, col := range cols {
+		if _, err := db.Exec("ALTER TABLE settings ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migrateSettingsTelegram adds the Telegram bridge columns to pre-existing
+// databases. Same duplicate-column-tolerant idiom as the SOCKS migration
+// above: SQLite has no ADD COLUMN IF NOT EXISTS.
+func migrateSettingsTelegram(db *sql.DB) error {
+	cols := []string{
+		"telegram_enabled INTEGER NOT NULL DEFAULT 0",
+		"telegram_token TEXT NOT NULL DEFAULT ''",
+		"telegram_bot_username TEXT NOT NULL DEFAULT ''",
+	}
+	for _, col := range cols {
+		if _, err := db.Exec("ALTER TABLE settings ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migrateTelegramBindingPin adds pinned_message_id to pre-existing databases.
+// Bindings written before this migration read back as 0 — "nothing pinned" —
+// which is exactly right: this bridge did not pin anything for them, so
+// unpublishing them must not go looking for a pin to remove.
+func migrateTelegramBindingPin(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE telegram_bindings ADD COLUMN pinned_message_id INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	// telegram_project_bindings is created by the schema above with both
+	// columns, so these only matter for a database that ran one of the early
+	// builds where the table existed without them.
+	for _, col := range []string{
+		"agent TEXT NOT NULL DEFAULT ''",
+		"topic_id INTEGER NOT NULL DEFAULT 0",
+	} {
+		if _, err := db.Exec("ALTER TABLE telegram_project_bindings ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	if _, err := db.Exec("ALTER TABLE telegram_bindings ADD COLUMN agent TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return err
 		}
 	}
 	return nil

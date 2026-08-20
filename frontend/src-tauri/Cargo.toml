@@ -26,6 +26,15 @@ tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
+# Native "where do you want to save this?" dialog + the write that follows it.
+# The webview has no working alternative: WKWebView has no showSaveFilePicker,
+# and an `<a download>` on a blob: URL is swallowed outright because wry only
+# installs a WKDownloadDelegate when a download handler is registered. Both
+# plugins are needed together — dialog's `save()` returns a path *and* adds it
+# to the fs scope for the session, which is what makes fs's write_file legal
+# for a location the user picked at runtime. See frontend/src/lib/saveFile.ts.
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 getrandom = "0.4"
 tokio = { version = "1", features = ["time", "signal", "macros", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }

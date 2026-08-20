@@ -1,5 +1,7 @@
+import type { ReactElement, ReactNode } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
 import { emptyThreadView } from '@/features/agent-chat/eventReducer'
@@ -67,11 +69,27 @@ beforeAll(async () => {
 // static stub, so each connect-gate test can configure its own
 // data/isLoading/isError shape.
 const mockAgentThreads = vi.fn()
+// `vi.fn()`-backed (not a static stub) so the fallback-default tests below can
+// populate a real catalog without touching every other test in this file,
+// which never overrides them and keeps getting the empty-array default.
+const mockAgents = vi.fn()
+const mockAgentModels = vi.fn()
 vi.mock('@/features/data/queries', () => ({
-  useAgents: () => ({ data: [], isLoading: false, error: null }),
-  useAgentModels: () => ({ data: [], isLoading: false, error: null }),
+  useAgents: () => mockAgents(),
+  useAgentModels: () => mockAgentModels(),
   useAgentThreads: () => mockAgentThreads(),
   useAgentSkills: () => ({ data: [], isLoading: false, error: null }),
+  // The pane probes its runtime for the agent-chat capability. `null` is the
+  // "reported no capability list" answer an older runtime gives, which
+  // `agentChatSupport` maps to 'unknown' — i.e. connect and find out, today's
+  // behaviour for every test in this file. Returning 'unsupported' here would
+  // instead black the pane out behind an update-your-runtime banner.
+  useMachineCapabilities: () => ({ data: null, isError: false }),
+  // `ChatHeader` mounts the real `TelegramPublishButton`, which reads the
+  // catalog to find which project a thread belongs to (so it can offer
+  // publishing the whole project). No workspaces means no project, which is
+  // the header state every test in this file is asserting about.
+  useWorkspaces: () => ({ data: [], isLoading: false, error: null }),
 }))
 
 // T11 (composer-context-attachments, C2): only `uploadAgentAttachment` is
@@ -89,11 +107,46 @@ vi.mock('@/features/agent-chat/imageCompression', () => ({
   downscaleImage: async (file: File) => file,
 }))
 
+// `ChatHeader` renders the real `TelegramPublishButton`, which runs a real
+// `useQuery` against the app's ambient client — the one `src/main.tsx` wraps
+// the whole tree in. This suite mounts the pane bare, so it has to supply
+// that provider itself; without it React Query throws "No QueryClient set".
+// (The button deliberately does NOT carry a private client of its own: that
+// would cut it off from the invalidations its own mutations fire. See
+// TelegramPublishButton.tsx's doc comment.)
+//
+// `machineRequest` is stubbed alongside it so the query resolves in-process:
+// these are pane-state tests, and a real fetch at `machine.url` would be a
+// network call jsdom cannot serve.
+vi.mock('@/lib/machineClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/machineClient')>()
+  return { ...actual, machineRequest: async () => [] }
+})
+
+/** Wraps every render in the ambient `QueryClientProvider` production has.
+ *  One client per `render()` (not per wrapper render — a fresh client on
+ *  every re-render would wipe the cache under `rerender`), and `retry: false`
+ *  so a query that does fail settles at once instead of back-off-retrying
+ *  past the end of the test. */
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  return rtlRender(ui, { wrapper })
+}
+
 beforeEach(() => {
   // Default: no thread yet, query settled, no error — every pre-existing
   // test in this file (which predates the connect gate) never inspects
   // `capturedSocketOpts.connect`, so this default only needs to not throw.
-  mockAgentThreads.mockReturnValue({ data: [], isLoading: false, isError: false })
+  mockAgentThreads.mockReturnValue({ data: [], isPending: false, isLoading: false, isError: false })
+  // Default: empty catalog, matching the old static stub — every pre-existing
+  // test in this file never populates a real agent/model catalog, so the
+  // model-pill fallback default (below) resolves to nothing and they see the
+  // same behaviour as before that fallback existed.
+  mockAgents.mockReturnValue({ data: [], isLoading: false, error: null })
+  mockAgentModels.mockReturnValue({ data: [], isLoading: false, error: null })
 })
 
 const machine = { id: 'm-1', name: 'dev', url: 'http://localhost:8989', key: 'k' } as never
@@ -121,6 +174,66 @@ describe('AgentChatPane', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 
+  // `ChatHeader` mounts `TelegramPublishButton` for every thread it renders
+  // (Task 7 of docs/superpowers/plans/2026-08-18-telegram-remote-chat.md),
+  // and that button runs a real `useQuery`. This asserts the whole mount:
+  // the button is there, addressed at this pane's thread, and it resolves
+  // against the ambient client rather than throwing "No QueryClient set".
+  it('mounts the Telegram publish action in the header', async () => {
+    mockSocket.mockReturnValue({
+      view: emptyThreadView(), status: 'open',
+      sendTurn: vi.fn(), abortTurn: vi.fn(),
+      setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
+    })
+    render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    // Matched on "telegram", not on the publish-ready wording: this file
+    // mocks no telegram API, so the config query never resolves and the
+    // button correctly reads "Telegram belum diatur" (readinessOf treats an
+    // unresolved config as no-token, deliberately failing closed). Asserting
+    // the ready label demanded a backend state the test never arranges, which
+    // is why it failed regardless of the button working.
+    //
+    // `find`, not `get`: the binding list is a query, so the button settles
+    // asynchronously either way.
+    expect(await screen.findByRole('button', { name: /telegram/i })).toBeInTheDocument()
+  })
+
+  // The seam between this pane and `ChatHeader`'s own `actions` slot. Both
+  // ends are trivial on their own and neither has a reason to fail in
+  // isolation, which is exactly why the wiring between them is what gets
+  // tested: `SSHAgentChatPanel` (the only supplier today) mocks this pane
+  // away in its own tests, so nothing else covers the hand-off.
+  it('renders headerActions in the chat header', () => {
+    mockSocket.mockReturnValue({
+      view: emptyThreadView(), status: 'open',
+      sendTurn: vi.fn(), abortTurn: vi.fn(),
+      setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
+    })
+    render(
+      <AgentChatPane
+        target={{ kind: 'machine', machine }}
+        worktreeId="w-abc"
+        threadKey="w-abc"
+        machine={machine}
+        headerActions={<button type="button">Session history</button>}
+      />,
+    )
+    const action = screen.getByRole('button', { name: 'Session history' })
+    expect(action.closest('div')?.textContent).toContain('Session history')
+    // Above the transcript, not inside the composer.
+    expect(screen.getByText('Chat').closest('div')).toContainElement(action)
+  })
+
+  it('renders no header actions when the caller supplies none', () => {
+    mockSocket.mockReturnValue({
+      view: emptyThreadView(), status: 'open',
+      sendTurn: vi.fn(), abortTurn: vi.fn(),
+      setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
+    })
+    render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    expect(screen.queryByRole('button', { name: 'Session history' })).toBeNull()
+  })
+
   it('names the worktree in the hero prompt when it knows it', () => {
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'open',
@@ -137,14 +250,20 @@ describe('AgentChatPane', () => {
   // The hero composer and the docked one are the same component in two
   // placements — the status strip is the tell, since it belongs to the docked
   // one only.
-  it('drops the status strip from the hero composer and keeps it on the docked one', () => {
+  // Was "drops the status strip from the hero composer and keeps it on the
+  // docked one" — there is no strip in either placement now. Inverted rather
+  // than deleted: the worktree label still reaches this pane (the header badge
+  // and the hero heading both use it), so "it is passed in" must not drift
+  // back into "it is also printed under the composer".
+  it('renders no worktree/branch strip under either composer placement', () => {
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'open',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
       setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
     })
-    const { rerender } = render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} worktreeLabel="auth" branch="main" />)
-    expect(screen.queryByText('main')).not.toBeInTheDocument()
+    const { rerender } = render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} worktreeLabel="auth" />)
+    // Hero: the heading names the worktree, and that is the only place it appears.
+    expect(screen.getAllByText(/auth/)).toHaveLength(1)
 
     mockSocket.mockReturnValue({
       view: {
@@ -155,8 +274,9 @@ describe('AgentChatPane', () => {
       sendTurn: vi.fn(), abortTurn: vi.fn(),
       setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
     })
-    rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} worktreeLabel="auth" branch="main" />)
-    expect(screen.getByText('main')).toBeInTheDocument()
+    rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} worktreeLabel="auth" />)
+    // Docked: the hero heading is gone, so nothing names it at all.
+    expect(screen.queryByText(/auth/)).not.toBeInTheDocument()
   })
 
   it('surfaces a thread error instead of rendering an empty timeline', () => {
@@ -522,7 +642,7 @@ describe('AgentChatPane — turnModel', () => {
 // `threadKey` into the composer so a hero↔docked remount survives.
 describe('AgentChatPane — connect gate', () => {
   it('passes connect:false when no thread in useAgentThreads matches this threadKey', () => {
-    mockAgentThreads.mockReturnValue({ data: [{ id: 'some-other-thread' }], isLoading: false, isError: false })
+    mockAgentThreads.mockReturnValue({ data: [{ id: 'some-other-thread' }], isPending: false, isLoading: false, isError: false })
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'draft',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
@@ -534,7 +654,7 @@ describe('AgentChatPane — connect gate', () => {
   })
 
   it('passes connect:true when a matching thread exists', () => {
-    mockAgentThreads.mockReturnValue({ data: [{ id: 'w-abc' }], isLoading: false, isError: false })
+    mockAgentThreads.mockReturnValue({ data: [{ id: 'w-abc' }], isPending: false, isLoading: false, isError: false })
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'connecting',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
@@ -548,7 +668,7 @@ describe('AgentChatPane — connect gate', () => {
   // Fail open: a stray empty row is cheaper than a real thread that never
   // connects because its existence check hasn't resolved yet.
   it('passes connect:true (fail-open) while the threads query is still loading', () => {
-    mockAgentThreads.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+    mockAgentThreads.mockReturnValue({ data: undefined, isPending: true, isLoading: true, isError: false })
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'connecting',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
@@ -560,7 +680,7 @@ describe('AgentChatPane — connect gate', () => {
   })
 
   it('passes connect:true (fail-open) when the threads query errors', () => {
-    mockAgentThreads.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+    mockAgentThreads.mockReturnValue({ data: undefined, isPending: false, isLoading: false, isError: true })
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'connecting',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
@@ -576,7 +696,7 @@ describe('AgentChatPane — connect gate', () => {
   // otherwise a stale query result could flap the gate back to false
   // mid-turn.
   it('keeps connect:true after the first send even when useAgentThreads has not caught up', async () => {
-    mockAgentThreads.mockReturnValue({ data: [], isLoading: false, isError: false })
+    mockAgentThreads.mockReturnValue({ data: [], isPending: false, isLoading: false, isError: false })
     const sendTurn = vi.fn()
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'draft',
@@ -617,7 +737,7 @@ describe('AgentChatPane — connect gate', () => {
   // what makes the swap safe in practice, not the unmount flush alone.
   it('keeps typed text through the hero↔docked remount once the debounce has committed it', () => {
     vi.useFakeTimers()
-    mockAgentThreads.mockReturnValue({ data: [{ id: 'w-abc' }], isLoading: false, isError: false })
+    mockAgentThreads.mockReturnValue({ data: [{ id: 'w-abc' }], isPending: false, isLoading: false, isError: false })
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'connecting',
       sendTurn: vi.fn(), abortTurn: vi.fn(),
@@ -683,5 +803,125 @@ describe('AgentChatPane — attachments', () => {
       { options: { effort: 'high', contextWindow: '200k' } },
       [{ id: 'att-1', kind: 'image', mime: 'image/png', name: 'shot.png' }],
     )
+  })
+})
+
+// ── the model pill survives leaving the pane ─────────────────────────────────
+//
+// The picker's value is local state, because a model rides the NEXT turn
+// rather than changing the thread. That made it correct while you sat in one
+// pane and wrong the moment you left: every tab / pane / SSH-session switch
+// remounts this component, the state went back to `null`, and the pill read
+// "Model" on a thread that had been running Sonnet for twenty turns — with the
+// operator's next message then silently going to the worktree's DEFAULT model.
+describe('AgentChatPane — model pill restore', () => {
+  function threadOn(agent: string | undefined, model: string | undefined) {
+    return {
+      ...emptyThreadView(),
+      items: [
+        { id: 'u1', kind: 'user' as const, text: 'go', createdAt: 1, updatedAt: 1, lastSequence: 0 },
+        {
+          id: 'a1', kind: 'assistant' as const, text: 'done', createdAt: 2, updatedAt: 2, lastSequence: 0,
+          ...(agent ? { turnAgent: agent } : {}),
+          ...(model ? { turnModel: model } : {}),
+        },
+      ],
+      status: 'idle' as const,
+    }
+  }
+
+  function mount(view: ReturnType<typeof threadOn>, threadKey = 'w-abc') {
+    mockSocket.mockReturnValue({ view, status: 'open', sendTurn: vi.fn(), abortTurn: vi.fn() })
+    return render(
+      <AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey={threadKey} machine={machine} />,
+    )
+  }
+
+  it('names the model the thread’s last turn actually ran on', () => {
+    mount(threadOn('claude', 'claude-sonnet-5'))
+    expect(screen.getAllByTitle('claude-sonnet-5').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+  })
+
+  // The state that used to be lost: a fresh mount is exactly what a tab switch
+  // produces, and it must land on the same model rather than the placeholder.
+  it('still names it after a remount', () => {
+    const view = threadOn('claude', 'claude-sonnet-5')
+    mount(view)
+    cleanup()
+    mount(view)
+    expect(screen.getAllByTitle('claude-sonnet-5').length).toBeGreaterThan(0)
+  })
+
+  it('falls back to the placeholder on a thread that never completed a turn', () => {
+    mount(threadOn(undefined, undefined))
+    expect(screen.getAllByText('Model').length).toBeGreaterThan(0)
+  })
+
+  // The reported bug: a thread on a provider whose turns never carry a model
+  // (nothing was ever picked, so `TurnStartedPayload.Model` is always empty —
+  // e.g. Pi) showed a bare "Model" placeholder forever after closing and
+  // reopening it, with no indication of what the next message would actually
+  // run on. Absent a pick or a resumable turn, the pill now falls back to the
+  // catalog's own rank-0 agent and that agent's rank-0 model.
+  it('defaults to the first installed agent and its first model when nothing was ever picked or resumed', () => {
+    mockAgents.mockReturnValue({
+      data: [{ id: 'pi', name: 'Pi', description: '', icon: 'pi', installed: true, modelCount: 1, skillCount: 0 }],
+      isLoading: false,
+      error: null,
+    })
+    mockAgentModels.mockReturnValue({
+      data: [{ id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 (via Pi)', contextWindow: 200000 }],
+      isLoading: false,
+      error: null,
+    })
+
+    mount(threadOn(undefined, undefined))
+
+    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+    expect(screen.getAllByTitle('Claude Sonnet 5 (via Pi)').length).toBeGreaterThan(0)
+  })
+
+  // Same default, verified on the wire — the fallback is a real
+  // ModelSelection, not just cosmetic on the pill.
+  it('sends the fallback default as an explicit ModelSelection', async () => {
+    mockAgents.mockReturnValue({
+      data: [{ id: 'pi', name: 'Pi', description: '', icon: 'pi', installed: true, modelCount: 1, skillCount: 0 }],
+      isLoading: false,
+      error: null,
+    })
+    mockAgentModels.mockReturnValue({
+      data: [{ id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 (via Pi)', contextWindow: 200000 }],
+      isLoading: false,
+      error: null,
+    })
+    const sendTurn = vi.fn()
+    mockSocket.mockReturnValue({ view: threadOn(undefined, undefined), status: 'open', sendTurn, abortTurn: vi.fn() })
+    render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+
+    await userEvent.type(screen.getByRole('textbox'), 'hi{Enter}')
+
+    expect(sendTurn).toHaveBeenCalledWith(
+      'hi',
+      { instanceId: 'pi:default', model: 'anthropic/claude-sonnet-5', options: { effort: 'high', contextWindow: '200k' } },
+      [],
+    )
+  })
+
+  // `threadKey` changes IN PLACE here — neither call site keys this component
+  // by thread — so switching sessions must not leave the previous thread's
+  // model on the pill.
+  it('does not carry one thread’s model onto another', () => {
+    const { rerender } = mount(threadOn('claude', 'claude-sonnet-5'), 'thread-a')
+    expect(screen.getAllByTitle('claude-sonnet-5').length).toBeGreaterThan(0)
+
+    mockSocket.mockReturnValue({
+      view: threadOn('claude', 'claude-opus-5'), status: 'open', sendTurn: vi.fn(), abortTurn: vi.fn(),
+    })
+    rerender(
+      <AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="thread-b" machine={machine} />,
+    )
+    expect(screen.getAllByTitle('claude-opus-5').length).toBeGreaterThan(0)
+    expect(screen.queryByTitle('claude-sonnet-5')).not.toBeInTheDocument()
   })
 })

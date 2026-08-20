@@ -38,8 +38,50 @@ type Ingestion struct {
 	// Delivery controls buffering of assistant text. See the note below.
 	Delivery DeliveryPolicy
 
+	// Memory retains the assistant's reply text into persistent agent memory
+	// when a turn ends. Zero value is a no-op — see MemoryHooks' doc comment.
+	Memory MemoryHooks
+
 	mu      sync.Mutex
 	buffers map[string]*assistantBuffer // key: threadID|turnID|itemID
+
+	// memoryText accumulates one turn's assistant text per thread, independent
+	// of buffers above: buffers are flushed (and their keys deleted) as soon
+	// as a delivery boundary is hit, but retain needs the FULL reply, so it
+	// keeps its own copy alive until TurnCompleted/TurnAborted. Keyed by
+	// threadID alone — a thread runs one turn at a time.
+	memoryText map[string]*strings.Builder
+
+	// signals tracks whether the in-flight turn has said ANYTHING the operator
+	// can see. See turnSignal and the TurnCompleted case for what it is for.
+	// Keyed by threadID alone, for the same reason memoryText is.
+	signals map[string]*turnSignal
+}
+
+// turnSignal is the bookkeeping behind "a turn must never end silently".
+//
+// A turn can produce nothing for many reasons — a model refusal with no
+// fallback, a CLI that exits mid-turn, a provider shape DevDeck has never
+// seen — and every one of them used to look identical from the client's
+// seat: `status: running` followed by `status: idle`, an empty transcript,
+// and no way to tell a refusal from a crash from a bug in DevDeck. The
+// operator's only recourse was to retype the message and watch it happen
+// again.
+//
+// This is deliberately provider-AGNOSTIC. The claude parser now reports its
+// own reasons (see parse.go's parseSystem/parseResult), but that only covers
+// the shapes that parser knows; codex, opencode and pi reach this same code
+// path, and so does the next CLI release with a failure mode nobody has seen
+// yet. Anything that slips past every provider-specific case still ends the
+// turn here, and here it is caught.
+type turnSignal struct {
+	// produced: the turn emitted something renderable — assistant text, a tool
+	// call, an approval card, a proposed plan.
+	produced bool
+	// reported: a reason has ALREADY reached the transcript (a runtime error or
+	// warning, or a denied tool), so the backstop below must stay quiet rather
+	// than appending a second, vaguer notice underneath a specific one.
+	reported bool
 }
 
 // DeliveryPolicy: buffered mode accumulates deltas instead of forwarding
@@ -109,6 +151,8 @@ func (in *Ingestion) Inject(ctx context.Context, ev event.Event) error {
 }
 
 func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
+	in.noteSignal(ev)
+
 	switch ev.Type {
 
 	case event.ContentDelta:
@@ -116,10 +160,42 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		if !ok {
 			return nil
 		}
+		if in.Memory.Retain != nil && p.Stream == event.StreamText {
+			in.accumulateMemoryText(ev.ThreadID, p.Text)
+		}
 		if in.Delivery.Buffered && p.Stream == event.StreamText {
 			return in.appendBuffered(ctx, ev, p)
 		}
 		return in.emitDelta(ctx, ev, p.Text, p.Stream, p.Sequence)
+
+	case event.RequestResolved, event.UserInputResolved:
+		// A request the user never answered: it timed out, or the thread was
+		// interrupted and the gate declined it on the operator's behalf (see
+		// ToolApprovalPrompter.Ask, which injects this on both paths). The
+		// clicked path never comes through here — it arrives as
+		// CmdThreadApprovalRespond and clears itself.
+		//
+		// Both halves matter. The activity keeps the transcript honest about
+		// how the card closed; the session-set is what actually retires the id
+		// from Thread.PendingRequests. Without the second one the thread never
+		// leaves `waiting` again, because engine.go only returns it to
+		// `running` when that set empties — and the operator is left with a
+		// composer that refuses to send and no visible reason why.
+		if err := in.dispatch(ctx, Command{
+			Type:     CmdThreadActivityAppend,
+			ThreadID: ev.ThreadID,
+			Payload:  mustJSON(ev),
+		}); err != nil {
+			return err
+		}
+		if ev.RequestID == "" {
+			return nil
+		}
+		return in.dispatch(ctx, Command{
+			Type:     CmdThreadSessionSet,
+			ThreadID: ev.ThreadID,
+			Payload:  mustJSON(map[string]any{"pendingRequestRemove": ev.RequestID}),
+		})
 
 	case event.RequestOpened, event.UserInputRequested:
 		// Three steps, and the order is the whole point.
@@ -172,6 +248,18 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		if err := in.flushThread(ctx, ev.ThreadID); err != nil {
 			return err
 		}
+		// Report BEFORE the status write below, not after: the session-set is
+		// what settles the thread to idle, and a client that stops rendering a
+		// turn at that point would never show a reason appended behind it.
+		if err := in.reportSilentTurn(ctx, ev); err != nil {
+			return err
+		}
+		// Whatever the assistant said this turn, even a partial reply on
+		// TurnAborted — a memory of "started explaining X, then got
+		// interrupted" is still worth more than nothing. takeMemoryText is a
+		// no-op read on an unset key when no ContentDelta ever accumulated
+		// (Memory.Retain was nil throughout, or the turn produced no text).
+		in.Memory.retain(ctx, ev.ThreadID, "assistant", in.takeMemoryText(ev.ThreadID))
 		payload := map[string]any{"status": string(ThreadIdle)}
 		// The context window's actual occupancy after this turn — not a sum
 		// across turns, which would double-count history that is already
@@ -237,6 +325,155 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 			Payload: mustJSON(ev),
 		})
 	}
+}
+
+// noteSignal records what the in-flight turn has shown the operator so far.
+// See turnSignal for why this exists at all.
+//
+// Called for EVERY event, including the ones Inject feeds in from DevDeck's
+// own tool layer (sshthread.go's ToolApprovalPrompter) — an SSH chat turn
+// whose whole visible output is an approval card has very much said
+// something, and must not be reported as silent.
+func (in *Ingestion) noteSignal(ev event.Event) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.signals == nil {
+		in.signals = make(map[string]*turnSignal)
+	}
+	sig := in.signals[ev.ThreadID]
+	if sig == nil {
+		sig = &turnSignal{}
+		in.signals[ev.ThreadID] = sig
+	}
+
+	switch ev.Type {
+	case event.TurnStarted:
+		// A fresh turn starts from silence. Reset rather than delete so a
+		// provider that never emits TurnStarted still gets a zero value below.
+		*sig = turnSignal{}
+
+	case event.RuntimeError, event.RuntimeWarning, event.ToolDenied:
+		// A reason reached the transcript. Also counts as produced: the turn is
+		// no longer blank on screen.
+		sig.reported = true
+		sig.produced = true
+
+	case event.ContentDelta:
+		// Empty deltas do not count — emitDelta drops those, so a turn made
+		// only of them still renders as nothing at all.
+		if p, ok := ev.Payload.(*event.ContentDeltaPayload); ok && p.Text != "" {
+			sig.produced = true
+		}
+
+	case event.ItemStarted, event.ItemCompleted, event.RequestOpened,
+		event.UserInputRequested, event.TurnProposedCompleted:
+		sig.produced = true
+	}
+}
+
+// takeSignal returns and clears a thread's turn bookkeeping.
+func (in *Ingestion) takeSignal(threadID string) turnSignal {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	sig, ok := in.signals[threadID]
+	if !ok {
+		return turnSignal{}
+	}
+	delete(in.signals, threadID)
+	return *sig
+}
+
+// reportSilentTurn appends the reason a turn ended, whenever the turn would
+// otherwise close with nothing to show for it. Two cases, in priority order:
+//
+//  1. The provider reported the turn FAILED. Before this, that verdict lived
+//     only in TurnCompletedPayload.Status, which this file read and discarded
+//     — a failed turn and a successful one produced byte-identical output on
+//     the wire (one `thread.session-set` with status idle), so the client had
+//     nothing to render and no way to know there was anything to render.
+//  2. The turn completed "successfully" but said nothing at all: no text, no
+//     tool call, no approval, and no reason already reported. That is the
+//     shape a model refusal with zero output tokens takes, and the shape any
+//     future provider bug will take too.
+//
+// TurnAborted is deliberately exempt from case 2: an interrupt the operator
+// pressed themselves legitimately produces nothing, and telling them their
+// own Stop button produced no output is noise, not information.
+func (in *Ingestion) reportSilentTurn(ctx context.Context, ev event.Event) error {
+	sig := in.takeSignal(ev.ThreadID)
+
+	failed := false
+	if p, ok := ev.Payload.(*event.TurnCompletedPayload); ok && p.Status == "failed" {
+		failed = true
+	}
+
+	switch {
+	case failed && !sig.reported:
+		return in.appendNotice(ctx, ev, event.RuntimeError,
+			"The agent ended this turn with an error but reported no reason. "+
+				"Check the agent CLI's own output for details.")
+	case ev.Type == event.TurnCompleted && !sig.produced && !sig.reported:
+		return in.appendNotice(ctx, ev, event.RuntimeWarning,
+			"This turn finished without producing any output. The agent may have "+
+				"declined the request or stopped early; try rephrasing, or switch "+
+				"models if it keeps happening.")
+	}
+	return nil
+}
+
+// appendNotice forwards a synthetic canonical event down the SAME path
+// handle's default case forwards a real one, so the client renders it with
+// the branches it already has (eventReducer.ts's `runtime.error` ->
+// error row, `runtime.warning` -> notice row) and no new wire shape exists to
+// keep in sync.
+func (in *Ingestion) appendNotice(ctx context.Context, ev event.Event, typ event.Type, message string) error {
+	notice := event.Event{
+		Type:       typ,
+		Provider:   ev.Provider,
+		InstanceID: ev.InstanceID,
+		ThreadID:   ev.ThreadID,
+		TurnID:     ev.TurnID,
+		CreatedAt:  ev.CreatedAt,
+	}
+	if typ == event.RuntimeError {
+		notice.Payload = &event.ErrorPayload{Message: message}
+	} else {
+		notice.Payload = &event.WarningPayload{Message: message}
+	}
+	return in.dispatch(ctx, Command{
+		Type:     CmdThreadActivityAppend,
+		ThreadID: ev.ThreadID,
+		Payload:  mustJSON(notice),
+	})
+}
+
+// accumulateMemoryText appends to a thread's running reply text, for retain
+// at TurnCompleted/TurnAborted. Independent of the buffers map used for
+// client delivery — see memoryText's doc comment on the Ingestion struct.
+func (in *Ingestion) accumulateMemoryText(threadID, text string) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.memoryText == nil {
+		in.memoryText = make(map[string]*strings.Builder)
+	}
+	b := in.memoryText[threadID]
+	if b == nil {
+		b = &strings.Builder{}
+		in.memoryText[threadID] = b
+	}
+	b.WriteString(text)
+}
+
+// takeMemoryText returns and clears a thread's accumulated reply text.
+func (in *Ingestion) takeMemoryText(threadID string) string {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	b, ok := in.memoryText[threadID]
+	if !ok {
+		return ""
+	}
+	delete(in.memoryText, threadID)
+	return b.String()
 }
 
 func (in *Ingestion) appendBuffered(ctx context.Context, ev event.Event, p *event.ContentDeltaPayload) error {
@@ -375,6 +612,21 @@ type AttachmentReader interface {
 	AgentAttachmentData(id string) (domain.AgentAttachment, []byte, error)
 }
 
+// pendingReleaser is the half of approval.Gate the Reactor needs for
+// EvtThreadRuntimeModeSet, declared here as a narrow optional interface rather
+// than added to approval.Broker.
+//
+// Broker is the contract every approval transport satisfies, including the
+// provider-driven one where DevDeck writes an answer to a CLI's stdin and no
+// goroutine of ours is parked on anything. Releasing a pending wait is
+// meaningless there, so making it a Broker method would oblige every
+// implementation to carry a stub for a capability only the blocking gate has.
+type pendingReleaser interface {
+	// ReleasePending accepts every request open on threadID that mode would
+	// not have gated, returning the ids released.
+	ReleasePending(threadID string, mode provider.RuntimeMode) []string
+}
+
 // Reactor listens for committed intent events and performs the actual
 // provider call. It runs AFTER commit, so the user's intent is already
 // durably recorded even if the provider call itself fails — which is what
@@ -394,6 +646,11 @@ type Reactor struct {
 	// pre-existing bare Reactor{} literal in this package's own tests
 	// compiling and passing unmodified.
 	Attachments AttachmentReader
+
+	// Memory recalls persistent-memory context and prepends it to a turn's
+	// text before it reaches the provider. Zero value is a no-op — see
+	// MemoryHooks' doc comment.
+	Memory MemoryHooks
 
 	// InstanceFor resolves a thread to the worktree's configured agent, its
 	// cwd, and the instance that should run it. Injected so the Reactor stays
@@ -553,10 +810,21 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 				p.Attachments[i].Data = data
 			}
 		}
+		// Recall happens here, not inside the provider adapter, so it is one
+		// code path for every provider (claude/codex/opencode/pi) and the SSH
+		// DevOps chat at once — see MemoryHooks' doc comment. sendText carries
+		// the recalled block; the COMMITTED event (e.Payload, already durable)
+		// and p.Text used for retain below both stay exactly what the user
+		// typed, so the transcript never shows memory the user didn't write.
+		sendText := p.Text
+		if block := r.Memory.recall(ctx, e.ThreadID, p.Text); block != "" {
+			sendText = block + "\n\n" + sendText
+		}
+		r.Memory.retain(ctx, e.ThreadID, "user", p.Text)
 		_, err := r.Provider.SendTurn(ctx, provider.SendTurnInput{
 			ThreadID:    e.ThreadID,
 			TurnID:      e.EventID,
-			Text:        p.Text,
+			Text:        sendText,
 			Attachments: p.Attachments,
 			Mode:        t.Mode,
 			Interact:    t.Interact,
@@ -638,6 +906,73 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		}
 		return interruptErr
 
+	case EvtThreadRuntimeModeSet:
+		// The mirror of EvtThreadInteractionModeSet below, and it was missing
+		// for the same reason: the event is in IntentEvents, so it reached this
+		// switch, fell through to `return nil`, and only ever updated the read
+		// model. That was almost enough — SSHToolService reads the thread's
+		// mode fresh on every call, so the NEXT tool call already obeys a mode
+		// change — but a call that is currently BLOCKED on an approval card has
+		// already read it. The operator switches the thread to full access to
+		// get past the prompt, and the prompt they were trying to dismiss keeps
+		// waiting for them to answer it.
+		//
+		// Releasing is the gate's own decision, not this switch's: it holds the
+		// class of each open request and re-runs the same permission matrix
+		// SSHToolService used to open the card in the first place. So switching
+		// to `auto` with a file write pending correctly releases nothing.
+		var p RuntimeModeSetPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		if releaser, ok := r.Broker.(pendingReleaser); ok {
+			for _, id := range releaser.ReleasePending(e.ThreadID, p.Mode) {
+				log.Printf("agentcore: released approval request=%s thread=%s under mode=%s", id, e.ThreadID, p.Mode)
+			}
+		}
+		// A Broker with no blocking waiters (the provider-driven path) has
+		// nothing to release above: a provider enforces its own permission
+		// mode and never parks a goroutine of ours on a card. Which is
+		// exactly why the push below still has to happen regardless: releasing
+		// DevDeck's own pending cards was never the same thing as changing
+		// what the LIVE agent process itself decides to gate. Before this
+		// existed, that push never happened at all — the mode change updated
+		// Thread.Mode in the read model and released same-process approval
+		// cards, but the running claude/codex/pi CLI kept enforcing whatever
+		// --permission-mode/approvalPolicy it was launched with for the rest
+		// of the session. An operator switching to auto or full access (or
+		// back to approval-required) kept being asked exactly as before, no
+		// matter what the Permission pill now said — see
+		// provider.Adapter.SetRuntimeMode's doc comment.
+		//
+		// r.Provider may be nil in tests that construct a bare Reactor to
+		// exercise the Broker path in isolation (see
+		// workers_runtimemode_test.go) — production always wires one.
+		if r.Provider == nil {
+			return nil
+		}
+		id, ok := r.Provider.Dir.InstanceFor(e.ThreadID)
+		if !ok {
+			// No LIVE session to tell, which is the ordinary state of an idle
+			// thread — and not a failure, because the mode is already
+			// committed to thread state and every turn carries it to the
+			// provider itself (SendTurn's Mode: t.Mode above). This case
+			// exists only to reach a CLI that is running RIGHT NOW, so that
+			// an operator switching mid-session stops being asked
+			// immediately rather than from the next turn.
+			//
+			// It used to return an error, which reached the operator as
+			// "⚠️ provider: thread … is not bound to an instance" — alarming,
+			// and wrong: the setting they just changed had in fact taken
+			// effect.
+			return nil
+		}
+		a, err := r.Provider.Registry.Adapter(id)
+		if err != nil {
+			return err
+		}
+		return a.SetRuntimeMode(ctx, e.ThreadID, p.Mode)
+
 	case EvtThreadInteractionModeSet:
 		var p InteractionModeSetPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -651,7 +986,9 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		// updated the read model but never reached the live CLI process.
 		id, ok := r.Provider.Dir.InstanceFor(e.ThreadID)
 		if !ok {
-			return fmt.Errorf("provider: thread %s is not bound to an instance", e.ThreadID)
+			// Same as the runtime mode above: nothing live to tell, and the
+			// next turn carries Interact: t.Interact regardless.
+			return nil
 		}
 		a, err := r.Provider.Registry.Adapter(id)
 		if err != nil {

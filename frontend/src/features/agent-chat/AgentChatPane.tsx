@@ -6,9 +6,10 @@
  * connecting (loading), a thread error, and no-messages-yet (empty) —
  * before falling through to the real timeline.
  */
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle, CircleStop, PackageX, WifiOff } from 'lucide-react'
+import { AlertTriangle, CircleStop, PackageX, ServerCog, WifiOff } from 'lucide-react'
+import { toast } from 'sonner'
 import type { LucideIcon } from 'lucide-react'
 import { Conversation, ConversationContent, ConversationScrollButton } from '@/components/ai-elements/conversation'
 import { ChatComposer } from '@/features/agent-chat/ChatComposer'
@@ -18,13 +19,15 @@ import type { ComposerBannerIconKey } from '@/features/agent-chat/composerBanner
 import type { ComposerBannerStackItem } from '@/features/agent-chat/ComposerBannerStack'
 import type { AgentAttachmentRef } from '@/features/agent-chat/ComposerAttachments'
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_EFFORT } from '@/features/agent-chat/ComposerControls'
+import { lastTurnModel } from '@/features/agent-chat/adapter'
 import { instanceIdForAgent } from '@/features/agent-chat/ModelPicker'
 import type { ModelChoice } from '@/features/agent-chat/ModelPicker'
 import { latestProposedPlan } from '@/features/agent-chat/plan'
 import type { PlanFollowUpSubmission } from '@/features/agent-chat/planMarkdown'
 import { useAgentChatSocket } from '@/features/agent-chat/useAgentChatSocket'
 import type { AgentChatTarget, InteractionMode, RuntimeMode, TurnModelSelection } from '@/features/agent-chat/useAgentChatSocket'
-import { useAgents, useAgentThreads } from '@/features/data/queries'
+import { useAgentModels, useAgents, useAgentThreads, useMachineCapabilities } from '@/features/data/queries'
+import { agentChatSupport } from '@/features/agent-chat/agentChatSupport'
 import type { MentionSource } from '@/features/agent-chat/composerMention'
 import type { Machine } from '@/store/types'
 
@@ -35,6 +38,7 @@ const BANNER_ICONS: Record<ComposerBannerIconKey, LucideIcon> = {
   'transport-error': AlertTriangle,
   'agent-missing': PackageX,
   'session-stopped': CircleStop,
+  'runtime-unsupported': ServerCog,
 }
 
 /**
@@ -63,10 +67,20 @@ export interface AgentChatPaneProps {
   worktreeId?: string
   threadKey: string
   machine: Machine
-  /** Shown in the composer's status strip. Resolved by the caller, which
-   *  already holds the Worktree row — this component only has an id. */
+  /** Hard veto on opening the socket, ANDed with the draft-thread gate below.
+   *  Defaults to `true`, so every existing caller is unaffected.
+   *
+   *  It exists for panes that are mounted but not yet shown. The SSH rail
+   *  keeps its chat panel mounted-but-hidden so a toggle doesn't drop the
+   *  socket (`SSHRightSidebar`), which without this would mean every SSH
+   *  terminal tab silently opened an agent socket and had the server
+   *  auto-create a thread the operator never asked for. */
+  connectEnabled?: boolean
+  /** The subject this thread is about — shown in the header badge and in the
+   *  empty thread's "What should we build in …?". Resolved by the caller,
+   *  which already holds the Worktree (or SSH connection) row; this component
+   *  only has an id. */
   worktreeLabel?: string
-  branch?: string | null
   /** The CLI agent this worktree runs (`Worktree.agent`). The model picker's
    *  default rail, and the agent a turn runs on unless the picker names
    *  another one. */
@@ -78,6 +92,11 @@ export interface AgentChatPaneProps {
    *  `ChatComposer` falls through to its own worktree-mention default, so
    *  every worktree call site is unaffected. */
   mentionSource?: MentionSource
+  /** Passed straight to `ChatHeader`'s own `actions` slot — thread-scoped
+   *  icon buttons this pane has no opinion about. The SSH rail supplies its
+   *  session-history and new-session pair here; every worktree call site
+   *  leaves it unset and the header renders exactly as before. */
+  headerActions?: ReactNode
 }
 
 /**
@@ -140,14 +159,25 @@ function PaneMessage({ tone = 'neutral', children }: { tone?: 'neutral' | 'error
  */
 function EmptyThread({ subject, composer }: { subject?: string; composer: ReactNode }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-8">
+    // `@container/hero`: this hero renders at ~260px in the SSH right rail and
+    // at ~900px in a full pane, and a 26px heading that reads as an invitation
+    // at 900px becomes three wrapped lines with a broken underline under them
+    // at 260px. Type size, spacing and the gutter all step off the pane's own
+    // width rather than the viewport's — the viewport is the same in both.
+    <div className="@container/hero flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6 @sm/hero:px-5 @sm/hero:py-8">
       <div className="flex w-full max-w-3xl flex-col">
-        <h2 className="mb-6 text-center text-[26px] leading-tight font-medium tracking-tight text-devdeck-fg">
+        <h2 className="mb-4 text-center text-[17px] leading-snug font-medium tracking-tight text-balance text-devdeck-fg @sm/hero:mb-6 @sm/hero:text-[26px] @sm/hero:leading-tight">
           What should we build
           {subject ? (
             <>
               {' in '}
-              <span className="underline decoration-devdeck-line decoration-1 underline-offset-[6px]">{subject}</span>
+              {/* `decoration-clone` keeps the rule under every line of a
+                  wrapped connection name instead of only the first — the SSH
+                  rail wraps a name like "Superapps Dev 02" far more often than
+                  a full-width pane does. */}
+              <span className="underline decoration-devdeck-line decoration-1 [box-decoration-break:clone] underline-offset-4 @sm/hero:underline-offset-[6px]">
+                {subject}
+              </span>
             </>
           ) : null}
           ?
@@ -164,24 +194,53 @@ export function AgentChatPane({
   threadKey,
   machine,
   worktreeLabel,
-  branch,
   agentId = 'claude',
   mentionSource,
+  connectEnabled = true,
+  headerActions,
 }: AgentChatPaneProps) {
   // Draft-thread connect gate (design spec §4, plan Task 10). `threadExists`
   // reads the same sidebar-backing query `SessionsPanel` already populates
   // (`features/data/queries.ts:1380`), so the path that matters — the
   // operator just clicked "New session" from a panel rendered off that same
-  // query — costs no extra request. Fail open (loading or errored both
+  // query — costs no extra request. Fail open (pending or errored both
   // resolve `true`): a stray empty thread row is a far cheaper failure than
   // a real thread whose transcript never loads.
+  //
+  // The fail-open test is `isPending`, NOT `isLoading`, and the difference is
+  // load-bearing for SSH threads. `useAgentThreads` is `enabled: !!machine &&
+  // !!worktreeId`, and an SSH thread has no worktree — so its query is
+  // permanently disabled, and react-query reports a disabled query as
+  // `isPending && !isFetching`, i.e. `isLoading === false`. Gating on
+  // `isLoading` therefore left `connect` false forever: the pane opened no
+  // socket at all, sent no `hello`, and showed the empty hero over a thread
+  // whose whole transcript was sitting in the durable log — until the operator
+  // sent a message and `hasSentThisSession` forced the gate open.
   const threadsQuery = useAgentThreads(machine, worktreeId)
   // Flips permanently once this pane has sent a turn, so a `useAgentThreads`
   // cache that hasn't caught up with the row it just caused can't flap the
   // gate back to `false` mid-turn.
   const [hasSentThisSession, setHasSentThisSession] = useState(false)
   const threadExists = (threadsQuery.data ?? []).some((thread) => thread.id === threadKey)
-  const connect = hasSentThisSession || threadExists || threadsQuery.isLoading || threadsQuery.isError
+
+  // Does the machine behind this pane serve agent chat at all? Only asked for
+  // a runtime-targeted pane — a `'hub'` target is the SSH panel, which gates
+  // itself upstream (sshChatAvailability.ts) and would answer for the wrong
+  // process here.
+  //
+  // `agentChatSupport` only ever trusts a POSITIVE answer, so this cannot
+  // block a working older runtime that reports no capability list — read that
+  // module's doc comment before changing the rule.
+  const targetMachine = target.kind === 'machine' ? target.machine : undefined
+  const capabilities = useMachineCapabilities(targetMachine)
+  const chatSupport = agentChatSupport({ machine: targetMachine, capabilities: capabilities.data })
+
+  const connect =
+    connectEnabled &&
+    // Never dial a runtime that has told us it cannot serve this. The socket
+    // would retry forever behind a banner promising delivery on reconnect.
+    chatSupport !== 'unsupported' &&
+    (hasSentThisSession || threadExists || threadsQuery.isPending || threadsQuery.isError)
 
   const {
     view,
@@ -195,16 +254,79 @@ export function AgentChatPane({
     clearError,
   } = useAgentChatSocket({ target, threadKey, connect })
   const agents = useAgents(machine)
+  // Installed only: an agent this machine cannot actually run is never a
+  // usable default — mirrors `ModelPicker`'s own `installed` filter on its
+  // rail.
+  const installedAgents = useMemo(() => (agents.data ?? []).filter((a) => a.installed), [agents.data])
+  // The agent the LAST-RESORT default below falls back to: the worktree's own
+  // configured agent when it is actually installed here, otherwise whatever
+  // is first in the installed list — the same rule `ModelPicker`'s
+  // `activeAgentId` already applies to its rail, so the fallback pill and the
+  // picker's own default selection never disagree.
+  const fallbackAgentId = useMemo(
+    () => (installedAgents.some((a) => a.id === agentId) ? agentId : installedAgents[0]?.id),
+    [installedAgents, agentId],
+  )
+  const fallbackModels = useAgentModels(machine, fallbackAgentId)
 
   // Model and effort ride the next `thread.turn.start` payload, so they are
   // local until a turn is sent. Runtime and interaction mode dispatch
   // immediately — they change how the agent behaves for the whole thread, not
   // just the next message — so the pill's displayed value is optimistic and
   // `ComposerControls` reverts it if an error frame arrives.
-  // `null` = run the worktree's configured agent on its own default model,
-  // which is what every thread did before the picker existed. Only once the
-  // operator picks something does a ModelSelection ride the turn.
-  const [model, setModel] = useState<ModelChoice | null>(null)
+  //
+  // ── Restored from the thread, not just remembered in the component ──
+  // Held as state alone, this was correct while you sat in one pane and wrong
+  // the moment you left it: every tab, pane and SSH-session switch remounts
+  // this component, `model` went back to `null`, and the pill read "Model" on a
+  // thread that had been running Sonnet for twenty turns — with the next
+  // message silently going to the worktree's DEFAULT model instead. So an
+  // explicit pick still wins, and underneath it the thread's own history
+  // answers: see `lastTurnModel`.
+  //
+  // The pick is keyed by thread and resolved DURING RENDER rather than reset by
+  // an effect, because `threadKey` changes in place here — neither call site
+  // keys this component by thread — and an effect would leave the previous
+  // thread's model on the pill for a frame after switching to a new one.
+  //
+  // This does mean a resumed model now sends an `instanceId` on turns where
+  // nothing was picked, which `turnModel` above warns about — but the hazard it
+  // warns about is the opposite case. Pinning the WORKTREE's configured agent
+  // would yank a thread the operator had deliberately switched; pinning the
+  // instance the thread's own last turn ran on re-asserts where it already is.
+  const resumedModel = useMemo(() => lastTurnModel(view.items), [view.items])
+  const [picked, setPicked] = useState<{ threadKey: string | undefined; choice: ModelChoice | null }>(() => ({
+    threadKey,
+    choice: null,
+  }))
+  const pickedHere = picked.threadKey === threadKey ? picked.choice : null
+  // Third tier, below an explicit pick and a resumed turn: the fallback
+  // agent's first catalog model (rank 0). Without this, a thread the operator
+  // never touched the picker on — and that has no `turn.started` history to
+  // resume, either because it is brand new or because its provider's turns
+  // never carried a model (any turn sent with `model: null` stamps an empty
+  // `TurnStartedPayload.Model`, so `lastTurnModel` never has anything to find)
+  // — left the pill reading a bare "Model" forever, e.g. after closing and
+  // reopening a Pi thread the operator had never picked a model on. A
+  // concrete, visible default beats an invisible provider-decided one.
+  const firstCatalogModel = fallbackModels.data?.[0]
+  const defaultModel: ModelChoice | null =
+    fallbackAgentId && firstCatalogModel
+      ? { agentId: fallbackAgentId, modelId: firstCatalogModel.id, modelName: firstCatalogModel.name }
+      : null
+  const model = useMemo(
+    () =>
+      pickedHere ??
+      (resumedModel
+        ? // The raw id, not a catalog lookup: resolving the friendly name would
+          // mean a second query that can lag or fail, and `modelPillLabel`
+          // renders an id perfectly well. What matters is that the pill names
+          // the model the conversation is actually on.
+          { agentId: resumedModel.agentId, modelId: resumedModel.modelId, modelName: resumedModel.modelId }
+        : defaultModel),
+    [pickedHere, resumedModel, defaultModel],
+  )
+  const setModel = useCallback((choice: ModelChoice | null) => setPicked({ threadKey, choice }), [threadKey])
   const [effort, setEffort] = useState(DEFAULT_EFFORT)
   // Same "rides the next turn" rule as effort — see the comment above.
   const [contextWindow, setContextWindow] = useState(DEFAULT_CONTEXT_WINDOW)
@@ -281,8 +403,9 @@ export function AgentChatPane({
       threadError: view.error,
       threadStatus: view.status,
       agents,
+      chatSupport,
     }),
-    [threadKey, machine.id, machine.name, agentId, status, showConnecting, view.items.length, view.error, view.status, agents],
+    [threadKey, machine.id, machine.name, agentId, status, showConnecting, view.items.length, view.error, view.status, agents, chatSupport],
   )
 
   useEffect(() => {
@@ -320,6 +443,18 @@ export function AgentChatPane({
   // finished uploading before submit — forwarded straight through, this pane
   // has no opinion about it beyond passing it on to `sendTurn`.
   function handleSend(text: string, attachments: AgentAttachmentRef[]) {
+    // Refuse rather than queue. `sendTurn` parks a frame in the socket's
+    // outbox when nothing is connected, which is exactly right for a draft
+    // thread (the outbox flushes the moment it connects) and exactly wrong
+    // here: this runtime has told us it cannot serve chat, so nothing will
+    // ever flush it. Queueing would swallow the message with no visible
+    // failure — the silent-turn shape all over again, one layer up.
+    if (chatSupport === 'unsupported') {
+      toast.error(`${machine.name} does not support agent chat`, {
+        description: 'Update the runtime to the latest version, then try again.',
+      })
+      return
+    }
     setHasSentThisSession(true)
     sendTurn(text, turnModel(model, effort, contextWindow), attachments)
   }
@@ -356,8 +491,6 @@ export function AgentChatPane({
       machine={machine}
       worktreeId={worktreeId}
       mentionSource={mentionSource}
-      worktree={worktreeLabel}
-      branch={branch}
       variant={isEmpty ? 'hero' : 'docked'}
       threadKey={threadKey}
       pendingUserInputs={view.pendingUserInputs}
@@ -384,6 +517,7 @@ export function AgentChatPane({
         socketStatus={status}
         threadStatus={view.status}
         subjectLabel={worktreeId ? undefined : worktreeLabel}
+        actions={headerActions}
       />
 
       {isEmpty ? (

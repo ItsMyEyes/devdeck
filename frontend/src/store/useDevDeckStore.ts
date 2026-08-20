@@ -237,7 +237,12 @@ export function shellSidebarState(shellSidebars: Record<string, ShellSidebarStat
   return shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR
 }
 
-export type SSHRightSidebarPanel = 'forwards' | 'stats' | 'chat'
+/** `'sessions'` is legacy: the SSH rail used to carry a History button for a
+ *  full-height session list, which the chat header's own history popover
+ *  replaced (`SSHAgentChatPanel`). Kept in the union only so a value persisted
+ *  before that change still types — `sshRightSidebarState` migrates it to
+ *  `'chat'` on read, and nothing sets it any more. */
+export type SSHRightSidebarPanel = 'forwards' | 'stats' | 'chat' | 'sessions'
 
 /** The SSH pane's right sidebar: Port Forwarding + Stats, mirroring
  *  ShellSidebar's left-side Explorer/Git sidebar. Keyed by the same
@@ -263,7 +268,12 @@ export function sshRightSidebarState(
   sidebars: Record<string, SSHRightSidebarState>,
   shellKey: string,
 ): SSHRightSidebarState {
-  return sidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR
+  const state = sidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR
+  // This slice is persisted, so an operator who last left the rail on the
+  // retired Sessions panel would reopen it onto a rail with no button lit and
+  // an empty body. Migrating on read — the single path every consumer resolves
+  // through — is what keeps that from needing a store version bump.
+  return state.panel === 'sessions' ? { ...state, panel: 'chat' } : state
 }
 
 /** The diff currently highlighted in a shell's git file list, keyed by

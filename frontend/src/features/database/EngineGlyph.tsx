@@ -12,7 +12,8 @@ export function EngineGlyph({ engine, size = 32 }: { engine: DBEngine; size?: nu
   return (
     <span
       className="flex flex-none items-center justify-center rounded-control border font-mono text-[10px] font-semibold"
-      style={{ width: size, height: size, color, background: `${color}18`, borderColor: `${color}44` }}
+      style={{ width: size, height: size, color, background: `color-mix(in srgb, ${color} 9%, transparent)`,
+        borderColor: `color-mix(in srgb, ${color} 27%, transparent)` }}
     >
       {label}
     </span>

@@ -1,7 +1,25 @@
 <!doctype html>
+<!-- `dark` is the pre-script default: it is what DevDeck looked like before the
+     appearance setting existed, and what a user with no stored preference still
+     gets. The inline script below may swap it before first paint. -->
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Light mode is disabled — DevDeck is dark-only. `<html>` already
+         carries `class="dark"` above; this just forces it defensively in
+         case a class set by an older build (or a stale `.light` some other
+         script adds) ever lingers. Deliberately duplicates the small amount
+         of logic in features/theme/theme.ts rather than importing it — the
+         app bundle has not loaded yet at this point. `theme.guard.test.ts`
+         pins the class names so the two cannot drift apart. -->
+    <script>
+      (function () {
+        var root = document.documentElement
+        root.classList.add('dark')
+        root.classList.remove('light')
+        root.style.colorScheme = 'dark'
+      })()
+    </script>
     <!-- interactive-widget=resizes-content: on Android Chrome, resize the
          layout viewport (and visualViewport) when the on-screen keyboard
          opens instead of just overlaying it, so useViewportHeight's

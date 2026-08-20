@@ -79,3 +79,100 @@ func TestDecisionValid(t *testing.T) {
 		t.Error(`"yolo" should not be valid`)
 	}
 }
+
+func TestToolDeniedPayloadRegistered(t *testing.T) {
+	raw := []byte(`{"eventId":"e1","type":"tool.denied","threadId":"w-abc","requestId":"r1",
+		"createdAt":"2026-01-01T00:00:00Z","payload":{"toolName":"Write","message":"nope"}}`)
+	var e Event
+	if err := json.Unmarshal(raw, &e); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	p, ok := e.Payload.(*ToolDeniedPayload)
+	if !ok {
+		t.Fatalf("payload = %T, want *ToolDeniedPayload", e.Payload)
+	}
+	if p.ToolName != "Write" || p.Message != "nope" {
+		t.Fatalf("payload = %+v", p)
+	}
+}
+
+// ProposedPlanPayload carries the plan the agent captured via ExitPlanMode
+// (design.md §2). It must round-trip through the same registry-driven
+// UnmarshalJSON every other payload uses.
+func TestProposedPlanPayloadRoundTrips(t *testing.T) {
+	in := Event{
+		EventID:   "ae-3",
+		Type:      TurnProposedCompleted,
+		Provider:  "claude",
+		ThreadID:  "w-abc",
+		TurnID:    "turn-1",
+		CreatedAt: time.UnixMilli(1700000000000).UTC(),
+		Payload: &ProposedPlanPayload{
+			PlanMarkdown: "# Plan\n\n1. Do the thing.",
+			PlanFilePath: "/Users/agent/.claude/plans/do-the-thing.md",
+			ToolUseID:    "toolu_01UNeXLedXjsmJ25eWTgfoHr",
+		},
+	}
+
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var out Event
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if out.Type != TurnProposedCompleted || out.ThreadID != "w-abc" {
+		t.Fatalf("envelope lost: %+v", out)
+	}
+	p, ok := out.Payload.(*ProposedPlanPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want *ProposedPlanPayload", out.Payload)
+	}
+	want := in.Payload.(*ProposedPlanPayload)
+	if p.PlanMarkdown != want.PlanMarkdown || p.PlanFilePath != want.PlanFilePath || p.ToolUseID != want.ToolUseID {
+		t.Fatalf("payload lost: got %+v, want %+v", p, want)
+	}
+}
+
+// If TurnProposedCompleted were ever missing from payloadRegistry, decoding
+// must degrade to a nil payload rather than error — the same contract
+// TestUnknownTypeDecodesWithNilPayload pins for a genuinely unknown type.
+// This test proves it is the registry entry (not some special case in
+// UnmarshalJSON) that makes TestProposedPlanPayloadRoundTrips pass: it
+// removes the entry for the duration of the test and restores it after.
+func TestProposedPlanPayloadUnregisteredDecodesToNilPayload(t *testing.T) {
+	saved, ok := payloadRegistry[TurnProposedCompleted]
+	if !ok {
+		t.Fatalf("TurnProposedCompleted must be registered in payloadRegistry before this test can prove anything by removing it")
+	}
+	delete(payloadRegistry, TurnProposedCompleted)
+	defer func() { payloadRegistry[TurnProposedCompleted] = saved }()
+
+	in := Event{
+		EventID:  "ae-4",
+		Type:     TurnProposedCompleted,
+		ThreadID: "w-abc",
+		Payload: &ProposedPlanPayload{
+			PlanMarkdown: "# Plan\n\n1. Do the thing.",
+		},
+	}
+
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var out Event
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unregistered type must not error, got: %v", err)
+	}
+	if out.Payload != nil {
+		t.Fatalf("payload = %v, want nil when TurnProposedCompleted is unregistered", out.Payload)
+	}
+	if out.EventID != "ae-4" {
+		t.Fatalf("envelope lost when unregistered: %+v", out)
+	}
+}

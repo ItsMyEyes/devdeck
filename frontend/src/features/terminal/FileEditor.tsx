@@ -45,9 +45,9 @@ interface FileEditorProps {
   onOpenDefinition: (path: string, target: DefinitionTarget) => void
   isPathDirty: (path: string) => boolean
   reveal?: DefinitionReveal
-  /** Markdown's edit-mode "open preview in new tab" button — see
-   *  MarkdownFileEditor's `onOpenPreviewTab` doc comment. Unused (and the
-   *  button hidden) for every other path. */
+  /** Markdown's "open preview in new tab" button — see MarkdownFileEditor's
+   *  `onOpenPreviewTab` doc comment. Unused (and the button hidden) for every
+   *  other path. */
   onOpenPreviewTab?: (path: string) => void
 }
 

@@ -19,9 +19,17 @@
  *    means an abandoned new session costs nothing — no row is written until
  *    the socket actually connects.
  *  - **Delete** erases the thread outright (row, transcript, receipts). It is
- *    irreversible, hence the confirm, which follows the `window.confirm`
- *    pattern the rest of this app's destructive in-panel actions already use
- *    (`FileEditor.tsx`, `GitPanel.tsx`, `DocumentFileTab.tsx`).
+ *    irreversible, hence the confirmation — an in-app `ConfirmDialog`, NOT
+ *    `window.confirm`. The native one cannot be used anywhere in this app: the
+ *    Tauri desktop build's WKWebView implements no
+ *    `runJavaScriptConfirmPanelWithMessage` delegate, so `confirm()` returns
+ *    false with no dialog ever shown and `if (!window.confirm(…)) return`
+ *    returns early on every call. That is what made deleting a session
+ *    impossible in the shipped app. `TerminalExplorer.tsx` documents the same
+ *    defect for `window.prompt`. The other destructive in-panel actions
+ *    (`FileEditor.tsx`, `GitPanel.tsx`, `SSHFileEditor.tsx`,
+ *    `DBSqlEditor.tsx`, `SkillContentDialog.tsx`) still call `window.confirm`
+ *    and are broken the same way — they should adopt `ConfirmDialog` too.
  */
 import { useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
@@ -29,8 +37,10 @@ import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/status-dot'
+import { Pill } from '@/components/ui/pill'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAgentThreads, useDeleteAgentThread } from '@/features/data/queries'
 import type { AgentThread } from '@/features/data/queries'
 
@@ -89,6 +99,31 @@ export function nextFreeThreadKey(worktreeId: string, taken: readonly string[]):
   }
 }
 
+/** What an untitled thread renders as, and therefore what it has to be
+ *  findable by — searching for what is on screen is the only rule a user can
+ *  reasonably hold. */
+const UNTITLED_LABEL = 'Untitled session'
+
+/**
+ * Narrows the session list to those matching a free-text query.
+ *
+ * Every whitespace-separated term must match, so typing more always narrows.
+ * The alternative — matching any term — makes the list GROW as you type, which
+ * reads as the search being broken rather than as a widening.
+ *
+ * Matching is on the label the row actually shows, which is why an untitled
+ * thread is searchable as "Untitled session": a list you cannot find half the
+ * rows of is worse than no search.
+ */
+export function filterSessions(threads: readonly AgentThread[], query: string): AgentThread[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return [...threads]
+  return threads.filter((thread) => {
+    const haystack = (thread.title.trim() || UNTITLED_LABEL).toLowerCase()
+    return terms.every((term) => haystack.includes(term))
+  })
+}
+
 function SessionRow({
   thread,
   active,
@@ -104,7 +139,7 @@ function SessionRow({
 }) {
   const label = THREAD_STATUS_LABEL[thread.status] ?? thread.status
   const color = THREAD_STATUS_COLOR[thread.status] ?? 'var(--devdeck-fg-2)'
-  const title = thread.title.trim() || 'Untitled session'
+  const title = thread.title.trim() || UNTITLED_LABEL
 
   return (
     <div
@@ -127,6 +162,7 @@ function SessionRow({
           {label}
           <span aria-hidden="true">·</span>
           {formatDistanceToNow(thread.updatedAt, { addSuffix: true })}
+          {thread.planReady ? <Pill color="var(--devdeck-accent)">Plan</Pill> : null}
         </span>
       </button>
       {/* Hover-revealed so a list of sessions is not a column of bins, but
@@ -151,6 +187,7 @@ function SessionRow({
 
 export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectThread }: SessionsPanelProps) {
   const [showAll, setShowAll] = useState(false)
+  const [query, setQuery] = useState('')
   const sessions = useAgentThreads(machine, worktreeId)
   const deleteThread = useDeleteAgentThread(machine, worktreeId)
 
@@ -160,12 +197,24 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
     onSelectThread?.(nextFreeThreadKey(worktreeId, all.map((t) => t.id)))
   }
 
+  // The thread awaiting confirmation, or null. An in-app dialog rather than
+  // `window.confirm`, which is a silent no-op in the Tauri desktop build — its
+  // WKWebView implements no `runJavaScriptConfirmPanelWithMessage` delegate, so
+  // `confirm()` returns false with no dialog and the guard returned early every
+  // single time. Deleting a session was impossible in the shipped app.
+  const [pendingDelete, setPendingDelete] = useState<AgentThread | null>(null)
+
   function handleDelete(thread: AgentThread) {
-    const title = thread.title.trim() || 'this session'
-    if (!window.confirm(`Delete ${title}? Its whole transcript goes with it. This cannot be undone.`)) return
+    setPendingDelete(thread)
+  }
+
+  function confirmDelete() {
+    const thread = pendingDelete
+    if (!thread) return
     deleteThread.mutate(thread.id, {
       onError: (error) => toast.error(errMessage(error)),
     })
+    setPendingDelete(null)
   }
 
   /** The header is outside every early return: "New session" has to work from
@@ -183,6 +232,27 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
       >
         <Plus size={13} aria-hidden="true" />
       </button>
+    </div>
+  )
+
+  /** Shown only once the list is long enough to be worth searching — a search
+   *  box above two rows is furniture, not a feature. Rendered inside the list
+   *  branch (not `header`) so it never appears over a loading, error, or empty
+   *  state, where there is nothing to filter. */
+  const search = (
+    <div className="flex-none px-2.5 pb-1.5">
+      <input
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search sessions"
+        aria-label="Search sessions"
+        className={cn(
+          'h-7 w-full rounded-md border border-devdeck-hairline bg-devdeck-raised px-2 text-[12px]',
+          'text-devdeck-fg placeholder:text-devdeck-fg-2',
+          'focus-visible:border-devdeck-border-accent focus-visible:outline-none',
+        )}
+      />
     </div>
   )
 
@@ -233,13 +303,20 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
     )
   }
 
-  const visible = showAll ? all : all.slice(0, INITIAL_VISIBLE_SESSIONS)
-  const hiddenCount = all.length - visible.length
+  // Filter first, then fold: "Show 3 more" has to count what the search left,
+  // not what the thread list started with.
+  const matched = filterSessions(all, query)
+  const visible = showAll ? matched : matched.slice(0, INITIAL_VISIBLE_SESSIONS)
+  const hiddenCount = matched.length - visible.length
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
+      {all.length > 2 ? search : null}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto pb-1">
+        {matched.length === 0 ? (
+          <p className="px-3 py-4 text-center text-[12px] text-devdeck-fg-2">No sessions match “{query.trim()}”.</p>
+        ) : null}
         {visible.map((thread) => (
           <SessionRow
             key={thread.id}
@@ -260,6 +337,18 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
           </button>
         ) : null}
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete ${pendingDelete?.title.trim() || 'this session'}?`}
+        description="Its whole transcript goes with it. This cannot be undone."
+        confirmLabel="Delete session"
+        pendingLabel="Deleting…"
+        pending={deleteThread.isPending}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

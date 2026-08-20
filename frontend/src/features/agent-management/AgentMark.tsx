@@ -49,6 +49,10 @@ export function AgentMark({
         <SiClaude title="" size={iconSize} />
       ) : id === 'codex' ? (
         <SiOpenai title="" size={iconSize} />
+      ) : id === 'pi' ? (
+        <img src="/pi-logo.png" alt="" width={iconSize} height={iconSize} className="rounded-[3px]" />
+      ) : id === 'opencode' ? (
+        <img src="/opencode-logo-light.svg" alt="" width={iconSize} height={iconSize} />
       ) : name ? (
         name.slice(0, 1).toUpperCase()
       ) : (

@@ -31,7 +31,16 @@ import type { Machine } from '@/store/types'
  *  socket status, not a thread status: `AgentThreadView.status` has no
  *  opinion about a thread that doesn't exist on the server yet (spec
  *  `2026-08-15-composer-drafts-and-stash-design.md` §7). */
-export type AgentSocketStatus = 'draft' | 'connecting' | 'open' | 'closed'
+/** `'unreachable'` is `'closed'` that has given up pretending.
+ *
+ *  The socket still retries underneath it — the state is a reporting change,
+ *  not a lifecycle one, so a runtime that comes back still reconnects on its
+ *  own. What changes is what the operator is told. `'connecting'`/`'closed'`
+ *  carry a deliberately reassuring banner ("the agent keeps working while you
+ *  are disconnected"), which is true of a brief blip and a lie about a socket
+ *  that has never once opened. Without this the pane sat on "Connecting…"
+ *  forever against a runtime that was never going to answer. */
+export type AgentSocketStatus = 'draft' | 'connecting' | 'open' | 'closed' | 'unreachable'
 
 /** Mirrors `Terminal.tsx`'s reconnect tuning: only a connection that stays
  *  up for this long clears the backoff counter, so a handshake that opens
@@ -39,6 +48,16 @@ export type AgentSocketStatus = 'draft' | 'connecting' | 'open' | 'closed'
 const CONNECTION_HEALTHY_MS = 10_000
 const BASE_BACKOFF_MS = 500
 const MAX_BACKOFF_MS = 8_000
+
+/** Consecutive failed attempts, with the socket never once having opened,
+ *  before the status flips to `'unreachable'`.
+ *
+ *  Four is where the backoff schedule (0.5s, 1s, 2s, 4s) has spent ~7.5s —
+ *  long enough that a runtime restart or a slow tunnel has had a fair chance,
+ *  short enough that an operator staring at a dead pane is not lied to for a
+ *  minute. Deliberately gated on "never opened": a socket that worked and then
+ *  dropped is genuinely reconnecting, and its reassuring banner is honest. */
+const UNREACHABLE_AFTER_ATTEMPTS = 4
 
 /** Mirrors `orchestration.Command` (`backend/internal/agentcore/orchestration/command.go`)
  *  — field names match its `json` tags exactly, one shape on both sides of
@@ -346,12 +365,19 @@ export function useAgentChatSocket({ target, threadKey, connect = true }: UseAge
 
     const scheduleReconnect = () => {
       if (disposed || retryTimer !== undefined) return
-      setStatus('closed')
+      // Retrying either way — only the reported state differs. See
+      // AgentSocketStatus' doc comment for why a never-opened socket must stop
+      // claiming it is merely "connecting".
+      const givenUp = !everOpened && attempts >= UNREACHABLE_AFTER_ATTEMPTS
+      setStatus(givenUp ? 'unreachable' : 'closed')
       const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempts, MAX_BACKOFF_MS)
       attempts++
       retryTimer = window.setTimeout(() => {
         retryTimer = undefined
-        setStatus('connecting')
+        // Once given up, stay given up until something actually opens —
+        // flipping back to 'connecting' on every retry would restore the
+        // endless "Connecting…" banner one frame at a time.
+        if (!givenUp) setStatus('connecting')
         openSocket()
       }, delay)
     }

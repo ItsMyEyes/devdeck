@@ -1,54 +1,10 @@
-import { isValidElement, useEffect, useId, useState } from 'react'
+import { isValidElement } from 'react'
 import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
-
-/** Renders one ```mermaid fenced block to an inline SVG via mermaid's
- *  browser render API. Lazy-imported (mermaid is a large dependency most
- *  previews never touch) and re-rendered whenever `chart` changes — cheap
- *  enough for prose-sized diagrams and simpler than diffing the source. */
-function MermaidDiagram({ chart }: { chart: string }) {
-  const reactId = useId().replace(/[^a-zA-Z0-9]/g, '')
-  const [svg, setSvg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setSvg(null)
-    setError(null)
-    import('mermaid').then(async ({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
-      try {
-        const result = await mermaid.render(`mermaid-${reactId}`, chart)
-        if (!cancelled) setSvg(result.svg)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not render diagram')
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [chart, reactId])
-
-  if (error) {
-    return (
-      <pre className="overflow-x-auto rounded-md border border-devdeck-err/40 bg-devdeck-red-tint px-3 py-2 font-mono text-[11px] text-devdeck-err">
-        {error}
-      </pre>
-    )
-  }
-  if (!svg) {
-    return <div className="font-mono text-[11px] text-devdeck-fg-2">Rendering diagram…</div>
-  }
-  return (
-    <div
-      className="devdeck-mermaid max-w-full overflow-x-auto [&_svg]:max-w-full"
-      // mermaid's `strict` security level sanitizes the rendered markup itself.
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  )
-}
+import { MermaidDiagram } from '@/features/rich-editor/MermaidDiagram'
+import { cn } from '@/lib/utils'
 
 function codeLanguage(className: string | undefined): string | undefined {
   return /language-(\S+)/.exec(className ?? '')?.[1]
@@ -84,14 +40,21 @@ const components: Components = {
   },
 }
 
-/** Read-only markdown rendering with DevDeck's typography tokens. Fenced
- *  ```mermaid blocks render as diagrams instead of code text. */
-export function MarkdownPreview({ source }: { source: string }) {
+/**
+ * Read-only markdown rendering on the same Notion theme the editor writes in
+ * (`.notion-doc`, globals.css), so a comment or a file reads identically
+ * whether it is being edited or displayed. Fenced ```mermaid blocks render as
+ * diagrams instead of code text.
+ *
+ * `compact` is the one-class size step down for markdown displayed inside
+ * something else — a comment in a thread — as opposed to a page of its own.
+ */
+export function MarkdownPreview({ source, compact }: { source: string; compact?: boolean }) {
   if (!source.trim()) {
-    return <p className="font-mono text-[12px] text-devdeck-fg-2">Nothing to preview.</p>
+    return <p className="font-mono text-[12px] text-notion-text-dim">Nothing to preview.</p>
   }
   return (
-    <div className="devdeck-markdown flex flex-col gap-2.5 text-[13px] leading-relaxed text-devdeck-fg-2">
+    <div className={cn('notion-doc', compact && 'notion-doc--compact')}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {source}
       </ReactMarkdown>

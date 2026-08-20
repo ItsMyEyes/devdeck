@@ -1,6 +1,6 @@
 import { createRootRouteWithContext, Outlet, redirect } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
-import { Toaster } from 'sonner'
+import { ToastHost } from '@/features/overlays/ToastHost'
 import { meQueryOptions } from '@/features/data/authQueries'
 import { qk } from '@/features/data/keys'
 import { fetchWhoami } from '@/lib/api'
@@ -35,22 +35,11 @@ function RootComponent() {
   return (
     <>
       <Outlet />
-      <Toaster
-        theme="dark"
-        // top-center, not bottom-center: bottom-center sits over a Browser
-        // tile's body, and that native webview always paints above the DOM
-        // (see useNativeOverlayBlocker's doc comment) — no z-index fixes it.
-        position="top-center"
-        toastOptions={{
-          style: {
-            background: 'var(--devdeck-glass-solid)',
-            border: '1px solid var(--devdeck-border-accent)',
-            color: 'var(--devdeck-fg-2)',
-            fontSize: '12.5px',
-            fontFamily: 'var(--font-sans)',
-          },
-        }}
-      />
+      {/* Bottom-right, and safe there: a toast over a Browser tile's body used
+          to be swallowed by that native webview (it paints above the whole DOM,
+          which is why these sat at top-center), so ToastHost now scopes an
+          occlusion blocker to the toast stack — see its doc comment. */}
+      <ToastHost />
     </>
   )
 }

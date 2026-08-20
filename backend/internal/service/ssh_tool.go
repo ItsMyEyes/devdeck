@@ -39,7 +39,11 @@ type ThreadPolicy interface {
 // ApprovalPrompter opens an approval card on the thread and blocks until the
 // user answers, the thread is cancelled, or ctx ends.
 type ApprovalPrompter interface {
-	Ask(ctx context.Context, threadID, requestID string, rt event.RequestType, detail string) (event.Decision, error)
+	// `mutating` carries this service's own classification of the action down
+	// to the gate, which needs it to re-decide an ALREADY OPEN card when the
+	// operator changes the thread's mode while it is waiting. See
+	// approval.Gate.ReleasePending.
+	Ask(ctx context.Context, threadID, requestID string, rt event.RequestType, detail string, mutating bool) (event.Decision, error)
 	SessionAccepted(threadID string) bool
 }
 
@@ -82,29 +86,50 @@ type ExecResult struct {
 // decline or cancel. The action never reaches ShellRunner/RemoteFiles.
 var ErrDenied = errors.New("denied by user")
 
+// ErrApprovalTimeout is returned when nobody answered an approval card within
+// approvalWindow. It exists as its own sentinel so the handler can tell a
+// human who never answered apart from a network deadline: reporting "the
+// operator declined" for an SSH dial that timed out is a lie the agent will
+// act on.
+var ErrApprovalTimeout = errors.New("approval timed out")
+
+// approvalWindow bounds how long a tool call waits on a human (design §4.4).
+// It is deliberately independent of any deadline the caller applied to the
+// action itself: a command's own timeout measures the remote host's work, and
+// spending it on an operator who is reading the command is how a 60-second
+// exec limit turned into a 60-second limit on the person.
+//
+// A var, not a const, so tests can shorten it rather than sleep for ten
+// minutes — the same "overridable in tests via direct reassignment" pattern
+// worktree_file.go's resolveRipgrep already uses. Nothing in production
+// writes it.
+var approvalWindow = 10 * time.Minute
+
 // toolRequestIDPrefix marks every approval request this service opens, so
 // the orchestration Reactor can recognise a resolved request as having no
 // provider counterpart (see ORCHESTRATION.md / the design's §4.4).
 const toolRequestIDPrefix = "tool-"
 
-// needsApproval implements the policy matrix (design §4.3): whether an
-// action of the given Class must be gated behind a human decision under the
-// given RuntimeMode. full-access never gates; auto and auto-accept-edits
-// gate mutations only; approval-required gates everything. Any other mode
-// value (there should never be one, but this function must still answer)
-// is treated the same as approval-required — the conservative default,
-// matching sshtool.Classify's own "unsure means gate it" philosophy.
+// sessionShortcutApplies reports whether a standing DecisionAcceptForSession
+// may skip a prompt under this mode. Only the two modes that gate mutations
+// alone qualify: full-access never asks in the first place, and
+// approval-required promises to ask every time.
+func sessionShortcutApplies(mode provider.RuntimeMode) bool {
+	return mode == provider.ModeAuto || mode == provider.ModeAutoAcceptEdits
+}
+
+// needsApproval implements the policy matrix (design §4.3): whether an action
+// of the given Class must be gated behind a human decision under the given
+// RuntimeMode.
+//
+// The table itself lives on provider.RuntimeMode, not here, because a SECOND
+// caller now has to agree with it at a different moment: this function decides
+// whether to OPEN a card, and approval.Gate.ReleasePending decides whether a
+// card already open should close itself because the operator changed the mode
+// while it was waiting. Two copies would drift, and a drifted copy shows up as
+// a card that can never be dismissed.
 func needsApproval(mode provider.RuntimeMode, class sshtool.Class) bool {
-	switch mode {
-	case provider.ModeFullAccess:
-		return false
-	case provider.ModeAuto, provider.ModeAutoAcceptEdits:
-		return class == sshtool.ClassMutate
-	case provider.ModeApprovalRequired:
-		return true
-	default:
-		return true
-	}
+	return !mode.AllowsUnprompted(class == sshtool.ClassMutate)
 }
 
 // authorize runs the full gate for one action: it decides whether approval
@@ -113,11 +138,18 @@ func needsApproval(mode provider.RuntimeMode, class sshtool.Class) bool {
 // a standing session accept for mutations, and otherwise blocks on
 // prompter.Ask. A nil error means the caller may proceed.
 func (svc *SSHToolService) authorize(ctx context.Context, sess sshtool.Session, class sshtool.Class, rt event.RequestType, detail string) error {
-	mode, ok := svc.policy.ModeFor(sess.ThreadID)
-	if ok && !needsApproval(mode, class) {
+	mode, known := svc.policy.ModeFor(sess.ThreadID)
+	if known && !needsApproval(mode, class) {
 		return nil
 	}
-	if class == sshtool.ClassMutate && svc.prompter.SessionAccepted(sess.ThreadID) {
+	// A standing "accept for session" answers later MUTATIONS, and only in the
+	// modes whose whole job is to gate mutations. It must not apply in
+	// approval-required, whose pill reads "Ask before commands and file
+	// changes" — a mode that can be switched off by a click on an earlier card
+	// is not the mode the operator selected. Nor when the thread's mode is
+	// unknown, which fails closed everywhere else in this function.
+	if known && class == sshtool.ClassMutate && sessionShortcutApplies(mode) &&
+		svc.prompter.SessionAccepted(sess.ThreadID) {
 		return nil
 	}
 
@@ -125,8 +157,18 @@ func (svc *SSHToolService) authorize(ctx context.Context, sess sshtool.Session, 
 	if err != nil {
 		return err
 	}
-	decision, err := svc.prompter.Ask(ctx, sess.ThreadID, requestID, rt, detail)
+	// The wait gets its own deadline, derived from the caller's context so a
+	// disconnecting client still cancels it, but never inheriting the caller's
+	// (much shorter) action deadline.
+	askCtx, cancel := context.WithTimeout(ctx, approvalWindow)
+	defer cancel()
+	decision, err := svc.prompter.Ask(askCtx, sess.ThreadID, requestID, rt, detail, class == sshtool.ClassMutate)
 	if err != nil {
+		// Distinguish "nobody answered in ten minutes" from "the caller went
+		// away": only the former is a decision-shaped outcome.
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return ErrApprovalTimeout
+		}
 		return err
 	}
 	if decision == event.DecisionDecline || decision == event.DecisionCancel {
@@ -139,14 +181,24 @@ func (svc *SSHToolService) authorize(ctx context.Context, sess sshtool.Session, 
 // RuntimeMode, and — once authorized — runs it verbatim over the thread's
 // SSH connection. A non-zero remote exit code comes back in ExecResult,
 // not as err.
-func (svc *SSHToolService) Exec(ctx context.Context, sess sshtool.Session, command string) (ExecResult, error) {
+func (svc *SSHToolService) Exec(ctx context.Context, sess sshtool.Session, command string, execTimeout time.Duration) (ExecResult, error) {
 	class := sshtool.Classify(command)
 	if err := svc.authorize(ctx, sess, class, event.ReqCommandExecApproval, command); err != nil {
 		return ExecResult{}, err
 	}
 
+	// execTimeout starts HERE, after the human has answered — it bounds the
+	// remote command, not the operator. A zero value means "no limit beyond
+	// the caller's own context".
+	runCtx := ctx
+	if execTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, execTimeout)
+		defer cancel()
+	}
+
 	start := time.Now()
-	stdout, stderr, exitCode, err := svc.runner.RunShell(ctx, sess.ConnectionID, command)
+	stdout, stderr, exitCode, err := svc.runner.RunShell(runCtx, sess.ConnectionID, command)
 	if err != nil {
 		return ExecResult{}, err
 	}

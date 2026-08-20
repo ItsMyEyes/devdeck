@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +28,8 @@ import (
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/agentcore/provider"
 	"devdeck/backend/internal/agentcore/provider/claude"
+	"devdeck/backend/internal/agentcore/provider/codex"
+	"devdeck/backend/internal/agentcore/provider/opencode"
 	"devdeck/backend/internal/agentcore/provider/pi"
 	"devdeck/backend/internal/config"
 	"devdeck/backend/internal/dbdriver"
@@ -34,10 +37,15 @@ import (
 	"devdeck/backend/internal/dbdriver/pgdrv"
 	"devdeck/backend/internal/dbdriver/sqlitedrv"
 	"devdeck/backend/internal/detect"
+	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/handler"
 	"devdeck/backend/internal/hoststats"
+	"devdeck/backend/internal/issuemcp"
+	"devdeck/backend/internal/memorycli"
 	"devdeck/backend/internal/lsp"
 	"devdeck/backend/internal/machineclient"
+	"devdeck/backend/internal/memory"
+	"devdeck/backend/internal/memorybackfill"
 	"devdeck/backend/internal/netproxy"
 	"devdeck/backend/internal/port"
 	"devdeck/backend/internal/registry"
@@ -47,7 +55,9 @@ import (
 	"devdeck/backend/internal/sshmgr"
 	"devdeck/backend/internal/sshthread"
 	"devdeck/backend/internal/sshtool"
+	"devdeck/backend/internal/sshtoolcli"
 	"devdeck/backend/internal/store"
+	"devdeck/backend/internal/telegram"
 	"devdeck/backend/internal/terminal"
 	"devdeck/backend/internal/version"
 	"devdeck/backend/internal/webui"
@@ -63,6 +73,36 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	// `devdeck ssh-tool …` is the SSH chat tool CLI: the same executable
+	// entered at a different point, which is how the feature avoids shipping a
+	// second binary the operator would have to install (sshtoolcli's package
+	// comment). It is dispatched first and returns without touching config, the
+	// database, the log prefix or a port — a spawned agent invokes it once per
+	// remote command through the shim in its workspace.
+	if code, handled := sshtoolcli.Dispatch(os.Args); handled {
+		os.Exit(code)
+	}
+	// Same bargain for the issue-tracker MCP server an agent's own config
+	// launches: `devdeck mcp-server` instead of a devdeck-mcp-server binary the
+	// operator has to build themselves and rebuild whenever the schema moves.
+	if code, handled := issuemcp.Dispatch(os.Args); handled {
+		os.Exit(code)
+	}
+	// `devdeck memory recall|graph` is the same bargain again, for pi: it has
+	// no MCP client at all (see internal/memorycli's package comment), so a
+	// skill drives this one-shot CLI over bash instead of a protocol
+	// handshake every other provider gets automatically.
+	if code, handled := memorycli.Dispatch(os.Args); handled {
+		os.Exit(code)
+	}
+	// `devdeck memory-backfill` is a one-shot operator command, same bargain
+	// again: no separate tool to build for populating persistent memory from
+	// history that predates the feature — see memorybackfill's package
+	// comment.
+	if code, handled := memorybackfill.Dispatch(os.Args); handled {
+		os.Exit(code)
+	}
+
 	// `devdeck setup` is a subcommand, not a flag, so it must be recognised and
 	// removed before the flag package sees the arguments.
 	args, wantSetup := stripSetupArg(os.Args)
@@ -348,6 +388,12 @@ func main() {
 		whoamiStore = st
 	}
 	whoamiH := handler.NewWhoamiHandler(*role, *machineName, whoamiStore, *hubURL, "")
+	// Advertised so a client can tell an out-of-date runtime from a broken
+	// one before it opens a socket — see handler.CapSSHChat. Declared here,
+	// next to the handler, so the list stays visibly tied to what this
+	// process actually registers below rather than drifting into a constant
+	// nobody re-checks.
+	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapTelegram)
 	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
 	lspDepsH := handler.NewLspDepsHandler(lspSrv.Installer())
 	updater := &selfupdate.Updater{Client: &selfupdate.Client{
@@ -381,11 +427,34 @@ func main() {
 	bookmarkH := handler.NewBookmarkHandler(st, service.NewFaviconService(st))
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
-	// One dialer backs both the interactive shell and the SFTP file API, so
-	// enabling ExecutorMachineID routing here routes both: every file
+
+	// Where the dialer gets its credentials, and where it dials FROM, both
+	// depend on the role — and they move together.
+	//
+	// On the hub: decrypt locally (the ciphertext and the master key are both
+	// here) and honour ExecutorMachineID by tunnelling the TCP dial through
+	// that runtime's SOCKS5 proxy. That is the split sshmgr/executor.go
+	// describes, and it still backs the interactive shell, SFTP and port
+	// forwarding unchanged.
+	//
+	// On a runtime: this process IS the executor, so there is no proxy to
+	// route through — a direct dial is the whole point. But its replica has no
+	// ssh_secrets rows (ApplyCatalogSnapshot copies connections, never
+	// credentials) and no master key to decrypt them with, so credentials come
+	// from the hub over a machine-key-gated route, scoped by the hub to
+	// exactly the connections this machine executes. See
+	// machineclient.HubSecretSource and handler.RuntimeSSHHandler.
+	var sshSecretSource sshmgr.SecretSource = sshSecrets
+	if isRuntime {
+		sshSecretSource = machineclient.NewHubSecretSource(*hubURL, *apiKey)
+	}
+	// One dialer backs the interactive shell, the SFTP file API and the agent
+	// tool calls, so the choice above applies to all of them: every file
 	// operation rides the same *ssh.Client the shell does.
-	sshDialer := sshmgr.NewDialer(st, sshSecrets).
-		WithExecutorRouting(st, machineclient.SOCKSProxyStarter{})
+	sshDialer := sshmgr.NewDialer(st, sshSecretSource)
+	if !isRuntime {
+		sshDialer = sshDialer.WithExecutorRouting(st, machineclient.SOCKSProxyStarter{})
+	}
 	sshSrv := sshmgr.NewServer(sshDialer)
 	// One FilePool backs both SFTP file ops and stats polling, so a saved
 	// connection's SSH client is cached once instead of dialed twice.
@@ -422,7 +491,7 @@ func main() {
 	// Agent chat harness. Runs on every role, but only a runtime ever has
 	// worktrees to chat about; the hub simply proxies the WebSocket like it
 	// does for /ws/terminal and /ws/ssh.
-	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver())
+	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver(), codex.NewDriver(), opencode.NewDriver())
 	// The engine's State is DERIVED from the event log, never stored — so it
 	// has to be rebuilt from that log on every boot. Skipping this was a real
 	// bug, not a theoretical one: the events survived the restart, so the
@@ -501,6 +570,77 @@ func main() {
 	// whatever tunnel or TLS terminator sits in front of the public URL.
 	var loopbackHubURL string
 
+	// memSvc is the hub-side owner of persistent agent memory (Hindsight) —
+	// see domain.MemoryConfig's doc comment for why it is intentionally
+	// hub-only, and internal/service/memory.go for the client it builds.
+	// Constructed on every role: a --role runtime process never calls it
+	// directly (see the isRuntime branch just below), but building it here
+	// unconditionally keeps this block the same shape as every service
+	// above it, and it does nothing until a handler or hook actually calls
+	// it — MemoryService.client() returns ErrMemoryNotConfigured until an
+	// operator turns the feature on from Settings.
+	memSvc := service.NewMemoryService(st, filepath.Dir(*dbPath))
+
+	// resolveScope turns a bare threadID into the attribution tags a memory
+	// gets retained/recalled under — see memory.Scope's doc comment for why
+	// this is tags on ONE shared bank rather than a bank per project. Cheap:
+	// at most one indexed worktree/project (or SSH connection) lookup on
+	// THIS process's own store, plus an in-memory engine-state read for the
+	// provider kind (Thread.InstanceID is "<kind>:<instanceId>"). Safe to
+	// call from a runtime too — a runtime's own st holds exactly the
+	// worktrees it hosts, the same store InstanceFor below already reads.
+	resolveScope := func(threadID string) memory.Scope {
+		scope := memory.Scope{Machine: *machineName, Thread: threadID}
+		if th, ok := agentEngine.State().Thread(threadID); ok {
+			if i := strings.IndexByte(string(th.InstanceID), ':'); i >= 0 {
+				scope.Provider = string(th.InstanceID)[:i]
+			}
+		}
+		if orchestration.IsSSHThread(threadID) {
+			scope.Surface = "ssh"
+			if conn, err := st.SSHConnectionByID(orchestration.SSHConnectionIDForThread(threadID)); err == nil {
+				scope.Project = conn.Name
+			}
+			return scope
+		}
+		scope.Surface = "worktree"
+		if wt, err := st.WorktreeByID(orchestration.WorktreeIDForThread(threadID)); err == nil {
+			if proj, err := st.ProjectByID(wt.ProjectID); err == nil {
+				scope.Project = proj.Name
+			}
+		}
+		return scope
+	}
+
+	// memoryHooks is how orchestration reaches persistent memory without
+	// importing internal/memory itself — see orchestration.MemoryHooks' doc
+	// comment. The two roles diverge here: a plain runtime has no Hindsight
+	// credentials of its own and calls back through the hub's machine-key-
+	// gated /api/runtime/memory/* routes (machineclient/memory.go); the hub
+	// (or a --role both process, which owns its worktrees directly in the
+	// same store) calls Hindsight itself through memSvc, no network hop.
+	var memoryHooks orchestration.MemoryHooks
+	if isRuntime {
+		memoryHooks = orchestration.MemoryHooks{
+			Recall: func(ctx context.Context, threadID, query string) string {
+				return machineclient.RecallMemory(ctx, *hubURL, *apiKey, resolveScope(threadID), query)
+			},
+			Retain: func(_ context.Context, threadID, role, text string) {
+				machineclient.RetainMemory(*hubURL, *apiKey, resolveScope(threadID), role, text)
+			},
+		}
+	} else {
+		memoryHooks = orchestration.MemoryHooks{
+			Recall: func(ctx context.Context, threadID, query string) string {
+				return memSvc.RecallBlock(ctx, resolveScope(threadID), query)
+			},
+			Retain: func(ctx context.Context, threadID, role, text string) {
+				memSvc.RetainAsync(ctx, resolveScope(threadID), role, text)
+			},
+		}
+	}
+	agentIngestion.Memory = memoryHooks
+
 	// toolPrompter drives an SSH tool's approval card through the exact same
 	// event path a provider's own approval request takes (design spec §4.4),
 	// so it is indistinguishable from a provider's, on the wire and in the
@@ -534,6 +674,9 @@ func main() {
 		// with no adapter — resolves a turn's attachment ids into bytes right
 		// before the provider call.
 		Attachments: st,
+		// Recalls persistent-memory context before every turn — see
+		// MemoryHooks above.
+		Memory: memoryHooks,
 		// The Reactor is the only component that learns an adapter was just
 		// created, so it is what starts that adapter's Ingestion loop.
 		OnInstanceStarted: func(ctx context.Context, a provider.Adapter) {
@@ -550,11 +693,95 @@ func main() {
 		// error wrapping, its empty-Agent fallback — stays exactly as it was
 		// before this feature existed.
 		InstanceFor: func(threadID string) (provider.InstanceID, provider.SessionStartInput, error) {
+			// mcpEndpointsFor wires MCP servers into a session: the live
+			// Hindsight endpoint (if memory is configured) so the model can
+			// call retain/recall/reflect on its own initiative, and
+			// DevDeck's own `mcp-server` subcommand (issue tracker +
+			// graph_neighbors, see internal/issuemcp) so it can file
+			// tickets and look up real memory-graph relationships instead
+			// of guessing them from a recall snippet — on top of the
+			// deterministic recall/retain every provider already gets from
+			// memoryHooks above.
+			//
+			// claude wires both endpoints unconditionally (ephemeral
+			// per-session --mcp-config, nothing persisted). codex and
+			// opencode wire them too, but only when the instance's own
+			// Config.HomeDir is set — their MCP config lives in a real file
+			// (~/.codex/config.toml, ~/.config/opencode/opencode.jsonc)
+			// that, with no isolated HomeDir, IS the operator's own
+			// hand-maintained one, shared with their interactive CLI use
+			// outside DevDeck; adding servers there silently would both
+			// surprise them and leak into every codex/opencode session on
+			// the machine. See each adapter's configureMCP for the actual
+			// write (`codex mcp add` / `opencode mcp add`, not hand-rolled
+			// file edits) and its idempotency. pi has no MCP client at all
+			// (confirmed against a live `pi --help` — no mcp subcommand or
+			// flag exists), so this returns nil for it; there is nothing
+			// DevDeck can wire until pi's own CLI gains MCP support.
+			// !isRuntime-only: see MemoryService.MCPEndpoint's doc comment
+			// for why a remote runtime never gets the Hindsight hop; the
+			// same reasoning applies to devdeck mcp-server, which needs
+			// direct access to this hub's own SQLite file.
+			mcpEndpointsFor := func(kind string) []provider.MCPEndpoint {
+				if isRuntime || kind == "pi" {
+					return nil
+				}
+				var eps []provider.MCPEndpoint
+				if info, ok := memSvc.MCPEndpoint(); ok {
+					eps = append(eps, provider.MCPEndpoint{Name: "hindsight", URL: info.URL, Token: info.Token})
+				}
+				if exe := hostExecutable(); exe != "" {
+					eps = append(eps, provider.MCPEndpoint{
+						Name: "devdeck", Command: exe, Args: []string{issuemcp.Subcommand, "--db", *dbPath},
+					})
+				}
+				return eps
+			}
+
+			// memoryEnvFor gives pi the same recall/graph capability the MCP
+			// hop above gives everyone else, over a route pi actually has:
+			// `devdeck memory recall|graph` run through its own bash tool
+			// (see internal/memorycli and the devdeck-memory skill that
+			// teaches pi when to call it). DEVDECK_DB is this hub's OWN db,
+			// the same file mcpEndpointsFor points `devdeck mcp-server` at
+			// above — pi never gets a credential the hub doesn't already
+			// trust.
+			memoryEnvFor := func(kind string) map[string]string {
+				if isRuntime || kind != "pi" {
+					return nil
+				}
+				exe := hostExecutable()
+				if exe == "" {
+					return nil
+				}
+				return map[string]string{"DEVDECK_BIN": exe, "DEVDECK_DB": *dbPath}
+			}
 			if orchestration.IsSSHThread(threadID) {
 				connectionID := orchestration.SSHConnectionIDForThread(threadID)
 				conn, err := st.SSHConnectionByID(connectionID)
 				if err != nil {
 					return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: %w", threadID, err)
+				}
+				// DevOps chat runs on the connection's executor runtime, not on
+				// the hub: the agent process, its tool calls, and the SSH dial
+				// all happen on the machine that actually reaches the host.
+				//
+				// Both halves of this check produce an operator-facing sentence
+				// rather than a silent misroute, because both are recoverable
+				// configuration mistakes and neither has any other symptom. The
+				// client gates the panel on the same two conditions before it
+				// ever opens a socket (SSHAgentChatPanel.tsx), so reaching here
+				// means something raced or a client is out of step — say so
+				// plainly instead of starting an agent on the wrong machine.
+				if conn.ExecutorMachineID == nil || *conn.ExecutorMachineID == "" {
+					return "", provider.SessionStartInput{}, fmt.Errorf(
+						"agent thread %s: SSH connection %q has no executor machine; assign it to a runtime in the connection's settings to use DevOps chat",
+						threadID, conn.Name)
+				}
+				if !isRuntime && !hostsSSHConnection(st, *conn.ExecutorMachineID) {
+					return "", provider.SessionStartInput{}, fmt.Errorf(
+						"agent thread %s: SSH connection %q runs on a runtime machine; open its chat from that machine",
+						threadID, conn.Name)
 				}
 				// Re-minted on every session start (Task 3's TokenStore.Mint
 				// doc comment): a stale token from a previous process, or a
@@ -569,7 +796,7 @@ func main() {
 					Host:         conn.Host,
 					User:         conn.Username,
 					Token:        token,
-				})
+				}, hostExecutable())
 				if err != nil {
 					return "", provider.SessionStartInput{}, fmt.Errorf("agent thread %s: seed workspace: %w", threadID, err)
 				}
@@ -578,9 +805,19 @@ func main() {
 				// it always takes the same empty-Agent fallback the worktree
 				// branch below logs about.
 				log.Printf("agent: SSH thread %s has no configurable agent; defaulting to %q", threadID, orchestration.DefaultAgent)
+				// Without PATH the whole feature is inert: the seeded
+				// AGENTS.md tells the agent that `devdeck-ssh` is its only
+				// route to the host, and a bare invocation of it has to
+				// resolve or every tool call comes back "command not found".
+				env := agentPathEnv(sshthread.BinDir(dir))
+				for k, v := range memoryEnvFor(orchestration.DefaultAgent) {
+					env[k] = v
+				}
 				return orchestration.InstanceIDForAgent(""), provider.SessionStartInput{
-					ThreadID: threadID,
-					Cwd:      dir,
+					ThreadID:     threadID,
+					Cwd:          dir,
+					Env:          env,
+					MCPEndpoints: mcpEndpointsFor(orchestration.DefaultAgent),
 				}, nil
 			}
 
@@ -597,9 +834,15 @@ func main() {
 			if wt.Agent == "" {
 				log.Printf("agent: worktree %s has no agent configured; defaulting to %q", wt.ID, orchestration.DefaultAgent)
 			}
+			agentKind := wt.Agent
+			if agentKind == "" {
+				agentKind = orchestration.DefaultAgent
+			}
 			return orchestration.InstanceIDForAgent(wt.Agent), provider.SessionStartInput{
-				ThreadID: threadID,
-				Cwd:      wt.Path,
+				ThreadID:     threadID,
+				Cwd:          wt.Path,
+				Env:          memoryEnvFor(agentKind),
+				MCPEndpoints: mcpEndpointsFor(agentKind),
 			}, nil
 		},
 	}
@@ -627,6 +870,174 @@ func main() {
 	publishedSOCKSSvc := service.NewPublishedSOCKSService(st, advertiseURL.Hostname())
 	publishedSOCKSH := handler.NewPublishedSOCKSHandler(publishedSOCKSSvc)
 	systemStatsH := handler.NewSystemStatsHandler(hoststats.NewCollector())
+
+	// The Telegram bridge runs on every role for the same reason the published
+	// SOCKS proxy does: which threads a process can publish is decided by
+	// which threads its own engine holds, not by its role. A hub publishes
+	// ssh:* threads; a runtime publishes its own worktree chats. One bot
+	// token per process is a hard requirement, not a style choice —
+	// Telegram's getUpdates is exclusive per token, so two processes sharing
+	// one token evict each other with 409 Conflict. See
+	// docs/superpowers/plans/2026-08-18-telegram-remote-chat.md §0.1.
+	telegramPairing := &telegram.Pairing{TTL: 5 * time.Minute, Now: time.Now}
+	// Shared by pointer with the bridge (which writes it) and the settings
+	// handler (which reads it), exactly like telegramPairing. See
+	// telegram.Health: without it, a bridge that can never receive a message
+	// is indistinguishable in the UI from a working one.
+	telegramHealth := &telegram.Health{}
+	// The live bridge, so the settings handler can reach it to unpin a
+	// confirmation when a thread is unpublished from the UI. Guarded by
+	// telegramMu with everything else here, and nil whenever no bridge is
+	// running (disabled, or no token).
+	var telegramBridge *telegram.Bridge
+	var telegramCancel context.CancelFunc
+	var telegramDone chan struct{}
+	var telegramMu sync.Mutex
+	// restartTelegram is the ONE place that starts or stops the bridge. It is
+	// concurrency-safe (guarded by telegramMu) and always stops the previous
+	// bridge before starting a new one — two long-poll loops on the same bot
+	// token evict each other with a 409, breaking the bot until a process
+	// restart.
+	//
+	// Cancelling is not the same as having stopped: Run returns only once both
+	// its loops have unwound, and until the old poll loop's in-flight
+	// getUpdates is actually torn down, Telegram still counts it as the
+	// token's one active poller. So this WAITS for the old bridge — bounded,
+	// because a hung shutdown must not wedge the HTTP handler that called it.
+	restartTelegram := func() {
+		telegramMu.Lock()
+		defer telegramMu.Unlock()
+		if telegramCancel != nil {
+			telegramCancel()
+			telegramCancel = nil
+			if telegramDone != nil {
+				select {
+				case <-telegramDone:
+				case <-time.After(5 * time.Second):
+					log.Printf("telegram: previous bridge did not stop within 5s; starting the new one anyway")
+				}
+				telegramDone = nil
+			}
+		}
+		telegramBridge = nil
+		cfg, err := st.TelegramConfig()
+		if err != nil || !cfg.Enabled || !cfg.HasToken {
+			// Every early return here leaves NO bridge running, so the state
+			// has to say so — otherwise disabling the bridge would leave the
+			// last "ok" on screen forever.
+			telegramHealth.Set(telegram.HealthOff, "")
+			return
+		}
+		token, err := st.TelegramBotToken()
+		if err != nil || token == "" {
+			telegramHealth.Set(telegram.HealthOff, "")
+			return
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		telegramCancel = cancel
+		// DEVDECK_TELEGRAM_API_BASE points the bot client at something other
+		// than api.telegram.org. Empty (the normal case) means the real API.
+		// This exists so the SHIPPED BINARY can be exercised end-to-end against
+		// a local stand-in — booting it, enabling the bridge over its own REST
+		// API, and watching it answer a message — which unit tests, exercising
+		// the package in-process, cannot prove.
+		client := &telegram.Client{Token: token, BaseURL: os.Getenv("DEVDECK_TELEGRAM_API_BASE")}
+
+		// Confirm the token actually works, and record the bot's @username.
+		// NOTHING else writes TelegramConfig.BotUsername — handler/telegram.go
+		// only carries the stored value through — so without this the Settings
+		// panel can never tell an operator whether the token they pasted is
+		// valid, and a typo'd token looks identical to a working one until
+		// messages mysteriously go nowhere.
+		//
+		// In its own goroutine, and deliberately not a precondition for
+		// starting the bridge below: an unreachable Telegram must not hold up
+		// boot, and the poll loop has its own retry/backoff for exactly that.
+		go func() {
+			me, err := client.GetMe(ctx)
+			if err != nil {
+				log.Printf("telegram: getMe failed — the bot token may be invalid or Telegram unreachable: %v", err)
+				telegramHealth.Set(telegram.HealthError, telegram.PollErrorDetail(err))
+				return
+			}
+			cur, err := st.TelegramConfig()
+			if err != nil || cur.BotUsername == me.Username {
+				return
+			}
+			cur.BotUsername = me.Username
+			if err := st.SetTelegramConfig(cur); err != nil {
+				log.Printf("telegram: store bot username: %v", err)
+				return
+			}
+			log.Printf("telegram: authenticated as @%s", me.Username)
+		}()
+
+		b := telegram.New(telegram.Deps{
+			Store:   st,
+			Engine:  agentEngine,
+			Client:  client,
+			Pairing: telegramPairing,
+			Health:  telegramHealth,
+			NewID:   func() string { return "tg-" + randomHex(8) },
+			// Backs /agents in a published project: which agent NEW sessions
+			// start on. The same catalog the chat header offers, so an agent
+			// missing its binary is listed and marked rather than silently
+			// dropped.
+			ListAgents: agentSvc.ListAgents,
+			ListSkills: func() ([]string, error) {
+				skills, err := agentSvc.ListSkills(orchestration.DefaultAgent)
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(skills))
+				for _, s := range skills {
+					names = append(names, s.Name)
+				}
+				return names, nil
+			},
+			// Keyed by AGENT, not by thread: which agent a destination runs is a
+			// question only the bridge can answer (its /agents choice lives on a
+			// Telegram binding), so resolving it here would have to guess — and
+			// guessing "the thread's creation-time instance" is exactly what
+			// made /model offer the previous agent's catalog.
+			Models: func(agentID string) ([]string, error) {
+				models, err := agentSvc.ListModels(agentID)
+				if err != nil {
+					return nil, err
+				}
+				ids := make([]string, 0, len(models))
+				for _, m := range models {
+					ids = append(ids, m.ID)
+				}
+				return ids, nil
+			},
+			Now: time.Now,
+		})
+		done := make(chan struct{})
+		telegramDone = done
+		telegramBridge = b
+		go func() {
+			defer close(done)
+			b.Run(ctx)
+		}()
+		log.Printf("telegram: bridge started")
+	}
+	restartTelegram()
+	// Unpublishing from Settings has to leave the Telegram chat in the same
+	// state /unpublish does, which means removing the pinned confirmation.
+	// Resolved through telegramMu on each call rather than captured once:
+	// every config save replaces the bridge, and a captured pointer would
+	// address a cancelled one whose client is no longer polling.
+	telegramUnpin := func(r *http.Request, binding domain.TelegramBinding) {
+		telegramMu.Lock()
+		b := telegramBridge
+		telegramMu.Unlock()
+		if b == nil {
+			return
+		}
+		b.UnpinBinding(r.Context(), binding)
+	}
+	telegramH := handler.NewTelegramHandler(st, telegramPairing, telegramHealth, restartTelegram, telegramUnpin)
 
 	mux := http.NewServeMux()
 
@@ -841,6 +1252,18 @@ func main() {
 		mux.Handle("GET /api/runtime/catalog", handler.RequireMachineKey(st)(catalogMux))
 		mux.Handle("POST /api/runtime/projects", handler.RequireMachineKey(st)(catalogMux))
 
+		// Persistent agent memory: a runtime calls back through these two
+		// routes instead of holding its own Hindsight credentials — see
+		// domain.MemoryConfig's doc comment and machineclient/memory.go, the
+		// only caller. Same nested-mux-behind-RequireMachineKey shape as the
+		// catalog routes just above, for the same reason.
+		runtimeMemoryH := handler.NewRuntimeMemoryHandler(memSvc)
+		runtimeMemoryMux := http.NewServeMux()
+		runtimeMemoryMux.HandleFunc("POST /api/runtime/memory/recall", runtimeMemoryH.PostRecall)
+		runtimeMemoryMux.HandleFunc("POST /api/runtime/memory/retain", runtimeMemoryH.PostRetain)
+		mux.Handle("POST /api/runtime/memory/recall", handler.RequireMachineKey(st)(runtimeMemoryMux))
+		mux.Handle("POST /api/runtime/memory/retain", handler.RequireMachineKey(st)(runtimeMemoryMux))
+
 		// SSH connection registry — hub-scoped like the machine registry.
 		mux.HandleFunc("GET /api/ssh/connections", sshH.GetConnections)
 		mux.HandleFunc("POST /api/ssh/connections", sshH.PostConnection)
@@ -889,23 +1312,16 @@ func main() {
 		mux.HandleFunc("POST /api/ssh/forwards/{id}/stop", sshForwardH.PostStop)
 		mux.HandleFunc("GET /api/ssh/forwards/states", sshForwardH.GetStates)
 
-		// Tool routes the devdeck-ssh helper CLI calls from inside an SSH
-		// chat thread's seeded workspace (sshthread.Seed) — authenticated by
-		// a per-thread token (tokenStore), never by this hub's session
-		// cookie or hub key. Same nested-mux pattern as /api/runtime/catalog
-		// above: RequireThreadToken must wrap only this route group, so it
-		// is built on its own mux instead of the shared one.
-		toolMux := http.NewServeMux()
-		toolMux.HandleFunc("POST /api/agent-tools/ssh/exec", sshToolH.Exec)
-		toolMux.HandleFunc("GET /api/agent-tools/ssh/file", sshToolH.ReadFile)
-		toolMux.HandleFunc("PUT /api/agent-tools/ssh/file", sshToolH.WriteFile)
-		toolMux.HandleFunc("GET /api/agent-tools/ssh/files", sshToolH.ListFiles)
-		toolMux.HandleFunc("GET /api/agent-tools/ssh/grep", sshToolH.Grep)
-		mux.Handle("POST /api/agent-tools/ssh/exec", handler.RequireThreadToken(tokenStore)(toolMux))
-		mux.Handle("GET /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
-		mux.Handle("PUT /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
-		mux.Handle("GET /api/agent-tools/ssh/files", handler.RequireThreadToken(tokenStore)(toolMux))
-		mux.Handle("GET /api/agent-tools/ssh/grep", handler.RequireThreadToken(tokenStore)(toolMux))
+		// Hands a runtime the decrypted credentials for the connections IT
+		// executes, so it can complete the SSH handshake itself for an SSH
+		// chat thread it hosts. Machine-key gated and scoped per connection by
+		// the handler — read handler.RuntimeSSHHandler's doc comment before
+		// touching this route; it is the one place a plaintext SSH credential
+		// crosses a process boundary.
+		runtimeSSHH := handler.NewRuntimeSSHHandler(st, sshSecrets)
+		runtimeSSHMux := http.NewServeMux()
+		runtimeSSHMux.HandleFunc("POST /api/runtime/ssh/secret", runtimeSSHH.PostSecret)
+		mux.Handle("POST /api/runtime/ssh/secret", handler.RequireMachineKey(st)(runtimeSSHMux))
 
 		// Database connection registry — hub-scoped like the SSH registry.
 		mux.HandleFunc("GET /api/db/connections", dbH.GetConnections)
@@ -952,6 +1368,35 @@ func main() {
 		mux.HandleFunc("GET /api/completions/config", completionsHandler.GetConfig)
 		mux.HandleFunc("PUT /api/completions/config", completionsHandler.PutConfig)
 		mux.HandleFunc("POST /api/completions/inline", completionsHandler.PostInline)
+
+		// Persistent agent memory (Hindsight-backed). Hub-only for the same
+		// reason completions is: the credentials live here, and every other
+		// piece of state a request needs is already on this process (the
+		// Memory page's browse calls; a runtime's per-turn recall/retain goes
+		// through /api/runtime/memory/* above instead, never this block).
+		memoryH := handler.NewMemoryHandler(memSvc)
+		mux.HandleFunc("GET /api/memory/config", memoryH.GetConfig)
+		mux.HandleFunc("PUT /api/memory/config", memoryH.PutConfig)
+		mux.HandleFunc("POST /api/memory/test", memoryH.PostTest)
+		mux.HandleFunc("GET /api/memory/stats", memoryH.GetStats)
+		mux.HandleFunc("GET /api/memory/tags", memoryH.GetTags)
+		mux.HandleFunc("GET /api/memory/memories", memoryH.GetMemories)
+		mux.HandleFunc("GET /api/memory/operations", memoryH.GetOperations)
+		mux.HandleFunc("GET /api/memory/graph", memoryH.GetGraph)
+		mux.HandleFunc("GET /api/memory/entities/graph", memoryH.GetEntityGraph)
+		mux.HandleFunc("GET /api/memory/entities", memoryH.GetEntities)
+		mux.HandleFunc("GET /api/memory/timeseries", memoryH.GetTimeseries)
+		mux.HandleFunc("GET /api/memory/documents", memoryH.GetDocuments)
+		mux.HandleFunc("GET /api/memory/mental-models", memoryH.GetMentalModels)
+		mux.HandleFunc("POST /api/memory/recall", memoryH.PostRecall)
+		mux.HandleFunc("POST /api/memory/reflect", memoryH.PostReflect)
+		mux.HandleFunc("POST /api/memory/global", memoryH.PostGlobalPreference)
+		mux.HandleFunc("GET /api/memory/export", memoryH.GetExport)
+		mux.HandleFunc("POST /api/memory/import", memoryH.PostImport)
+		mux.HandleFunc("GET /api/memory/local/status", memoryH.GetLocalStatus)
+		mux.HandleFunc("POST /api/memory/local/start", memoryH.PostLocalStart)
+		mux.HandleFunc("POST /api/memory/local/stop", memoryH.PostLocalStop)
+		mux.HandleFunc("GET /api/memory/local/logs", memoryH.GetLocalLogs)
 	}
 
 	// Runtime execution endpoints. These accept a descriptor carrying
@@ -981,8 +1426,46 @@ func main() {
 	mux.HandleFunc("GET /api/proxy/publish", publishedSOCKSH.Get)
 	mux.HandleFunc("PUT /api/proxy/publish", publishedSOCKSH.Put)
 
+	// Registered on every role, like the published-SOCKS routes just above:
+	// a runtime publishing its own worktree chats to Telegram is exactly as
+	// valid as a hub publishing its SSH chats (see telegramH's construction
+	// above for why).
+	mux.HandleFunc("GET /api/telegram/config", telegramH.GetConfig)
+	mux.HandleFunc("PUT /api/telegram/config", telegramH.PutConfig)
+	mux.HandleFunc("POST /api/telegram/pair", telegramH.PostPair)
+	mux.HandleFunc("GET /api/telegram/users", telegramH.GetUsers)
+	mux.HandleFunc("DELETE /api/telegram/users/{userId}", telegramH.DeleteUser)
+	mux.HandleFunc("GET /api/telegram/bindings", telegramH.GetBindings)
+	mux.HandleFunc("PUT /api/telegram/bindings/{threadId}", telegramH.PutBinding)
+	mux.HandleFunc("DELETE /api/telegram/bindings/{threadId}", telegramH.DeleteBinding)
+
 	mux.HandleFunc("/ws/terminal", termSrv.HandleWS)
 	mux.HandleFunc("/ws/agent", agentWS.HandleWS)
+
+	// Tool routes the devdeck-ssh helper CLI calls from inside an SSH chat
+	// thread's seeded workspace (sshthread.Seed) — authenticated by a
+	// per-thread token (tokenStore), never by a session cookie or hub key.
+	// The nested mux is deliberate: RequireThreadToken must wrap only this
+	// route group, not the whole server, so it is built on its own mux.
+	//
+	// Registered on EVERY role, alongside /ws/agent just above and for the
+	// same reason: an SSH chat thread now runs wherever its agent runs, and an
+	// agent hosted on a runtime calls these on that runtime — the helper shim
+	// forwards to this same process's binary (sshthread.Seed's hostExe) and
+	// the workspace's hubUrl is this process's own loopback address. Leaving
+	// them hub-only is what made a runtime-hosted thread's every tool call
+	// 404 against a route its own workspace was pointed at.
+	toolMux := http.NewServeMux()
+	toolMux.HandleFunc("POST /api/agent-tools/ssh/exec", sshToolH.Exec)
+	toolMux.HandleFunc("GET /api/agent-tools/ssh/file", sshToolH.ReadFile)
+	toolMux.HandleFunc("PUT /api/agent-tools/ssh/file", sshToolH.WriteFile)
+	toolMux.HandleFunc("GET /api/agent-tools/ssh/files", sshToolH.ListFiles)
+	toolMux.HandleFunc("GET /api/agent-tools/ssh/grep", sshToolH.Grep)
+	mux.Handle("POST /api/agent-tools/ssh/exec", handler.RequireThreadToken(tokenStore)(toolMux))
+	mux.Handle("GET /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
+	mux.Handle("PUT /api/agent-tools/ssh/file", handler.RequireThreadToken(tokenStore)(toolMux))
+	mux.Handle("GET /api/agent-tools/ssh/files", handler.RequireThreadToken(tokenStore)(toolMux))
+	mux.Handle("GET /api/agent-tools/ssh/grep", handler.RequireThreadToken(tokenStore)(toolMux))
 	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
 	mux.HandleFunc("DELETE /api/agent/threads/{threadId}", agentThreadH.DeleteThread)
 	// Composer image attachments (Composer — Context Attachments, C1). Every
@@ -1117,6 +1600,18 @@ func main() {
 	// the server from booting.
 	if err := publishedSOCKSSvc.StartIfEnabled(); err != nil {
 		log.Printf("published socks5 proxy: %v", err)
+	}
+	// Same replay, for a locally managed Hindsight process/container — see
+	// MemoryService.LocalStartIfRunning's doc comment. Backgrounded, unlike
+	// the SOCKS5 replay above: a cold image pull or a cold `uvx` package
+	// fetch can take minutes, and the hub must start serving HTTP
+	// immediately rather than block its own boot on that.
+	if !isRuntime {
+		go func() {
+			if err := memSvc.LocalStartIfRunning(context.Background()); err != nil {
+				log.Printf("memory: local hosting: %v", err)
+			}
+		}()
 	}
 	// Graceful shutdown, rather than letting the process die where it stands.
 	// Three things here exist only in this process's memory and nothing else
@@ -1446,6 +1941,67 @@ func defaultPythonBin() string {
 }
 
 // randomHex returns n bytes of crypto/rand as a lowercase hex string, e.g.
+// hostExecutable returns the absolute path of the running DevDeck binary, which
+// sshthread.Seed bakes into the workspace's devdeck-ssh shim so the agent's tool
+// calls re-enter this same executable at its `ssh-tool` subcommand.
+//
+// Returns "" when the path cannot be resolved or is not a real file, which tells
+// Seed to write no shim (see its doc comment) — the tool call then fails as
+// "command not found", which is at least an honest report to the agent.
+//
+// os.Executable is followed by a Stat because it is documented as best-effort on
+// some platforms, and a path that does not exist is exactly the input that would
+// produce a shim failing with an unrecognisable shell error instead.
+// hostsSSHConnection reports whether THIS process is the executor named by
+// machineID — i.e. whether it may host that connection's DevOps chat.
+//
+// Only ever consulted on a hub or a --role both process. A runtime never asks:
+// it reaches its InstanceFor branch solely for connections its own catalog
+// slice contains, and store.CatalogForMachine builds that slice from
+// SSHConnectionsByExecutor, so "this connection is in my replica" already
+// means "I am its executor".
+//
+// True only for a machine flagged IsLocal, which is the desktop's own embedded
+// runtime — the same identity sshmgr/executor.go treats as "dial directly
+// rather than proxy through myself". Anything else names a separate process,
+// and the chat belongs there.
+func hostsSSHConnection(st port.Store, machineID string) bool {
+	m, err := st.MachineByID(machineID)
+	if err != nil {
+		return false
+	}
+	return m.IsLocal
+}
+
+func hostExecutable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("agent: cannot resolve executable path; SSH threads will have no devdeck-ssh: %v", err)
+		return ""
+	}
+	if info, err := os.Stat(exe); err != nil || info.IsDir() {
+		log.Printf("agent: executable path %q is not usable; SSH threads will have no devdeck-ssh", exe)
+		return ""
+	}
+	return exe
+}
+
+// agentPathEnv prepends binDir — an SSH thread workspace's own bin/, holding
+// the generated devdeck-ssh shim — to PATH for that thread's agent process, so
+// a bare `devdeck-ssh` resolves.
+//
+// Prepending, not replacing: the agent still needs the rest of its PATH to find
+// its own toolchain. Per-workspace rather than one shared directory because the
+// shim is written by the same Seed call that writes the thread's binding, so the
+// two can never disagree about which executable serves this thread.
+func agentPathEnv(binDir string) map[string]string {
+	existing := os.Getenv("PATH")
+	if existing == "" {
+		return map[string]string{"PATH": binDir}
+	}
+	return map[string]string{"PATH": binDir + string(os.PathListSeparator) + existing}
+}
+
 // randomHex(8) -> "1a2b3c4d5e6f7a8b". Mirrors the type-prefixed hex ids used
 // throughout the store (internal/store.idGen); agent event/command ids reuse
 // the same shape ("ae-"/"ac-" prefixes) rather than inventing a new scheme.

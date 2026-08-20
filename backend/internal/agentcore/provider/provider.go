@@ -118,6 +118,40 @@ const (
 	ModeFullAccess       RuntimeMode = "full-access"
 )
 
+// AllowsUnprompted reports whether an action may run under this mode WITHOUT
+// asking a human — the whole permission matrix, in one place:
+//
+//	                    read   mutating
+//	full-access         run    run
+//	auto                run    ask
+//	auto-accept-edits   run    ask
+//	approval-required   ask    ask
+//
+// `mutating` is the caller's own judgement about the action (for the SSH tool
+// gate, sshtool.Classify's verdict). An unrecognised mode answers false: the
+// conservative direction, matching sshtool.Classify's "when in doubt, gate it"
+// philosophy.
+//
+// It lives on RuntimeMode rather than in the one service that first needed it
+// because two separate places now have to agree on it, and they run at
+// different times: service.SSHToolService decides whether to OPEN an approval
+// card, and approval.Gate.ReleasePending decides whether a card already open
+// should now close itself because the operator changed the mode while it was
+// waiting. Two copies of this table would drift, and the failure mode of that
+// drift is a card that can never be dismissed.
+func (m RuntimeMode) AllowsUnprompted(mutating bool) bool {
+	switch m {
+	case ModeFullAccess:
+		return true
+	case ModeAuto, ModeAutoAcceptEdits:
+		return !mutating
+	case ModeApprovalRequired:
+		return false
+	default:
+		return false
+	}
+}
+
 // InteractionMode separates "collaboration style" from "permission policy".
 // The two are orthogonal: plan mode still needs a runtime mode.
 type InteractionMode string
@@ -136,14 +170,31 @@ type SessionStartInput struct {
 	// ResumeCursor is an opaque value previously emitted by the adapter via
 	// SessionStartedPayload.Resume. Orchestration stores it without reading it.
 	ResumeCursor json.RawMessage
-	// MCPEndpoint is injected if you mirror t3code's built-in MCP pattern.
-	MCPEndpoint *MCPEndpoint
+	// Env are per-SESSION environment overrides, layered on top of the
+	// instance's own (InstanceSpec.Env) when the agent process is spawned.
+	// Distinct from InstanceSpec.Env because the thing that varies here is the
+	// thread, not the configured agent: an SSH chat thread prepends its own
+	// workspace bin/ to PATH, where the devdeck-ssh shim lives, and that shim
+	// is the only route its agent has to the remote host. An adapter that
+	// spawns no process may ignore this.
+	Env map[string]string
+	// MCPEndpoints are injected if you mirror t3code's built-in MCP pattern.
+	// Each entry is either HTTP (URL set — e.g. Hindsight's own MCP server)
+	// or stdio (Command set — e.g. `devdeck mcp-server`, spawned as a
+	// subprocess by the agent's own CLI). An adapter that doesn't support
+	// MCP at all may ignore this field entirely.
+	MCPEndpoints []MCPEndpoint
 }
 
 type MCPEndpoint struct {
-	Name  string
+	Name string
+	// HTTP transport.
 	URL   string
 	Token string
+	// Stdio transport. Command set means stdio; empty means HTTP (URL set
+	// instead) — the two are mutually exclusive on one MCPEndpoint.
+	Command string
+	Args    []string
 }
 
 // ModelSelection is what the composer's picker sends with a turn. The tags
@@ -178,12 +229,21 @@ type SendTurnInput struct {
 	Model       ModelSelection
 }
 
+// Attachment travels two ways: metadata-only over the WebSocket command
+// channel (as part of TurnStartPayload — see orchestration/command.go), and
+// with Data populated server-side once the Reactor loads the bytes from the
+// attachment store (see orchestration/workers.go) before handing it to an
+// Adapter's SendTurn. The JSON tags are load-bearing for the first leg, the
+// same bug class ModelSelection was already fixed for (see its own comment,
+// above): an untagged struct sends PascalCase keys the client never emits,
+// silently dropping every field on decode.
 type Attachment struct {
-	Kind string // "image" | "file"
-	MIME string
-	Name string
-	Data []byte
-	Path string
+	ID   string `json:"id"`
+	Kind string `json:"kind"` // "image" | "file"
+	MIME string `json:"mime"`
+	Name string `json:"name"`
+	Data []byte `json:"-"` // filled server-side from the store — see workers.go
+	Path string `json:"-"` // unused today; kept, not serialized
 }
 
 type TurnStartResult struct {
@@ -218,6 +278,29 @@ type Adapter interface {
 	// RespondToRequest unblocks an agent that is waiting on an approval.
 	RespondToRequest(ctx context.Context, threadID, requestID string, d event.Decision) error
 	RespondToUserInput(ctx context.Context, threadID, requestID string, answers map[string]any) error
+
+	// SetInteractionMode switches an already-running session's live
+	// permission/collaboration mode (e.g. into or out of "plan") without a
+	// restart. Verified viable on a live claude session (capture/README.md
+	// "Open question 2") — providers that cannot do this (or have no notion
+	// of interaction mode at all, e.g. pi) implement it as a no-op rather
+	// than an error; Capabilities.SupportsPlanMode is what tells a caller
+	// whether calling this does anything.
+	SetInteractionMode(ctx context.Context, threadID string, mode InteractionMode) error
+
+	// SetRuntimeMode pushes a changed permission policy (RuntimeMode) to an
+	// already-running session, the same way SetInteractionMode pushes a
+	// changed collaboration mode. Without this, RuntimeMode only ever reaches
+	// a session at StartSession time (each adapter's own buildArgs /
+	// approvalPolicyFor): the composer's Permission pill updates DevDeck's own
+	// thread state, but the live process keeps enforcing whatever mode it was
+	// launched with for the rest of its life — visibly, an operator who
+	// switches to auto or full access keeps getting asked, and switching back
+	// to approval-required looks like it never left it. Providers with no live
+	// channel for this (or no notion of RuntimeMode at all, e.g. pi) implement
+	// it as a no-op rather than a guess at an unverified RPC — see each
+	// implementation's own doc comment for why.
+	SetRuntimeMode(ctx context.Context, threadID string, mode RuntimeMode) error
 
 	StopSession(ctx context.Context, threadID string) error
 	StopAll(ctx context.Context) error
@@ -372,6 +455,14 @@ func (s *Service) RespondToRequest(ctx context.Context, threadID, requestID stri
 		return err
 	}
 	return a.RespondToRequest(ctx, threadID, requestID, d)
+}
+
+func (s *Service) RespondToUserInput(ctx context.Context, threadID, requestID string, answers map[string]any) error {
+	a, err := s.adapterFor(threadID)
+	if err != nil {
+		return err
+	}
+	return a.RespondToUserInput(ctx, threadID, requestID, answers)
 }
 
 func (s *Service) InterruptTurn(ctx context.Context, threadID, turnID string) error {

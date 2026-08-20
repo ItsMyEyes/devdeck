@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { ApiError, exportMarkdown, type MarkdownExportFormat } from '@/lib/api'
+import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
 
 const FORMAT_OPTIONS = [
   { value: 'docx', label: 'Word (.docx)' },
@@ -24,15 +25,15 @@ export function MarkdownExportCard() {
       toast.error('Markdown is required')
       return
     }
+    // Destination first, bytes second: pandoc + mermaid rendering takes long
+    // enough that the click's transient activation is gone by the time the
+    // blob lands, and showSaveFilePicker would throw rather than open.
+    const saveTarget = await pickSaveTarget(`${filename || 'document'}.${format}`)
+    if (saveTarget === SAVE_CANCELLED) return
     setPending(true)
     try {
       const blob = await exportMarkdown(markdown, format, filename || 'document')
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${filename || 'document'}.${format}`
-      a.click()
-      URL.revokeObjectURL(url)
+      await saveTarget.write(blob)
       toast.success(`Exported ${format.toUpperCase()}`)
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Export failed')

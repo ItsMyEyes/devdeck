@@ -1,4 +1,4 @@
-.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api build-mcp portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri dev-tauri-full e2e-tauri-smoke
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri dev-tauri-full e2e-tauri-smoke
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -84,11 +84,17 @@ prepare-webui: build-web
 build-api: prepare-webui
 	cd backend && go build -ldflags "$(LDFLAGS)" -o devdeck-api ./cmd/server
 
-# MCP stdio server exposing the issue tracker to coding agents (list_projects,
-# create_issue, upload_attachment, mark_issue_done). Reads the same --db file
-# the main server uses.
-build-mcp:
-	cd backend && go build -o devdeck-mcp-server ./cmd/mcp-server
+# NOTE: there is deliberately no separate build target for the SSH chat helper
+# an agent calls as `devdeck-ssh`. It is a subcommand of this same binary
+# (`devdeck ssh-tool`, see internal/sshtoolcli), reached through a shim DevDeck
+# writes into each SSH thread's workspace at session start — so every target
+# below ships it for free, and there is nothing extra for an operator to
+# install, sign, or keep version-matched.
+
+# NOTE: no target for the issue-tracker MCP server either — it is
+# `devdeck mcp-server` (internal/issuemcp), reached through the same binary every
+# target below builds. An agent's .mcp.json points its `command` straight at
+# that binary; see COMMANDS.md "MCP server (agent-facing issue tracker)".
 
 # Portable binary for the selected GOOS/GOARCH (defaults to the host).
 portable: portable-current
@@ -97,7 +103,10 @@ portable-current: prepare-webui
 	mkdir -p $(DIST_DIR)
 	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
 
-# Release matrix: macOS, Linux, and Windows on Intel/AMD and ARM64.
+# Release matrix: macOS, Linux, and Windows on Intel/AMD and ARM64. One artifact
+# per target: the SSH chat helper an agent calls as `devdeck-ssh` is a
+# subcommand of this binary, not a companion file, so there is no pairing to get
+# wrong in a release.
 portable-all: prepare-webui
 	mkdir -p $(DIST_DIR)
 	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-amd64 ./cmd/server
@@ -151,8 +160,22 @@ dev-tauri:
 # frontendDist (ui/) straight from the custom protocol the Rust code targets.
 # No frontend HMR here — the sidecar serves whatever `prepare-webui` last
 # built into backend/internal/webui/dist.
+#
+# Agent chat (frontend/src/features/agent-chat/enabled.ts) is an in-flight
+# feature that defaults OFF in a `vite build` (import.meta.env.PROD is true) —
+# and this target serves exactly that static build via --no-dev-server rather
+# than the Vite dev server, so it inherits chat-off same as a real production
+# install, even though it's still a debug binary. VITE_AGENT_CHAT=1 flips it
+# on for this target specifically. It has to be set before `npm run
+# tauri:dev-full`'s own `make sidecar-host` (-> prepare-webui -> `vite build`)
+# runs, not passed to `tauri dev` itself — the flag is baked into the bundle
+# at build time, dev-tauri's own `vite dev` path already shows chat without
+# this (PROD is false there). Override with `make dev-tauri-full
+# VITE_AGENT_CHAT=0` to exercise the feature-off path instead.
+VITE_AGENT_CHAT ?= 1
+
 dev-tauri-full:
-	cd frontend && npm run tauri:dev-full
+	cd frontend && VITE_AGENT_CHAT=$(VITE_AGENT_CHAT) npm run tauri:dev-full
 
 # Scripted smoke test for dev-tauri-full's real local-hub-mode flow (sidecar
 # spawn -> health check -> machine registration -> clean process teardown)

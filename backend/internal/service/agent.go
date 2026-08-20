@@ -12,6 +12,9 @@ import (
 
 	"devdeck/backend/internal/agentcore/provider"
 	"devdeck/backend/internal/agentcore/provider/claude"
+	"devdeck/backend/internal/agentcore/provider/codex"
+	"devdeck/backend/internal/agentcore/provider/opencode"
+	"devdeck/backend/internal/agentcore/provider/pi"
 	"devdeck/backend/internal/detect"
 	"devdeck/backend/internal/domain"
 	"devdeck/backend/internal/port"
@@ -95,12 +98,15 @@ type agentProbe struct {
 // probeDrivers maps an agent ID to its agentcore provider.Driver, for the
 // agents that already have one. Driver.Probe reports the exact CLI version
 // and resolved binary path in one cheap call — richer than a bare installed
-// boolean. Agents without a live agentcore driver yet (codex, pi, opencode,
+// boolean. Agents without a live agentcore driver yet (codex, opencode,
 // gemini — their Driver ports have not landed) fall back to the plain
 // binary-resolution probe below; they are still real entries the UI must
 // render, just with less detail until their turn comes.
 var probeDrivers = map[string]provider.Driver{
-	string(claude.Kind): claude.NewDriver(),
+	string(claude.Kind):   claude.NewDriver(),
+	string(pi.Kind):       pi.NewDriver(),
+	string(codex.Kind):    codex.NewDriver(),
+	string(opencode.Kind): opencode.NewDriver(),
 }
 
 // probe returns the cached per-machine probe for agentID, populating the

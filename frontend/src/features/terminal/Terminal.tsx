@@ -5,9 +5,10 @@ import { SearchAddon } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, MessageSquarePlus, X } from 'lucide-react'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
 import { createTerminalWriter } from '@/features/terminal/terminalWriter'
+import { useResolvedTheme } from '@/features/theme/useTheme'
 import type { Machine } from '@/store/types'
 
 /** How long a connection must survive before its backoff counter is cleared.
@@ -22,12 +23,27 @@ const CONNECTION_HEALTHY_MS = 10_000
  *  kicking a new attempt on every event. */
 const MIN_KICK_INTERVAL_MS = 2_000
 
+/** A captured xterm selection, addressed for the composer's terminal-context
+ *  chip (`docs/superpowers/specs/2026-08-15-composer-context-attachments-design.md`,
+ *  "C3 — terminal context"). `startLine`/`endLine` are 1-indexed — real line
+ *  numbers a human would read off the screen, not xterm's internal 0-indexed
+ *  buffer rows that `getSelectionPosition()` actually returns. */
+export interface TerminalContextSelection {
+  text: string
+  sessionKey: string
+  startLine: number
+  endLine: number
+}
+
 export interface TerminalHandle {
   /** Write a line to the session's stdin (used by the "send input" box). */
   sendInput: (text: string) => void
   focus: () => void
   /** Serialize the full scrollback (including off-screen history) to the clipboard. */
   copyBuffer: () => void
+  /** Captures the current selection for the composer's terminal-context chip.
+   *  Returns `null` when there is no active (non-empty) selection. */
+  captureSelection: () => TerminalContextSelection | null
 }
 
 /* xterm cannot read CSS custom properties, so the pane colour is duplicated
@@ -58,6 +74,39 @@ export const TERMINAL_THEME = {
   brightWhite: '#eeeeeb',
 }
 
+/* Light counterpart. `background` tracks --devdeck-pane in `.light` for the
+   same seam reason. The ANSI entries are NOT the dark ones lightened: on paper
+   those wash out to illegibility (#56d58a green is 1.8:1 on white), so each
+   keeps its hue and takes enough lightness contrast to stay readable as
+   program output. */
+export const TERMINAL_THEME_LIGHT = {
+  background: '#f8faf9',
+  foreground: '#1f2626',
+  cursor: '#0e8a83',
+  cursorAccent: '#f8faf9',
+  selectionBackground: '#0e8a8340',
+  black: '#24292e',
+  red: '#c02626',
+  green: '#217a3a',
+  yellow: '#8a6413',
+  blue: '#0e6fa8',
+  magenta: '#8b3fc4',
+  cyan: '#0e8a83',
+  white: '#5c6363',
+  brightBlack: '#6a7171',
+  brightRed: '#d63a2f',
+  brightGreen: '#2a8f47',
+  brightYellow: '#9c7519',
+  brightBlue: '#1580bd',
+  brightMagenta: '#9c50d6',
+  brightCyan: '#12a099',
+  brightWhite: '#2b3232',
+}
+
+export function terminalTheme(resolved: 'light' | 'dark') {
+  return resolved === 'light' ? TERMINAL_THEME_LIGHT : TERMINAL_THEME
+}
+
 interface TerminalProps {
   session: string
   machine: Machine
@@ -65,6 +114,11 @@ interface TerminalProps {
   ctrlArmed?: boolean
   onCtrlConsumed?: () => void
   onExit?: () => void
+  /** Called with the captured selection when the "Send to chat" affordance is
+   *  clicked. This component has no notion of panes, threads, or which chat
+   *  tab should receive it — resolving that (and inserting the chip) is the
+   *  caller's job (`ExpandedTerminal.tsx`'s bridge). */
+  onSendToChat?: (selection: TerminalContextSelection) => void
 }
 
 function isTerminalExitedFrame(data: string) {
@@ -96,7 +150,7 @@ export function isAppShortcut(event: KeyboardEvent) {
 
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
-  { session, machine, ctrlArmed = false, onCtrlConsumed, onExit },
+  { session, machine, ctrlArmed = false, onCtrlConsumed, onExit, onSendToChat },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -111,6 +165,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  // Driven by xterm's own `onSelectionChange` (`xterm.d.ts:996`), not derived
+  // at render time — a selection is a fact about xterm's internal buffer,
+  // and this is the only way to know it changed without polling.
+  const [hasSelection, setHasSelection] = useState(false)
+
+  // Held in a ref as well as read as state: the terminal is constructed once
+  // per session and must not be torn down and rebuilt (losing the socket and
+  // the scrollback) just because the palette changed, so creation reads the
+  // ref and the effect below repaints the live instance in place.
+  const resolvedTheme = useResolvedTheme()
+  const themeRef = useRef(resolvedTheme)
+  useEffect(() => {
+    themeRef.current = resolvedTheme
+    const term = termRef.current
+    if (term) term.options.theme = terminalTheme(resolvedTheme)
+  }, [resolvedTheme])
 
   useEffect(() => {
     ctrlArmedRef.current = ctrlArmed
@@ -130,6 +200,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current?.focus()
   }
 
+  // Not inside the mount effect: it must always read `session` as of the
+  // call, and the mount effect only reruns when `session`/`machine` change
+  // (a stale closure there would ship the wrong sessionKey if other props
+  // changed first). `termRef.current` is always current regardless.
+  function captureSelection(): TerminalContextSelection | null {
+    const term = termRef.current
+    if (!term || !term.hasSelection()) return null
+    const text = term.getSelection()
+    const range = term.getSelectionPosition()
+    if (!text || !range) return null
+    return {
+      text,
+      sessionKey: session,
+      // `IBufferRange` positions are 0-indexed buffer rows (verified against
+      // the installed package at runtime — `xterm.d.ts`'s own "1-based" doc
+      // comment does not match `getSelectionPosition()`'s actual output);
+      // +1 turns them into the 1-indexed line numbers a human reads off the
+      // screen, matching what the composer chip displays.
+      startLine: range.start.y + 1,
+      endLine: range.end.y + 1,
+    }
+  }
+
   useImperativeHandle(ref, () => ({
     sendInput: (text: string) => send(inputFrame(text)),
     focus: () => termRef.current?.focus(),
@@ -137,6 +230,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       const data = serializeAddonRef.current?.serialize()
       if (data) void navigator.clipboard.writeText(data)
     },
+    captureSelection,
   }))
 
   function send(frame: string) {
@@ -155,7 +249,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       lineHeight: 1.35,
       cursorBlink: true,
       convertEol: false,
-      theme: TERMINAL_THEME,
+      theme: terminalTheme(themeRef.current),
       scrollback: 5000,
     })
     const fit = new FitAddon()
@@ -167,6 +261,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     term.loadAddon(serialize)
     searchAddonRef.current = search
     serializeAddonRef.current = serialize
+    term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
+    // WebGL addon loads AFTER `open()`, not before: xterm only activates a
+    // renderer addon once the terminal is attached to the DOM, so loading it
+    // first (the previous order here) deferred activation to xterm's own
+    // internal renderer-swap timer — a macrotask outside this try/catch,
+    // where a WebGL2-context failure (headless env, old GPU driver) becomes
+    // an *uncaught* exception instead of the graceful fallback this comment
+    // always claimed. Loading it after `open()` activates synchronously,
+    // inside the try/catch, restoring the fallback this file's own doc
+    // comment describes (verified: this is exactly the failure jsdom hits
+    // building Terminal.test.tsx, and this reorder is what fixes it).
+    term.open(host)
     try {
       const webgl = new WebglAddon()
       webgl.onContextLoss(() => webgl.dispose())
@@ -174,8 +280,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     } catch {
       // WebGL unavailable (headless env, old GPU driver) — falls back to xterm's default renderer.
     }
-    term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
-    term.open(host)
     fit.fit()
     termRef.current = term
 
@@ -341,6 +445,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       send(inputFrame(data))
     })
     const onResize = term.onResize(({ cols, rows }) => send(resizeFrame(cols, rows)))
+    // Drives the "Send to chat" affordance's visibility (`hasSelection`
+    // state) — fires on every change, including to/from empty, so this is
+    // also how the affordance disappears when the selection is cleared.
+    const onSelectionChange = term.onSelectionChange(() => {
+      setHasSelection(term.hasSelection())
+    })
 
     // Debounced: a mobile keyboard opening (or the visual viewport jittering
     // while it animates) resizes the host many times over ~300ms, and every
@@ -374,6 +484,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       ro.disconnect()
       onData.dispose()
       onResize.dispose()
+      onSelectionChange.dispose()
       const ws = wsRef.current
       if (ws) {
         ws.onclose = null
@@ -388,6 +499,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Drop any frames queued for a socket that never opened, so they can't be
       // flushed into a different session on the next connect.
       outbox.current = []
+      // A session/machine change tears this terminal down and builds a new
+      // one (see the effect's dep array) — the old selection doesn't carry
+      // over, so the affordance shouldn't either.
+      setHasSelection(false)
     }
   }, [session, machine])
 
@@ -438,6 +553,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             <X size={12} />
           </button>
         </div>
+      ) : null}
+      {hasSelection ? (
+        <button
+          type="button"
+          onClick={() => {
+            const selection = captureSelection()
+            if (selection) onSendToChat?.(selection)
+          }}
+          className="absolute bottom-2 left-2 z-10 flex cursor-pointer items-center gap-1 rounded-md border border-devdeck-border bg-devdeck-pane px-2 py-1 text-[11px] text-devdeck-fg-2 shadow-lg hover:text-devdeck-fg"
+        >
+          <MessageSquarePlus size={12} />
+          Send to chat
+        </button>
       ) : null}
     </div>
   )

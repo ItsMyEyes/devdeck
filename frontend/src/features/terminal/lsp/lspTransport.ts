@@ -114,19 +114,129 @@ export function restoreDocumentUriCase(uri: string, knownUris: Iterable<string>)
   return uri
 }
 
+/**
+ * True for a document-synchronisation notification naming a uri no language
+ * server can address.
+ *
+ * Every uri DevDeck puts on the wire is a `file://` one, built by `uriHelpers`
+ * from the worktree root the backend reports. But `MonacoLspClient`'s
+ * `TextDocumentSynchronizer` announces *every* model monaco holds, and
+ * `MonacoEditor` deliberately builds each code model on a synthetic
+ * `inmemory://devdeck/…` uri first, swapping to the real one only once the LSP
+ * session has resolved (see its `uri` prop doc) — so those placeholder buffers
+ * were announced too, along with every non-LSP surface's scratch model.
+ *
+ * gopls answers a non-file uri with a hard `-32700 "DocumentURI scheme is not
+ * 'file'"`, and returns the same for the `textDocument/semanticTokens/full`
+ * monaco fires against that placeholder model a moment later. Monaco files a
+ * semantic-tokens error under "temporarily unavailable" and schedules no retry
+ * (`ModelSemanticColoring`), so a doomed exchange costs real colour rather than
+ * just noise — `rangeSemanticTokens.ts` covers the other way a file loses its
+ * whole-file token set.
+ *
+ * Only the three fire-and-forget notifications are filtered. A *request*
+ * carries an id and someone waiting on it, so dropping one would hang the
+ * caller — the exact failure `answerWithoutServer` exists to prevent.
+ */
+function isUnaddressableDocumentMessage(message: RpcMessage): boolean {
+  if (
+    message.method !== 'textDocument/didOpen' &&
+    message.method !== 'textDocument/didChange' &&
+    message.method !== 'textDocument/didClose'
+  ) {
+    return false
+  }
+  const uri = (message.params as { textDocument?: { uri?: string } } | undefined)?.textDocument?.uri
+  return uri !== undefined && !uri.startsWith('file://')
+}
+
+/**
+ * Settings a language server needs before it will offer something DevDeck
+ * relies on, keyed by `serverLanguage()`.
+ *
+ * gopls gates semantic tokens behind an experimental option that is *off* by
+ * default (`gopls api-json` reports `semanticTokens` default `false`, status
+ * `experimental`, as of v0.22). Left at the default it answers `initialize`
+ * with no `semanticTokensProvider` at all, so monaco never registers a
+ * semantic-tokens provider and every identifier is painted by the monarch
+ * grammar alone — which knows keywords and strings but cannot tell a function
+ * from a variable. That is why `func main()` and `cli.ExecuteRootCmd()` render
+ * in the plain foreground instead of the function colour.
+ *
+ * Nothing here overrides a user's own gopls configuration file; these are the
+ * settings the *client* asks for, which is exactly where VS Code puts the same
+ * flag.
+ */
+const SERVER_SETTINGS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  go: { semanticTokens: true },
+}
+
+/** The `workspace/configuration` section a server pulls its settings from —
+ *  gopls asks for `"gopls"` (verified against gopls v0.22 over a real stdio
+ *  session), not for its monaco language id. */
+const SETTINGS_SECTION: Readonly<Record<string, string>> = {
+  go: 'gopls',
+}
+
+export function serverSettings(language: string | undefined): Record<string, unknown> | undefined {
+  if (!language) return undefined
+  return SERVER_SETTINGS[serverLanguage(language)] as Record<string, unknown> | undefined
+}
+
+/**
+ * This client's answer to one `workspace/configuration` item.
+ *
+ * A server reads its settings twice — once from `initializationOptions` while
+ * it boots, then again from this request — and the second read *replaces* the
+ * first. Answering `null` for every item (which this transport used to do)
+ * therefore handed back whatever `rewriteInitialize` had just asked for, so the
+ * setting had to be repeated here for it to survive.
+ *
+ * An item with no `section` asks for the whole configuration tree, so the
+ * settings are returned nested under their section name; a request for some
+ * other server's section still gets `null`.
+ */
+export function configurationItemResult(language: string | undefined, section: unknown): unknown {
+  const settings = serverSettings(language)
+  if (!settings || !language) return null
+  const own = SETTINGS_SECTION[serverLanguage(language)]
+  if (section === undefined || section === null || section === '') {
+    return own ? { [own]: settings } : settings
+  }
+  return section === own ? settings : null
+}
+
 /** MonacoLspClient hardcodes `rootUri: null` and sends no workspaceFolders,
  *  which drops gopls into single-file mode. The backend already told us the
  *  real root in its `ready` control frame, so patch it in transit rather than
- *  patching or subclassing the client. Every other message passes through by
- *  reference, untouched. */
-export function rewriteInitialize(message: RpcMessage, rootUri: string): RpcMessage {
+ *  patching or subclassing the client. The same rewrite carries
+ *  `initializationOptions` (see `SERVER_SETTINGS`), which the client has no way
+ *  to supply either. Every other message passes through by reference,
+ *  untouched. */
+export function rewriteInitialize(
+  message: RpcMessage,
+  rootUri: string,
+  language?: string,
+): RpcMessage {
   if (message.method !== 'initialize') return message
+  const params = message.params as Record<string, unknown> | undefined
+  const settings = serverSettings(language)
   return {
     ...message,
     params: {
-      ...(message.params as Record<string, unknown> | undefined),
+      ...params,
       rootUri,
       workspaceFolders: [{ uri: rootUri, name: 'worktree' }],
+      // Merged, not replaced: the client sends none today, but a future monaco
+      // that starts populating this must not have its options dropped.
+      ...(settings
+        ? {
+            initializationOptions: {
+              ...(params?.initializationOptions as Record<string, unknown> | undefined),
+              ...settings,
+            },
+          }
+        : {}),
     },
   }
 }
@@ -256,13 +366,17 @@ export class DevDeckLspTransport implements IMessageTransport {
     // Case repair runs first so the language filter below, which keys on the
     // uri, tracks the same string the wire carries.
     if (typeof message !== 'string') message = this.withRealDocumentUri(message as RpcMessage)
-    if (typeof message !== 'string' && this.isForeignDocumentMessage(message as RpcMessage)) {
+    if (
+      typeof message !== 'string' &&
+      (this.isForeignDocumentMessage(message as RpcMessage) ||
+        isUnaddressableDocumentMessage(message as RpcMessage))
+    ) {
       return Promise.resolve()
     }
     const payload =
       typeof message === 'string'
         ? message
-        : JSON.stringify(rewriteInitialize(message as RpcMessage, this.rootUri ?? ''))
+        : JSON.stringify(rewriteInitialize(message as RpcMessage, this.rootUri ?? '', this.language))
     if (this.socket.readyState !== 1) {
       this.queue.push(payload)
     } else {
@@ -541,8 +655,10 @@ export class DevDeckLspTransport implements IMessageTransport {
   private respond(message: RpcMessage) {
     let result: unknown = null
     if (message.method === 'workspace/configuration') {
-      const items = (message.params as { items?: unknown[] } | undefined)?.items
-      result = Array.isArray(items) ? items.map(() => null) : []
+      const items = (message.params as { items?: { section?: unknown }[] } | undefined)?.items
+      result = Array.isArray(items)
+        ? items.map((item) => configurationItemResult(this.language, item?.section))
+        : []
     } else if (message.method === 'workspace/applyEdit') {
       result = { applied: false, failureReason: 'Workspace edits are not supported' }
     }

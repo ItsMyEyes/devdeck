@@ -17,3 +17,7 @@ copy-this.md
 temp
 # superpowers brainstorming companion
 .superpowers/
+
+# @gg/ — reference only, kept locally but not tracked.
+gg/
+backend/internal/agentcore/provider/**/testdata/

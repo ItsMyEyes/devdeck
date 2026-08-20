@@ -138,6 +138,28 @@ function ModelRow({
   )
 }
 
+/**
+ * What the composer pill shows for a model, as opposed to what the picker's
+ * list shows.
+ *
+ * Ids like `ollama/deepseek-v4-flash:cloud` are mostly provider — and the
+ * provider is already on the pill as the agent mark right beside the text, so
+ * repeating it costs width twice over. At a real chat-pane width the full id
+ * pushed the effort pill into a mid-character clip and shoved the mode pills
+ * out of the row entirely.
+ *
+ * Only the FIRST segment goes: `a/b/c` keeps `b/c`, because anything after the
+ * provider is part of the model's own name. The full id stays reachable — the
+ * pill carries it as its `title`.
+ */
+export function modelPillLabel(modelName: string | undefined): string {
+  const name = modelName?.trim() ?? ''
+  if (name === '') return 'Model'
+  const slash = name.indexOf('/')
+  const tail = slash === -1 ? name : name.slice(slash + 1).trim()
+  return tail === '' ? 'Model' : tail
+}
+
 export function ModelPicker({ machine, worktreeAgentId, value, onChange, variant = 'inline' }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -207,7 +229,7 @@ export function ModelPicker({ machine, worktreeAgentId, value, onChange, variant
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, rows])
 
-  const label = value?.modelName ?? 'Model'
+  const label = modelPillLabel(value?.modelName)
 
   return (
     <Popover.Root
@@ -222,9 +244,26 @@ export function ModelPicker({ machine, worktreeAgentId, value, onChange, variant
         }
       }}
     >
-      <Popover.Trigger render={<ComposerControl className={variant === 'menu' ? 'w-full justify-start' : undefined} />}>
+      <Popover.Trigger
+        render={
+          <ComposerControl
+            // `min-w-0` is what lets the label below actually truncate: without
+            // it a flex item's floor is its content width, so the pill refuses
+            // to shrink and the row clips the pills AFTER it instead.
+            //
+            // `shrink` opts back out of `Button`'s own base `shrink-0` (last
+            // class in `button.tsx`'s variant string), which otherwise pinned
+            // this pill at its full content width no matter what its
+            // `PillWrap` did — the label then overflowed the wrapper and
+            // printed on top of the effort pill. tailwind-merge resolves the
+            // pair in this className's favour because it is applied last.
+            className={cn('min-w-0 shrink overflow-hidden', variant === 'menu' ? 'w-full justify-start' : undefined)}
+            title={value?.modelName ?? undefined}
+          />
+        }
+      >
         <AgentMark id={value?.agentId || worktreeAgentId} name={agentName(value?.agentId || worktreeAgentId)} size="sm" bare />
-        {label}
+        <span className="min-w-0 truncate">{label}</span>
         <ComposerControlChevron />
       </Popover.Trigger>
       <Popover.Portal>

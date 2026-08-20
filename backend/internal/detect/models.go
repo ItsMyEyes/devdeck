@@ -157,12 +157,20 @@ func readPiModels() []domain.Model {
 		return nil
 	}
 
+	// IDs are prefixed "provider/id" — required, not cosmetic: Pi's own
+	// model catalog reuses bare ids across providers (e.g. "deepseek-v4-flash"
+	// exists under both the "deepseek" and "opencode-go" providers, at
+	// different prices), and the orchestration adapter's mid-session
+	// set_model switch (agentcore/provider/pi/adapter.go) only fires for a
+	// model string in this exact "provider/id" form — a bare id there is
+	// left on whatever model the session already has.
 	var models []domain.Model
-	for _, prov := range mf.Providers {
+	for provName, prov := range mf.Providers {
 		for _, m := range prov.Models {
+			id := provName + "/" + m.ID
 			models = append(models, domain.Model{
-				ID:            m.ID,
-				Name:          m.ID,
+				ID:            id,
+				Name:          id,
 				ContextWindow: 0,
 			})
 		}
@@ -173,12 +181,13 @@ func readPiModels() []domain.Model {
 	data, err = os.ReadFile(settingsPath)
 	if err == nil {
 		var sf piSettingsFile
-		if json.Unmarshal(data, &sf) == nil && sf.DefaultModel != "" {
+		if json.Unmarshal(data, &sf) == nil && sf.DefaultModel != "" && sf.DefaultProvider != "" {
+			id := sf.DefaultProvider + "/" + sf.DefaultModel
 			// Prepend default model if not already in the list
-			if !containsModel(models, sf.DefaultModel) {
+			if !containsModel(models, id) {
 				models = append([]domain.Model{{
-					ID:            sf.DefaultModel,
-					Name:          sf.DefaultModel,
+					ID:            id,
+					Name:          id,
 					ContextWindow: 0,
 				}}, models...)
 			}

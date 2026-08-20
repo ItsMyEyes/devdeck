@@ -15,6 +15,8 @@
     "allow-hub-mode",
     "allow-diagnostics",
     "process:allow-restart",
+    "dialog:allow-save",
+    "fs:allow-write-file",
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "$APPLOG/*" }]

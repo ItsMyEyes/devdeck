@@ -3,7 +3,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame } from '@/lib/terminalClient'
 import { sshShellWsUrl } from '@/lib/sshClient'
-import { isAppShortcut, TERMINAL_THEME } from '@/features/terminal/Terminal'
+import { isAppShortcut, terminalTheme } from '@/features/terminal/Terminal'
+import { currentResolvedTheme, subscribeResolvedTheme } from '@/features/theme/theme'
 import { createTerminalWriter, type TerminalWriter } from '@/features/terminal/terminalWriter'
 
 /**
@@ -31,6 +32,14 @@ interface SSHSession {
 
 const sessions = new Map<string, SSHSession>()
 
+// These terminals are created outside the component tree, so no hook can
+// repaint them. One module-level subscription re-themes every live session in
+// place — the socket, and therefore the remote shell, is untouched.
+subscribeResolvedTheme((resolved) => {
+  const theme = terminalTheme(resolved)
+  for (const session of sessions.values()) session.term.options.theme = theme
+})
+
 function connect(session: SSHSession, connectionId: string) {
   const { term } = session
   const socket = new WebSocket(sshShellWsUrl(connectionId, term.cols, term.rows))
@@ -57,7 +66,7 @@ function createSession(connectionId: string): SSHSession {
     lineHeight: 1.35,
     cursorBlink: true,
     convertEol: false,
-    theme: TERMINAL_THEME,
+    theme: terminalTheme(currentResolvedTheme()),
     scrollback: 5000,
   })
   const fit = new FitAddon()

@@ -337,6 +337,9 @@ func applyOne(s *State, e Event) {
 				Status       ThreadStatus    `json:"status"`
 				ResumeCursor json.RawMessage `json:"resumeCursor,omitempty"`
 				PendingAdd   string          `json:"pendingRequestAdd,omitempty"`
+				// PendingRemove retires one request the user never answered —
+				// see its use below.
+				PendingRemove string `json:"pendingRequestRemove,omitempty"`
 				// ClearPending wipes every pending approval/input request in one
 				// step — used by ReconcileOrphanedThreads (workers.go) to close out
 				// a thread the process that owned its approval prompt can no
@@ -360,6 +363,20 @@ func applyOne(s *State, e Event) {
 			if p.PendingAdd != "" {
 				t.PendingRequests[p.PendingAdd] = true
 				t.Status = ThreadWaiting
+			}
+			// The mirror of PendingAdd, for a request that was resolved
+			// WITHOUT the user clicking anything: an approval that timed out,
+			// or one abandoned when the thread was interrupted. Those arrive
+			// as event.RequestResolved (see Ingestion.handle), never as
+			// EvtThreadApprovalResponseRequested, so without this the id would
+			// sit in PendingRequests forever and the check below would never
+			// let the thread leave `waiting` again — one orphan pinning the
+			// composer until a restart.
+			if p.PendingRemove != "" {
+				delete(t.PendingRequests, p.PendingRemove)
+				if len(t.PendingRequests) == 0 && t.Status == ThreadWaiting {
+					t.Status = ThreadRunning
+				}
 			}
 			if p.ClearPending {
 				t.PendingRequests = map[string]bool{}

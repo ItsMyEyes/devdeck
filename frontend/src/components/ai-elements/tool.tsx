@@ -13,6 +13,7 @@ import {
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
+  LoaderCircleIcon,
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -99,6 +100,100 @@ export const ToolHeader = ({
     </CollapsibleTrigger>
   );
 };
+
+/**
+ * DevDeck addition — a one-line tool row, in place of `ToolHeader`'s card.
+ *
+ * `ToolHeader` above is upstream's: `p-3`, a wrench glyph, and a pill badge
+ * spelling out the status, inside a bordered `Tool` card with `mb-4` under it.
+ * That is ~60px of chrome per call, and an agent turn is routinely twenty calls
+ * — the transcript became a stack of boxes with the prose pushed off screen.
+ *
+ * This trades the badge for a single status glyph and the wrench for nothing,
+ * and spends the width it recovers on `summary` (the call's own primary
+ * argument) so a collapsed row says what it did rather than only which tool did
+ * it. Kept as a separate export rather than a `variant` on `ToolHeader` so the
+ * upstream component stays byte-comparable against a future vendor refresh.
+ *
+ * The status still reaches assistive tech, as the trigger's accessible name:
+ * `statusLabels` renders `sr-only` beside the glyph, because an icon on its own
+ * would leave the button announcing just "Edit".
+ */
+export type ToolCompactHeaderProps = {
+  name: string;
+  state: ToolPart["state"];
+  summary?: string;
+  className?: string;
+};
+
+/**
+ * `statusIcons` above is upstream's, sized `size-4` and coloured in raw Tailwind
+ * scale values (`text-green-600`, `text-yellow-600`) that were picked for a
+ * light theme. This is the same set at row scale in DevDeck's own status tokens,
+ * so a finished call reads in the same green as a running worktree elsewhere in
+ * the app and a failed one in the same red as an error banner.
+ *
+ * "Running" is the only animated one, and it animates because it is the only
+ * state that will change on its own. It is a spinner rather than the pulsing
+ * FILLED disc it used to be: at 14px a solid accent-coloured circle was the
+ * heaviest mark on the screen — louder than the error glyph — in a column where
+ * every other status is a hairline outline, so the one row still in flight read
+ * as the one row something had gone wrong on.
+ */
+const compactStatusIcons: Record<ToolPart["state"], ReactNode> = {
+  "approval-requested": <ClockIcon className="text-devdeck-wait" />,
+  "approval-responded": <CheckCircleIcon className="text-devdeck-accent" />,
+  "input-available": (
+    <LoaderCircleIcon className="animate-spin text-devdeck-accent" />
+  ),
+  "input-streaming": <CircleIcon className="text-devdeck-dim-pane" />,
+  "output-available": <CheckCircleIcon className="text-devdeck-run" />,
+  "output-denied": <XCircleIcon className="text-devdeck-wait" />,
+  "output-error": <XCircleIcon className="text-devdeck-err" />,
+};
+
+export const ToolCompactHeader = ({
+  className,
+  name,
+  state,
+  summary,
+  ...props
+}: ToolCompactHeaderProps) => (
+  <CollapsibleTrigger
+    className={cn(
+      "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-devdeck-raised",
+      className
+    )}
+    {...props}
+  >
+    <span className="flex size-3.5 flex-none items-center justify-center [&>svg]:size-3.5">
+      {compactStatusIcons[state]}
+    </span>
+    {/* `bash:` — the colon only when something follows it, so a bare row does
+        not read as a label with its value missing. It is what turns the row
+        from "bash" (which tool) into "bash: ssh -o … dev2" (what the agent is
+        actually doing), and the pair is the whole point of the compact row. */}
+    <span className="flex-none font-medium text-[13px] text-devdeck-fg">
+      {summary ? `${name}:` : name}
+    </span>
+    <span className="sr-only">{statusLabels[state]}</span>
+    {summary ? (
+      <span
+        title={summary}
+        className="min-w-0 truncate font-mono text-[11.5px] text-devdeck-fg-2"
+      >
+        {summary}
+      </span>
+    ) : null}
+    {/* The chevron trails the text rather than pinning to the right edge, and a
+        spacer after it absorbs what is left. Right-aligned, it sat alone in
+        several hundred pixels of empty row and read as unrelated to the call it
+        belonged to; here it lands next to short summaries and is pushed out to
+        the fold only by summaries long enough to need the room. */}
+    <ChevronDownIcon className="size-3.5 flex-none text-devdeck-dim-pane transition-transform group-data-[state=open]:rotate-180" />
+    <span className="flex-1" />
+  </CollapsibleTrigger>
+);
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 

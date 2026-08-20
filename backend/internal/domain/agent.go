@@ -137,4 +137,12 @@ type AgentThread struct {
 	Status     string `json:"status"`
 	CreatedAt  int64  `json:"createdAt"`
 	UpdatedAt  int64  `json:"updatedAt"`
+	// PlanReady mirrors the engine's live Thread.ProposedPlan != nil, the
+	// same overlay pattern Status already gets from withLiveStatus. There is
+	// no SQL column behind it — a stored copy of a rule the projector owns
+	// would be a second implementation to keep in step (see withLiveStatus's
+	// doc comment). Zero value (false) is exactly right for a thread the
+	// engine has never heard of: "no live state" and "no plan on the table"
+	// mean the same thing here.
+	PlanReady bool `json:"planReady"`
 }

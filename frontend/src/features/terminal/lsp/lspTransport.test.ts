@@ -113,6 +113,31 @@ describe('DevDeckLspTransport', () => {
     expect(onMessage).not.toHaveBeenCalled()
   })
 
+  // The reply to this request replaces whatever `initialize` asked for, so a
+  // go transport has to repeat `semanticTokens: true` here or gopls drops back
+  // to its default and stops emitting the tokens that colour function names.
+  it('answers workspace/configuration with the settings for its own language', () => {
+    const socket = new FakeSocket()
+    const transport = new DevDeckLspTransport(socket as unknown as WebSocket, 'go')
+    const onMessage = vi.fn()
+    transport.onMessage(onMessage)
+    socket.open()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'workspace/configuration',
+      params: { items: [{ section: 'gopls' }, { section: 'someone-else' }] },
+    })
+
+    expect(JSON.parse(socket.sent[0] as string)).toEqual({
+      jsonrpc: '2.0',
+      id: 0,
+      result: [{ semanticTokens: true }, null],
+    })
+    expect(onMessage).not.toHaveBeenCalled()
+  })
+
   it('refuses workspace/applyEdit and answers other requests with null', () => {
     const { socket } = makeTransport()
     socket.open()

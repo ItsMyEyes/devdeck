@@ -1,5 +1,11 @@
 import { MonacoLspClient } from 'monaco-lsp-client'
 import { openModelUris } from '@/features/editor/openModelUris'
+import { monaco } from '@/features/editor/monacoSetup'
+import {
+  createRangeSemanticTokensProvider,
+  monacoLanguagesFor,
+  semanticTokensLegendFrom,
+} from '@/features/editor/rangeSemanticTokens'
 import type { Machine } from '@/store/types'
 import {
   openLspTransport,
@@ -106,6 +112,27 @@ export async function createLspSession(
   // editor instance would fan out duplicate completions across split panes.
   const client = new MonacoLspClient(transport)
 
+  // Viewport semantic tokens — the only way a file past the server's whole-file
+  // limit gets coloured at all. gopls refuses `semanticTokens/full` over 100 kB
+  // and `MonacoLspClient` registers no range provider to fall back on, so a big
+  // file is left to the monarch grammar for the life of the tab even though
+  // hover and go-to-definition keep working on it. Registered as soon as the
+  // legend arrives, since monaco cannot decode a token without it; the
+  // registration is itself the registry change that starts monaco's viewport
+  // pass on every model already open. See rangeSemanticTokens.ts.
+  const rangeProviders: Array<{ dispose(): void }> = []
+  transport.onMessage((raw) => {
+    if (rangeProviders.length > 0) return
+    const legend = semanticTokensLegendFrom(raw)
+    if (!legend) return
+    const provider = createRangeSemanticTokensProvider(legend, (uri, range) =>
+      transport.request('textDocument/semanticTokens/range', { textDocument: { uri }, range }),
+    )
+    for (const id of monacoLanguagesFor(languageId)) {
+      rangeProviders.push(monaco.languages.registerDocumentRangeSemanticTokensProvider(id, provider))
+    }
+  })
+
   let disposed = false
   return {
     client,
@@ -127,6 +154,8 @@ export async function createLspSession(
       disposed = true
       unsubscribe()
       listeners.clear()
+      for (const provider of rangeProviders) provider.dispose()
+      rangeProviders.length = 0
       transport.close()
     },
   }

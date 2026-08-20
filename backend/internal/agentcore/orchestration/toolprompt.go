@@ -36,7 +36,14 @@ type ToolApprovalPrompter struct {
 // resolve injection uses a context independent of ctx: ctx may be exactly
 // what just failed (timed out or was cancelled), and the resolution still
 // has to land.
-func (p *ToolApprovalPrompter) Ask(ctx context.Context, threadID, requestID string, rt event.RequestType, detail string) (event.Decision, error) {
+// `mutating` is the caller's classification of the action (sshtool.Classify's
+// verdict, for the SSH tool gate). It is not used to decide whether to ask —
+// that decision is already made by the time Ask is called — but to let
+// approval.Gate.ReleasePending re-run the permission matrix if the operator
+// changes the thread's mode WHILE this card is up. Without it every open card
+// would have to be treated as mutating, and switching to `auto` (which stops
+// gating reads) could never release a pending read.
+func (p *ToolApprovalPrompter) Ask(ctx context.Context, threadID, requestID string, rt event.RequestType, detail string, mutating bool) (event.Decision, error) {
 	openErr := p.Ingestion.Inject(ctx, event.Event{
 		Type:      event.RequestOpened,
 		ThreadID:  threadID,
@@ -44,11 +51,7 @@ func (p *ToolApprovalPrompter) Ask(ctx context.Context, threadID, requestID stri
 		Payload: &event.RequestOpenedPayload{
 			RequestType: rt,
 			Detail:      detail,
-			Options: []event.Decision{
-				event.DecisionAccept,
-				event.DecisionAcceptForSession,
-				event.DecisionDecline,
-			},
+			Options:     approvalOptionsFor(rt),
 		},
 	})
 	if openErr != nil {
@@ -58,7 +61,7 @@ func (p *ToolApprovalPrompter) Ask(ctx context.Context, threadID, requestID stri
 		return event.DecisionDecline, fmt.Errorf("tool approval: open request: %w", openErr)
 	}
 
-	decision, awaitErr := p.Gate.Await(ctx, threadID, requestID)
+	decision, awaitErr := p.Gate.AwaitClass(ctx, threadID, requestID, mutating)
 	if awaitErr != nil {
 		// ctx ended, or the thread was cancelled out from under the caller
 		// (approval.Gate.CancelThread already delivers DecisionDecline for
@@ -88,6 +91,26 @@ func (p *ToolApprovalPrompter) Ask(ctx context.Context, threadID, requestID stri
 		return decision, fmt.Errorf("tool approval: resolve request: %w", resolveErr)
 	default:
 		return decision, nil
+	}
+}
+
+// approvalOptionsFor decides which buttons a card offers.
+//
+// "Accept for session" is offered only on cards for actions that CHANGE the
+// host. It used to appear on every card, including reads — and since the
+// standing accept it grants covers mutations, an operator clicking it on a
+// harmless `read /etc/motd` was silently authorizing every later change to
+// that server. The read they were looking at would still prompt next time,
+// which is exactly backwards: the harmless class stayed gated and the
+// dangerous one went quiet.
+func approvalOptionsFor(rt event.RequestType) []event.Decision {
+	if rt == event.ReqFileReadApproval {
+		return []event.Decision{event.DecisionAccept, event.DecisionDecline}
+	}
+	return []event.Decision{
+		event.DecisionAccept,
+		event.DecisionAcceptForSession,
+		event.DecisionDecline,
 	}
 }
 

@@ -3,9 +3,11 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Machine } from '@/store/types'
 import type { editor } from 'monaco-editor/editor'
+import { createInlineCompletionsProvider } from '@/features/editor/inlineCompletions'
 import { monaco } from '@/features/editor/monacoSetup'
 import { MonacoEditor } from '@/features/editor/MonacoEditor'
 import type { EditorReveal } from '@/features/editor/reveal'
+import { useCompletionsConfig } from '@/features/editor/useCompletionsConfig'
 import {
   acquireLspSession,
   languageIdForPath,
@@ -96,6 +98,7 @@ export function CodeFileEditor({
 }) {
   const languageId = languageIdForPath(path)
   const [session, setSession] = useState<LspSession | null>(null)
+  const { data: completionsConfig } = useCompletionsConfig()
 
   const fallbackDefinition = useCallback(
     (instance: editor.ICodeEditor, position: { lineNumber: number; column: number }) => {
@@ -361,6 +364,25 @@ export function CodeFileEditor({
     handleStatus(session.getStatus(), session.getStatusMessage())
     return session.subscribeStatus(handleStatus)
   }, [session, languageId, worktreeId])
+
+  // Gated on the fetched completions config (enabled && configured) — if
+  // disabled/unconfigured, the provider is never registered, so there's zero
+  // overhead. Registered in its own effect (not `handleMount`, which must stay
+  // session-independent — see its comment above) so a session transition
+  // re-registers cleanly instead of remounting the editor.
+  useEffect(() => {
+    if (!languageId || !completionsConfig?.enabled || !completionsConfig?.configured) return
+    // Monaco's inline-completions registry is global per language id (see
+    // createInlineCompletionsProvider's doc comment), so this provider must
+    // be scoped to the exact model this CodeFileEditor instance owns —
+    // otherwise a second open file of the same language (e.g. a split pane)
+    // would have its provider invoked against this file's buffer too.
+    const registration = monaco.languages.registerInlineCompletionsProvider(
+      languageId,
+      createInlineCompletionsProvider(() => session, undefined, session?.documentUri(path)),
+    )
+    return () => registration.dispose()
+  }, [session, languageId, completionsConfig?.enabled, completionsConfig?.configured, path])
 
   const handleMount = useCallback((instance: editor.IStandaloneCodeEditor) => {
     const disposables: Array<{ dispose(): void }> = []

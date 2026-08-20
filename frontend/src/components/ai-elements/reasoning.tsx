@@ -8,7 +8,6 @@ import {
 } from "@/components/shadcn/collapsible";
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
@@ -25,6 +24,8 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 
+// One Dark Pro Darker in place of `@streamdown/code`'s `github-dark` default.
+import { codeHighlighter as code } from "./codeHighlighter";
 import { Shimmer } from "./shimmer";
 
 interface ReasoningContextValue {

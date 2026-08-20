@@ -16,3 +16,20 @@ export function changeHub(): Promise<void> {
 export function openLogFile(): Promise<void> {
   return invoke('open_log_file')
 }
+
+/**
+ * Points the native window at the light or dark system appearance.
+ *
+ * The CSS palette cannot reach this. The window is `transparent: true` with
+ * `windowEffects: ['sidebar']` (tauri.macos.conf.json), which is a real
+ * `NSVisualEffectView` composited *behind* the webview — the title bar and the
+ * strip around the app are that material, not our markup. It picks light or
+ * dark from the window's `NSAppearance`, so with the app in light mode and the
+ * OS in dark the chrome stayed dark around a light page.
+ *
+ * Web builds have no window to set; callers guard on `useIsTauri()`.
+ */
+export async function setNativeWindowTheme(theme: 'light' | 'dark'): Promise<void> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  await getCurrentWindow().setTheme(theme)
+}

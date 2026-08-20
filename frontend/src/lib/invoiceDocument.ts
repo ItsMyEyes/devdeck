@@ -5,6 +5,7 @@
 import { fmtDate, fmtRupiah } from '@/lib/format'
 import { INVST } from '@/lib/constants'
 import { ISSUER } from '@/lib/issuer'
+import { saveText } from '@/lib/saveFile'
 import type { Invoice } from '@/store/types'
 
 function escapeHtml(s: string): string {
@@ -133,15 +134,8 @@ function buildInvoiceHtml(iv: Invoice): string {
 </html>`
 }
 
-/** Builds a printable invoice document and downloads it as an .html file. */
+/** Builds a printable invoice document and saves it as an .html file, through
+ *  the OS save dialog wherever one is available. */
 export function downloadInvoice(iv: Invoice): void {
-  const blob = new Blob([buildInvoiceHtml(iv)], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${iv.number || 'invoice'}.html`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  void saveText(buildInvoiceHtml(iv), `${iv.number || 'invoice'}.html`, 'text/html;charset=utf-8')
 }

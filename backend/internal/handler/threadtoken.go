@@ -26,17 +26,16 @@ type threadTokenCtxKey struct{}
 func RequireThreadToken(store *sshtool.TokenStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			tok := bearerToken(r)
-			if tok == "" {
-				// Fall back to ?key= for parity with keyFromRequest's
-				// convention. Unlike keyFromRequest, this fallback isn't
-				// restricted to WebSocket upgrades: every route in this
-				// group is a plain HTTP request from the devdeck-ssh helper
-				// CLI, which has no other way to avoid putting the token in
-				// a header.
-				tok = r.URL.Query().Get("key")
-			}
-			sess, ok := store.Lookup(tok)
+			// Header only — deliberately NOT keyFromRequest's ?key= fallback.
+			// AccessLog records the raw query string (access.go), and the
+			// redaction pass that would hide a secret runs over request and
+			// response bodies, never over the URL — so a single ?key= call
+			// writes a credential granting shell on a production host into a
+			// plaintext log. The fallback also had no caller to serve: the
+			// devdeck-ssh helper CLI sets an Authorization header, which
+			// audit.go's redactedHeaders already covers, and these are plain
+			// HTTP requests, not WebSocket upgrades that cannot carry headers.
+			sess, ok := store.Lookup(bearerToken(r))
 			if !ok {
 				writeErr(w, http.StatusUnauthorized, "unauthorized")
 				return

@@ -4,6 +4,7 @@ import { Braces, Download, FileCode, FileText, LoaderCircle } from 'lucide-react
 import { buttonVariants } from '@/components/ui/button'
 import { useExportDBTable } from '@/features/data/queries'
 import type { DBExportFormat, DBFilter, DBObjectRef, DBSortKey } from '@/lib/api'
+import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
@@ -13,16 +14,13 @@ const FORMATS: { value: DBExportFormat; label: string; hint: string; icon: typeo
   { value: 'sql', label: 'SQL', hint: 'INSERT statements', icon: FileCode },
 ]
 
-/** Hands a Blob to the browser as a download. The object URL is revoked right
- *  after the synthetic click so a multi-hundred-megabyte export is not pinned
- *  in memory for the tab's lifetime. */
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+/** The name offered in the save dialog. The server's own filename arrives in
+ *  Content-Disposition, but the dialog has to open before the request goes out
+ *  (see `run`), so the table name stands in — it is what the server derives its
+ *  name from anyway, and the user can edit it in the panel. */
+function suggestedName(object: DBObjectRef, format: DBExportFormat) {
+  const stem = object.name.replace(/[^\w.-]+/g, '_') || 'export'
+  return `${stem}.${format}`
 }
 
 /** Toolbar Export button: a popover of formats that streams the table through
@@ -46,12 +44,17 @@ export function DBExportMenu({
 
   async function run(format: DBExportFormat) {
     setOpen(false)
+    // Destination first, bytes second: showSaveFilePicker only works while the
+    // click's transient activation is alive, and a table export can run for
+    // minutes. Asking afterwards throws and drops the file into Downloads.
+    const saveTarget = await pickSaveTarget(suggestedName(object, format))
+    if (saveTarget === SAVE_CANCELLED) return
     try {
-      const { blob, filename } = await exportTable.mutateAsync({
+      const { blob } = await exportTable.mutateAsync({
         connectionId,
         body: { object, filters, sort, format },
       })
-      downloadBlob(blob, filename)
+      await saveTarget.write(blob)
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Export failed')
     }

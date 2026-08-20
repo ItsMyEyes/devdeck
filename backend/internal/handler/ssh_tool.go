@@ -17,7 +17,7 @@ import (
 // *service.SSHToolService's exactly, so the concrete type satisfies this
 // interface with no adapter required at the call site that constructs it.
 type sshToolService interface {
-	Exec(ctx context.Context, sess sshtool.Session, command string) (service.ExecResult, error)
+	Exec(ctx context.Context, sess sshtool.Session, command string, execTimeout time.Duration) (service.ExecResult, error)
 	ReadFile(ctx context.Context, sess sshtool.Session, path string) (service.SSHFileContent, error)
 	ListFiles(ctx context.Context, sess sshtool.Session, path string) ([]service.SSHFileEntry, error)
 	Grep(ctx context.Context, sess sshtool.Session, query string) (service.GrepResult, error)
@@ -84,10 +84,14 @@ func (h *SSHToolHandler) Exec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(clampExecTimeoutSec(body.TimeoutSec))*time.Second)
-	defer cancel()
-
-	result, err := h.svc.Exec(ctx, sess, body.Command)
+	// The request context goes down untouched; timeoutSec travels as a value
+	// so the service can start its clock AFTER any approval, not before it.
+	// Wrapping the whole call in that deadline — the shape this handler used
+	// to have — spent a 60-second command budget on the operator reading the
+	// approval card, so every exec approval expired in a minute while the
+	// design promised ten.
+	result, err := h.svc.Exec(r.Context(), sess, body.Command,
+		time.Duration(clampExecTimeoutSec(body.TimeoutSec))*time.Second)
 	if writeSSHToolErr(w, err) {
 		return
 	}
@@ -170,14 +174,18 @@ func (h *SSHToolHandler) WriteFile(w http.ResponseWriter, r *http.Request) {
 
 // writeSSHToolErr maps an SSHToolService error onto the response, per the
 // design's §8 error table: service.ErrDenied -> 403 "denied by user";
-// context.DeadlineExceeded (the approval gate's cap, or any other context
-// deadline a handler above applied, e.g. Exec's timeoutSec) -> 403
-// "approval timed out"; anything else -> 502 with the error's own message,
-// since by the time an error reaches this handler unclassified it came from
-// the remote host or transport, not from request validation. Returns true
-// when it wrote a response (i.e. err was non-nil). Named distinctly from
-// tools.go's own writeToolErr (an unrelated Tools-module helper) to avoid a
-// redeclaration in this package.
+// service.ErrApprovalTimeout -> 403 "approval timed out"; anything else ->
+// 502 with the error's own message, since by the time an error reaches this
+// handler unclassified it came from the remote host or transport, not from
+// request validation. Returns true when it wrote a response (i.e. err was
+// non-nil). Named distinctly from tools.go's own writeToolErr (an unrelated
+// Tools-module helper) to avoid a redeclaration in this package.
+//
+// A bare context.DeadlineExceeded is deliberately NOT mapped to "approval
+// timed out" any more. Only the service knows whether a deadline was the
+// approval window or the command's own clock, and it says so with a sentinel;
+// sniffing the context error here reported an SSH dial that timed out as a
+// decision the operator made, which is a lie the agent acts on.
 func writeSSHToolErr(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
@@ -185,8 +193,10 @@ func writeSSHToolErr(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, service.ErrDenied):
 		writeErr(w, http.StatusForbidden, "denied by user")
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, service.ErrApprovalTimeout):
 		writeErr(w, http.StatusForbidden, "approval timed out")
+	case errors.Is(err, context.DeadlineExceeded):
+		writeErr(w, http.StatusGatewayTimeout, "remote command timed out")
 	default:
 		writeErr(w, http.StatusBadGateway, err.Error())
 	}

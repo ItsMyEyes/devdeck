@@ -292,3 +292,91 @@ describe('useAgentChatSocket — attachments', () => {
     expect(payloads[0]).not.toHaveProperty('attachments')
   })
 })
+
+/**
+ * The reported bug: a pane pointed at a runtime that never answers sat on
+ * `'connecting'` forever, so the composer showed "Connecting…" under copy
+ * promising that a message sent now is "queued and delivered on reconnect".
+ * The socket must keep retrying — a runtime that comes back should still
+ * reconnect on its own — while reporting honestly that it has never once
+ * opened.
+ */
+describe('useAgentChatSocket — a socket that never opens', () => {
+  let originalWebSocket: typeof WebSocket
+
+  beforeEach(() => {
+    FakeWebSocket.instances = []
+    originalWebSocket = globalThis.WebSocket
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    useDevDeckStore.setState({ agentThreads: {} })
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    globalThis.WebSocket = originalWebSocket
+    vi.clearAllMocks()
+  })
+
+  /** Drives one failed connection: the socket closes without ever opening,
+   *  then the backoff timer fires and a fresh one is constructed. */
+  async function failOnce(index: number) {
+    await act(async () => {
+      FakeWebSocket.instances[index]?.onclose?.()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+  }
+
+  it('reports unreachable after repeated failures, and keeps retrying', async () => {
+    const view = renderHook(() => useAgentChatSocket({ target, threadKey: 'thread-unreachable' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(FakeWebSocket.instances.length).toBe(1)
+    expect(view.result.current.status).toBe('connecting')
+
+    // Below the threshold it is still an ordinary reconnect: the reassuring
+    // banner is honest for a blip, so this must NOT flip early.
+    await failOnce(0)
+    expect(view.result.current.status).not.toBe('unreachable')
+
+    for (let i = 1; i < 6; i++) await failOnce(i)
+
+    expect(view.result.current.status).toBe('unreachable')
+    // Still retrying underneath the honest label — a runtime that comes back
+    // must reconnect without the operator reloading the app.
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(6)
+  })
+
+  it('goes back to open when the runtime finally answers', async () => {
+    const view = renderHook(() => useAgentChatSocket({ target, threadKey: 'thread-recovers' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    for (let i = 0; i < 6; i++) await failOnce(i)
+    expect(view.result.current.status).toBe('unreachable')
+
+    await act(async () => {
+      FakeWebSocket.instances[FakeWebSocket.instances.length - 1]?.onopen?.()
+    })
+    expect(view.result.current.status).toBe('open')
+  })
+
+  // A socket that worked and then dropped is genuinely reconnecting, and its
+  // reassuring banner is honest — this must never be reported as unreachable.
+  it('never reports unreachable once the socket has opened at least once', async () => {
+    const view = renderHook(() => useAgentChatSocket({ target, threadKey: 'thread-flaps' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      FakeWebSocket.instances[0]?.onopen?.()
+    })
+    expect(view.result.current.status).toBe('open')
+
+    for (let i = 0; i < 8; i++) await failOnce(i)
+    expect(view.result.current.status).not.toBe('unreachable')
+  })
+})

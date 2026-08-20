@@ -1,11 +1,12 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Activity, Bot, Waypoints } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SSHRightSidebarPanel } from '@/store/useDevDeckStore'
 import { SSH_RIGHT_SIDEBAR_MAX_WIDTH, SSH_RIGHT_SIDEBAR_MIN_WIDTH, sshRightSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { StatsPane } from '@/features/stats/StatsPane'
-import { SSHAgentChatPanel } from './SSHAgentChatPanel'
+import { useAgentThreads } from '@/features/data/queries'
+import { HUB_MACHINE, SSHAgentChatPanel } from './SSHAgentChatPanel'
 import { SSHForwardsPanel } from './SSHForwardsPanel'
 
 /** Width the drag strip's dblclick restores — mirrors the store's own
@@ -41,6 +42,27 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
   const setSSHRightSidebarWidth = useDevDeckStore((s) => s.setSSHRightSidebarWidth)
 
   const { open, panel, width } = sshRightSidebarState(sshRightSidebars, shellKey)
+
+  // Which of this connection's sessions the chat panel is showing.
+  //
+  // `pickedThreadKey` only holds an EXPLICIT switch (history popover / "New
+  // session") — component state, not the store, since it only needs to
+  // survive as long as this SSH tab stays mounted. Absent a pick, the default
+  // is the most RECENTLY TOUCHED session (`AgentThreads` orders
+  // `updated_at DESC`, so `sessions.data[0]` is it), not the primary/first-
+  // ever thread `ssh:<connectionId>` this used to be hardcoded to. That
+  // hardcoding was the bug: reopening this SSH tab (a fresh `SSHRightSidebar`
+  // mount — plain `useState`, nothing here persists across one) always landed
+  // back on the very first conversation ever had with this host, no matter
+  // how many newer sessions existed, with no visible sign anything was
+  // wrong — the picked-looking row in the history popover just wasn't the one
+  // actually on screen. `sessionsWorktreeId` falls back to the primary key
+  // only while `sessions` is still loading or genuinely empty (a brand-new
+  // connection with no history yet).
+  const sessionsWorktreeId = `ssh:${connectionId}`
+  const sessions = useAgentThreads(HUB_MACHINE, sessionsWorktreeId)
+  const [pickedThreadKey, setPickedThreadKey] = useState<string | undefined>(undefined)
+  const threadKey = pickedThreadKey ?? sessions.data?.[0]?.id ?? sessionsWorktreeId
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -140,7 +162,16 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
             data-testid="ssh-chat-panel"
             className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'chat' ? 'flex' : 'hidden')}
           >
-            <SSHAgentChatPanel connectionId={connectionId} visible={open && panel === 'chat'} />
+            <SSHAgentChatPanel
+              connectionId={connectionId}
+              visible={open && panel === 'chat'}
+              threadKey={threadKey}
+              // Same setter the Sessions panel below drives, so the chat
+              // header's own history/new-session buttons and the rail's
+              // Sessions tab move one piece of state, not two that can
+              // disagree about which session is open.
+              onSelectThread={setPickedThreadKey}
+            />
           </div>
           <div className={cn('min-h-0 min-w-0 flex-1 flex-col', panel === 'forwards' ? 'flex' : 'hidden')}>
             <SSHForwardsPanel connectionId={connectionId} visible={open && panel === 'forwards'} />
@@ -158,6 +189,11 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
           active={open && panel === 'chat'}
           onClick={() => handleIconClick('chat')}
         />
+        {/* No Sessions button here any more. It opened a full-height list that
+            replaced the conversation you were reading, and the chat header's
+            own history popover (`SSHAgentChatPanel`) reaches the same
+            `SessionsPanel` without doing that — two entry points to one list,
+            of which this was the worse one. */}
         <RailButton
           label="Stats"
           icon={<Activity size={15} />}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"devdeck/backend/internal/agentcore/event"
+	"devdeck/backend/internal/agentcore/provider"
 )
 
 // defaultTombstoneTTL bounds how long a decision nobody has collected is kept
@@ -76,6 +77,17 @@ type gateEntry struct {
 	ch       chan event.Decision
 	threadID string
 
+	// mutating is the waiter's own judgement about the action this request
+	// gates — for the SSH tool gate, sshtool.Classify's verdict. It exists so
+	// ReleasePending can re-run the permission matrix against a mode the
+	// operator picked AFTER the card went up.
+	//
+	// True by default, and deliberately so: a request registered through Open
+	// (the Broker path, where a provider raised the card and no goroutine in
+	// this process is waiting on it) declares no class, and "assume it changes
+	// the host" is the only safe reading of silence. Only AwaitClass lowers it.
+	mutating bool
+
 	// decided records a decision that has been delivered but not necessarily
 	// collected. decidedAt starts the tombstone's clock.
 	decided   bool
@@ -109,7 +121,7 @@ func (g *Gate) Open(threadID, requestID string) {
 func (g *Gate) openLocked(threadID, requestID string) *gateEntry {
 	e, ok := g.entries[requestID]
 	if !ok {
-		e = &gateEntry{ch: make(chan event.Decision, 1), threadID: threadID}
+		e = &gateEntry{ch: make(chan event.Decision, 1), threadID: threadID, mutating: true}
 		g.entries[requestID] = e
 	}
 	if g.byThread[threadID] == nil {
@@ -219,9 +231,36 @@ func (g *Gate) CancelThread(threadID string) {
 // on every exit path, so a timed-out Await leaks nothing and a later Resolve
 // for the same id reports ErrUnknownRequest.
 func (g *Gate) Await(ctx context.Context, threadID, requestID string) (event.Decision, error) {
+	return g.AwaitClass(ctx, threadID, requestID, true)
+}
+
+// AwaitClass is Await, plus the caller's judgement about whether the action
+// being gated CHANGES the remote host. The class is what lets ReleasePending
+// re-run the permission matrix on a card that is already open — without it a
+// read-only command parked under approval-required would stay parked when the
+// operator switched to auto, which is precisely the mode that stops gating
+// reads.
+//
+// Await keeps the conservative `mutating: true`, so every existing caller and
+// the Broker path are unchanged.
+func (g *Gate) AwaitClass(ctx context.Context, threadID, requestID string, mutating bool) (event.Decision, error) {
 	g.mu.Lock()
 	g.sweepLocked()
 	e := g.openLocked(threadID, requestID)
+	// Recorded even when Open registered the entry first (it always does, on
+	// the tool path: Ingestion publishes the card before the asking goroutine
+	// reaches here), which is the only way the real class ever replaces Open's
+	// assumed one.
+	//
+	// That leaves a window — between Open and here — where a read is still
+	// recorded as mutating, so a ReleasePending landing inside it would decline
+	// to release something `auto` should have. It is microseconds wide (Ask
+	// injects the open and calls this immediately after) and closes long before
+	// the card has reached a browser, let alone been clicked. It also fails in
+	// the safe direction: the worst outcome is a prompt the operator still has
+	// to answer. Closing it properly would mean widening Broker.Open with a
+	// class every other implementation has no use for.
+	e.mutating = mutating
 	if e.decided {
 		d := e.decision
 		g.dropLocked(requestID)
@@ -262,6 +301,52 @@ func (g *Gate) tracked(requestID string) bool {
 	defer g.mu.Unlock()
 	_, ok := g.entries[requestID]
 	return ok
+}
+
+// ReleasePending accepts every request still open on threadID that `mode`
+// would not have gated in the first place, and returns the ids it released.
+//
+// This is what makes the permission pill mean something WHILE a card is up.
+// service.SSHToolService reads the thread's mode once, decides to ask, and
+// then parks on Await — so before this existed, an operator who answered a
+// blocking prompt by switching the thread to full access watched nothing
+// happen: the mode they had just chosen said "never ask", and the question
+// they were being asked was already in flight and had no way to hear about it.
+// The only way out was to answer the card they had just declared unnecessary.
+//
+// DecisionAccept, not DecisionAcceptForSession: the standing session flag is a
+// separate grant the operator makes explicitly, and widening the mode should
+// not silently set it too — the mode itself is now the durable permission, and
+// it is visible in the composer where a hidden flag is not.
+//
+// Requests whose class the new mode still gates are left alone, which is the
+// whole point of `auto` being distinct from `full-access`: switching to auto
+// with a file WRITE pending releases nothing, and the operator still answers
+// for the write.
+func (g *Gate) ReleasePending(threadID string, mode provider.RuntimeMode) []string {
+	g.mu.Lock()
+	g.sweepLocked()
+
+	now := time.Now()
+	released := make([]string, 0, len(g.byThread[threadID]))
+	chans := make([]chan event.Decision, 0, len(g.byThread[threadID]))
+	for id := range g.byThread[threadID] {
+		e := g.entries[id]
+		if e == nil || e.decided || !mode.AllowsUnprompted(e.mutating) {
+			continue
+		}
+		e.decided, e.decision, e.decidedAt = true, event.DecisionAccept, now
+		released = append(released, id)
+		chans = append(chans, e.ch)
+	}
+	g.mu.Unlock()
+
+	// Outside the lock, exactly as CancelThread does: each channel is buffered
+	// and each entry is decided once, so none of these can block.
+	for _, ch := range chans {
+		ch <- event.DecisionAccept
+	}
+	return released
 }
 
 // SessionAccepted reports whether threadID answered a prior request with

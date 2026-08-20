@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { format as formatSQL } from 'sql-formatter'
 import { AlignLeft, Download, History, Play, Plus, Save, ScanSearch, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { monaco } from '@/features/editor/monacoSetup'
 import { MonacoEditor } from '@/features/editor/MonacoEditor'
@@ -19,6 +20,7 @@ import {
 } from '@/features/data/queries'
 import { ApiError } from '@/lib/api'
 import type { DBCaps } from '@/lib/api'
+import { saveText } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { DBEngine } from '@/store/types'
@@ -27,16 +29,14 @@ import { sqlCompletionItems } from './sqlCompletion'
 import { buildSQLSchema, firstSQLLine, parseExecutedAt, sqlFormatterLanguage } from './sqlEditorSupport'
 import type { CacheEntry, SQLSchemaMap } from './sqlEditorSupport'
 
-/** Hands `text` to the browser as a download. The object URL is revoked after
- *  the synthetic click so the Blob is not pinned for the tab's lifetime — a
- *  result set here can be tens of megabytes. */
+/** Saves `text` through the OS save dialog. Called straight from the click
+ *  handler with nothing awaited first — see saveText's own note on transient
+ *  activation. A result set here can be tens of megabytes, so the failure
+ *  toast matters: a half-written file is worth telling the user about. */
 function downloadText(text: string, filename: string, mime: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: mime }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  void saveText(text, filename, mime).catch((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : `Could not save ${filename}`)
+  })
 }
 
 export function DBSqlEditor({

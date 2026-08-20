@@ -1,15 +1,23 @@
 import { Switch } from '@base-ui/react/switch'
 import {
   ArrowLeft,
+  BrainCog,
+  Check,
+  Cloud,
   Code2,
+  Container,
   Copy,
   Eye,
   EyeOff,
   Info,
   KeyRound,
+  Palette,
   Radio,
   ScrollText,
+  Send,
   Settings,
+  Sparkles,
+  Terminal,
   TriangleAlert,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -21,16 +29,31 @@ import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { StatusDot } from '@/components/ui/status-dot'
 import { changeHub, openLogFile } from '@/features/desktop/desktopBridge'
 import { useMachines, useTailscaleStatus } from '@/features/data/queries'
+import { useCompletionsConfig, useUpdateCompletionsConfig } from '@/features/editor/useCompletionsConfig'
 import { useVsCodeMode } from '@/features/editor/useVsCodeMode'
-import type { TailscaleHubStatus } from '@/lib/api'
+import { MemoryLocalPanel } from '@/features/memory/MemoryLocalPanel'
+import { useMemoryConfig, useTestMemoryConnection, useUpdateMemoryConfig } from '@/features/memory/useMemory'
+import { AppearanceSetting } from '@/features/theme/AppearanceSetting'
+import type { MemoryConfig, TailscaleHubStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { SocksPublishSection } from './SocksPublishSection'
+import { TelegramPublishSection } from './TelegramSection'
 import { VersionSection } from './VersionSection'
 
 const MASKED_KEY = '••••••••••••••••'
 
-type SectionId = 'general' | 'access' | 'network' | 'editor' | 'diagnostics' | 'about'
+type SectionId =
+  | 'general'
+  | 'access'
+  | 'network'
+  | 'published'
+  | 'appearance'
+  | 'editor'
+  | 'completions'
+  | 'memory'
+  | 'diagnostics'
+  | 'about'
 
 interface NavItem {
   id: SectionId
@@ -50,12 +73,16 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'general', label: 'General', icon: Settings },
       { id: 'access', label: 'Access', icon: KeyRound },
       { id: 'network', label: 'Network', icon: Radio },
+      { id: 'published', label: 'Published', icon: Send },
     ],
   },
   {
     label: 'System',
     items: [
+      { id: 'appearance', label: 'Appearance', icon: Palette },
       { id: 'editor', label: 'Editor', icon: Code2 },
+      { id: 'completions', label: 'Completions', icon: Sparkles },
+      { id: 'memory', label: 'Memory', icon: BrainCog },
       { id: 'diagnostics', label: 'Diagnostics', icon: ScrollText },
       { id: 'about', label: 'About', icon: Info },
     ],
@@ -71,13 +98,29 @@ const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
     title: 'Access',
     subtitle: "Share this hub's key so a new runtime can self-register.",
   },
+  published: {
+    title: 'Published',
+    subtitle: 'Surface a machine\u2019s agent threads outside DevDeck, so they can be driven from somewhere else.',
+  },
   network: {
     title: 'Network',
     subtitle: 'Tailscale exposure and forward-proxy publishing for this hub and its runtimes.',
   },
+  appearance: {
+    title: 'Appearance',
+    subtitle: 'Light or dark, for the whole app — chrome, editor and terminals.',
+  },
   editor: {
     title: 'Editor',
     subtitle: 'Chrome and rendering preferences for the code editor.',
+  },
+  completions: {
+    title: 'Completions',
+    subtitle: "Bring your own API key for AI-generated ghost-text completions in the code editor.",
+  },
+  memory: {
+    title: 'Memory',
+    subtitle: 'A self-hosted Hindsight server giving every agent — every provider, every runtime — one shared, persistent memory.',
   },
   diagnostics: {
     title: 'Diagnostics',
@@ -156,6 +199,14 @@ export function DesktopSettingsDialog() {
   const [keyRevealed, setKeyRevealed] = useState(false)
   const [section, setSection] = useState<SectionId>('general')
   const [vscodeMode, setVsCodeModeEnabled] = useVsCodeMode()
+  const { data: completionsConfig } = useCompletionsConfig()
+  const updateCompletions = useUpdateCompletionsConfig()
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const { data: memoryConfig } = useMemoryConfig()
+  const updateMemory = useUpdateMemoryConfig()
+  const testMemory = useTestMemoryConnection()
+  const [memoryApiKeyDraft, setMemoryApiKeyDraft] = useState('')
+  const [memoryLlmApiKeyDraft, setMemoryLlmApiKeyDraft] = useState('')
 
   function closeDialog() {
     setConfirmingSwitch(false)
@@ -369,6 +420,40 @@ export function DesktopSettingsDialog() {
               </>
             )}
 
+            {section === 'published' && (
+              <>
+                <SectionHeadRow
+                  label="Remote chat"
+                  title="Telegram"
+                  description="Run a Telegram bot on a machine so its agent threads can be driven from a chat. One bot token per machine - Telegram only lets one process poll a token at a time."
+                />
+                <div className="mt-3">
+                  <TelegramPublishSection open={open && section === 'published'} />
+                </div>
+                <Divider />
+                {/* Named rather than left implicit: this section holds exactly
+                    one destination today, and without saying so the page reads
+                    as though something failed to load. */}
+                <SectionHeadRow
+                  label="Segera hadir"
+                  title="Destinasi lain"
+                  description="Telegram is the only destination for now. Slack, Discord and webhooks are on the list - the bridge underneath is destination-agnostic, so adding one is a renderer plus a transport, not a rewrite."
+                />
+                <div className="mt-3 rounded-lg border border-dashed border-devdeck-border bg-devdeck-pane/40 px-3.5 py-3">
+                  <p className="font-mono text-[11px] text-devdeck-fg-2">Coming soon - currently only Telegram.</p>
+                </div>
+              </>
+            )}
+
+            {section === 'appearance' && (
+              <>
+                <SectionHeadRow label="Theme" title="Colour scheme" description="DevDeck is dark-only." />
+                <SettingsCard>
+                  <AppearanceSetting />
+                </SettingsCard>
+              </>
+            )}
+
             {section === 'editor' && (
               <SectionHeadRow
                 label="Editor"
@@ -393,6 +478,399 @@ export function DesktopSettingsDialog() {
                   </Switch.Root>
                 }
               />
+            )}
+
+            {section === 'completions' && (
+              <>
+                <SectionHeadRow
+                  label="AI"
+                  title="Inline completions"
+                  description="Bring your own API key for AI-generated ghost-text completions in the code editor, grounded against the file's language server."
+                  action={
+                    <Switch.Root
+                      checked={completionsConfig?.enabled ?? false}
+                      onCheckedChange={(enabled) => updateCompletions.mutate({ enabled })}
+                      aria-label="Enable inline completions"
+                      className={cn(
+                        'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
+                      )}
+                    >
+                      <Switch.Thumb
+                        className={cn(
+                          'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                          'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                        )}
+                      />
+                    </Switch.Root>
+                  }
+                />
+                <Divider />
+                <InsetPanel>
+                  <div className="flex flex-col gap-3">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Provider</span>
+                      <select
+                        value={completionsConfig?.provider ?? 'anthropic'}
+                        onChange={(e) => updateCompletions.mutate({ provider: e.target.value as 'anthropic' | 'openai-compatible' })}
+                        className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                      >
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openai-compatible">OpenAI-compatible</option>
+                      </select>
+                    </label>
+                    {completionsConfig?.provider === 'openai-compatible' && (
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Base URL</span>
+                        <input
+                          defaultValue={completionsConfig.baseUrl}
+                          onBlur={(e) => updateCompletions.mutate({ baseUrl: e.target.value })}
+                          placeholder="https://api.openai.com/v1"
+                          className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        />
+                      </label>
+                    )}
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Model</span>
+                      <input
+                        defaultValue={completionsConfig?.model ?? ''}
+                        onBlur={(e) => updateCompletions.mutate({ model: e.target.value })}
+                        className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">API key</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="password"
+                          value={apiKeyDraft}
+                          onChange={(e) => setApiKeyDraft(e.target.value)}
+                          placeholder={completionsConfig?.configured ? 'Configured — enter a new key to replace it' : 'Not configured'}
+                          className="min-w-0 flex-1 rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={!apiKeyDraft}
+                          onClick={() => {
+                            updateCompletions.mutate({ apiKey: apiKeyDraft })
+                            setApiKeyDraft('')
+                          }}
+                        >
+                          Save key
+                        </Button>
+                      </div>
+                    </label>
+                  </div>
+                </InsetPanel>
+              </>
+            )}
+
+            {section === 'memory' && (
+              <>
+                <SectionHeadRow
+                  label="Memory"
+                  title="Persistent agent memory"
+                  description="Every provider (claude, codex, opencode, pi) and every runtime this hub knows about recalls from and retains to the same bank — nothing project-specific, nothing per-machine."
+                  action={
+                    <Switch.Root
+                      checked={memoryConfig?.enabled ?? false}
+                      onCheckedChange={(enabled) => updateMemory.mutate({ enabled })}
+                      aria-label="Enable persistent memory"
+                      className={cn(
+                        'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
+                      )}
+                    >
+                      <Switch.Thumb
+                        className={cn(
+                          'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                          'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                        )}
+                      />
+                    </Switch.Root>
+                  }
+                />
+                <Divider />
+
+                <InsetPanel>
+                  <div className="flex flex-col gap-2.5">
+                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                      Deployment
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(
+                        [
+                          { id: 'manual' as const, label: 'Manual / Cloud', hint: 'Your own server or URL', Icon: Cloud },
+                          { id: 'container' as const, label: 'This device (container)', hint: 'docker or podman', Icon: Container },
+                          { id: 'baremetal' as const, label: 'This device (bare metal)', hint: 'uvx / pip, no Docker', Icon: Terminal },
+                        ]
+                      ).map((opt) => {
+                        const active = memoryConfig?.hosting === opt.id
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => updateMemory.mutate({ hosting: opt.id })}
+                            className={cn(
+                              'relative rounded-lg border px-2.5 py-2.5 text-left transition-colors',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                              active
+                                ? 'border-devdeck-border-accent bg-devdeck-accent-tint text-devdeck-accent'
+                                : 'border-devdeck-border text-devdeck-fg-2 hover:bg-devdeck-hover-wash',
+                            )}
+                          >
+                            {active && (
+                              <span className="absolute right-2 top-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-devdeck-accent text-devdeck-accent-ink">
+                                <Check size={9} strokeWidth={3} />
+                              </span>
+                            )}
+                            <opt.Icon size={16} strokeWidth={1.75} className="mb-1.5" />
+                            <div className="text-[11px] font-semibold">{opt.label}</div>
+                            <div className="mt-0.5 font-mono text-[9.5px] opacity-80">{opt.hint}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </InsetPanel>
+
+                {memoryConfig && memoryConfig.hosting !== 'manual' ? (
+                  <MemoryLocalPanel hosting={memoryConfig.hosting} localPort={memoryConfig.localPort} updateMemory={updateMemory} />
+                ) : (
+                  <InsetPanel>
+                    <div className="flex flex-col gap-3">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                          Hindsight base URL
+                        </span>
+                        <input
+                          defaultValue={memoryConfig?.baseUrl ?? ''}
+                          onBlur={(e) => updateMemory.mutate({ baseUrl: e.target.value })}
+                          placeholder="http://127.0.0.1:8888"
+                          className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                          Hindsight API key
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="password"
+                            value={memoryApiKeyDraft}
+                            onChange={(e) => setMemoryApiKeyDraft(e.target.value)}
+                            placeholder={memoryConfig?.configured ? 'Configured — enter a new key to replace it' : 'Not configured (loopback deployments may not need one)'}
+                            className="min-w-0 flex-1 rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={!memoryApiKeyDraft}
+                            onClick={() => {
+                              updateMemory.mutate({ apiKey: memoryApiKeyDraft })
+                              setMemoryApiKeyDraft('')
+                            }}
+                          >
+                            Save key
+                          </Button>
+                        </div>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={testMemory.isPending || !memoryConfig?.baseUrl}
+                          onClick={() =>
+                            testMemory.mutate(
+                              { baseUrl: memoryConfig?.baseUrl ?? '', apiKey: memoryApiKeyDraft },
+                              {
+                                onSuccess: () => toast.success('Connected to Hindsight'),
+                                onError: (err) => toast.error(err instanceof Error ? err.message : 'Connection failed'),
+                              },
+                            )
+                          }
+                        >
+                          {testMemory.isPending ? 'Testing…' : 'Test connection'}
+                        </Button>
+                        <span className="font-mono text-[10.5px] text-devdeck-fg-2">
+                          Tests whatever is saved above — a base URL edit is saved on blur before testing.
+                        </span>
+                      </div>
+                    </div>
+                  </InsetPanel>
+                )}
+
+                <InsetPanel>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Bank</span>
+                    <input
+                      defaultValue={memoryConfig?.bankId ?? 'devdeck'}
+                      onBlur={(e) => updateMemory.mutate({ bankId: e.target.value })}
+                      className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                    />
+                  </label>
+                </InsetPanel>
+
+                <Divider />
+                <SectionHeadRow label="Recall & retain" title="Per-turn behaviour" />
+                <InsetPanel className="mt-3">
+                  <div className="flex flex-col gap-3">
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="text-[11.5px] text-devdeck-fg">
+                        Recall before each turn
+                        <span className="block text-[10.5px] text-devdeck-fg-2">
+                          Prepend relevant memories to what the agent sees.
+                        </span>
+                      </span>
+                      <Switch.Root
+                        checked={memoryConfig?.autoRecall ?? true}
+                        onCheckedChange={(autoRecall) => updateMemory.mutate({ autoRecall })}
+                        aria-label="Auto-recall before each turn"
+                        className={cn(
+                          'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
+                        )}
+                      >
+                        <Switch.Thumb
+                          className={cn(
+                            'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                            'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                          )}
+                        />
+                      </Switch.Root>
+                    </label>
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="text-[11.5px] text-devdeck-fg">
+                        Retain after each turn
+                        <span className="block text-[10.5px] text-devdeck-fg-2">
+                          Store what the user asked and the agent replied.
+                        </span>
+                      </span>
+                      <Switch.Root
+                        checked={memoryConfig?.autoRetain ?? true}
+                        onCheckedChange={(autoRetain) => updateMemory.mutate({ autoRetain })}
+                        aria-label="Auto-retain after each turn"
+                        className={cn(
+                          'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
+                        )}
+                      >
+                        <Switch.Thumb
+                          className={cn(
+                            'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                            'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                          )}
+                        />
+                      </Switch.Root>
+                    </label>
+                    <div className="flex gap-3">
+                      <label className="flex flex-1 flex-col gap-1">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                          Recall budget
+                        </span>
+                        <select
+                          value={memoryConfig?.recallBudget ?? 'mid'}
+                          onChange={(e) => updateMemory.mutate({ recallBudget: e.target.value as 'low' | 'mid' | 'high' })}
+                          className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        >
+                          <option value="low">Low</option>
+                          <option value="mid">Mid</option>
+                          <option value="high">High</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-1 flex-col gap-1">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                          Max tokens
+                        </span>
+                        <input
+                          type="number"
+                          defaultValue={memoryConfig?.maxTokens ?? 1536}
+                          onBlur={(e) => updateMemory.mutate({ maxTokens: Number(e.target.value) || 1536 })}
+                          className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </InsetPanel>
+
+                <Divider />
+                <SectionHeadRow
+                  label="Fact extraction"
+                  title="LLM used by Hindsight itself"
+                  description="Separate from any coding agent's own model — this is what Hindsight uses to turn a raw turn into structured facts. Point Base URL at ollama/lmstudio to keep transcripts off any third-party API, or at any OpenAI/Anthropic-compatible proxy or gateway."
+                />
+                <InsetPanel className="mt-3">
+                  <div className="flex flex-col gap-3">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Provider</span>
+                      <select
+                        value={memoryConfig?.llmProvider ?? 'openai'}
+                        onChange={(e) => updateMemory.mutate({ llmProvider: e.target.value as MemoryConfig['llmProvider'] })}
+                        className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="groq">Groq</option>
+                        <option value="ollama">Ollama (local)</option>
+                        <option value="lmstudio">LM Studio (local)</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Model</span>
+                      <input
+                        defaultValue={memoryConfig?.llmModel ?? ''}
+                        onBlur={(e) => updateMemory.mutate({ llmModel: e.target.value })}
+                        placeholder="e.g. gpt-5-mini, llama3.1"
+                        className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                        Base URL
+                      </span>
+                      <input
+                        defaultValue={memoryConfig?.llmBaseUrl ?? ''}
+                        onBlur={(e) => updateMemory.mutate({ llmBaseUrl: e.target.value })}
+                        placeholder={
+                          memoryConfig?.llmProvider === 'ollama'
+                            ? 'http://127.0.0.1:11434'
+                            : memoryConfig?.llmProvider === 'lmstudio'
+                              ? 'http://127.0.0.1:1234'
+                              : 'Leave empty for the provider default, or point at a proxy/gateway'
+                        }
+                        className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
+                        LLM API key
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="password"
+                          value={memoryLlmApiKeyDraft}
+                          onChange={(e) => setMemoryLlmApiKeyDraft(e.target.value)}
+                          placeholder="Not needed for ollama/lmstudio"
+                          className="min-w-0 flex-1 rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={!memoryLlmApiKeyDraft}
+                          onClick={() => {
+                            updateMemory.mutate({ llmApiKey: memoryLlmApiKeyDraft })
+                            setMemoryLlmApiKeyDraft('')
+                          }}
+                        >
+                          Save key
+                        </Button>
+                      </div>
+                    </label>
+                  </div>
+                </InsetPanel>
+              </>
             )}
 
             {section === 'diagnostics' && (

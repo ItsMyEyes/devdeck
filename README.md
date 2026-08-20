@@ -124,7 +124,8 @@ This applies to every fresh download/re-install. As a one-off alternative you ca
 ## Repository layout
 
 ```
-backend/   Go server — cmd/server (main binary), cmd/mcp-server (issue-tracker MCP server), internal/*
+backend/   Go server — cmd/server (the only binary; also hosts the `mcp-server`
+           and `ssh-tool` agent-facing subcommands), internal/*
 frontend/  React SPA — src/routes (TanStack Router), src/features, src/lib, src/store
 docs/      Design specs and implementation plans (docs/superpowers/)
 ```

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/shadcn/button";
+import { saveText } from "@/lib/saveFile";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
@@ -139,15 +140,9 @@ export const ConversationDownload = ({
 }: ConversationDownloadProps) => {
   const handleDownload = useCallback(() => {
     const markdown = messagesToMarkdown(messages, formatMessage);
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    // saveText, not the upstream ai-elements `<a download>`: that anchor is a
+    // silent no-op inside the desktop shell's webview. See @/lib/saveFile.
+    void saveText(markdown, filename, "text/markdown;charset=utf-8");
   }, [messages, filename, formatMessage]);
 
   return (

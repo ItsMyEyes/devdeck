@@ -94,6 +94,12 @@ func (a *e2eFakeAdapter) RespondToRequest(context.Context, string, string, event
 func (a *e2eFakeAdapter) RespondToUserInput(context.Context, string, string, map[string]any) error {
 	return nil
 }
+func (a *e2eFakeAdapter) SetInteractionMode(context.Context, string, provider.InteractionMode) error {
+	return nil
+}
+func (a *e2eFakeAdapter) SetRuntimeMode(context.Context, string, provider.RuntimeMode) error {
+	return nil
+}
 func (a *e2eFakeAdapter) StopSession(context.Context, string) error { return nil }
 func (a *e2eFakeAdapter) StopAll(context.Context) error             { return nil }
 func (a *e2eFakeAdapter) HasSession(string) bool                    { return true }

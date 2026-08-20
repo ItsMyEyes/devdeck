@@ -255,28 +255,28 @@ Desktop data lives in the OS app-data directory (macOS: `~/Library/Application S
 | You want a native app, and already host a hub elsewhere | Desktop app → "Connect to a hub" |
 | You want a native app and nothing else running anywhere | Desktop app → "Host locally" |
 
-## 14. MCP issue-tracker server for agents
+## 14. MCP issue-tracker + memory-graph server for agents
 
-`backend/cmd/mcp-server` is a separate binary that exposes DevDeck's issues to a coding agent over MCP (stdio) — handy for having the agent working *inside* a worktree file its own tickets against the same project. It opens the same SQLite `--db` file the main server uses (safe to share, WAL mode).
+`devdeck mcp-server` exposes DevDeck's issues to a coding agent over MCP (stdio) — handy for having the agent working *inside* a worktree file its own tickets against the same project. It opens the same SQLite `--db` file the main server uses (safe to share, WAL mode).
 
-```bash
-make build-mcp   # writes backend/devdeck-mcp-server
-```
-
-Point an MCP client at it (e.g. in a worktree's own `.mcp.json`):
+There is nothing to build or install: it's a subcommand of the DevDeck binary you're already running. Point an MCP client at that binary (e.g. in a worktree's own `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "devdeck-issues": {
-      "command": "/path/to/devdeck-mcp-server",
-      "args": ["--db", "/path/to/devdeck.db"]
+      "command": "/path/to/devdeck",
+      "args": ["mcp-server", "--db", "/path/to/devdeck.db"]
     }
   }
 }
 ```
 
-It exposes four tools: `list_projects`, `create_issue` (assignee is required — the agent should ask if it isn't obvious), `upload_attachment` (attaches a local file and, by default, appends a link/embed to the issue's description), and `mark_issue_done` (moves the issue to **In Review** — a human still does the final close).
+If you use the desktop app, that path is `/Applications/DevDeck.app/Contents/MacOS/devdeck-server` on macOS. With no `--db` it resolves `data/devdeck.db` beside the binary — the same default the server uses.
+
+It exposes four issue tools: `list_projects`, `create_issue` (assignee is required — the agent should ask if it isn't obvious), `upload_attachment` (attaches a local file and, by default, appends a link/embed to the issue's description), and `mark_issue_done` (moves the issue to **In Review** — a human still does the final close).
+
+It also exposes `graph_neighbors`: give it an entity or fact label copied from a recall/reflect result, and it returns that node's real neighbors from persistent memory's graph — relationship type (cooccurrence, semantic, temporal, entity, caused_by) and strength (weight) — instead of the agent inferring a connection from an isolated snippet. An unmatched or ambiguous label comes back with candidates, never a guess. Requires memory to be configured under Settings → Memory.
 
 ## 15. Troubleshooting
 

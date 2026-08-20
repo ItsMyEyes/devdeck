@@ -85,9 +85,23 @@ func TestAgentSmokeRealProcessReachesTheClient(t *testing.T) {
 	st, threadID := newSmokeStore(t)
 	binPath := writeFakeAgent(t)
 
+	// A counter, like every sibling test's NewID — NOT a clock reading.
+	//
+	// This was `"ae-" + strconv.Itoa(time.Now().Nanosecond())`, which is not
+	// unique: macOS reports that clock at microsecond granularity (ids came
+	// out ending in "000"), and Decide mints two ids back to back for a single
+	// turn.start — well inside one tick. When they collided the whole commit
+	// failed on agent_event.event_id's UNIQUE constraint, the turn was
+	// rejected, and the test timed out waiting for a message that was never
+	// logged. Intermittent by nature, and it blamed whatever unrelated change
+	// happened to shift the timing.
+	//
+	// Safe unsynchronized: Engine.process is the only caller and it runs on the
+	// engine's single goroutine.
+	eventSeq := 0
 	engine := orchestration.NewEngine(orchestration.EngineOptions{
 		Store:     orchestration.NewPortStore(st),
-		NewID:     func() string { return "ae-" + strconv.Itoa(time.Now().Nanosecond()) },
+		NewID:     func() string { eventSeq++; return "ae-" + strconv.Itoa(eventSeq) },
 		QueueSize: 64,
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -32,7 +32,7 @@ type fakePrompter struct {
 	session  bool
 }
 
-func (f *fakePrompter) Ask(_ context.Context, _, _ string, rt event.RequestType, _ string) (event.Decision, error) {
+func (f *fakePrompter) Ask(_ context.Context, _, _ string, rt event.RequestType, _ string, _ bool) (event.Decision, error) {
 	f.asked++
 	f.lastType = rt
 	return f.decision, nil
@@ -46,7 +46,7 @@ func TestExecReadOnlySkipsApprovalInAutoMode(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionAccept}
 	svc := NewSSHToolService(r, nil, fakePolicy{provider.ModeAuto}, p)
 
-	res, err := svc.Exec(context.Background(), sess(), "systemctl status nginx")
+	res, err := svc.Exec(context.Background(), sess(), "systemctl status nginx", 0)
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestExecMutatingAsksAndRunsOnAccept(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionAccept}
 	svc := NewSSHToolService(r, nil, fakePolicy{provider.ModeAuto}, p)
 
-	if _, err := svc.Exec(context.Background(), sess(), "systemctl restart nginx"); err != nil {
+	if _, err := svc.Exec(context.Background(), sess(), "systemctl restart nginx", 0); err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
 	if p.asked != 1 {
@@ -82,7 +82,7 @@ func TestExecDeniedNeverRuns(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionDecline}
 	svc := NewSSHToolService(r, nil, fakePolicy{provider.ModeAuto}, p)
 
-	if _, err := svc.Exec(context.Background(), sess(), "rm -rf /srv"); !errors.Is(err, ErrDenied) {
+	if _, err := svc.Exec(context.Background(), sess(), "rm -rf /srv", 0); !errors.Is(err, ErrDenied) {
 		t.Fatalf("err = %v, want ErrDenied", err)
 	}
 	if r.gotCommand != "" {
@@ -94,7 +94,7 @@ func TestApprovalRequiredGatesEvenReads(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionAccept}
 	svc := NewSSHToolService(&fakeRunner{}, nil, fakePolicy{provider.ModeApprovalRequired}, p)
 
-	if _, err := svc.Exec(context.Background(), sess(), "ls /etc"); err != nil {
+	if _, err := svc.Exec(context.Background(), sess(), "ls /etc", 0); err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
 	if p.asked != 1 {
@@ -106,7 +106,7 @@ func TestFullAccessNeverGates(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionDecline}
 	svc := NewSSHToolService(&fakeRunner{}, nil, fakePolicy{provider.ModeFullAccess}, p)
 
-	if _, err := svc.Exec(context.Background(), sess(), "rm -rf /tmp/x"); err != nil {
+	if _, err := svc.Exec(context.Background(), sess(), "rm -rf /tmp/x", 0); err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
 	if p.asked != 0 {
@@ -118,7 +118,7 @@ func TestSessionAcceptSkipsRepeatApproval(t *testing.T) {
 	p := &fakePrompter{decision: event.DecisionAccept, session: true}
 	svc := NewSSHToolService(&fakeRunner{}, nil, fakePolicy{provider.ModeAuto}, p)
 
-	if _, err := svc.Exec(context.Background(), sess(), "systemctl restart nginx"); err != nil {
+	if _, err := svc.Exec(context.Background(), sess(), "systemctl restart nginx", 0); err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
 	if p.asked != 0 {
@@ -128,7 +128,7 @@ func TestSessionAcceptSkipsRepeatApproval(t *testing.T) {
 
 func TestNonZeroExitIsNotAnError(t *testing.T) {
 	svc := NewSSHToolService(&fakeRunner{exitCode: 2}, nil, fakePolicy{provider.ModeFullAccess}, &fakePrompter{})
-	res, err := svc.Exec(context.Background(), sess(), "ls /nope")
+	res, err := svc.Exec(context.Background(), sess(), "ls /nope", 0)
 	if err != nil {
 		t.Fatalf("non-zero exit surfaced as error: %v", err)
 	}

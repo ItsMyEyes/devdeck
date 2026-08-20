@@ -25,7 +25,12 @@ export interface ToolGroupEntry {
   items: ChatItem[]
 }
 
-export type TimelineEntry = MessageEntry | ReasoningEntry | ToolGroupEntry
+export interface PlanEntry {
+  kind: 'plan'
+  item: ChatItem
+}
+
+export type TimelineEntry = MessageEntry | ReasoningEntry | ToolGroupEntry | PlanEntry
 
 /**
  * Groups `view.items` in order. Consecutive `tool` items collapse into a
@@ -50,6 +55,11 @@ export function buildTimeline(view: AgentThreadView): TimelineEntry[] {
 
     if (item.kind === 'reasoning') {
       entries.push({ kind: 'reasoning', item, collapsed: true })
+      continue
+    }
+
+    if (item.kind === 'plan') {
+      entries.push({ kind: 'plan', item })
       continue
     }
 
@@ -128,4 +138,55 @@ export function formatTurnStamp(startedAt: number, completedAt: number): string 
   })
   const seconds = Math.max(0, Math.round((completedAt - startedAt) / 1000))
   return `${time} • ${seconds}s`
+}
+
+/** `1.2k` / `847` / `12.4k`, the same compact shape the composer's context
+ *  indicator uses. Whole thousands lose the decimal (`5k`, not `5.0k`). */
+export function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens)
+  const thousands = tokens / 1000
+  return `${thousands >= 10 || Number.isInteger(thousands) ? Math.round(thousands) : thousands.toFixed(1)}k`
+}
+
+/**
+ * The token half of a turn's stamp: `12.4k tokens · 38 tok/s`.
+ *
+ * The rate is OUTPUT tokens over the turn's wall clock, which is what
+ * "tokens per second" means everywhere else — the prompt and the cache reads
+ * were not generated, and dividing the total by the duration reports a rate
+ * several times higher than the model ever produced.
+ *
+ * Returns null when the provider reported no usage (not every CLI does), so
+ * the caller renders the plain time stamp rather than `0 tokens`. The rate is
+ * dropped on its own when the turn is too short to measure or nothing was
+ * generated — a sub-second turn would otherwise read as an absurd rate.
+ */
+export function formatTurnTokens(
+  turnTokens: number | undefined,
+  outputTokens: number | undefined,
+  startedAt: number,
+  completedAt: number,
+): string | null {
+  if (turnTokens === undefined || turnTokens <= 0) return null
+  const label = `${formatTokens(turnTokens)} tokens`
+  const seconds = (completedAt - startedAt) / 1000
+  if (!outputTokens || outputTokens <= 0 || seconds < 1) return label
+  return `${label} · ${Math.round(outputTokens / seconds)} tok/s`
+}
+
+/**
+ * Which agent and model actually ran the turn — `claude · claude-sonnet-5`.
+ *
+ * Read off the turn itself rather than the composer's current pick, because
+ * the two genuinely diverge: the pill shows what the NEXT turn will use, and
+ * a thread can switch models partway through. A transcript that labelled every
+ * turn with today's selection would misreport its own history.
+ *
+ * Null when neither is known, so the caller renders the plain stamp instead of
+ * a stray separator. Turns recorded before this field existed are exactly that
+ * case.
+ */
+export function formatTurnEngine(agent: string | undefined, model: string | undefined): string | null {
+  const parts = [agent, model].filter((part): part is string => !!part && part.length > 0)
+  return parts.length === 0 ? null : parts.join(' · ')
 }

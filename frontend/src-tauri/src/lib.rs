@@ -94,11 +94,30 @@ enum LaunchEnd {
 }
 
 /// Builds the app's menu bar: a "DevDeck" submenu holding `items` (id, label
-/// pairs), plus a standard Edit submenu (Cut/Copy/Paste/Select All). On
-/// macOS the menubar may only contain Submenus — a bare top-level `.text()`
-/// item (the previous approach) leaves the OS with no native Edit menu, and
-/// without it Cmd+C/Cmd+V have nothing to bind to, so copy/paste silently
-/// stops working in every WKWebView text input in the app.
+/// pairs), plus a standard Edit submenu (Cut/Copy/Paste). On macOS the menubar
+/// may only contain Submenus — a bare top-level `.text()` item (the previous
+/// approach) leaves the OS with no native Edit menu, and without it Cmd+C/Cmd+V
+/// have nothing to bind to, so copy/paste silently stops working in every
+/// WKWebView text input in the app.
+///
+/// Select All is deliberately NOT in that list, even though it is the obvious
+/// fourth item. macOS matches a menu item's key equivalent in
+/// `NSApplication.sendEvent:`, *before* the key event reaches the first
+/// responder, so a `Select All` item claims Cmd+A app-wide and the webview
+/// never sees a `keydown` for it. The menu then sends the native `selectAll:`
+/// down the responder chain, and WKWebView runs it against whatever DOM
+/// element has focus — which inside Monaco is its small hidden input buffer,
+/// not the document. The result is a Cmd+A that appears to do nothing at all
+/// in the code editor.
+///
+/// Cut/Copy/Paste are safe on that same path precisely because Monaco keeps
+/// the current selection mirrored in that hidden input for the clipboard to
+/// act on; "select all" has no equivalent it can express there.
+///
+/// Dropping the item costs nothing: WebKit already implements Cmd+A itself for
+/// `<input>`, `<textarea>` and `contenteditable` (verified against the WebKit
+/// engine with no Edit menu present), and Monaco and Tiptap each bind the
+/// chord in JS. All three only need the event to actually reach the page.
 fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>, items: &[(&str, &str)]) -> tauri::Result<Menu<R>> {
     let mut app_menu = SubmenuBuilder::new(app, "DevDeck");
     for (id, label) in items {
@@ -106,7 +125,7 @@ fn build_menu<R: tauri::Runtime>(app: &AppHandle<R>, items: &[(&str, &str)]) -> 
     }
     let app_menu = app_menu.build()?;
 
-    let edit_menu = SubmenuBuilder::new(app, "Edit").cut().copy().paste().select_all().build()?;
+    let edit_menu = SubmenuBuilder::new(app, "Edit").cut().copy().paste().build()?;
 
     let menu = Menu::new(app)?;
     menu.append(&app_menu)?;
@@ -119,6 +138,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .register_uri_scheme_protocol(APP_SCHEME, serve_bundled_asset)
         .manage(BrowserTiles::new())
         .on_page_load(|webview, payload| {

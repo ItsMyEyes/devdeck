@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   entryCompletedAt,
   entryCreatedAt,
+  lastTurnModel,
   messageRole,
   promptChatStatus,
   toolUIState,
-  toolUIType,
+  toolDisplayName,
+  toolResultText,
+  toolSummary,
   turnSpans,
   withHardBreaks,
 } from '@/features/agent-chat/adapter'
@@ -30,19 +33,85 @@ describe('messageRole', () => {
   })
 })
 
-describe('toolUIType', () => {
-  it('namespaces the tool name the way ToolHeader parses it back out', () => {
-    expect(toolUIType('Edit')).toBe('tool-Edit')
+describe('toolDisplayName', () => {
+  it('shows the tool name the provider sent, as-is', () => {
+    expect(toolDisplayName('Edit')).toBe('Edit')
   })
 
   it('falls back to a generic name when the provider sent none', () => {
-    expect(toolUIType(undefined)).toBe('tool-Tool')
+    expect(toolDisplayName(undefined)).toBe('Tool')
   })
 
+  // Regression against the former `toolUIType`, which encoded the name as
+  // `tool-<name>` for upstream ToolHeader to split back apart on '-'. A
+  // hyphenated name was the one input that round-trip could mangle.
   it('keeps a hyphenated tool name intact', () => {
-    // ToolHeader derives the label with type.split('-').slice(1).join('-'),
-    // so a hyphen inside the name survives the round trip.
-    expect(toolUIType('web-search')).toBe('tool-web-search')
+    expect(toolDisplayName('web-search')).toBe('web-search')
+  })
+})
+
+describe('toolResultText', () => {
+  it('unwraps the content-part envelope providers report results in', () => {
+    expect(toolResultText({ content: [{ type: 'text', text: 'new-superapps-dev2' }] })).toBe('new-superapps-dev2')
+  })
+
+  it('joins multiple text parts in order', () => {
+    expect(toolResultText({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] })).toBe('a\nb')
+  })
+
+  it('passes a bare string through', () => {
+    expect(toolResultText('ok')).toBe('ok')
+  })
+
+  it('declines shapes it does not recognise, so the caller can fall back to JSON', () => {
+    expect(toolResultText({ content: [{ type: 'image', data: '…' }] })).toBeUndefined()
+    expect(toolResultText({ exitCode: 0 })).toBeUndefined()
+    expect(toolResultText(undefined)).toBeUndefined()
+    expect(toolResultText(null)).toBeUndefined()
+  })
+
+  it('treats an empty result as nothing to show', () => {
+    expect(toolResultText({ content: [] })).toBeUndefined()
+    expect(toolResultText('')).toBeUndefined()
+  })
+})
+
+describe('toolSummary', () => {
+  it('names the file a read or edit is about', () => {
+    expect(toolSummary({ file_path: '/a/b.go', offset: 40 })).toBe('/a/b.go')
+  })
+
+  it('prefers the more specific key when a call carries several', () => {
+    // file_path outranks command: a tool that names a file is about that file.
+    expect(toolSummary({ command: 'go test ./...', file_path: '/a/b.go' })).toBe('/a/b.go')
+  })
+
+  it('shows the command a shell call runs', () => {
+    expect(toolSummary({ command: 'go test ./...' })).toBe('go test ./...')
+  })
+
+  it('flattens a multi-line command onto one line', () => {
+    expect(toolSummary({ command: 'set -e\n\n  go build ./...' })).toBe('set -e go build ./...')
+  })
+
+  it('caps a runaway argument so a heredoc cannot reach the DOM', () => {
+    const summary = toolSummary({ command: 'x'.repeat(500) })
+    expect(summary).toHaveLength(161)
+    expect(summary?.endsWith('…')).toBe(true)
+  })
+
+  // A row with nothing to say must render no summary span at all, rather than an
+  // empty one that still takes its place in the flex layout.
+  it('has nothing to say about a call with no recognised argument', () => {
+    expect(toolSummary({ todos: [] })).toBeUndefined()
+    expect(toolSummary({ file_path: '   ' })).toBeUndefined()
+  })
+
+  it('has nothing to say about an input that is not an object', () => {
+    expect(toolSummary(undefined)).toBeUndefined()
+    expect(toolSummary('go test')).toBeUndefined()
+    expect(toolSummary(['go test'])).toBeUndefined()
+    expect(toolSummary(null)).toBeUndefined()
   })
 })
 
@@ -228,5 +297,53 @@ describe('withHardBreaks', () => {
 
   it('is a no-op on empty text', () => {
     expect(withHardBreaks('')).toBe('')
+  })
+})
+
+// The composer's model pill is local state, so every tab/pane/SSH-session
+// switch remounts it back to `null` and the pill reads "Model" on a thread
+// that has been running Sonnet for twenty turns — with the next message then
+// silently going to the worktree's DEFAULT model. This is what it restores from.
+describe('lastTurnModel', () => {
+  const stamped = (id: string, turnAgent?: string, turnModel?: string): ChatItem => ({
+    id,
+    kind: 'assistant',
+    text: id,
+    createdAt: 1,
+    updatedAt: 1,
+    lastSequence: 0,
+    ...(turnAgent ? { turnAgent } : {}),
+    ...(turnModel ? { turnModel } : {}),
+  })
+
+  it('reads the agent and model off the most recent settled turn', () => {
+    expect(lastTurnModel([stamped('a', 'claude', 'claude-opus-5')])).toEqual({
+      agentId: 'claude',
+      modelId: 'claude-opus-5',
+    })
+  })
+
+  // A thread whose model was switched partway through resumes on the model it
+  // is on NOW, not the one it started on.
+  it('takes the newest stamp, not the oldest', () => {
+    const items = [
+      stamped('a', 'claude', 'claude-opus-5'),
+      stamped('b'),
+      stamped('c', 'claude', 'claude-sonnet-5'),
+      stamped('d'),
+    ]
+    expect(lastTurnModel(items)?.modelId).toBe('claude-sonnet-5')
+  })
+
+  it('has no answer for a thread that never completed a turn', () => {
+    expect(lastTurnModel([])).toBeUndefined()
+    expect(lastTurnModel([stamped('a'), stamped('b')])).toBeUndefined()
+  })
+
+  // Both halves or nothing: `instanceIdForAgent(agentId)` and the model id are
+  // sent together, so half a stamp would resume onto a guess.
+  it('ignores a half-stamped item', () => {
+    expect(lastTurnModel([stamped('a', 'claude', undefined)])).toBeUndefined()
+    expect(lastTurnModel([stamped('a', undefined, 'claude-opus-5')])).toBeUndefined()
   })
 })

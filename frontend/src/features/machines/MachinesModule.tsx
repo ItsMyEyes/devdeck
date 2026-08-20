@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   Download,
   KeyRound,
+  Loader2,
   Monitor,
   Plus,
   Power,
@@ -12,6 +13,7 @@ import {
   Settings2,
   TerminalSquare,
   Trash2,
+  TriangleAlert,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -20,6 +22,7 @@ import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
 import { useMachineHealth, useMachineUpdateCheck, useMachineVersion, useMachines } from '@/features/data/queries'
 import { TerminalSessionsDialog } from '@/features/machines/TerminalSessionsDialog'
+import { fetchMachineUpdateCheck } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 
 function RuntimeHealth({ machineId }: { machineId: string }) {
@@ -89,7 +92,14 @@ function MachineRow({ machine }: { machine: Machine }) {
               {build.data.version}
             </span>
           ) : null}
-          {canUpdate ? (
+          {check.isFetching ? (
+            <span
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2"
+              title="Checking for updates…"
+            >
+              <Loader2 size={12} className="animate-spin" />
+            </span>
+          ) : canUpdate ? (
             <button
               type="button"
               aria-label={`Update ${machine.name} to ${check.data?.latest}`}
@@ -104,6 +114,13 @@ function MachineRow({ machine }: { machine: Machine }) {
               <Download size={12} />
               {check.data?.latest}
             </button>
+          ) : check.isError || check.data?.error ? (
+            <span
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-err"
+              title={check.data?.error || 'Could not check this runtime for updates.'}
+            >
+              <TriangleAlert size={12} />
+            </span>
           ) : null}
           {/* Outside the isLocal guard below: the desktop's embedded runtime
               serves a web UI too, and reaching it from a phone over the
@@ -184,8 +201,17 @@ export function MachinesModule() {
   async function checkAllForUpdates() {
     setChecking(true)
     try {
+      // useMachineUpdateCheck is `enabled: false` (a manual-only query, to stay
+      // under GitHub's unauthenticated rate limit) — queryClient.refetchQueries
+      // silently skips disabled queries, so this must fetch each one directly
+      // instead. A per-machine .catch keeps one unreachable runtime from
+      // aborting the rest of the batch.
       await Promise.all(
-        (machines ?? []).map((m) => queryClient.refetchQueries({ queryKey: qk.machineUpdateCheck(m.id) })),
+        (machines ?? []).map((m) =>
+          queryClient
+            .fetchQuery({ queryKey: qk.machineUpdateCheck(m.id), queryFn: () => fetchMachineUpdateCheck(m.id) })
+            .catch(() => undefined),
+        ),
       )
     } finally {
       setChecking(false)

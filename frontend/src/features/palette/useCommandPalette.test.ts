@@ -18,6 +18,7 @@ describe('assemblePaletteItems', () => {
       bookmarks: [item({ id: 'bookmark:b1', title: 'API repo', group: 'results', kind: 'bookmark' })],
       verbHints: [item({ id: 'verb:ssh', title: 'ssh <host>', group: 'results', kind: 'command' })],
       createActions: [item({ id: 'create:ssh', title: 'New SSH…', group: 'create', kind: 'create' })],
+      appearance: [item({ id: 'appearance:light', title: 'Appearance: Light', group: 'create', kind: 'command' })],
       recent: [item({ id: 'worktree:wt2', title: 'main', group: 'recent' })],
     })
     const groups = rankPaletteItems(items, '', () => 0).map((g) => g.group)
@@ -32,10 +33,30 @@ describe('assemblePaletteItems', () => {
       bookmarks: [],
       verbHints: [],
       createActions: [item({ id: 'create:ssh', title: 'New SSH…', group: 'create', kind: 'create' })],
+      appearance: [],
       recent: [],
     })
     const groups = rankPaletteItems(items, 'feat', () => 0).map((g) => g.group)
     expect(groups).toEqual(['results', 'create'])
+  })
+
+  // Three rows that never change would sit in Create on every open; they are
+  // only worth showing once the user is actually looking for them.
+  it('keeps the appearance rows out of the empty-query view and in once searched', () => {
+    const appearance = [
+      item({ id: 'appearance:light', title: 'Appearance: Light', group: 'create', kind: 'command' }),
+    ]
+    const sources = {
+      openTabs: [],
+      entities: [],
+      bookmarks: [],
+      verbHints: [],
+      createActions: [],
+      appearance,
+      recent: [],
+    }
+    expect(assemblePaletteItems({ ...sources, query: '' })).toEqual([])
+    expect(assemblePaletteItems({ ...sources, query: 'appearance' })).toEqual(appearance)
   })
 })
 

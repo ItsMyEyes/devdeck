@@ -85,4 +85,15 @@ describe('globals.css token layer', () => {
   it('registers the is-user variant the Message component relies on', () => {
     expect(css).toContain('@custom-variant is-user')
   })
+
+  // Streamdown ships its code-block copy/download buttons permanently visible
+  // and there is no prop that hides them, so the only lever is this rule. If
+  // it is dropped, every fenced block in the transcript grows a pair of
+  // always-on buttons again.
+  it('hover-gates the code-block actions Streamdown always renders', () => {
+    expect(css).toContain(".chat-md [data-streamdown='code-block-actions']")
+    expect(css).toContain(".chat-md [data-streamdown='code-block']:hover [data-streamdown='code-block-actions']")
+    // Keyboard users must still reach them.
+    expect(css).toContain(':focus-within [data-streamdown=\'code-block-actions\']')
+  })
 })

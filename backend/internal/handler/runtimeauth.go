@@ -58,9 +58,26 @@ func RequireRuntimeAuth(svc *service.AuthService, key string) func(http.Handler)
 		// "this is a hub" BEFORE any credential exists, to decide whether an
 		// unauthenticated visitor should see the runtime sign-in page or the
 		// hub's password/TOTP login — see __root.tsx's beforeLoad. Nothing in
-		// this payload (role, machineName, hubUrl, machineId, lastSyncedAt)
-		// is secret.
+		// this payload (role, machineName, hubUrl, machineId, lastSyncedAt,
+		// capabilities) is secret.
 		"/api/whoami": true,
+		// The /api/agent-tools/ssh/* routes authenticate via RequireThreadToken
+		// (threadtoken.go) — a per-thread token minted for the devdeck-ssh
+		// helper CLI — not by this runtime's key or a session cookie. The agent
+		// process holds only that token, by design.
+		//
+		// This mirrors the identical block in RequireAuth's own publicPaths
+		// (middleware.go), and it has to be duplicated because the two roles run
+		// different middleware over the same mux. It became load-bearing when
+		// SSH chat moved onto the executor runtime: the routes are now
+		// registered on every role, so without these four entries a
+		// runtime-hosted thread's every tool call is rejected here, before
+		// RequireThreadToken ever gets to see the token that would have
+		// authorized it.
+		"/api/agent-tools/ssh/exec":  true,
+		"/api/agent-tools/ssh/file":  true,
+		"/api/agent-tools/ssh/files": true,
+		"/api/agent-tools/ssh/grep":  true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

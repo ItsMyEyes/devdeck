@@ -70,6 +70,51 @@ description: |
 	}
 }
 
+// TestPiReadsSharedAgentsSkillsDirectory pins pi to the directory its own
+// binary actually scans. A live pi installation ignores
+// PI_CODING_AGENT_DIR/skills entirely — a skill planted there never showed
+// up in `pi config`'s resource picker — and instead reads the same
+// ~/.agents/skills codex already shares. Regression guard for that
+// live-verified fact, not the more obvious (and wrong) guess.
+func TestPiReadsSharedAgentsSkillsDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestSkill(t, filepath.Join(home, ".agents", "skills", "shared-skill"), `---
+name: shared-skill
+description: Shared across agents
+---
+`)
+	writeTestSkill(t, filepath.Join(home, ".claude", "skills", "claude-only"), `---
+name: claude-only
+description: only in claude's own directory
+---
+`)
+	// The wrong-guess directory a regression could reintroduce — a skill
+	// placed here must NOT be picked up, mirroring what the live binary does.
+	writeTestSkill(t, filepath.Join(home, ".pi", "agent", "skills", "wrong-location"), `---
+name: wrong-location
+description: pi never actually reads this directory
+---
+`)
+
+	piSkills := ReadSkills("pi")
+	if len(piSkills) != 1 || piSkills[0].Name != "shared-skill" {
+		t.Fatalf("ReadSkills(pi) = %#v, want exactly [shared-skill]", piSkills)
+	}
+
+	if err := InstallSkill("pi", "claude-only"); err != nil {
+		t.Fatalf("InstallSkill: %v", err)
+	}
+	link := filepath.Join(home, ".agents", "skills", "claude-only")
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("installed skill is not a symlink under the shared directory: info=%v err=%v", info, err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".pi", "agent", "skills", "claude-only")); err == nil {
+		t.Fatal("InstallSkill(pi, ...) must not write under .pi/agent/skills — pi never reads it")
+	}
+}
+
 func TestRemoveSkillRejectsLinkedSource(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink behavior is covered on Unix")

@@ -28,6 +28,16 @@ import type {
   ThemedToken,
 } from "shiki";
 import { createHighlighter } from "shiki";
+import {
+  ONE_DARK_PRO_DARKER_NAME,
+  oneDarkProDarkerShikiTheme,
+} from "@/lib/oneDarkProDarker";
+
+// The theme pair, matching `codeHighlighter.ts`: One Dark Pro Darker in the
+// dark, and — since One Dark ships no light variant — GitHub Light beside it.
+// `codeToTokens` takes theme *names*, so the custom one is registered above by
+// object and looked up here by the name that object carries.
+const LIGHT_THEME = "github-light";
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // oxlint-disable-next-line eslint(no-bitwise)
@@ -157,7 +167,7 @@ const getHighlighter = (
 
   const highlighterPromise = createHighlighter({
     langs: [language],
-    themes: ["github-light", "github-dark"],
+    themes: [LIGHT_THEME, oneDarkProDarkerShikiTheme],
   });
 
   highlighterCache.set(language, highlighterPromise);
@@ -213,8 +223,8 @@ export const highlightCode = (
       const result = highlighter.codeToTokens(code, {
         lang: langToUse,
         themes: {
-          dark: "github-dark",
-          light: "github-light",
+          dark: ONE_DARK_PRO_DARKER_NAME,
+          light: LIGHT_THEME,
         },
       });
 

@@ -79,6 +79,10 @@ export interface RequestOpts {
   base?: string
   /** Extra headers merged in alongside Content-Type (e.g. a runtime's bearer key). */
   headers?: Record<string, string>
+  /** Aborts the underlying fetch when triggered — used by callers (e.g. inline
+   *  completions) that need a superseded request to actually stop the
+   *  in-flight network call, not just have its result discarded client-side. */
+  signal?: AbortSignal
 }
 
 export async function request<T>(
@@ -88,6 +92,7 @@ export async function request<T>(
   opts?: RequestOpts,
 ): Promise<T> {
   const init: RequestInit = { method }
+  if (opts?.signal) init.signal = opts.signal
   const headers: Record<string, string> = { ...opts?.headers }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -282,6 +287,395 @@ export function fetchSettings(): Promise<Settings> {
 
 export function updateSettings(patch: SettingsPatch): Promise<Settings> {
   return request<Settings>('PUT', '/settings', patch)
+}
+
+// ---- Completions ----
+
+export interface CompletionsConfig {
+  provider: 'anthropic' | 'openai-compatible'
+  baseUrl: string
+  model: string
+  enabled: boolean
+  configured: boolean
+}
+
+export interface CompletionsConfigPatch {
+  provider?: 'anthropic' | 'openai-compatible'
+  baseUrl?: string
+  model?: string
+  enabled?: boolean
+  apiKey?: string
+}
+
+export function fetchCompletionsConfig(): Promise<CompletionsConfig> {
+  return request<CompletionsConfig>('GET', '/completions/config')
+}
+
+export function updateCompletionsConfig(patch: CompletionsConfigPatch): Promise<CompletionsConfig> {
+  return request<CompletionsConfig>('PUT', '/completions/config', patch)
+}
+
+export interface GroundingSymbol {
+  name: string
+  kind: string
+  detail: string
+}
+
+export interface InlineCompletionRequest {
+  prefix: string
+  suffix: string
+  language: string
+  groundingSymbols: GroundingSymbol[]
+}
+
+export interface InlineCompletionResult {
+  completion: string
+}
+
+// request<T>() already returns undefined on a 204 (see toApiError/request
+// above) — an unconfigured or disabled completions feature is exactly that
+// case, not an error.
+export function requestInlineCompletion(
+  req: InlineCompletionRequest,
+  opts?: RequestOpts,
+): Promise<InlineCompletionResult | undefined> {
+  return request<InlineCompletionResult | undefined>('POST', '/completions/inline', req, opts)
+}
+
+// ---- Memory (persistent agent memory, Hindsight-backed) ----
+//
+// Hub-only, like Completions above — see domain.MemoryConfig's doc comment
+// on the Go side for why. `Enabled`/`AutoRecall` etc. mirror the backend's
+// camelCase config DTO; the browse types below (MemoryBankStats,
+// MemoryUnit, MemoryGraph*) instead mirror Hindsight's OWN wire shape
+// (snake_case) verbatim, on purpose — the handler passes those through
+// untouched (see backend/internal/handler/memory.go's doc comment) so the
+// Memory page renders whatever Hindsight actually has rather than a
+// DevDeck-side model that could quietly drift from it.
+
+/** "manual": an operator-supplied BaseURL (their own server, a cloud
+ *  account). "container": the hub manages a docker/podman container on its
+ *  own machine. "baremetal": the hub manages a plain OS process (uvx
+ *  hindsight-api, or an already-installed hindsight-api binary) — the
+ *  fallback when neither docker nor podman is present. See
+ *  backend/internal/memoryhost's package comment for the full picture. */
+export type MemoryHosting = 'manual' | 'container' | 'baremetal'
+
+export interface MemoryConfig {
+  enabled: boolean
+  baseUrl: string
+  bankId: string
+  hosting: MemoryHosting
+  localPort: number
+  localRunning: boolean
+  llmProvider: 'openai' | 'anthropic' | 'gemini' | 'groq' | 'ollama' | 'lmstudio'
+  llmModel: string
+  llmBaseUrl: string
+  autoRecall: boolean
+  autoRetain: boolean
+  recallBudget: 'low' | 'mid' | 'high'
+  maxTokens: number
+  configured: boolean
+}
+
+export interface MemoryConfigPatch {
+  enabled?: boolean
+  baseUrl?: string
+  bankId?: string
+  hosting?: MemoryHosting
+  localPort?: number
+  llmProvider?: MemoryConfig['llmProvider']
+  llmModel?: string
+  llmBaseUrl?: string
+  autoRecall?: boolean
+  autoRetain?: boolean
+  recallBudget?: MemoryConfig['recallBudget']
+  maxTokens?: number
+  apiKey?: string
+  llmApiKey?: string
+}
+
+/** Mirrors backend/internal/memoryhost.Status — a snapshot of whatever
+ *  locally managed container/process this hub might have. */
+export interface MemoryLocalStatus {
+  available: boolean
+  detected?: string // "docker" | "podman" | "hindsight-api" | "uvx"
+  binaryPath?: string
+  exists: boolean
+  running: boolean
+  detail?: string
+}
+
+export function fetchMemoryLocalStatus(): Promise<MemoryLocalStatus> {
+  return request<MemoryLocalStatus>('GET', '/memory/local/status')
+}
+
+export function startMemoryLocal(): Promise<MemoryLocalStatus> {
+  return request<MemoryLocalStatus>('POST', '/memory/local/start')
+}
+
+export function stopMemoryLocal(): Promise<MemoryLocalStatus> {
+  return request<MemoryLocalStatus>('POST', '/memory/local/stop')
+}
+
+export function fetchMemoryLocalLogs(tail = 200): Promise<{ logs: string }> {
+  return request<{ logs: string }>('GET', `/memory/local/logs?tail=${tail}`)
+}
+
+export function fetchMemoryConfig(): Promise<MemoryConfig> {
+  return request<MemoryConfig>('GET', '/memory/config')
+}
+
+export function updateMemoryConfig(patch: MemoryConfigPatch): Promise<MemoryConfig> {
+  return request<MemoryConfig>('PUT', '/memory/config', patch)
+}
+
+export function testMemoryConnection(baseUrl: string, apiKey: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('POST', '/memory/test', { baseUrl, apiKey })
+}
+
+export interface MemoryBankStats {
+  bank_id: string
+  total_nodes: number
+  total_links: number
+  total_documents: number
+  total_observations: number
+  nodes_by_fact_type: Record<string, number>
+  links_by_link_type: Record<string, number>
+  pending_operations: number
+  failed_operations: number
+  last_consolidated_at?: string
+  last_memory_write_at?: string
+}
+
+export function fetchMemoryStats(): Promise<MemoryBankStats> {
+  return request<MemoryBankStats>('GET', '/memory/stats')
+}
+
+export interface MemoryTagItem {
+  tag: string
+  count: number
+}
+
+export interface MemoryTagsResponse {
+  items: MemoryTagItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export function fetchMemoryTags(params: { q?: string } = {}): Promise<MemoryTagsResponse> {
+  const qs = params.q ? `?q=${encodeURIComponent(params.q)}` : ''
+  return request<MemoryTagsResponse>('GET', `/memory/tags${qs}`)
+}
+
+/** One retained memory unit, as Hindsight itself represents it. Every field
+ *  beyond `id` is optional defensively — `GET /memory/memories`' items are
+ *  typed as bare objects in Hindsight's own OpenAPI schema, not a fixed
+ *  contract, so a page rendering this must tolerate an absent field rather
+ *  than crash on it. */
+export interface MemoryUnit {
+  id: string
+  text?: string
+  type?: 'world' | 'experience' | 'observation' | string
+  context?: string
+  tags?: string[]
+  entities?: string[]
+  metadata?: Record<string, unknown>
+  mentioned_at?: string
+  occurred_start?: string
+  occurred_end?: string
+  document_id?: string
+  state?: string
+  [key: string]: unknown
+}
+
+export interface MemoryListResponse {
+  items: MemoryUnit[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export function fetchMemoryUnits(params: {
+  type?: string
+  q?: string
+  tags?: string[]
+  limit?: number
+  offset?: number
+} = {}): Promise<MemoryListResponse> {
+  const sp = new URLSearchParams()
+  if (params.type) sp.set('type', params.type)
+  if (params.q) sp.set('q', params.q)
+  for (const t of params.tags ?? []) sp.append('tags', t)
+  if (params.limit !== undefined) sp.set('limit', String(params.limit))
+  if (params.offset !== undefined) sp.set('offset', String(params.offset))
+  const qs = sp.toString()
+  return request<MemoryListResponse>('GET', `/memory/memories${qs ? `?${qs}` : ''}`)
+}
+
+/** One background job Hindsight is running against the bank — extracting
+ *  facts from a just-retained turn, consolidating, refreshing a mental
+ *  model. `status` is one of pending/running/done/failed as observed live;
+ *  render an unrecognized value the same as "pending" rather than crashing. */
+export interface MemoryOperation {
+  id: string
+  task_type: string
+  items_count: number
+  document_id?: string
+  filename?: string
+  created_at: string
+  updated_at: string
+  status: string
+  error_message?: string
+  retry_count: number
+  next_retry_at?: string
+  progress?: {
+    stage: string
+    at: string
+    processed?: number
+    total?: number
+    detail?: Record<string, number>
+  }
+}
+
+export interface MemoryOperationsResponse {
+  bank_id: string
+  total: number
+  limit: number
+  offset: number
+  operations: MemoryOperation[]
+}
+
+export function fetchMemoryOperations(limit = 20): Promise<MemoryOperationsResponse> {
+  return request<MemoryOperationsResponse>('GET', `/memory/operations?limit=${limit}`)
+}
+
+/** A graph node/edge as Hindsight returns it — genuinely untyped upstream
+ *  (its OpenAPI schema declares both as bare objects with no fixed
+ *  properties), so callers must read defensively across a few plausible
+ *  field-name candidates rather than assume one. */
+export type MemoryGraphElement = Record<string, unknown>
+
+export interface MemoryGraphResponse {
+  nodes: MemoryGraphElement[]
+  edges: MemoryGraphElement[]
+  total_units?: number
+  total_entities?: number
+  total_edges?: number
+  limit?: number
+}
+
+export function fetchMemoryGraph(params: { type?: string; limit?: number; q?: string } = {}): Promise<MemoryGraphResponse> {
+  const sp = new URLSearchParams()
+  if (params.type) sp.set('type', params.type)
+  if (params.limit !== undefined) sp.set('limit', String(params.limit))
+  if (params.q) sp.set('q', params.q)
+  const qs = sp.toString()
+  return request<MemoryGraphResponse>('GET', `/memory/graph${qs ? `?${qs}` : ''}`)
+}
+
+export function fetchMemoryEntityGraph(params: { limit?: number; minCount?: number } = {}): Promise<MemoryGraphResponse> {
+  const sp = new URLSearchParams()
+  if (params.limit !== undefined) sp.set('limit', String(params.limit))
+  if (params.minCount !== undefined) sp.set('min_count', String(params.minCount))
+  const qs = sp.toString()
+  return request<MemoryGraphResponse>('GET', `/memory/entities/graph${qs ? `?${qs}` : ''}`)
+}
+
+export interface MemoryTimeseriesBucket {
+  time: string
+  world: number
+  experience: number
+  observation: number
+}
+
+export interface MemoryTimeseriesResponse {
+  bank_id: string
+  period: string
+  buckets: MemoryTimeseriesBucket[]
+}
+
+export function fetchMemoryTimeseries(period: '7d' | '30d' | '90d' = '30d'): Promise<MemoryTimeseriesResponse> {
+  return request<MemoryTimeseriesResponse>('GET', `/memory/timeseries?period=${period}`)
+}
+
+export interface MemoryRecallResult {
+  id: string
+  text: string
+  type?: string
+  context?: string
+  tags?: string[]
+  entities?: string[]
+  mentioned_at?: string
+  document_id?: string
+  scores?: { final: number; reranker?: number; semantic?: number; keyword?: number }
+}
+
+export function searchMemory(body: { query: string; budget?: string; maxTokens?: number; tags?: string[] }): Promise<{ results: MemoryRecallResult[] }> {
+  return request('POST', '/memory/recall', body)
+}
+
+export function reflectMemory(body: { query: string; budget?: string; maxTokens?: number }): Promise<{ text: string }> {
+  return request('POST', '/memory/reflect', body)
+}
+
+/** Store one operator preference in the cross-project "global" tier — the one
+ *  kind of memory that auto-recall surfaces in every project's chats, not only
+ *  the project it was learned in. See backend memory.RecallTags / RetainGlobal. */
+export function addGlobalPreference(text: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('POST', '/memory/global', { text })
+}
+
+/** Downloads the configured bank's full content — facts, entities, causal
+ *  links, chunks, and consolidated observations — as a transfer ZIP the
+ *  operator can move to another machine or cloud. Bypasses `request()`: the
+ *  response is a binary file, not the `{"error"}` JSON envelope. */
+export async function exportMemoryBrain(): Promise<{ blob: Blob; filename: string }> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/memory/export`)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+  const blob = await res.blob()
+  const filename = parseContentDispositionFilename(res.headers.get('Content-Disposition'), 'brain.zip')
+  return { blob, filename }
+}
+
+export type MemoryImportMode = 'merge' | 'replace'
+
+/** What the Import Brain dialog shows after a successful import — mirrors
+ *  backend service.ImportSummary. `raw` is Hindsight's own untyped
+ *  result_metadata (e.g. imported/skipped document counts). */
+export interface MemoryImportSummary {
+  cleared: boolean
+  raw?: Record<string, unknown>
+}
+
+/** Uploads a transfer ZIP produced by exportMemoryBrain into the configured
+ *  bank. mode "merge" adds anything new and leaves existing documents
+ *  untouched; "replace" wipes the bank's existing memory content first. */
+export async function importMemoryBrain(file: File, mode: MemoryImportMode): Promise<MemoryImportSummary> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('mode', mode)
+
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/memory/import`, { method: 'POST', body: form })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network request failed'
+    throw new ApiError(message, 0)
+  }
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+  return res.json() as Promise<MemoryImportSummary>
 }
 
 // ---- Workspaces ----

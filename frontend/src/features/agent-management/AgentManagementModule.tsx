@@ -9,13 +9,14 @@ import { ModuleHeader } from '@/features/modules/ModuleHeader'
 import { DataError } from '@/features/screens/DataError'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { EmptyState } from '@/features/screens/EmptyState'
-import { fetchAgentEnvProfiles, fetchAgentMCPServers, fetchAgentSkills } from '@/lib/machineApi'
+import { fetchAgentEnvProfiles, fetchAgentMCPServers, fetchAgentModels, fetchAgentSkills } from '@/lib/machineApi'
 import { cn } from '@/lib/utils'
+import { AgentMark } from './AgentMark'
 import { EnvProfileManagement } from './EnvProfileManagement'
 import { MCPManagement } from './MCPManagement'
 import { SkillsManagement } from './SkillsManagement'
 import type { EnvProfileSummary } from '@/store/types'
-import type { AgentMCPInventory, AgentSkillInventory } from './types'
+import type { AgentMCPInventory, AgentModelInventory, AgentSkillInventory } from './types'
 
 type ManagementTab = 'skills' | 'mcp' | 'settings'
 
@@ -71,6 +72,14 @@ export function AgentManagementModule() {
       retry: false,
     })),
   })
+  const modelQueries = useQueries({
+    queries: installedAgents.map((agent) => ({
+      queryKey: qk.agentModels(machine?.id ?? '', agent.id),
+      queryFn: () => fetchAgentModels(machine!, agent.id),
+      enabled: !!machine,
+      staleTime: 30_000,
+    })),
+  })
   // Default to claude when settings agents load; keep current selection if already set.
   useEffect(() => {
     if (!activeSettingsAgentId && settingsAgents.length > 0) {
@@ -101,6 +110,11 @@ export function AgentManagementModule() {
     servers: mcpQueries[index]?.data ?? [],
     error: mcpQueries[index]?.error instanceof Error ? mcpQueries[index].error : undefined,
   }))
+  const modelInventory: AgentModelInventory[] = installedAgents.map((agent, index) => ({
+    agent,
+    models: modelQueries[index]?.data ?? [],
+    error: modelQueries[index]?.error instanceof Error ? modelQueries[index].error : undefined,
+  }))
   const skillCount = new Set(skillInventory.flatMap((item) => item.skills.map((skill) => skill.name))).size
   const mcpCount = mcpInventory.reduce((total, item) => total + item.servers.length, 0)
   const envProfiles: EnvProfileSummary[] = envProfileQueries[0]?.data ?? []
@@ -110,6 +124,7 @@ export function AgentManagementModule() {
     agentsQuery.isFetching ||
     skillQueries.some((query) => query.isFetching) ||
     mcpQueries.some((query) => query.isFetching) ||
+    modelQueries.some((query) => query.isFetching) ||
     envProfileQueries.some((query) => query.isFetching)
 
   async function refresh() {
@@ -174,36 +189,56 @@ export function AgentManagementModule() {
         />
       ) : (
         <>
-          {/* <section className="flex-none border-b border-devdeck-border bg-devdeck-pane/35 px-3 py-3 sm:px-4 sm:py-4">
+          <section className="flex-none border-b border-devdeck-border bg-devdeck-pane/35 px-3 py-3 sm:px-4 sm:py-4">
             <div className="mx-auto grid w-full max-w-[1180px] gap-3 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
               <div className="min-w-0 py-0.5">
                 <h2 className="text-[13px] font-semibold text-devdeck-fg-2">Connected agents</h2>
                 <p className="mt-1 max-w-[32ch] text-[11px] leading-relaxed text-devdeck-fg-2">
-                  Skills and MCP servers stay visible in one workspace.
+                  Skills, MCP servers, and models stay visible in one workspace.
                 </p>
               </div>
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {installedAgents.map((agent) => (
+                {modelInventory.map(({ agent, models }) => (
                   <article
                     key={agent.id}
-                    className="flex min-w-0 items-center gap-3 rounded-xl border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5"
+                    className="flex min-w-0 flex-col gap-2 rounded-xl border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5"
                   >
-                    <AgentMark id={agent.id} name={agent.name} active />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-semibold text-devdeck-fg-2">
-                        {agent.name}
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-2 font-mono text-[9.5px] text-devdeck-fg-2">
-                        <span>{agent.skillCount} skills</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{agent.modelCount} models</span>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <AgentMark id={agent.id} name={agent.name} active />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-semibold text-devdeck-fg-2">
+                          {agent.name}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2 font-mono text-[9.5px] text-devdeck-fg-2">
+                          <span>{agent.skillCount} skills</span>
+                          <span aria-hidden="true">/</span>
+                          <span>{models.length || agent.modelCount} models</span>
+                        </div>
                       </div>
                     </div>
+                    {models.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {models.slice(0, 4).map((model) => (
+                          <span
+                            key={model.id}
+                            title={model.id}
+                            className="max-w-full truncate rounded-md border border-devdeck-border-card bg-devdeck-card-wash px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2"
+                          >
+                            {model.name}
+                          </span>
+                        ))}
+                        {models.length > 4 ? (
+                          <span className="rounded-md border border-devdeck-border-card bg-devdeck-card-wash px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
+                            +{models.length - 4} more
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>
             </div>
-          </section> */}
+          </section>
 
           <div
             className="grid flex-none grid-cols-2 gap-1 border-b border-devdeck-border bg-devdeck-pane px-3 py-2 sm:flex sm:px-4"

@@ -86,6 +86,18 @@ type Attachment struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// AgentAttachment mirrors the frontend AgentAttachment type. Raw bytes are
+// fetched separately via GET /api/agent/attachments/{id}. ThreadID may name
+// a thread that does not exist yet — see store/agentattachment.go.
+type AgentAttachment struct {
+	ID        string `json:"id"`
+	ThreadID  string `json:"threadId"`
+	Name      string `json:"name"`
+	MimeType  string `json:"mimeType"`
+	SizeBytes int64  `json:"sizeBytes"`
+	CreatedAt string `json:"createdAt"`
+}
+
 // IssueComment mirrors the frontend IssueComment type — a comment on an
 // issue's Activity timeline, or (when ParentID is set) a single-level-deep
 // reply to another comment.
@@ -215,6 +227,79 @@ type CatalogSnapshot struct {
 type Settings struct {
 	ActiveWorkspaceID *string `json:"activeWorkspaceId"`
 	DefaultModel      string  `json:"defaultModel"`
+}
+
+// CompletionsConfig is the BYOK configuration for AI inline completions.
+// The API key is deliberately excluded from this struct — see
+// port.Store.CompletionsAPIKey() — the same reason SignInPINHash is kept off
+// domain.Settings: it must never ride along in GET /api/settings or
+// GET /api/completions/config JSON.
+type CompletionsConfig struct {
+	Provider string `json:"provider"` // "anthropic" | "openai-compatible"
+	BaseURL  string `json:"baseUrl"`  // openai-compatible only; empty = provider default
+	Model    string `json:"model"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// MemoryConfig is the hub's configuration for the persistent agent memory
+// layer (a self-hosted Hindsight server — internal/memory). It is
+// deliberately hub-only, like CompletionsConfig: a runtime never stores its
+// own copy, and never talks to the memory server directly — it calls back
+// through the hub's machine-key-gated /api/runtime/memory/* routes (see
+// machineclient/memory.go), the same way it already does for the catalog and
+// the SOCKS-routed SSH executor. That is what makes memory shared across
+// every runtime instead of siloed per machine.
+//
+// APIKey and LLMAPIKey are excluded from this struct for the same reason
+// CompletionsConfig excludes its key — see port.Store.MemoryAPIKey /
+// MemoryLLMAPIKey, used only by the memory service, never returned by a
+// handler.
+type MemoryConfig struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"baseUrl"` // Hindsight API root, e.g. http://127.0.0.1:8888
+	BankID  string `json:"bankId"`  // one bank for every project on this dashboard
+
+	// Hosting selects who runs the Hindsight process this config points at —
+	// see internal/memoryhost's package comment for the full picture.
+	// "manual": BaseURL is an operator-supplied address (their own server, a
+	// cloud account, a container they started themselves) — the only mode
+	// that existed before local hosting shipped, and still the only sane
+	// choice for anything not running on this hub's own machine.
+	// "container": the hub manages a docker/podman container on ITS OWN
+	// machine.
+	// "baremetal": the hub manages a plain OS process (via `uvx hindsight-api`
+	// or an already-installed `hindsight-api` binary) on its own machine —
+	// the fallback when neither docker nor podman is present.
+	// Both local modes derive BaseURL from LocalPort rather than having the
+	// operator type it, and LocalRunning is the persisted intent a hub
+	// restart honors, the same pattern domain.PublishedSOCKSConfig.Enabled
+	// uses to re-bind on boot.
+	Hosting      string `json:"hosting"`      // "manual" | "container" | "baremetal"
+	LocalPort    int    `json:"localPort"`    // loopback port the locally managed process/container binds to
+	LocalRunning bool   `json:"localRunning"` // operator's persisted intent — re-started on hub boot if true
+
+	// LLM used by the Hindsight SERVER itself for fact extraction/reflection —
+	// not the coding agent's own model. "ollama"/"lmstudio" keep transcripts
+	// off any third-party API. In "container"/"baremetal" hosting these are
+	// also the values injected into the managed process's own environment
+	// (see internal/memoryhost) — in "manual" hosting they are
+	// record-keeping only, since the operator's own process reads its env
+	// independently.
+	LLMProvider string `json:"llmProvider"` // openai | anthropic | gemini | groq | ollama | lmstudio
+	LLMModel    string `json:"llmModel"`
+	// LLMBaseURL overrides the provider's default API endpoint, for ANY
+	// provider — not just ollama/lmstudio's local servers. An
+	// openai/anthropic/gemini/groq operator can point this at a proxy or
+	// gateway (LiteLLM, Azure OpenAI, OpenRouter, a self-hosted
+	// OpenAI-compatible server) the same way completions.BaseURL already
+	// does for openai-compatible inline completions. Empty = provider
+	// default.
+	LLMBaseURL string `json:"llmBaseUrl"`
+
+	AutoRecall   bool   `json:"autoRecall"`   // inject recalled memories before each turn
+	AutoRetain   bool   `json:"autoRetain"`   // store each turn back into the bank
+	RecallBudget string `json:"recallBudget"` // low | mid | high
+	MaxTokens    int    `json:"maxTokens"`    // cap on the injected recall block
 }
 
 // PublishedSOCKSConfig is one machine's persistent forward-proxy publication
@@ -509,4 +594,94 @@ type User struct {
 	LockoutLevel     int      `json:"-"`
 	LockedUntil      *string  `json:"-"`
 	LastFailedAt     *string  `json:"-"`
+}
+
+// TelegramConfig is one machine's Telegram bridge state. Like
+// PublishedSOCKSConfig it lives on that machine's own settings singleton, and
+// like CompletionsConfig it excludes its secret: the bot token is reached
+// through port.Store.TelegramBotToken and never rides along in JSON.
+//
+// HasToken is derived at read time from whether a token is stored — a caller
+// cannot set it, so the UI can never be told a token exists when it does not.
+type TelegramConfig struct {
+	Enabled     bool   `json:"enabled"`
+	HasToken    bool   `json:"hasToken"`
+	BotUsername string `json:"botUsername"` // from getMe, display only
+
+	// Health is the RUNNING bridge's inbound state — "off", "connecting",
+	// "ok" or "error" (telegram.HealthState) — and HealthDetail is why, for
+	// "error" only. Neither is stored: they are read from the live bridge by
+	// the handler, because a persisted "ok" surviving into a process whose
+	// bridge never started is exactly the lie they exist to prevent.
+	//
+	// They exist because BotUsername is NOT evidence the bridge works. getMe
+	// succeeds against a token whose getUpdates is refused outright (a webhook
+	// registered on it, another process polling it), so a panel showing only
+	// the @username rendered a completely dead bridge as a healthy one — with
+	// no surface anywhere, in the app or in Telegram, that said otherwise.
+	Health       string `json:"health"`
+	HealthDetail string `json:"healthDetail"`
+}
+
+// TelegramProjectBinding publishes a whole project to one forum-enabled
+// supergroup. Every session in the project gets its own topic there, each
+// recorded as an ordinary TelegramBinding — this type only names the group.
+//
+// It exists because publishing one session at a time was busywork: an
+// operator has to run /init again for every session they create, and the ones
+// they forget are silently invisible. Binding the project instead means
+// "everything in here, including whatever I make later".
+type TelegramProjectBinding struct {
+	ProjectID string `json:"projectId"`
+	ChatID    int64  `json:"chatId"`
+	// TopicID scopes the project to ONE destination, not to a whole group.
+	// Matching on chat alone made a published project answer in every topic
+	// at once; with this, one forum can hold several projects side by side,
+	// one topic each. 0 is a DM or a non-forum group, which has exactly one
+	// destination anyway.
+	TopicID int64 `json:"topicId,omitempty"`
+	// Agent is which agent NEW sessions in this destination start on; "" is
+	// the default. It lives on the project rather than on a session because a
+	// thread's agent is fixed at thread.create and no command changes it
+	// afterwards — so /agents can only ever choose for the next session.
+	Agent string `json:"agent,omitempty"`
+	// PinnedMessageID is the confirmation pinned in the group's General
+	// topic. Internal bookkeeping, like TelegramBinding.PinnedMessageID.
+	PinnedMessageID int64 `json:"-"`
+}
+
+// TelegramUser is one entry on the allowlist. Enrolment is always /pair —
+// there is no way to add a row without proving possession of a live code.
+type TelegramUser struct {
+	UserID  int64  `json:"userId"`
+	Label   string `json:"label"` // @username at pairing time, display only
+	AddedAt int64  `json:"addedAt"`
+}
+
+// TelegramBinding publishes one thread to one Telegram destination. TopicID 0
+// means the destination is a DM or a non-forum group, in which case
+// sendMessage simply omits message_thread_id.
+//
+// LastSeq is the replay cursor: the bridge re-reads AgentEventsSince(threadID,
+// LastSeq) rather than trusting the engine subscription, which drops batches
+// for slow subscribers by design.
+type TelegramBinding struct {
+	ThreadID string `json:"threadId"`
+	ChatID   int64  `json:"chatId"`
+	TopicID  int64  `json:"topicId,omitempty"`
+	Model    string `json:"model,omitempty"` // last /model choice; "" = provider default
+	// Agent is which agent the NEXT session here starts on; "" = the thread's
+	// own. Like TelegramProjectBinding.Agent, it can only ever choose for the
+	// next session: a thread's agent is fixed at thread.create.
+	Agent   string `json:"agent,omitempty"`
+	LastSeq uint64 `json:"lastSeq"`
+	// PinnedMessageID is the /init confirmation this bridge pinned in the
+	// destination chat, 0 when nothing is pinned. Internal bookkeeping — the
+	// frontend has no use for a Telegram message id, so it stays out of the
+	// JSON and out of the mirrored TypeScript type.
+	//
+	// Stored rather than re-derived: unpinning needs the EXACT id, because
+	// Telegram's unpinChatMessage with no message_id removes the most recent
+	// pin in the chat, which may be something the operator pinned themselves.
+	PinnedMessageID int64 `json:"-"`
 }

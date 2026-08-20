@@ -36,6 +36,9 @@ func (a *stubAdapter) RespondToUserInput(context.Context, string, string, map[st
 func (a *stubAdapter) SetInteractionMode(context.Context, string, provider.InteractionMode) error {
 	return nil
 }
+func (a *stubAdapter) SetRuntimeMode(context.Context, string, provider.RuntimeMode) error {
+	return nil
+}
 func (a *stubAdapter) StopSession(context.Context, string) error { return nil }
 func (a *stubAdapter) StopAll(context.Context) error             { return nil }
 func (a *stubAdapter) HasSession(string) bool                    { return true }

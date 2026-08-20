@@ -131,6 +131,22 @@
   --devdeck-red-tint-strong-text: var(--devdeck-err);
   --devdeck-accent-gradient: linear-gradient(135deg, var(--devdeck-accent), #238d87);
 
+  /* ── status literals ──────────────────────────────────────────────────
+     The palette `lib/constants.ts` paints worktree state, issue/invoice
+     status, priority and log-line kind with. They lived there as hex literals
+     because `Pill` concatenated an alpha suffix onto them; `Pill` and
+     `StatusDot` both use `color-mix` now, so these can be tokens and follow
+     the theme. Values are unchanged from the hexes they replace. */
+  --devdeck-st-green: #56d58a;
+  --devdeck-st-blue: #6d8bff;
+  --devdeck-st-yellow: #f5c451;
+  --devdeck-st-red: #f87171;
+  --devdeck-st-purple: #c7a3ff;
+  --devdeck-st-grey: #8a919c;
+  --devdeck-st-grey-dim: #5f6672;
+  --devdeck-st-out: #b6bcc6;
+  --devdeck-st-cmd: #9db1ff;
+
   /* ── radius: exactly three steps. No other value may appear. ──────────── */
   --r-container: 14px; /* pane card, sidebar card, dialogs, popovers */
   --r-control: 10px; /* tabs, rows, buttons, icon buttons, inputs */
@@ -138,6 +154,41 @@
 
   /* ── gap ────────────────────────────────────────────────────────────── */
   --devdeck-gap: 8px;
+
+  /* ── Notion document theme ──────────────────────────────────────────────
+     A second, deliberately ACHROMATIC palette, scoped to the markdown
+     surfaces (the Tiptap canvas, its menus, the rendered preview). Notion's
+     dark theme is pure neutral grey on near-black; the DevDeck palette above
+     carries a teal cast at hue 188.6deg on every neutral. Tinting a document
+     surface reads as a coloured page, so these tokens drop the hue rather
+     than aliasing --devdeck-pane and friends.
+
+     Values are Notion's own: #191919 page, #252525 for menus and code, text
+     at 81% white, blue #2383e2 for checkboxes and selection. Nothing here is
+     used outside the markdown surfaces, so the app chrome is untouched. */
+  --nt-bg: #191919; /* page */
+  --nt-surface: #252525; /* menus, code blocks, frontmatter */
+  --nt-surface-hover: #2f2f2f;
+  --nt-hover: rgba(255, 255, 255, 0.055);
+  --nt-border: rgba(255, 255, 255, 0.094);
+  --nt-divider: rgba(255, 255, 255, 0.13);
+  --nt-text: rgba(255, 255, 255, 0.81);
+  --nt-text-strong: #ffffff;
+  --nt-text-dim: rgba(255, 255, 255, 0.443);
+  --nt-placeholder: rgba(255, 255, 255, 0.282);
+  --nt-blue: #2383e2;
+  --nt-select: rgba(35, 131, 226, 0.28);
+  --nt-code: #ff7369; /* inline code, Notion's dark-mode red */
+  --nt-code-bg: rgba(135, 131, 120, 0.15);
+  --nt-shadow:
+    0 14px 28px -6px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  /* Notion's stack. --font-sans (Arial) is the UI family and stays that for
+     every control in the app; a document body is the one place where the
+     platform UI face is what makes the page read as Notion, and it falls
+     back to Arial where there is no system face. */
+  --nt-font:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', var(--font-sans);
 
   /* ── semantic (shadcn-style) ─────────────────────────────────────────── */
   --background: var(--devdeck-pane);
@@ -163,6 +214,163 @@
   --radius: var(--r-control);
 }
 
+/* ── light appearance ─────────────────────────────────────────────────────
+   Applied by `features/theme/theme.ts` as `.light` on <html>, and by the
+   pre-paint script in index.html so a light user never sees a dark flash.
+
+   Only the RAW --devdeck- and --nt- tokens are restated. The semantic layer
+   (--background, --primary, …) and every one of the ~600 component call sites
+   alias those, so they follow automatically and no component file changes.
+
+   Three things are re-derived rather than flipped from the dark palette:
+
+   - The neutrals change HUE. :root carries its chroma at the accent's
+     188.6deg, which reads clean on near-black — a light surface shows chroma
+     far more strongly, and at these lightnesses that same hue reads as dingy
+     green-grey. These sit at ~222deg instead: a cool, faintly blue slate,
+     which is what makes a light UI look clean rather than dirty. The ~34deg
+     split from the teal accent is small enough to stay related.
+
+   - Elevation reverses direction AND widens. In dark a raised surface is a
+     lighter film over the pane, and 2-3% is plenty because the eye reads
+     added light easily. On paper the same 2-3% is invisible: the pane, the
+     card wash and the backdrop all collapse into one flat sheet. So the pane
+     becomes a light grey, a raised surface becomes white, and the gap between
+     each step is 3-5% rather than 1-2%.
+
+   - The accent and status hues darken. #39c6bd is 1.9:1 on white — fine as a
+     glow on near-black, unreadable as text or a focus ring on paper. Each
+     keeps its hue and takes enough lightness contrast to hold the same job.
+
+   Ratios below are against the pane (#f4f6f9) unless noted. */
+.light {
+  /* ── materials ────────────────────────────────────────────────────────
+     The pane is WHITE and every wash on top of it is a translucent dark film,
+     which is the mirror image of dark's white films over near-black — and the
+     only arrangement that keeps working when surfaces nest.
+
+     The obvious light palette (grey pane, white cards) was tried first and is
+     wrong: `--devdeck-card-wash` means "one step off whatever is behind me",
+     and it stacks. An agent card is a wash, and the chips and secondary
+     buttons INSIDE it are another. White-over-white has nowhere left to go, so
+     the second layer vanished — the chips and the Details button rendered
+     invisible on the card and the whole page read as one flat sheet. A dark
+     film compounds instead: white pane → 4% card → 8% chip, each step legible.
+
+     Kept low (4%, not dark's 5.5%): the eye reads a dark film on paper more
+     readily than added light on near-black, and the same strength would look
+     like dirt. */
+  --devdeck-glass: rgba(255, 255, 255, 0.76);
+  --devdeck-glass-filter: blur(48px) saturate(1.8) brightness(1.03);
+  --devdeck-glass-solid: #ffffff;
+  --devdeck-pane: #ffffff;
+  --devdeck-base: #e9edf2; /* backdrop behind panes */
+  /* Raised is where dark's ladder inverts: a code block cannot be whiter than
+     a white pane, so it steps DOWN into grey to separate. */
+  --devdeck-raised: #f6f8fb; /* code blocks, tool cards, composer box */
+  --devdeck-card: #eef2f7; /* code-block title bar, hover on raised */
+
+  --devdeck-card-wash: rgba(15, 23, 42, 0.04);
+  --devdeck-hairline: rgba(15, 23, 42, 0.09);
+
+  /* Selected. Removes light rather than adding it, for the same reason. */
+  --devdeck-on: rgba(15, 23, 42, 0.075);
+
+  /* ── foreground ─────────────────────────────────────────────────────── */
+  --devdeck-fg: #0f172a; /* 16.4 */
+  --devdeck-fg-2: #5c6b80; /* 5.6 — also placeholders */
+  --devdeck-dim-glass: #64748b; /* 4.7 on glass */
+  /* Recessive numeric chrome only (line numbers, status line), deliberately
+     below AA — the mirror of --devdeck-dim-pane in dark. */
+  --devdeck-dim-pane: #94a3b8;
+
+  /* non-text: input edges, separators that must be seen, focus ring. */
+  --devdeck-line: #7c8ba1; /* 3.3 */
+  --devdeck-ring: #0e7c74;
+
+  /* accent: deep enough to carry text, a focus ring and the one primary
+     action per screen. 4.8 on the pane, 5.1 on white. */
+  --devdeck-accent: #0e7c74;
+  --devdeck-accent-hover: #0b655e;
+  --devdeck-accent-ink: #ffffff;
+
+  /* status: same hues as dark, taken to the darker end so they read as text
+     on paper rather than as pastel highlighter. */
+  --devdeck-run: #15803d;
+  --devdeck-wait: #a16207;
+  --devdeck-err: #b91c1c;
+  --devdeck-purple: #7c3aed;
+
+  --devdeck-diff-del: #fee4e2;
+  --devdeck-diff-add: #dcfce7;
+
+  /* ── borders ────────────────────────────────────────────────────────
+     Same near-invisible role as in dark, so nothing reflows; cool black
+     alphas instead of white ones. */
+  --devdeck-border: rgba(15, 23, 42, 0.055);
+  --devdeck-border-card: rgba(15, 23, 42, 0.085);
+  --devdeck-border-menu: rgba(15, 23, 42, 0.11);
+
+  --devdeck-hover-wash: rgba(15, 23, 42, 0.04);
+  --devdeck-hover-wash-menu: rgba(15, 23, 42, 0.06);
+
+  /* Tints track the darkened status colours above. Alphas are LOWER than
+     dark's: a saturated tint over paper is far louder than the same tint over
+     near-black, and these are backgrounds for text that must stay readable. */
+  --devdeck-accent-tint: rgba(14, 124, 116, 0.1);
+  --devdeck-accent-tint-hover: rgba(14, 124, 116, 0.16);
+  --devdeck-green-tint: rgba(21, 128, 61, 0.1);
+  --devdeck-green-tint-border: rgba(21, 128, 61, 0.24);
+  --devdeck-green-tint-hover: rgba(21, 128, 61, 0.16);
+  --devdeck-yellow-tint: rgba(161, 98, 7, 0.1);
+  --devdeck-yellow-tint-border: rgba(161, 98, 7, 0.24);
+  --devdeck-red-tint: rgba(185, 28, 28, 0.08);
+  --devdeck-red-tint-hover: rgba(185, 28, 28, 0.14);
+  --devdeck-red-tint-strong: rgba(185, 28, 28, 0.12);
+  --devdeck-red-tint-strong-border: rgba(185, 28, 28, 0.3);
+  --devdeck-red-tint-strong-hover: rgba(185, 28, 28, 0.18);
+  --devdeck-accent-gradient: linear-gradient(135deg, var(--devdeck-accent), #0a5c56);
+
+  /* Status literals, taken to the darker end of the same hues. The dark set
+     above is 2.0-2.6:1 on white — pale highlighter, not text. */
+  --devdeck-st-green: #15803d;
+  --devdeck-st-blue: #2563eb;
+  --devdeck-st-yellow: #a16207;
+  --devdeck-st-red: #b91c1c;
+  --devdeck-st-purple: #7c3aed;
+  --devdeck-st-grey: #64748b;
+  --devdeck-st-grey-dim: #94a3b8;
+  --devdeck-st-out: #475569;
+  --devdeck-st-cmd: #3b5bdb;
+  /* Ink on the yellow/warning fills, which stay dark-on-tint here. */
+  --devdeck-yellow-ink: #2a1f05;
+  --devdeck-warning-ink: #2a1f05;
+
+  /* ── Notion document theme ─────────────────────────────────────────────
+     Notion's own light values, same achromatic intent as the dark set: a
+     document page must not pick up the cast the app chrome carries. */
+  --nt-bg: #ffffff;
+  --nt-surface: #f7f6f3;
+  --nt-surface-hover: #efeeec;
+  --nt-hover: rgba(0, 0, 0, 0.04);
+  --nt-border: rgba(0, 0, 0, 0.09);
+  --nt-divider: rgba(0, 0, 0, 0.13);
+  --nt-text: rgb(55, 53, 47);
+  --nt-text-strong: #000000;
+  --nt-text-dim: rgba(55, 53, 47, 0.5);
+  --nt-placeholder: rgba(55, 53, 47, 0.32);
+  --nt-blue: #2383e2;
+  --nt-select: rgba(35, 131, 226, 0.2);
+  --nt-code: #eb5757;
+  --nt-code-bg: rgba(135, 131, 120, 0.15);
+  --nt-shadow:
+    0 12px 28px -8px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.07),
+    0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+/* Applies to both palettes: `.light` restates --devdeck-glass-solid, and this
+   resolves against whichever one is in force. Must stay AFTER `.light` — the
+   two selectors have equal specificity, so source order decides. */
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --devdeck-glass: var(--devdeck-glass-solid);
@@ -249,6 +457,19 @@
   --color-devdeck-yellow-ink: var(--devdeck-yellow-ink);
   --color-devdeck-hover-wash: var(--devdeck-hover-wash);
   --color-devdeck-hover-wash-menu: var(--devdeck-hover-wash-menu);
+
+  /* Notion document theme, for the markdown surfaces and their menus only —
+     e.g. bg-notion-bg, text-notion-text, border-notion-border. */
+  --color-notion-bg: var(--nt-bg);
+  --color-notion-surface: var(--nt-surface);
+  --color-notion-surface-hover: var(--nt-surface-hover);
+  --color-notion-hover: var(--nt-hover);
+  --color-notion-border: var(--nt-border);
+  --color-notion-divider: var(--nt-divider);
+  --color-notion-text: var(--nt-text);
+  --color-notion-text-strong: var(--nt-text-strong);
+  --color-notion-text-dim: var(--nt-text-dim);
+  --color-notion-blue: var(--nt-blue);
 
   /* Arial everywhere for UI text — one family, no webfont fetch, identical
      metrics on every machine the app runs on. Helvetica/Liberation Sans are
@@ -598,71 +819,600 @@
   border-radius: var(--r-control);
 }
 
-.devdeck-markdown h1,
-.devdeck-markdown h2,
-.devdeck-markdown h3 {
-  font-weight: 600;
-  color: var(--devdeck-fg);
-  line-height: 1.3;
-}
-.devdeck-markdown h1 {
-  font-size: 18px;
-}
-.devdeck-markdown h2 {
-  font-size: 15.5px;
-}
-.devdeck-markdown h3 {
-  font-size: 13.5px;
-}
-.devdeck-markdown p {
-  margin: 0;
-}
-.devdeck-markdown ul,
-.devdeck-markdown ol {
-  padding-left: 1.25em;
+/* ── fenced code blocks ─────────────────────────────────────────────────────
+   Streamdown ships its code block as PREBUILT JS carrying Tailwind class
+   NAMES, and Tailwind v4 only generates the utilities it finds in the sources
+   it scans — which never includes node_modules. Two of that component's
+   classes therefore resolved to nothing at all, and both were load-bearing:
+
+     `-mt-10`     pulls the copy/download overlay back up over the title bar.
+                  Without it the overlay stayed a real 32px row in the flex
+                  column, so EVERY block carried ~40px of blank between its
+                  language label and its first line of code, with the buttons
+                  materialising in the middle of that void on hover.
+     `bg-sidebar` a shadcn token this theme does not define, so the outer card
+     `border-sidebar`  was an invisible 8px frame and only the INNER body's own
+                  border showed: a box, inside a box, inside a gap.
+
+   Pointing `@source` at the minified bundle would generate all of it, and
+   would also hand a future upstream restyle a blank cheque over this app's
+   look. So this is the same treatment the rest of this stylesheet gives
+   Streamdown: our own rules against its `data-streamdown` contract, which is
+   the part it documents. One card — a title bar, the code, and the actions
+   floated into the title bar's right end, where a code block's actions live
+   everywhere else in this app. */
+.chat-md [data-streamdown='code-block'] {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
+  gap: 0;
+  margin: 0 0 0.85em;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--devdeck-hairline);
+  border-radius: var(--r-control);
+  background: var(--devdeck-raised);
 }
-.devdeck-markdown a {
-  color: var(--devdeck-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+
+/* ── DevDeck's own code-block chrome (CollapsibleCodeBlock.tsx) ─────────────
+   `.chat-code` wraps Streamdown's block and renders the header itself: the
+   language as an ICON, and a line-wrap toggle Streamdown has no equivalent of.
+   So inside that wrapper the card moves out here and Streamdown's own header
+   and floating action pill are hidden — reproduced, not restyled, because
+   neither of those two things can be reached from CSS alone. */
+.chat-md .chat-code {
+  overflow: hidden;
+  border: 1px solid var(--devdeck-hairline);
+  border-radius: var(--r-control);
+  background: var(--devdeck-raised);
 }
-.devdeck-markdown code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  background: var(--devdeck-glass-solid);
-  border: 1px solid var(--devdeck-border-strong);
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
+.chat-md .chat-code > [data-streamdown='code-block'],
+.chat-md .chat-code [hidden] > [data-streamdown='code-block'] {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
-.devdeck-markdown pre {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  background: var(--devdeck-glass-solid);
-  border: 1px solid var(--devdeck-border-strong);
-  border-radius: 8px;
-  padding: 0.75em 1em;
-  overflow-x: auto;
+.chat-md .chat-code [data-streamdown='code-block-header'],
+.chat-md .chat-code > [data-streamdown='code-block'] > div:has(> [data-streamdown='code-block-actions']) {
+  display: none;
 }
-.devdeck-markdown pre code {
-  background: none;
-  border: none;
+.chat-md .chat-code-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3em 0.5em 0.3em 0.65em;
+  border-bottom: 1px solid var(--devdeck-hairline);
+  background: var(--devdeck-card);
+}
+.chat-md .chat-code-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-micro);
+  color: var(--devdeck-dim-pane);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.chat-md .chat-code-action:hover {
+  color: var(--devdeck-fg);
+  background: var(--devdeck-raised);
+}
+/* The wrap toggle. `anywhere` rather than `break-word` on purpose: these are
+   commands and paths, which carry no spaces to break at — `break-word` would
+   leave a 200-character path overflowing exactly as it did unwrapped. */
+.chat-md .chat-code[data-wrap='true'] [data-streamdown='code-block-body'] {
+  overflow-x: hidden;
+}
+.chat-md .chat-code[data-wrap='true'] [data-streamdown='code-block-body'] pre,
+.chat-md .chat-code[data-wrap='true'] [data-streamdown='code-block-body'] code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* `.chat-md > :first-child`/`:last-child` above zero the outer margins of a
+   reply's first and last block, but they are a class plus `*` and this rule is
+   two classes — so a message ENDING in a fence kept 0.85em of margin the rest
+   of the transcript had already accounted for, and sat 12px lower than every
+   other entry. Restated here at matching specificity rather than weakening the
+   rule above, which every other element in a reply relies on. */
+.chat-md > [data-streamdown='code-block']:last-child {
+  margin-bottom: 0;
+}
+.chat-md > [data-streamdown='code-block']:first-child {
+  margin-top: 0;
+}
+.chat-md [data-streamdown='code-block-header'] {
+  height: auto;
+  min-height: 0;
+  padding: 0.3em 0.75em;
+  border-bottom: 1px solid var(--devdeck-hairline);
+  background: var(--devdeck-card);
+  font-size: 11px;
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+  color: var(--devdeck-dim-pane);
+}
+/* Upstream's `ml-1` on the label, undone — the bar owns the padding now. A
+   fence opened with no language renders that label empty, which would leave a
+   nameless strip above the code rather than a title bar. */
+.chat-md [data-streamdown='code-block-header'] > span {
+  margin-left: 0;
+}
+.chat-md [data-streamdown='code-block-header'] > span:empty::after {
+  content: 'code';
+}
+/* The overlay row `-mt-10` was supposed to lift. Absolute rather than negative
+   margin: it lands in the title bar regardless of what that bar's height ends
+   up being, and it cannot push the code down again if upstream changes the
+   arithmetic. The wrapper is anonymous, so it is addressed by what it holds. */
+.chat-md [data-streamdown='code-block'] > div:has(> [data-streamdown='code-block-actions']) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  height: auto;
+  margin: 0;
+  padding: 0.2em 0.3em;
+}
+/* Streamdown parks a copy and a download button on top of every fenced code
+   block and leaves both permanently visible. A long agent answer is mostly
+   code, so that is a column of buttons competing with the content the whole
+   time you read it — and the message's own copy button next to it is already
+   hover-gated, so the two disagreed about when an affordance should appear.
+
+   Gated here rather than in the component because these come from Streamdown,
+   not from us; `data-streamdown` is its own stable contract. `focus-within`
+   keeps them reachable by keyboard, which plain `:hover` alone would not. */
+.chat-md [data-streamdown='code-block-actions'] {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  gap: 0.15em;
+  padding: 0.1em 0.2em;
+  border: 1px solid var(--devdeck-hairline);
+  border-radius: var(--r-micro);
+  background: var(--devdeck-card);
+}
+.chat-md [data-streamdown='code-block']:hover [data-streamdown='code-block-actions'],
+.chat-md [data-streamdown='code-block']:focus-within [data-streamdown='code-block-actions'] {
+  opacity: 1;
+}
+/* The body is the card's contents now, not a second card inside it. */
+.chat-md [data-streamdown='code-block-body'] {
+  padding: 0.65em 0.8em;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.chat-md [data-streamdown='code-block-body'] pre {
+  margin: 0;
+}
+/* The gutter's own size is a hard-coded `text-[13px]` upstream, which read a
+   half-step LARGER than the code it numbers. Two classes' worth of specificity
+   to outrank that utility. */
+.chat-md [data-streamdown='code-block-body'] code > span::before {
+  font-size: 12.5px;
+  width: 1.5em;
+  margin-right: 1em;
+}
+/* A code block is a card inside a reading column, and a 9px scrollbar cut a
+   visible grey slab across the bottom of every one of them (the app-wide rule
+   above is sized for a pane, not for a 3-line snippet). */
+.chat-md [data-streamdown='code-block-body']::-webkit-scrollbar {
+  height: 6px;
+}
+.chat-md [data-streamdown='code-block-body']::-webkit-scrollbar-thumb {
+  border-width: 1px;
+}
+
+/* ── Notion theme ───────────────────────────────────────────────────────────
+   One stylesheet for every markdown surface outside the agent chat: the Tiptap
+   canvas (NotionEditor) and the rendered preview (MarkdownPreview). Tiptap
+   itself is left at its default configuration — the whole visual identity of
+   the editor is here, in CSS, which is how Tiptap is meant to be themed.
+
+   It replaces the .devdeck-markdown layer these surfaces used to share, whose
+   flex-based lists made Chromium drop ::marker entirely (unmarked bullets) and
+   whose sizes were tuned for an issue card rather than a document.
+
+   Every dimension is em-based off one font-size, so a document and a field on
+   a form differ by exactly one class (.notion-doc--compact).
+
+   Values are Notion's: 16px/1.5 body at 81% white, 1px between blocks with
+   3px/2px inside them, #252525 code, blue #2383e2 checkboxes. Width is not one
+   of them — the document fills whatever container it is given (see
+   MarkdownFileEditor for the page's padding ladder). */
+.notion-doc {
+  font-family: var(--nt-font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--nt-text);
+  caret-color: var(--nt-text-strong);
+  -webkit-font-smoothing: antialiased;
+  outline: none;
+  overflow-wrap: anywhere; /* an unbroken URL wraps, it doesn't widen the column */
+  tab-size: 2;
+}
+/* ProseMirror's own required whitespace rule, and editor-only on purpose: a
+   run of typed spaces has to survive, and the caret has to be placeable at the
+   end of a line. It must NOT reach the rendered preview, whose react-markdown
+   output keeps the source's newlines as text nodes between block elements —
+   under pre-wrap each of those draws a blank line. */
+.notion-doc.ProseMirror {
+  white-space: pre-wrap;
+}
+.notion-doc ::selection {
+  background: var(--nt-select);
+}
+
+/* ── block rhythm ─────────────────────────────────────────────────────────
+   Notion's: 1px between blocks, 3px/2px inside each, so a line's hit area is
+   taller than its text. Spacing sits on the elements rather than on a flex
+   gap — a flex container breaks ProseMirror's drop-cursor and gap-cursor
+   positioning. */
+.notion-doc > * {
+  margin: 1px 0;
+}
+.notion-doc > :first-child {
+  margin-top: 0;
+}
+.notion-doc p {
+  margin: 1px 0;
+  padding: 3px 2px;
+}
+.notion-doc h1,
+.notion-doc h2,
+.notion-doc h3,
+.notion-doc h4,
+.notion-doc h5,
+.notion-doc h6 {
+  color: var(--nt-text-strong);
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 1px;
+  padding: 3px 2px;
+  text-wrap: pretty;
+}
+.notion-doc h1 {
+  font-size: 1.875em;
+  margin-top: 2em;
+}
+.notion-doc h2 {
+  font-size: 1.5em;
+  margin-top: 1.4em;
+}
+.notion-doc h3 {
+  font-size: 1.25em;
+  margin-top: 1em;
+}
+.notion-doc h4 {
+  font-size: 1.1em;
+  margin-top: 1em;
+}
+.notion-doc h5,
+.notion-doc h6 {
+  font-size: 1em;
+  margin-top: 1em;
+}
+
+/* Tailwind's preflight zeroes `list-style`; these put real markers back. */
+.notion-doc ul,
+.notion-doc ol {
+  margin: 1px 0;
+  padding-left: 1.7em;
+  list-style-position: outside;
+}
+.notion-doc ul {
+  list-style-type: disc;
+}
+.notion-doc ul ul {
+  list-style-type: circle;
+}
+.notion-doc ul ul ul {
+  list-style-type: square;
+}
+.notion-doc ol {
+  list-style-type: decimal;
+}
+.notion-doc li {
+  margin: 1px 0;
+  padding: 3px 2px;
+}
+.notion-doc li::marker {
+  color: var(--nt-text-dim);
+}
+.notion-doc li > p {
+  margin: 0;
   padding: 0;
 }
-.devdeck-markdown table {
+.notion-doc li > ul,
+.notion-doc li > ol {
+  margin: 1px 0;
+  padding-left: 1.4em;
+}
+
+/* To-dos. A checked one dims and strikes through, the way Notion marks a
+   finished item; TaskItem puts `data-checked` on the <li> for us. */
+.notion-doc ul[data-type='taskList'] {
+  padding-left: 0;
+  list-style: none;
+}
+.notion-doc ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.notion-doc ul[data-type='taskList'] li > label {
+  display: flex;
+  flex: none;
+  /* Matches the line box, so the box sits on the first line's centre rather
+     than on the top of its ascenders. */
+  align-items: center;
+  height: 1.5em;
+  user-select: none;
+}
+.notion-doc ul[data-type='taskList'] li > div {
+  min-width: 0;
+  flex: 1;
+}
+.notion-doc li[data-checked='true'] > div {
+  color: var(--nt-text-dim);
+  text-decoration: line-through;
+}
+.notion-doc input[type='checkbox'] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.25px solid var(--nt-text-dim);
+  border-radius: var(--r-micro);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.notion-doc input[type='checkbox']:hover {
+  background-color: var(--nt-hover);
+}
+/* The tick is a background image rather than a pseudo-element: ::after on a
+   replaced element is not guaranteed to render, a background always is. */
+.notion-doc input[type='checkbox']:checked {
+  background-color: var(--nt-blue);
+  border-color: var(--nt-blue);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.4l3 3 6-6'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+.notion-doc blockquote {
+  margin: 6px 0;
+  padding: 3px 2px 3px 14px;
+  border-left: 3px solid currentColor;
+  font-size: 1em;
+}
+.notion-doc blockquote p:first-child {
+  margin-top: 0;
+}
+.notion-doc hr {
+  margin: 6px 0;
+  padding: 0;
+  border: none;
+  border-top: 1px solid var(--nt-divider);
+}
+
+.notion-doc code {
+  font-family: var(--font-mono);
+  font-size: 85%;
+  color: var(--nt-code);
+  background: var(--nt-code-bg);
+  border-radius: var(--r-micro);
+  padding: 0.2em 0.4em;
+}
+.notion-doc pre {
+  margin: 4px 0;
+  padding: 1em;
+  background: var(--nt-surface);
+  border-radius: var(--r-micro);
+  color: var(--nt-text);
+  font-family: var(--font-mono);
+  font-size: 85%;
+  line-height: 1.5;
+  /* `pre` inside a `pre-wrap` document: a fence keeps its own long lines and
+     scrolls, rather than reflowing code the author lined up by hand. */
+  white-space: pre;
+  overflow-x: auto;
+}
+.notion-doc pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* ── mermaid ──────────────────────────────────────────────────────────────
+   A ```mermaid fence renders its diagram inline on the editing canvas
+   (rich-editor/MermaidBlock), with the fence itself kept below it so the
+   source stays editable. The two sit tight together — they are one block, not
+   a code block that happens to be followed by a picture — so the source loses
+   the bottom margin `pre` would otherwise carry.
+
+   A reader has no use for the source, so a non-editable canvas shows the
+   diagram alone. Keyed off the `contenteditable` attribute ProseMirror already
+   maintains, which means it follows `setEditable` with no React involved. */
+.notion-doc .notion-mermaid__source {
+  margin-bottom: 0;
+  border-radius: var(--r-micro) var(--r-micro) 0 0;
+}
+.notion-doc .notion-mermaid__diagram {
+  margin: 0 0 4px;
+  padding: 1em;
+  background: var(--nt-surface);
+  border-top: 1px solid var(--nt-border);
+  border-radius: 0 0 var(--r-micro) var(--r-micro);
+  overflow-x: auto;
+  /* The rendered SVG is output, not prose — it must not inherit the canvas's
+     `pre-wrap`, which would reach mermaid's own text nodes. (Centring lives on
+     the svg itself, in MermaidDiagram: it is a block element, so it centres by
+     auto margins rather than by anything set here.) */
+  white-space: normal;
+}
+.notion-doc[contenteditable='false'] .notion-mermaid__source {
+  display: none;
+}
+.notion-doc[contenteditable='false'] .notion-mermaid__diagram {
+  border-top: 0;
+  border-radius: var(--r-micro);
+}
+
+/* mermaid sizes every label's `foreignObject` exactly 4px narrower than the
+   text inside it — a constant, not a font-metric mismatch: it is the same 4px
+   on a three-letter edge label as on a twenty-character node. `foreignObject`
+   clips, so that shows up as a shaved last character ("Notion edito"). Letting
+   it overflow reveals those pixels and changes no box: the svg measures
+   identically with and without this rule. Scoped to the shared diagram wrapper
+   so both the editing canvas and the rendered preview get it. */
+.devdeck-mermaid foreignObject {
+  overflow: visible;
+}
+
+/* Notion's links are body-coloured with a dim underline, not a second accent
+   colour in the middle of a sentence. */
+.notion-doc a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--nt-text-dim);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.notion-doc a:hover {
+  background: var(--nt-hover);
+  text-decoration-color: var(--nt-text-strong);
+}
+.notion-doc strong {
+  font-weight: 600;
+  color: var(--nt-text-strong);
+}
+.notion-doc em {
+  font-style: italic;
+}
+.notion-doc s {
+  text-decoration: line-through;
+}
+.notion-doc img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 4px 0;
+  border-radius: var(--r-micro);
+}
+
+.notion-doc .tableWrapper {
+  margin: 6px 0;
+  overflow-x: auto;
+}
+.notion-doc table {
+  width: 100%;
   border-collapse: collapse;
-  font-size: 0.9em;
+  table-layout: fixed;
+  font-size: 0.95em;
 }
-.devdeck-markdown th,
-.devdeck-markdown td {
-  border: 1px solid var(--devdeck-border-strong);
-  padding: 0.35em 0.6em;
+.notion-doc th,
+.notion-doc td {
+  position: relative;
+  min-width: 100px;
+  padding: 7px 9px;
+  border: 1px solid var(--nt-divider);
+  text-align: left;
+  vertical-align: top;
 }
-.devdeck-markdown blockquote {
-  border-left: 2px solid var(--devdeck-border-accent);
-  padding-left: 0.75em;
-  color: var(--devdeck-fg-2);
+.notion-doc th {
+  background: var(--nt-hover);
+  color: var(--nt-text-strong);
+  font-weight: 500;
+}
+.notion-doc th > p,
+.notion-doc td > p {
   margin: 0;
+  padding: 0;
+}
+
+/* ── editing chrome ───────────────────────────────────────────────────────
+   Inert on a read-only preview, which renders none of these hooks. */
+.notion-doc .is-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--nt-placeholder);
+}
+/* Only while the editor actually has focus: ProseMirror parks its initial
+   selection on the first selectable node, so an unfocused document opening on
+   an image or a rule would otherwise sit there permanently ringed. */
+.notion-doc.ProseMirror-focused .ProseMirror-selectednode {
+  outline: 2px solid var(--nt-blue);
+  outline-offset: 1px;
+  border-radius: var(--r-micro);
+}
+.notion-doc .ProseMirror-gapcursor::after {
+  border-top-color: var(--nt-text-dim);
+}
+.notion-doc .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--nt-select);
+  pointer-events: none;
+}
+.notion-doc .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--nt-blue);
+  pointer-events: none;
+}
+.notion-doc.resize-cursor {
+  cursor: col-resize;
+}
+
+/* A field on a form (issue description, comment composer) rather than a page:
+   one size down, and headings that don't reserve 2em of air above them in a
+   box three lines tall. */
+.notion-doc--compact {
+  font-size: 14px;
+}
+.notion-doc--compact h1 {
+  font-size: 1.5em;
+  margin-top: 0.8em;
+}
+.notion-doc--compact h2 {
+  font-size: 1.25em;
+  margin-top: 0.7em;
+}
+.notion-doc--compact h3 {
+  font-size: 1.1em;
+  margin-top: 0.6em;
+}
+.notion-doc--compact h4,
+.notion-doc--compact h5,
+.notion-doc--compact h6 {
+  font-size: 1em;
+  margin-top: 0.6em;
+}
+
+/* ── Toasts (sonner) ────────────────────────────────────────────────────────
+   ToastHost renders every toast `unstyled` — sonner injects its stylesheet at
+   runtime, outside our cascade layers, so its own visual rules would beat any
+   utility class. That gate (`[data-styled='true']`) also covers the one rule
+   with no class-based equivalent: hiding the CONTENT of the stacked toasts
+   behind the front one. Without it a collapsed stack renders three messages
+   overlapping inside one card. Re-added here, keyed exactly as sonner does it.
+   The 400ms opacity transition it fades with is ungated, so it still applies. */
+[data-sonner-toast][data-expanded='false'][data-front='false'] > * {
+  opacity: 0;
 }

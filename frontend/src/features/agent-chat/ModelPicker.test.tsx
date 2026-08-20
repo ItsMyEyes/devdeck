@@ -34,7 +34,7 @@ vi.mock('@/features/data/queries', () => ({
   }),
 }))
 
-const { ModelPicker, favouriteKey, instanceIdForAgent } = await import('./ModelPicker')
+const { ModelPicker, favouriteKey, instanceIdForAgent, modelPillLabel } = await import('./ModelPicker')
 const { useDevDeckStore } = await import('@/store/useDevDeckStore')
 
 const machine: Machine = { id: 'm1', name: 'dev', url: '', key: '', isLocal: false, signingPublicKey: '' }
@@ -166,5 +166,34 @@ describe('instanceIdForAgent', () => {
 
   it('falls back to claude for an unset agent, matching the backend default', () => {
     expect(instanceIdForAgent('')).toBe('claude:default')
+  })
+})
+
+// Regression, from a screenshot: at a real chat-pane width the control row
+// rendered `ollama/deepseek-v4-flash:cloud` at full length, which pushed the
+// effort pill into a mid-character clip ("High · 200(") and shoved the mode
+// pills out of the row entirely. The row is `flex-nowrap overflow-hidden`, so
+// anything that refuses to shrink is not truncated — it is cut off.
+describe('modelPillLabel', () => {
+  it('drops the provider prefix the agent mark already shows', () => {
+    expect(modelPillLabel('ollama/deepseek-v4-flash:cloud')).toBe('deepseek-v4-flash:cloud')
+    expect(modelPillLabel('openai-codex/gpt-5.5')).toBe('gpt-5.5')
+  })
+
+  it('leaves an unprefixed name alone', () => {
+    expect(modelPillLabel('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(modelPillLabel('Sonnet 5')).toBe('Sonnet 5')
+  })
+
+  // A path-like model id must not be reduced to its last segment — only the
+  // FIRST segment is the provider.
+  it('drops only the first segment', () => {
+    expect(modelPillLabel('a/b/c')).toBe('b/c')
+  })
+
+  it('falls back to the placeholder for an empty name', () => {
+    expect(modelPillLabel(undefined)).toBe('Model')
+    expect(modelPillLabel('')).toBe('Model')
+    expect(modelPillLabel('ollama/')).toBe('Model')
   })
 })

@@ -1182,7 +1182,6 @@ function TerminalWorkspace({
           threadKey={content.threadKey}
           machine={machine}
           worktreeLabel={projectName ?? label}
-          branch={worktree.branch || null}
           agentId={worktree.agent || undefined}
         />
       )

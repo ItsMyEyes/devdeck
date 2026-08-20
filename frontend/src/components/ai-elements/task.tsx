@@ -66,6 +66,37 @@ export const TaskTrigger = ({
   </CollapsibleTrigger>
 );
 
+/**
+ * DevDeck addition — `TaskContent` without the forced inner wrapper.
+ *
+ * `TaskContent` below is upstream's: it wraps whatever it is given in a
+ * `mt-4 space-y-2 border-l-2 pl-4` div, and those classes are not reachable
+ * from `className` (which lands on the `CollapsibleContent` outside it). That
+ * wrapper is right for a task list of prose items and wrong for the one place
+ * this app uses it — a run of folded TOOL ROWS, which must line up on exactly
+ * the same left edge as the unfolded rows above and below them. Indented and
+ * gapped, the same call read as two different things depending on whether it
+ * happened to be the newest one.
+ *
+ * Kept as a separate export rather than a prop on `TaskContent` so the
+ * upstream component stays byte-comparable against a future vendor refresh —
+ * same reasoning as `ToolCompactHeader` in `tool.tsx`.
+ */
+export type TaskCompactContentProps = ComponentProps<typeof CollapsibleContent>;
+
+export const TaskCompactContent = ({
+  className,
+  ...props
+}: TaskCompactContentProps) => (
+  <CollapsibleContent
+    className={cn(
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      className
+    )}
+    {...props}
+  />
+);
+
 export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
 
 export const TaskContent = ({

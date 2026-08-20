@@ -182,15 +182,51 @@ export function MonacoEditor({
   // jump silently discarded.
   useEffect(() => {
     const instance = editorRef.current
-    if (!instance || !reveal || !ready) return
-    const model = instance.getModel()
-    if (!model) return
-    const range = toMonacoRange(reveal, model.getLineCount(), (line) =>
-      model.getLineMaxColumn(line),
-    )
-    instance.setSelection(range)
-    instance.revealRangeInCenter(range)
-    instance.focus()
+    const host = hostRef.current
+    if (!instance || !host || !reveal || !ready) return
+
+    const apply = () => {
+      const model = instance.getModel()
+      if (!model) return
+      // Monaco measures its container once, when it is created, and re-measures
+      // only when its own `automaticLayout` observer fires — which is
+      // asynchronous, so never before this effect.
+      //
+      // That matters because FileEditor keeps every open file mounted and hides
+      // the inactive ones with `display: none`. An editor built in a background
+      // tab therefore believes it is 0x0 for as long as it stays there, and
+      // revealing a range into a zero-height viewport is not a scroll to the
+      // wrong place — monaco clamps scrollTop to a zero scroll range and the
+      // jump is discarded outright. Clicking through to a function whose file
+      // was already open landed on line 1 for exactly this reason, while the
+      // same click into a not-yet-open file worked: that tab is created
+      // already visible.
+      //
+      // Re-measuring first is what makes the reveal land, because by the time
+      // effects run the tab this editor lives in has already been switched to
+      // in the DOM.
+      instance.layout()
+      const range = toMonacoRange(reveal, model.getLineCount(), (line) =>
+        model.getLineMaxColumn(line),
+      )
+      instance.setSelection(range)
+      instance.revealRangeInCenter(range)
+      instance.focus()
+    }
+
+    apply()
+
+    // Belt and braces for a reveal that arrives at a tab which is *not* being
+    // shown in the same commit: the apply above measured nothing, so hold the
+    // jump until the container actually has a size rather than dropping it.
+    if (host.clientHeight > 0) return
+    const observer = new ResizeObserver(() => {
+      if (host.clientHeight === 0) return
+      observer.disconnect()
+      apply()
+    })
+    observer.observe(host)
+    return () => observer.disconnect()
   }, [reveal, ready, mounted, registryKey])
 
   return (

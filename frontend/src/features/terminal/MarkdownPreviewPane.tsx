@@ -18,7 +18,7 @@ export function MarkdownPreviewPane({ target, path }: { target: FilesTarget; pat
 
   if (file.isLoading) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-devdeck-pane">
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-notion-bg">
         <DataLoading compact label="loading preview…" />
       </div>
     )
@@ -26,7 +26,7 @@ export function MarkdownPreviewPane({ target, path }: { target: FilesTarget; pat
 
   if (file.error) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-devdeck-pane px-6 text-center">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-notion-bg px-6 text-center">
         <FileWarning size={22} className="text-devdeck-yellow" />
         <span className="max-w-lg font-mono text-[11px] leading-relaxed text-devdeck-fg-2">
           {file.error instanceof ApiError ? file.error.message : 'Could not open this file'}
@@ -35,9 +35,14 @@ export function MarkdownPreviewPane({ target, path }: { target: FilesTarget; pat
     )
   }
 
+  // Same page geometry as the editing tab (MarkdownFileEditor's rich mode) —
+  // full pane width on the same responsive padding ladder — so popping the
+  // preview out beside the editor doesn't reflow the document.
   return (
-    <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-devdeck-pane px-6 py-6">
-      <MarkdownPreview source={file.data?.content ?? ''} />
+    <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-notion-bg">
+      <div className="w-full px-5 py-12 sm:px-14 md:px-16 xl:px-24">
+        <MarkdownPreview source={file.data?.content ?? ''} />
+      </div>
     </div>
   )
 }

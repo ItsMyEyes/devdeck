@@ -83,6 +83,7 @@ type fakeAdapter struct {
 	sendTurnCalls        []provider.SendTurnInput
 	userInputCalls       []userInputCall
 	interactionModeCalls []interactionModeCall
+	runtimeModeCalls     []runtimeModeCall
 }
 
 // What the Reactor forwarded to the provider when the user answered. Recorded
@@ -101,6 +102,15 @@ type userInputCall struct {
 type interactionModeCall struct {
 	threadID string
 	mode     provider.InteractionMode
+}
+
+// What the Reactor forwarded when the composer's Permission pill changes —
+// TestReactorSetsRuntimeModeOnModeChange asserts both fields for the same
+// reason interactionModeCall does: a wrong threadID or mode would silently
+// leave the wrong thread's live session asking under its old policy.
+type runtimeModeCall struct {
+	threadID string
+	mode     provider.RuntimeMode
 }
 
 func (a *fakeAdapter) Kind() provider.Kind             { return fakeKind }
@@ -154,6 +164,18 @@ func (a *fakeAdapter) interactionModeSnapshot() []interactionModeCall {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]interactionModeCall(nil), a.interactionModeCalls...)
+}
+func (a *fakeAdapter) SetRuntimeMode(_ context.Context, threadID string, mode provider.RuntimeMode) error {
+	a.rec.record("SetRuntimeMode")
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.runtimeModeCalls = append(a.runtimeModeCalls, runtimeModeCall{threadID, mode})
+	return nil
+}
+func (a *fakeAdapter) runtimeModeSnapshot() []runtimeModeCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]runtimeModeCall(nil), a.runtimeModeCalls...)
 }
 func (a *fakeAdapter) StopSession(context.Context, string) error { return nil }
 func (a *fakeAdapter) StopAll(context.Context) error             { return nil }
@@ -686,6 +708,37 @@ func TestReactorSetsInteractionModeOnModeChange(t *testing.T) {
 	}
 	if calls[0].threadID != "w-abc" || calls[0].mode != provider.InteractionPlan {
 		t.Fatalf("call = %+v, want {threadID: w-abc, mode: plan}", calls[0])
+	}
+}
+
+// Before SetRuntimeMode existed, EvtThreadRuntimeModeSet only ever reached
+// approval.Gate.ReleasePending (DevDeck's own SSH-tool approval cards) — it
+// never told the live provider adapter anything. The composer's Permission
+// pill flipped Thread.Mode in the read model, but a running claude/codex/pi
+// process kept enforcing whatever --permission-mode/approvalPolicy it was
+// launched with for the rest of the session: an operator switching to auto
+// or full access (or back to approval-required) kept getting asked exactly
+// as before, no matter what the pill now said. This is the live-provider
+// half of that fix — ReleasePending's own coverage lives in
+// workers_runtimemode_test.go.
+func TestReactorSetsRuntimeModeOnModeChange(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadRuntimeModeSet, mustRaw(t, RuntimeModeSetPayload{
+		Mode: provider.ModeFullAccess,
+	}))
+	h.waitForCall(t, "SetRuntimeMode")
+
+	calls := h.adapter.runtimeModeSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("runtimeModeCalls = %+v, want exactly one", calls)
+	}
+	if calls[0].threadID != "w-abc" || calls[0].mode != provider.ModeFullAccess {
+		t.Fatalf("call = %+v, want {threadID: w-abc, mode: full-access}", calls[0])
 	}
 }
 

@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,6 +42,59 @@ type session struct {
 	// stderr holds what the process wrote to stderr, so a fatal startup error
 	// can be reported instead of surfacing only as "no active session" later.
 	stderr *boundedBuffer
+
+	// stdinMu serializes every write to the CLI's stdin. Before this task
+	// SendTurn/InterruptTurn were the only writers and both ran on the
+	// Reactor's single goroutine; the auto-deny drain below writes from
+	// readLoop's goroutine instead, so two goroutines can now interleave on
+	// one json.Encoder without it — a corrupt NDJSON line the CLI can't
+	// parse, which takes the whole session down.
+	stdinMu sync.Mutex
+}
+
+// writeControlResponse is the one place this package writes a
+// control_response. Reused unmodified by A2's RespondToRequest.
+func (s *session) writeControlResponse(requestID string, response map[string]any) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	return s.stdinEnc.Encode(map[string]any{
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": requestID,
+			"response":   response,
+		},
+	})
+}
+
+// applyModel switches the running session's model when the operator's pick
+// differs from what the session is actually using, and records the new value.
+//
+// This exists because `--model` is a session-START flag (buildArgs) and the
+// session starts on thread.created — before the operator has picked anything.
+// Without it every later pick was dropped: the thread silently kept running
+// the model it was born with while the composer's pill claimed otherwise.
+//
+// `set_model` is the CLI's own control request, verified live against 2.1.233
+// — with it the session's reported model changed to the requested one, without
+// it it did not. Caller must NOT already hold stdinMu.
+func (s *session) applyModel(model string) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	if model == "" || model == s.model {
+		return nil
+	}
+	if err := s.stdinEnc.Encode(map[string]any{
+		"type":       "control_request",
+		"request_id": newControlRequestID("set-model-"),
+		"request":    map[string]any{"subtype": "set_model", "model": model},
+	}); err != nil {
+		return err
+	}
+	// Recorded only after the write succeeds, so a failed switch is retried on
+	// the next turn rather than remembered as done.
+	s.model = model
+	return nil
 }
 
 // stderrCaptureBytes bounds per-session stderr retention. Only the head is
@@ -152,6 +208,17 @@ func buildArgs(cfg Config, in provider.SessionStartInput) []string {
 		// process's stderr was going nowhere (see startProcess).
 		"--verbose",
 		"--include-partial-messages",
+		// Required in every mode, unconditionally: AskUserQuestion is not
+		// offered to the model without it (verified: system/init's tool list
+		// differs by exactly AskUserQuestion/EnterPlanMode/ExitPlanMode
+		// between a run with and without this flag), and the modes that
+		// never prompt (auto, bypassPermissions, dontAsk) are unaffected by
+		// its presence.
+		// Corrected belief: without this flag, approval-required does not
+		// "ask but have nothing to say yes with" — it silently denies every
+		// tool call (system/permission_denied, dropped entirely pre-parser).
+		// This flag is what turns that into a real ask.
+		"--permission-prompt-tool", "stdio",
 	}
 
 	switch {
@@ -160,21 +227,35 @@ func buildArgs(cfg Config, in provider.SessionStartInput) []string {
 		// it takes precedence over the RuntimeMode mapping below rather than
 		// stacking a second --permission-mode flag.
 		args = append(args, "--permission-mode", "plan")
-	case in.Mode == provider.ModeAutoAcceptEdits:
-		args = append(args, "--permission-mode", "acceptEdits")
-	case in.Mode == provider.ModeFullAccess:
-		args = append(args, "--permission-mode", "bypassPermissions")
-	case in.Mode == provider.ModeAuto:
-		args = append(args, "--permission-mode", "auto")
+	case in.Mode == provider.ModeAutoAcceptEdits, in.Mode == provider.ModeFullAccess, in.Mode == provider.ModeAuto:
+		args = append(args, "--permission-mode", claudePermissionMode(in.Mode))
 	default:
-		// approval-required: leave the CLI's default in place, every tool
-		// call asks for approval. The broker that answers those requests is
-		// spec 2 (backend/internal/agentcore/approval); until then the
-		// adapter still asks, it just has nothing to say yes with.
+		// approval-required: the CLI's own default, now a REAL ask (see the
+		// flag's comment above). parse.go's auto-denier answers every
+		// can_use_tool it does not yet route to a real decision (everything
+		// except AskUserQuestion); A2 replaces that branch with a real
+		// broker. AskUserQuestion itself is answered for real, below.
 	}
 
 	if in.Model.Model != "" {
 		args = append(args, "--model", in.Model.Model)
+	}
+
+	// effort/contextWindow: the composer's Reasoning/Context Window picker
+	// (ComposerControls.tsx). Both are real CLI flags, confirmed against
+	// `claude --help`, not passed through untranslated — this file is the
+	// one place that boundary crosses (see this function's own doc comment).
+	// Neither is validated here: --effort degrades gracefully on a bad value
+	// (a stderr warning, falls back to the default) so there is nothing to
+	// guard, and --autocompact's value already went through the composer's
+	// own validation before it ever reached Options (that flag, unlike
+	// --effort, HARD-FAILS session startup on anything outside 100k-1M or
+	// "auto" — see ContextWindowPicker.tsx's clamp).
+	if effort, ok := in.Model.Options["effort"].(string); ok && effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	if window, ok := in.Model.Options["contextWindow"].(string); ok && window != "" {
+		args = append(args, "--autocompact", window)
 	}
 
 	if len(in.ResumeCursor) > 0 {
@@ -184,23 +265,48 @@ func buildArgs(cfg Config, in provider.SessionStartInput) []string {
 		}
 	}
 
-	if in.MCPEndpoint != nil {
-		mcpCfg, _ := json.Marshal(map[string]any{
-			"mcpServers": map[string]any{
-				in.MCPEndpoint.Name: map[string]any{
-					"type": "http",
-					"url":  in.MCPEndpoint.URL,
-					"headers": map[string]string{
-						"Authorization": "Bearer " + in.MCPEndpoint.Token,
-					},
+	if len(in.MCPEndpoints) > 0 {
+		servers := map[string]any{}
+		for _, ep := range in.MCPEndpoints {
+			if ep.Command != "" {
+				servers[ep.Name] = map[string]any{
+					"command": ep.Command,
+					"args":    ep.Args,
+				}
+				continue
+			}
+			servers[ep.Name] = map[string]any{
+				"type": "http",
+				"url":  ep.URL,
+				"headers": map[string]string{
+					"Authorization": "Bearer " + ep.Token,
 				},
-			},
-		})
+			}
+		}
+		mcpCfg, _ := json.Marshal(map[string]any{"mcpServers": servers})
 		args = append(args, "--mcp-config", string(mcpCfg))
 	}
 
 	args = append(args, cfg.ExtraArgs...)
 	return args
+}
+
+// mergedSessionEnv layers one session's own overrides
+// (provider.SessionStartInput.Env) on top of the instance's, mutating
+// neither. Session wins: it is the more specific of the two, and it is how an
+// SSH chat thread puts the devdeck-ssh helper on its agent's PATH.
+func mergedSessionEnv(instance, session map[string]string) map[string]string {
+	if len(session) == 0 {
+		return instance
+	}
+	out := make(map[string]string, len(instance)+len(session))
+	for k, v := range instance {
+		out[k] = v
+	}
+	for k, v := range session {
+		out[k] = v
+	}
+	return out
 }
 
 // buildEnv starts from the parent process's own environment (the spawned
@@ -244,7 +350,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 
 	cmd := exec.CommandContext(sctx, bin, buildArgs(a.cfg, in)...)
 	cmd.Dir = in.Cwd
-	cmd.Env = buildEnv(a.env, a.cfg)
+	cmd.Env = buildEnv(mergedSessionEnv(a.env, in.Env), a.cfg)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -309,6 +415,7 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 		for _, ev := range parseLine(append([]byte(nil), line...), sess.state) {
 			a.emit(ev)
 		}
+		a.drainAutoDenies(sess)
 	}
 	if err := sc.Err(); err != nil {
 		log.Printf("claude: instance %s thread %s: stdout scan: %v", a.instanceID, sess.threadID, err)
@@ -350,6 +457,39 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 	a.mu.Unlock()
 }
 
+// drainAutoDenies writes back a "deny" control_response for every
+// control_request the parser queued an auto-deny for on the most recent
+// parseLine call — every can_use_tool this package does not yet route to a
+// real decision (AskUserQuestion is the one exception; it goes through
+// RespondToUserInput instead). This is the backstop that keeps a request
+// class this parser has never special-cased from hanging the session
+// forever: the capture that motivated this task measured NO CLI-side
+// timeout on an unanswered control_request. Factored out of readLoop's own
+// loop so it is unit-testable without a live subprocess (readLoop's tail
+// calls sess.cmd.Wait(), which a hand-built *session in a test cannot
+// satisfy).
+func (a *adapter) drainAutoDenies(sess *session) {
+	for _, d := range sess.state.takeAutoDenies() {
+		if err := sess.writeControlResponse(d.requestID, map[string]any{
+			"behavior": "deny",
+			"message":  d.message,
+		}); err != nil {
+			log.Printf("claude: instance %s thread %s: auto-deny write: %v", a.instanceID, sess.threadID, err)
+		}
+	}
+}
+
+// supportedImageMIMETypes mirrors t3code's ClaudeAdapter.ts
+// SUPPORTED_CLAUDE_IMAGE_MIME_TYPES — the exact set claude's CLI accepts as
+// an image content block's media_type. Anything else fails the turn
+// outright in SendTurn rather than being silently dropped.
+var supportedImageMIMETypes = map[string]bool{
+	"image/gif":  true,
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+}
+
 // SendTurn writes one user turn to the session's stdin. setTurnID is called
 // before the write reaches the process: every event readLoop parses from
 // this point on is stamped with in.TurnID until the next SendTurn call.
@@ -373,14 +513,39 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 		Payload:    &event.TurnStartedPayload{Model: in.Model.Model},
 	})
 
+	content := []map[string]any{{"type": "text", "text": in.Text}}
+	for _, att := range in.Attachments {
+		if !supportedImageMIMETypes[att.MIME] {
+			return provider.TurnStartResult{}, fmt.Errorf("claude: unsupported attachment MIME type %q", att.MIME)
+		}
+		content = append(content, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": att.MIME,
+				"data":       base64.StdEncoding.EncodeToString(att.Data),
+			},
+		})
+	}
+
+	// Before the message, not after: the CLI applies the model to whatever it
+	// processes next, so switching afterwards would run THIS turn on the old
+	// model and only take effect on the following one.
+	if err := sess.applyModel(in.Model.Model); err != nil {
+		return provider.TurnStartResult{}, fmt.Errorf("claude: switch model: %w", err)
+	}
+
 	msg := map[string]any{
 		"type": "user",
 		"message": map[string]any{
 			"role":    "user",
-			"content": []map[string]any{{"type": "text", "text": in.Text}},
+			"content": content,
 		},
 	}
-	if err := sess.stdinEnc.Encode(msg); err != nil {
+	sess.stdinMu.Lock()
+	err := sess.stdinEnc.Encode(msg)
+	sess.stdinMu.Unlock()
+	if err != nil {
 		return provider.TurnStartResult{}, fmt.Errorf("claude: write turn: %w", err)
 	}
 
@@ -397,24 +562,177 @@ func (a *adapter) InterruptTurn(ctx context.Context, threadID, turnID string) er
 	if !ok {
 		return nil
 	}
+	sess.stdinMu.Lock()
+	defer sess.stdinMu.Unlock()
 	return sess.stdinEnc.Encode(map[string]any{
 		"type":    "control_request",
 		"request": map[string]any{"subtype": "interrupt"},
 	})
 }
 
-// RespondToRequest is a no-op in spec 1: no adapter opens a request yet (see
-// approval.NoopBroker), but the Reactor (Task 9) calls this path
-// unconditionally for every provider by design, so it must return nil
-// rather than an error. The real implementation — sending a control_response
-// back over stdin — lands in spec 2.
-func (a *adapter) RespondToRequest(ctx context.Context, threadID, requestID string, d event.Decision) error {
-	return nil
+// newControlRequestID mints a request_id for an outbound control_request
+// this package does not otherwise correlate an answer to (unlike
+// RespondToRequest's requestID, which comes FROM the CLI). Uniqueness only
+// needs to hold within one process's lifetime; a fixed-width random suffix
+// is enough and avoids pulling in a UUID dependency for one call site.
+func newControlRequestID(prefix string) string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read does not fail on any supported platform; this is
+		// an unreachable-in-practice fallback, not a real collision risk.
+		return prefix + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return prefix + hex.EncodeToString(b)
 }
 
-// RespondToUserInput is a no-op in spec 1, for the same reason as
-// RespondToRequest.
+// SetInteractionMode switches an already-running session's live permission
+// mode via the stream-json control channel — verified live in T1's capture
+// (capture/README.md "Open question 2"): `set_permission_mode` is accepted
+// on an already-running session, in both directions, and applies
+// immediately (confirmed by the `system/status` line that follows echoing
+// the new `permissionMode`). No restart, no lost conversation — this is why
+// spec §4's path (a) shipped instead of the StopSession/Unbind/StartSession
+// fallback (b).
+//
+// Best-effort like InterruptTurn: a nil return when no session exists for
+// the thread is not an error, it means there is nothing left to reach.
+// provider.InteractionMode's two values ("default"/"plan") ARE the CLI's own
+// mode names, so no translation table is needed here — buildArgs already
+// relies on that same identity for the initial --permission-mode flag.
+func (a *adapter) SetInteractionMode(ctx context.Context, threadID string, mode provider.InteractionMode) error {
+	a.mu.Lock()
+	sess, ok := a.sessions[threadID]
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	sess.stdinMu.Lock()
+	defer sess.stdinMu.Unlock()
+	return sess.stdinEnc.Encode(map[string]any{
+		"type":       "control_request",
+		"request_id": newControlRequestID("setmode-"),
+		"request": map[string]any{
+			"subtype": "set_permission_mode",
+			"mode":    string(mode),
+		},
+	})
+}
+
+// claudePermissionMode maps a RuntimeMode onto the CLI's own --permission-mode
+// value, for the three modes that need an explicit flag (approval-required is
+// the CLI's own default, and Plan mode — itself a --permission-mode value —
+// is handled separately by buildArgs/SetInteractionMode). Shared by buildArgs
+// (session start) and SetRuntimeMode (an already-running session's live
+// mid-run switch, below) so the two can never map a mode two different ways.
+func claudePermissionMode(mode provider.RuntimeMode) string {
+	switch mode {
+	case provider.ModeAutoAcceptEdits:
+		return "acceptEdits"
+	case provider.ModeFullAccess:
+		return "bypassPermissions"
+	case provider.ModeAuto:
+		return "auto"
+	default:
+		return "default"
+	}
+}
+
+// SetRuntimeMode pushes a changed Permission-pill mode into an already-running
+// session, over the identical set_permission_mode control_request
+// SetInteractionMode uses above. Without this, RuntimeMode only ever reached
+// the CLI at StartSession (buildArgs): the composer's Permission pill updated
+// DevDeck's own thread state and released any of DevDeck's OWN pending
+// approval cards (approval.Gate.ReleasePending), but the live claude process
+// kept enforcing whichever --permission-mode it was launched with for the
+// rest of the session — an operator switching to auto or full access kept
+// getting asked by the CLI itself, no matter what the pill now said.
+func (a *adapter) SetRuntimeMode(ctx context.Context, threadID string, mode provider.RuntimeMode) error {
+	a.mu.Lock()
+	sess, ok := a.sessions[threadID]
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	sess.stdinMu.Lock()
+	defer sess.stdinMu.Unlock()
+	return sess.stdinEnc.Encode(map[string]any{
+		"type":       "control_request",
+		"request_id": newControlRequestID("setmode-"),
+		"request": map[string]any{
+			"subtype": "set_permission_mode",
+			"mode":    claudePermissionMode(mode),
+		},
+	})
+}
+
+// permissionResult maps a Decision onto the CLI's PermissionResult shape —
+// identical to t3code (ClaudeAdapter.ts:4033-4051), verified byte-for-byte
+// against captures e2, e14, e3.
+func permissionResult(d event.Decision, input, suggestions json.RawMessage) map[string]any {
+	switch d {
+	case event.DecisionAccept, event.DecisionAcceptForSession:
+		out := map[string]any{"behavior": "allow", "updatedInput": json.RawMessage(input)}
+		if d == event.DecisionAcceptForSession && len(suggestions) > 0 && string(suggestions) != "null" {
+			out["updatedPermissions"] = json.RawMessage(suggestions)
+		}
+		return out
+	case event.DecisionCancel:
+		return map[string]any{"behavior": "deny", "message": "User cancelled tool execution."}
+	default: // decline
+		return map[string]any{"behavior": "deny", "message": "User declined tool execution."}
+	}
+}
+
+// RespondToRequest answers a pending can_use_tool approval — the operator's
+// accept/acceptForSession/decline/cancel decision, mapped by
+// permissionResult onto the CLI's PermissionResult shape and written back
+// over stdin as a control_response. The pending entry is retired first, so a
+// double-tap (a second device, or a cancel racing this call) is a benign
+// no-op rather than a second stdin write.
+func (a *adapter) RespondToRequest(ctx context.Context, threadID, requestID string, d event.Decision) error {
+	a.mu.Lock()
+	sess, ok := a.sessions[threadID]
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	p, found := sess.state.takePending(requestID)
+	if !found {
+		return nil
+	}
+	return sess.writeControlResponse(requestID, permissionResult(d, p.input, p.suggestions))
+}
+
+// RespondToUserInput answers a pending AskUserQuestion. The original
+// questions array must be echoed verbatim (spec §1.5) — this is why the
+// pending map exists even in A1: the raw input arrives minutes before the
+// answer does.
 func (a *adapter) RespondToUserInput(ctx context.Context, threadID, requestID string, answers map[string]any) error {
+	a.mu.Lock()
+	sess, ok := a.sessions[threadID]
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	p, found := sess.state.takePending(requestID)
+	if !found {
+		// Already resolved or cancelled — a double-tap from a second device,
+		// or a cancel that raced this call. Benign, mirrors ErrUnknownRequest.
+		return nil
+	}
+	if err := sess.writeControlResponse(requestID, map[string]any{
+		"behavior": "allow",
+		"updatedInput": map[string]any{
+			"questions": json.RawMessage(p.input),
+			"answers":   answers,
+		},
+	}); err != nil {
+		return err
+	}
+	a.emit(event.Event{
+		Type: event.UserInputResolved, Provider: string(Kind), InstanceID: string(a.instanceID),
+		ThreadID: threadID, RequestID: requestID, CreatedAt: time.Now().UTC(),
+	})
 	return nil
 }
 

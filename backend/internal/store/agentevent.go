@@ -74,20 +74,39 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 			}
 		}
 
-		// The thread's name, projected from the first thing the user actually
+		// The thread's name, projected from the LATEST thing the user actually
 		// said. `EvtThreadCreated` has nothing to name a thread WITH — it
 		// carries only an instance id, and it is committed on the WebSocket's
 		// hello, before any message exists — so every row was inserted with
 		// title '' and stayed that way, which is why the sidebar read
 		// "Untitled session" forever.
 		//
-		// `WHERE title = ''` is what makes this first-message-only: later
-		// turns in the same thread leave the name alone, and a user-supplied
-		// title (should renaming ever land) is never overwritten.
-		if e.Type == orchestration.EvtThreadMessageSent {
+		// ── Latest, not first ──
+		// This used to carry `AND title = ''`, which pinned the name to the
+		// opening message for the thread's whole life. That reads well in the
+		// cases people design for and badly in the ones that actually happen: a
+		// session opened with "coba kasih pertanyaan lagi" or "hi" wore that
+		// name permanently, however far the conversation later travelled, and
+		// the sidebar became a list of throat-clearing. Retitling on every turn
+		// costs one indexed UPDATE per message and keeps the row describing
+		// what the thread is about NOW.
+		//
+		// ── Why this hangs off turn-start and not message-sent ──
+		// `EvtThreadMessageSent` is emitted from TWO places in `Decide`:
+		// `CmdThreadTurnStart` (the user's message) and
+		// `CmdThreadAssistantComplete` (the agent's). Nothing dispatches the
+		// second one today, so keying off it happens to work — but it is a live
+		// branch, and the moment anything does, `summarizeThreadTitle` would
+		// start naming threads after the AGENT's last reply. Under the old
+		// `title = ''` guard that was almost harmless (only the first event
+		// ever won); retitling every turn makes it a real hazard.
+		// `EvtThreadTurnStartRequested` has exactly one emitter, always
+		// alongside the same `TurnStartPayload`, so it cannot pick up agent
+		// text no matter what is wired up later.
+		if e.Type == orchestration.EvtThreadTurnStartRequested {
 			if title := summarizeThreadTitle(e.Payload); title != "" {
 				if _, err := tx.Exec(
-					`UPDATE agent_thread SET title = ? WHERE id = ? AND title = ''`,
+					`UPDATE agent_thread SET title = ? WHERE id = ?`,
 					title, e.ThreadID,
 				); err != nil {
 					return nil, fmt.Errorf("title agent thread %s: %w", e.ThreadID, err)
@@ -251,8 +270,9 @@ func (s *Store) AllAgentEvents() ([]orchestration.Event, error) {
 	return scanAgentEvents(rows)
 }
 
-// DeleteAgentThread erases a thread: its sidebar row, its event log, and the
-// command receipts that log was written under — one transaction, all three.
+// DeleteAgentThread erases a thread: its sidebar row, its event log, the
+// command receipts that log was written under, and any attachments uploaded
+// against it — one transaction, all four.
 //
 // A tombstone would be the event-sourced reflex, and it is the wrong call
 // here. Thread ids are addresses, not surrogates: the primary chat pane IS the
@@ -276,6 +296,9 @@ func (s *Store) DeleteAgentThread(threadID string) error {
 	}
 	if _, err := tx.Exec(`DELETE FROM agent_event WHERE thread_id = ?`, threadID); err != nil {
 		return fmt.Errorf("delete agent events %s: %w", threadID, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_attachment WHERE thread_id = ?`, threadID); err != nil {
+		return fmt.Errorf("delete agent attachments %s: %w", threadID, err)
 	}
 	if _, err := tx.Exec(`DELETE FROM agent_thread WHERE id = ?`, threadID); err != nil {
 		return fmt.Errorf("delete agent thread %s: %w", threadID, err)

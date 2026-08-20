@@ -64,13 +64,16 @@ describe('serverLanguage', () => {
   })
 })
 
+/** Every uri here is a `file://` one because the transport also filters on
+ *  scheme (lspTransport.scheme.test.ts) — an `inmemory://` document is dropped
+ *  before the language filter these cases exercise is ever consulted. */
 describe('DevDeckLspTransport language filtering', () => {
   it('forwards didOpen for the transport\'s own language', () => {
     const { socket, transport } = goTransport()
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',
-      params: { textDocument: { uri: 'inmemory://devdeck/a', languageId: 'go', version: 1, text: '' } },
+      params: { textDocument: { uri: 'file:///w/a.go', languageId: 'go', version: 1, text: '' } },
     })
     expect(sentMethods(socket)).toEqual(['textDocument/didOpen'])
   })
@@ -80,14 +83,14 @@ describe('DevDeckLspTransport language filtering', () => {
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',
-      params: { textDocument: { uri: 'inmemory://devdeck/b', languageId: 'typescript', version: 1, text: '' } },
+      params: { textDocument: { uri: 'file:///w/b.ts', languageId: 'typescript', version: 1, text: '' } },
     })
     expect(socket.sent).toEqual([])
   })
 
   it('keeps dropping didChange/didClose for a uri it dropped the didOpen for', () => {
     const { socket, transport } = goTransport()
-    const uri = 'inmemory://devdeck/b'
+    const uri = 'file:///w/b.ts'
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',
@@ -108,7 +111,7 @@ describe('DevDeckLspTransport language filtering', () => {
 
   it('stops dropping a uri once it is legitimately re-opened for this language', () => {
     const { socket, transport } = goTransport()
-    const uri = 'inmemory://devdeck/c'
+    const uri = 'file:///w/c.go'
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',
@@ -135,7 +138,7 @@ describe('DevDeckLspTransport language filtering', () => {
       void transport.send({
         jsonrpc: '2.0',
         method: 'textDocument/didOpen',
-        params: { textDocument: { uri: `inmemory://devdeck/${languageId}`, languageId, version: 1, text: '' } },
+        params: { textDocument: { uri: `file:///w/${languageId}`, languageId, version: 1, text: '' } },
       })
     }
     expect(sentMethods(socket)).toEqual([
@@ -153,7 +156,7 @@ describe('DevDeckLspTransport language filtering', () => {
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',
-      params: { textDocument: { uri: 'inmemory://devdeck/a', languageId: 'typescript', version: 1, text: '' } },
+      params: { textDocument: { uri: 'file:///w/a.go', languageId: 'typescript', version: 1, text: '' } },
     })
     expect(sentMethods(socket)).toEqual(['textDocument/didOpen'])
   })

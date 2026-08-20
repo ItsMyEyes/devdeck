@@ -205,11 +205,29 @@ CLAUDE.md                          ← same content (Claude reads this name)
 The token is never written into `AGENTS.md` or any file the agent is asked to
 quote back, and never appears in the transcript.
 
-## 6. Helper CLI
+## 6. Tool CLI
 
-New binary `backend/cmd/devdeck-ssh` (sibling of the existing
-`backend/cmd/mcp-server`). Resolves its session from `$DEVDECK_SSH_SESSION` or
-`./.devdeck/session.json`.
+> **Amended after implementation review (F3).** This section originally
+> specified a new binary `backend/cmd/devdeck-ssh`. Shipping a second executable
+> turned out to be the feature's single largest failure surface — it had to be
+> cross-compiled for six targets, renamed past the release's
+> `devdeck-* → devdeck-runtime-*` step, added as a second Tauri `externalBin`,
+> signed, and landed on the operator's PATH under exactly the name `devdeck-ssh`,
+> and it could not work under `go run` at all. Any one of those missing produced
+> a hub whose every tool call answered `command not found`.
+>
+> What shipped instead: `backend/internal/sshtoolcli`, entered as
+> **`devdeck ssh-tool`** — a subcommand of the binary that is already running the
+> hub, dispatched at the top of `main` before any config or database work.
+> `sshthread.Seed` writes a `bin/devdeck-ssh` shim into each thread's workspace
+> forwarding to `os.Executable()`, and that workspace `bin/` is what `main.go`
+> prepends to the agent's PATH. The agent's contract below is unchanged — it
+> still invokes a bare `devdeck-ssh` — but there is nothing for an operator to
+> install, and a moved or upgraded install self-corrects, because Seed re-runs on
+> every session start. `cmd/mcp-server` was folded in the same way
+> (`devdeck mcp-server`, `internal/issuemcp`).
+
+Resolves its session from `$DEVDECK_SSH_SESSION` or `./.devdeck/session.json`.
 
 ```
 devdeck-ssh exec  <command...>          # runs remotely, prints stdout/stderr
@@ -283,4 +301,9 @@ implementation:
 4. Workspace lives beside the SQLite DB, alongside `auth.key`/`signing.key`.
 5. Tokens are in-memory (lost on restart, re-minted on next session start) —
    no schema change, no new store method.
-6. The helper CLI is a separate binary, matching `cmd/mcp-server` precedent.
+6. ~~The helper CLI is a separate binary, matching `cmd/mcp-server` precedent.~~
+   **Reversed in implementation (see §6):** the tool CLI is a subcommand of the
+   DevDeck binary reached through a generated workspace shim, and
+   `cmd/mcp-server` followed it rather than setting the precedent. A second
+   artifact meant a second thing to build, ship, sign and put on PATH, and the
+   feature was dead in every case where one of those was missed.

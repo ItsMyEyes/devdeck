@@ -75,7 +75,7 @@ func TestToolApprovalPrompterOpensAwaitsAndResolves(t *testing.T) {
 		}
 	}()
 
-	d, err := p.Ask(ctx, "ssh:sc-1", "tool-1", event.ReqCommandExecApproval, "systemctl restart nginx")
+	d, err := p.Ask(ctx, "ssh:sc-1", "tool-1", event.ReqCommandExecApproval, "systemctl restart nginx", true)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

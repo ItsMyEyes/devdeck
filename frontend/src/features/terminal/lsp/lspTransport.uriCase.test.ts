@@ -128,9 +128,14 @@ describe('DevDeckLspTransport document uri case', () => {
     expect(sentUris(socket)).toEqual([REAL, REAL, LOWER])
   })
 
+  /** The case repair is a best-effort lookup, not a gate: a document monaco
+   *  has already dropped from its model list still has to reach the server
+   *  addressed as it was. Uses a second `file://` path rather than the
+   *  `inmemory://` placeholder this once asserted on — those never reach the
+   *  server at all now, see lspTransport.scheme.test.ts. */
   it('passes a uri with no matching model through untouched', () => {
     const { socket, transport } = goTransport([REAL])
-    const uri = 'inmemory://devdeck/m-1:w-2:internal/cli/root.go'
+    const uri = 'file:///Users/kiyora/Documents/superapps/core/internal/cli/Other.go'
     void transport.send({
       jsonrpc: '2.0',
       method: 'textDocument/didOpen',

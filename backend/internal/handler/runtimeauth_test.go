@@ -184,3 +184,31 @@ func TestRequireRuntimeAuthAllowsWhoamiWithoutACredential(t *testing.T) {
 		t.Errorf("unauthenticated /api/whoami: code=%d hit=%v, want 200 — the frontend must be able to learn this process's role before any credential exists", rec.Code, hit)
 	}
 }
+
+// SSH DevOps chat runs on the connection's executor runtime, so the agent
+// process and its devdeck-ssh helper live on the RUNTIME and call these routes
+// there. The helper holds a per-thread token (RequireThreadToken) and nothing
+// else — no runtime key, no session cookie — so this middleware has to let the
+// request through and leave the decision to RequireThreadToken.
+//
+// Without these entries every tool call from a runtime-hosted thread is
+// rejected here, before the token that would have authorized it is ever read:
+// the agent sees a 401 on every exec, and the operator sees a chat that talks
+// but cannot touch the host.
+func TestRequireRuntimeAuthLetsAgentToolRoutesReachTheirTokenCheck(t *testing.T) {
+	for _, path := range []string{
+		"/api/agent-tools/ssh/exec",
+		"/api/agent-tools/ssh/file",
+		"/api/agent-tools/ssh/files",
+		"/api/agent-tools/ssh/grep",
+	} {
+		var hit bool
+		mw := RequireRuntimeAuth(nil, "rt-key")
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		mw(okHandler(&hit)).ServeHTTP(rec, req)
+		if !hit || rec.Code != http.StatusOK {
+			t.Errorf("%s: code=%d hit=%v, want it passed through to RequireThreadToken", path, rec.Code, hit)
+		}
+	}
+}

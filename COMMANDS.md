@@ -338,9 +338,9 @@ OPENAI_BASE_URL=https://api.openai.com/v1   # optional, for OpenAI-compatible en
 MARKITDOWN_LLM_MODEL=gpt-4o-mini
 ```
 
-## MCP server (agent-facing issue tracker)
+## MCP server (agent-facing issue tracker + memory graph)
 
-`backend/cmd/mcp-server` exposes DevDeck's issues as MCP tools over stdio, so a
+`devdeck mcp-server` exposes DevDeck's issues as MCP tools over stdio, so a
 coding agent (e.g. one running inside a DevDeck-managed worktree) can file its
 own tickets: `list_projects`, `create_issue` (assignee is required — the
 calling agent should ask if it isn't obvious), `upload_attachment` (attaches
@@ -349,9 +349,55 @@ and `mark_issue_done` (moves an issue to `in_review`). It opens the **same**
 `--db` file as the main server (WAL mode makes that safe) — point it at
 `devdeck.db` beside your running instance, not a separate database.
 
+The same process also exposes `graph_neighbors`: given an entity or fact
+label (copied verbatim from a recall/reflect result), it returns that node's
+real neighbors from persistent memory's entity/fact graph — `linkType`
+(cooccurrence, semantic, temporal, entity, caused_by) and `weight` included —
+instead of the agent guessing a relationship from an isolated snippet. An
+unmatched or ambiguous label returns candidates rather than a guess. Reads
+the memory bank configured in Settings → Memory; returns a tool error (not a
+guess) if memory isn't configured or the bank is unreachable.
+
+It is a **subcommand of the DevDeck binary you already have**
+(`backend/internal/issuemcp`), not a separate program: nothing to build, install
+or keep version-matched with the schema. With no `--db` it resolves
+`data/devdeck.db` beside the executable, which is the same default the server
+uses.
+
+**You normally don't need to configure this by hand.** DevDeck auto-wires
+both this server AND Hindsight's own MCP server (recall/reflect/retain) into
+every new chat, on top of the deterministic recall/retain every provider
+already gets — no `.mcp.json` needed:
+
+- **claude** — always, via an ephemeral per-session `--mcp-config` flag.
+  Nothing persisted, nothing to clean up.
+- **codex / opencode** — only when that agent instance has its own isolated
+  `HomeDir` set (Agent management → the instance's config). Their MCP config
+  lives in a real file (`~/.codex/config.toml`,
+  `~/.config/opencode/opencode.jsonc`) — with no isolated `HomeDir` that file
+  IS the operator's own, shared with using that CLI directly in a terminal,
+  so DevDeck never writes to it automatically. Give the instance an isolated
+  `HomeDir` to opt in; wiring then happens once, at that instance's first
+  session, via `codex mcp add` / `opencode mcp add` (idempotent — safe to
+  restart the hub repeatedly).
+- **pi** — MCP itself is not possible (its CLI has no MCP client support at
+  all — no `mcp` subcommand, no related flag, as of this writing), but recall
+  and graph lookup are: DevDeck injects `DEVDECK_BIN`/`DEVDECK_DB` into a pi
+  session's environment (same `!isRuntime` gate as everything else here), and
+  a skill (`~/.agents/skills/devdeck-memory`, pi's own shared skills
+  directory) teaches pi to run `devdeck memory recall "<query>"` /
+  `devdeck memory graph "<entity>"` over bash instead of a protocol
+  handshake — see `internal/memorycli`. `graph_neighbors`'s matching logic
+  lives once in `internal/memory` (`memory.Neighbors`) and both the MCP tool
+  and this CLI call it, so they never drift apart.
+
+This is separate from Agent management's own **MCP servers** UI (Claude and
+Codex only), which edits an agent's real settings file directly when an
+operator explicitly adds a server there — a deliberate, manual action, unlike
+the automatic wiring above.
+
 ```bash
-cd backend && go run ./cmd/mcp-server --db devdeck.db
-# or: make build-mcp   (writes backend/devdeck-mcp-server)
+cd backend && go run ./cmd/server mcp-server --db devdeck.db
 ```
 
 Point an MCP client at it, e.g. in `.mcp.json`:
@@ -360,12 +406,15 @@ Point an MCP client at it, e.g. in `.mcp.json`:
 {
   "mcpServers": {
     "devdeck-issues": {
-      "command": "/path/to/devdeck-mcp-server",
-      "args": ["--db", "/path/to/devdeck.db"]
+      "command": "/path/to/devdeck",
+      "args": ["mcp-server", "--db", "/path/to/devdeck.db"]
     }
   }
 }
 ```
+
+On macOS the desktop app's copy is at
+`/Applications/DevDeck.app/Contents/MacOS/devdeck-server`.
 
 ## Build
 
@@ -384,6 +433,26 @@ make portable-all
 The executable creates `data/devdeck.db` beside itself on first launch. Node.js and
 Go are build-time dependencies only; end users still need Git and their selected
 coding-agent CLI installed.
+
+### Frontend chunk sizes
+
+`vite.config.ts` sets `build.chunkSizeWarningLimit` to 2,800 kB rather than
+Vite's 500 kB default, because monaco-editor's core (`editor.api`, 2,656 kB)
+is a single import graph that cannot be split. See the comment there for the
+full breakdown of what sets that floor — it is deliberately tight, so the
+warning still fires if anything grows. Monaco's web workers (`ts.worker` is
+6.9 MB) are separate worker bundles and are not counted by the warning.
+
+Nothing above the old 500 kB line is on the initial load: the entry chunk is
+~335 kB and the app is split per route. The one oversized chunk that is *ours*
+rather than a vendor's is `ExpandedTerminal` (850 kB) — xterm and its addons
+(~530 kB of source) sit in it alongside the terminal and agent-chat panes. It
+can be reduced by giving the non-default panes in its `renderers` map their
+own `lazy()` boundaries, the way `FileEditor.tsx` already does for
+`CodeFileEditor`/`MarkdownFileEditor`; that needs `insertTerminalContext` and
+`nextFreeThreadKey` moved out of the `ChatComposer`/`SessionsPanel` component
+modules first, since importing them statically pulls all of agent-chat back
+in. Not done — it is a bundle-health improvement, not a correctness one.
 
 ## Versioning / releases
 
@@ -491,7 +560,15 @@ cd frontend && npx @tanstack/router-plugin --target react
   (`hub-mode.json`, `devdeck.db`, `runtime-key`) never collides with a real
   installed app's. Trade-off: no frontend HMR — the sidecar serves whatever
   `prepare-webui` last built into `backend/internal/webui/dist`, so re-run
-  the target after frontend changes you want to see.
+  the target after frontend changes you want to see. Because it serves that
+  static `vite build` output rather than the Vite dev server, the in-flight
+  agent-chat feature (`frontend/src/features/agent-chat/enabled.ts`, off by
+  default whenever `import.meta.env.PROD` is true) would otherwise be hidden
+  here exactly like a real production install; the Makefile target sets
+  `VITE_AGENT_CHAT=1` before the build step to keep chat visible for this dev
+  flow — override with `make dev-tauri-full VITE_AGENT_CHAT=0` to exercise the
+  feature-off path instead. `make dev-tauri` needs no such override: its
+  `vite dev` path already has `PROD` false, so chat shows by default there.
 - `make e2e-tauri-smoke` (or `frontend/src-tauri/scripts/e2e-smoke.sh`) — a
   scripted smoke test of `dev-tauri-full`'s real local-hub-mode flow: builds
   a plain, non-watching debug binary (`tauri build --no-bundle --debug

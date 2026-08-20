@@ -13,6 +13,7 @@ import {
   highlightJsonHtml,
   highlightXmlHtml,
 } from '@/lib/formatters'
+import { saveText } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 import { CsvTableView } from './CsvTableView'
 import { JsonTreeView } from './JsonTreeView'
@@ -99,13 +100,10 @@ export function FormatterTool() {
 
   function downloadOutput() {
     if (!outcome || outcome.error) return
-    const blob = new Blob([outcome.pretty], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `formatted.${EXTENSION[outcome.format]}`
-    a.click()
-    URL.revokeObjectURL(url)
+    const name = `formatted.${EXTENSION[outcome.format]}`
+    void saveText(outcome.pretty, name).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : `Could not save ${name}`)
+    })
   }
 
   const hasStructuredView = outcome?.format === 'json' || outcome?.format === 'csv'

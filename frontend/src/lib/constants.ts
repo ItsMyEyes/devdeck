@@ -1,57 +1,65 @@
 import type { InvoiceStatus, IssueStatus, LineKind, Priority, WorktreeState } from '@/store/types'
 
 /**
- * Worktree lifecycle → label + status color.
- * Hex literals (not var()) because Pill/StatusDot append an alpha suffix to
- * this value — they must match --devdeck-run/wait/err/fg-2 in globals.css.
+ * Status palettes, as `var(--devdeck-*)` references rather than hex literals.
+ *
+ * These were hexes because `Pill` built its fill and border by concatenating an
+ * alpha suffix (`color + '18'`), which only produces a valid colour from a hex.
+ * That pinned every pill in the app to the dark-tuned value: on a light surface
+ * `#7fb37f` is 2.4:1 and `#c9a86a` is 2.0:1 — pale highlighter rather than
+ * readable text. `Pill` and `StatusDot` both use `color-mix` now, which accepts
+ * any CSS <color>, so these follow the theme like everything else.
+ *
+ * The dark values are unchanged; `.light` in globals.css restates each token at
+ * the darker end of the same hue.
  */
 export const STATE: Record<WorktreeState, { label: string; color: string }> = {
-  running: { label: 'running', color: '#7fb37f' },
-  waiting: { label: 'needs input', color: '#c9a86a' },
-  idle: { label: 'idle', color: '#9ca09f' },
-  stopped: { label: 'stopped', color: '#9ca09f' },
-  error: { label: 'error', color: '#c98080' },
+  running: { label: 'running', color: 'var(--devdeck-run)' },
+  waiting: { label: 'needs input', color: 'var(--devdeck-wait)' },
+  idle: { label: 'idle', color: 'var(--devdeck-fg-2)' },
+  stopped: { label: 'stopped', color: 'var(--devdeck-fg-2)' },
+  error: { label: 'error', color: 'var(--devdeck-err)' },
 }
 
 export const PRI: Record<Priority, { label: string; color: string }> = {
-  high: { label: 'High', color: '#f5c451' },
-  normal: { label: 'Normal', color: '#6d8bff' },
-  low: { label: 'Low', color: '#5f6672' },
+  high: { label: 'High', color: 'var(--devdeck-st-yellow)' },
+  normal: { label: 'Normal', color: 'var(--devdeck-st-blue)' },
+  low: { label: 'Low', color: 'var(--devdeck-st-grey-dim)' },
 }
 
 export const ISSUE_STATUS: Record<IssueStatus, { label: string; color: string }> = {
-  todo: { label: 'Todo', color: '#6b7280' },
-  in_progress: { label: 'In Progress', color: '#6d8bff' },
-  in_review: { label: 'In Review', color: '#f5c451' },
-  done: { label: 'Done', color: '#56d58a' },
+  todo: { label: 'Todo', color: 'var(--devdeck-st-grey)' },
+  in_progress: { label: 'In Progress', color: 'var(--devdeck-st-blue)' },
+  in_review: { label: 'In Review', color: 'var(--devdeck-st-yellow)' },
+  done: { label: 'Done', color: 'var(--devdeck-st-green)' },
 }
 
 export const INVST: Record<InvoiceStatus, { label: string; color: string }> = {
-  draft: { label: 'Draft', color: '#8a919c' },
-  sent: { label: 'Sent', color: '#6d8bff' },
-  paid: { label: 'Paid', color: '#56d58a' },
-  overdue: { label: 'Overdue', color: '#f87171' },
+  draft: { label: 'Draft', color: 'var(--devdeck-st-grey)' },
+  sent: { label: 'Sent', color: 'var(--devdeck-st-blue)' },
+  paid: { label: 'Paid', color: 'var(--devdeck-st-green)' },
+  overdue: { label: 'Overdue', color: 'var(--devdeck-st-red)' },
 }
 
 /** Terminal-log line kind → text color. */
 export const KIND: Record<LineKind, string> = {
-  cmd: '#9db1ff',
-  out: '#b6bcc6',
-  ok: '#56d58a',
-  warn: '#f5c451',
-  err: '#f87171',
-  sys: '#7f8794',
-  file: '#c7a3ff',
-  dim: '#5f6672',
+  cmd: 'var(--devdeck-st-cmd)',
+  out: 'var(--devdeck-st-out)',
+  ok: 'var(--devdeck-st-green)',
+  warn: 'var(--devdeck-st-yellow)',
+  err: 'var(--devdeck-st-red)',
+  sys: 'var(--devdeck-st-grey)',
+  file: 'var(--devdeck-st-purple)',
+  dim: 'var(--devdeck-st-grey-dim)',
 }
 
 /** News tag → accent color. */
 export const TAGC: Record<string, string> = {
-  AI: '#c7a3ff',
-  Payments: '#56d58a',
-  Eng: '#6d8bff',
-  Business: '#f5c451',
-  Finance: '#f08a8a',
+  AI: 'var(--devdeck-st-purple)',
+  Payments: 'var(--devdeck-st-green)',
+  Eng: 'var(--devdeck-st-blue)',
+  Business: 'var(--devdeck-st-yellow)',
+  Finance: 'var(--devdeck-st-red)',
 }
 
-export const TAGC_FALLBACK = '#8a919c'
+export const TAGC_FALLBACK = 'var(--devdeck-st-grey)'

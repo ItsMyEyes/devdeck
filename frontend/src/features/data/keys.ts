@@ -63,6 +63,12 @@ export const qk = {
   machineStats: (id: string) => ['machines', id, 'stats'] as const,
   machineHealth: (id: string) => ['machines', id, 'health'] as const,
   machineVersion: (id: string) => ['machines', id, 'version'] as const,
+  /** Which optional features a machine's process can actually serve, from its
+   *  own `/api/whoami` — see `useMachineCapabilities`. Separate from
+   *  `machineVersion` on purpose: a version string would force this side to
+   *  know which release shipped what, which is exactly the knowledge that
+   *  goes stale. */
+  machineCapabilities: (id: string) => ['machines', id, 'capabilities'] as const,
   publishedSocks: (id: string) => ['machines', id, 'publishedSocks'] as const,
   /** This process's own publication (same-origin /api/proxy/publish), which
    *  has no Machine record to key by — a hub never self-registers. */
@@ -102,4 +108,16 @@ export const qk = {
   dbStats: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'stats', object] as const,
   dbRows: (connectionId: string, req: DBRowsRequest) => ['db', connectionId, 'rows', req] as const,
   dbShowCreate: (connectionId: string, object: DBObjectRef) => ['db', connectionId, 'showCreate', object] as const,
+  completions: ['completions', 'config'] as const,
+  memoryConfig: ['memory', 'config'] as const,
+  memoryStats: ['memory', 'stats'] as const,
+  memoryTags: (q: string) => ['memory', 'tags', q] as const,
+  memoryUnits: (params: { type?: string; q?: string; tags?: string[]; offset?: number }) =>
+    ['memory', 'units', params] as const,
+  memoryGraph: (params: { type?: string; q?: string }) => ['memory', 'graph', params] as const,
+  memoryEntityGraph: ['memory', 'entityGraph'] as const,
+  memoryTimeseries: (period: string) => ['memory', 'timeseries', period] as const,
+  memoryLocalStatus: ['memory', 'local', 'status'] as const,
+  memoryLocalLogs: ['memory', 'local', 'logs'] as const,
+  memoryOperations: ['memory', 'operations'] as const,
 }

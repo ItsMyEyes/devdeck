@@ -280,10 +280,10 @@ func TestPayloadSurvivesRoundTrip(t *testing.T) {
 // The sessions sidebar read "Untitled session" forever: EvtThreadCreated is
 // committed on the WebSocket's hello, before any message exists, so it has
 // nothing to name a thread with and the row was inserted with title ''.
-func TestCommitProjectsThreadTitleFromFirstMessage(t *testing.T) {
+func TestCommitProjectsThreadTitleFromTheUsersTurn(t *testing.T) {
 	st := NewTestStore(t)
 
-	sent := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadMessageSent)
+	sent := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadTurnStartRequested)
 	sent.Payload = json.RawMessage(`{"text":"add rate limiting to the upload endpoint"}`)
 	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
 		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
@@ -304,12 +304,14 @@ func TestCommitProjectsThreadTitleFromFirstMessage(t *testing.T) {
 	}
 }
 
-// First message only. A thread is named once; later turns must not rename it
-// out from under the user.
-func TestCommitKeepsTheFirstMessageAsTheTitle(t *testing.T) {
+// The LATEST turn names the thread, not the opening one. Pinning the name to
+// the first message reads well in the cases people design for and badly in the
+// ones that happen: a session opened with "hi" wore that name for its whole
+// life, however far the conversation later travelled.
+func TestCommitRetitlesTheThreadFromTheLatestTurn(t *testing.T) {
 	st := NewTestStore(t)
 
-	first := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadMessageSent)
+	first := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadTurnStartRequested)
 	first.Payload = json.RawMessage(`{"text":"first"}`)
 	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
 		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
@@ -318,15 +320,45 @@ func TestCommitKeepsTheFirstMessageAsTheTitle(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	second := evt("ae-3", "w-abc", "ac-2", orchestration.EvtThreadMessageSent)
+	second := evt("ae-3", "w-abc", "ac-2", orchestration.EvtThreadTurnStartRequested)
 	second.Payload = json.RawMessage(`{"text":"second"}`)
 	if _, err := st.CommitAgentEvents("ac-2", []orchestration.Event{second}); err != nil {
 		t.Fatalf("commit 2: %v", err)
 	}
 
 	threads, _ := st.AgentThreads("w-abc")
-	if threads[0].Title != "first" {
-		t.Fatalf("title = %q, want it pinned to the first message", threads[0].Title)
+	if threads[0].Title != "second" {
+		t.Fatalf("title = %q, want the latest turn", threads[0].Title)
+	}
+}
+
+// `EvtThreadMessageSent` is emitted from TWO places in Decide — the user's
+// turn AND `CmdThreadAssistantComplete`. Nothing dispatches the second today,
+// so keying the title off it happened to work; retitling on every turn would
+// have made it name threads after the agent's last reply the moment anything
+// did. The projection hangs off `EvtThreadTurnStartRequested`, which has one
+// emitter, so agent text can never reach it.
+func TestCommitNeverTitlesAThreadFromAgentText(t *testing.T) {
+	st := NewTestStore(t)
+
+	turn := evt("ae-2", "w-abc", "ac-1", orchestration.EvtThreadTurnStartRequested)
+	turn.Payload = json.RawMessage(`{"text":"what the user asked"}`)
+	if _, err := st.CommitAgentEvents("ac-1", []orchestration.Event{
+		evt("ae-1", "w-abc", "ac-1", orchestration.EvtThreadCreated),
+		turn,
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	assistant := evt("ae-3", "w-abc", "ac-2", orchestration.EvtThreadMessageSent)
+	assistant.Payload = json.RawMessage(`{"text":"what the agent replied"}`)
+	if _, err := st.CommitAgentEvents("ac-2", []orchestration.Event{assistant}); err != nil {
+		t.Fatalf("commit 2: %v", err)
+	}
+
+	threads, _ := st.AgentThreads("w-abc")
+	if threads[0].Title != "what the user asked" {
+		t.Fatalf("title = %q, want the user's own words", threads[0].Title)
 	}
 }
 

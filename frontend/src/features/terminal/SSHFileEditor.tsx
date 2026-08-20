@@ -31,9 +31,9 @@ interface SSHFileEditorProps {
   onDeleted: (path: string) => void
   /** Content search's "open at line" entry point — see PlainCodeEditor.tsx's LineReveal doc comment. */
   reveal?: LineReveal
-  /** Markdown's edit-mode "open preview in new tab" button — see
-   *  MarkdownFileEditor's `onOpenPreviewTab` doc comment. Unused (and the
-   *  button hidden) for every other path. */
+  /** Markdown's "open preview in new tab" button — see MarkdownFileEditor's
+   *  `onOpenPreviewTab` doc comment. Unused (and the button hidden) for every
+   *  other path. */
   onOpenPreviewTab?: (path: string) => void
 }
 

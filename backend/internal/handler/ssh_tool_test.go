@@ -7,24 +7,26 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"devdeck/backend/internal/service"
 	"devdeck/backend/internal/sshtool"
 )
 
-// fakeToolSvc is a minimal sshToolService fake. Exec records the session
-// and command it was called with so tests can assert on them; err, when
-// set, is returned by whichever method is exercised. The four file methods
-// return zero values — no test here exercises their success path, only
-// that the routes exist and are guarded by RequireThreadToken.
+// fakeToolSvc is a minimal sshToolService fake. Exec records the session,
+// command, and exec timeout it was called with so tests can assert on them;
+// err, when set, is returned by whichever method is exercised. The four file
+// methods return zero values — no test here exercises their success path,
+// only that the routes exist and are guarded by RequireThreadToken.
 type fakeToolSvc struct {
-	gotSession sshtool.Session
-	gotCommand string
-	err        error
+	gotSession     sshtool.Session
+	gotCommand     string
+	gotExecTimeout time.Duration
+	err            error
 }
 
-func (f *fakeToolSvc) Exec(_ context.Context, sess sshtool.Session, command string) (service.ExecResult, error) {
-	f.gotSession, f.gotCommand = sess, command
+func (f *fakeToolSvc) Exec(_ context.Context, sess sshtool.Session, command string, execTimeout time.Duration) (service.ExecResult, error) {
+	f.gotSession, f.gotCommand, f.gotExecTimeout = sess, command, execTimeout
 	if f.err != nil {
 		return service.ExecResult{}, f.err
 	}
@@ -124,10 +126,54 @@ func TestExecDeniedReturns403(t *testing.T) {
 	}
 }
 
-func TestExecApprovalTimeoutReturns403(t *testing.T) {
+// Only the service knows whether a deadline was the human's window or the
+// command's, so it says which with a sentinel. A bare context deadline is a
+// transport failure and must not be dressed up as an operator's decision.
+func TestExecTransportDeadlineIsNotReportedAsADecision(t *testing.T) {
 	store := sshtool.NewTokenStore()
 	tok := store.Mint("ssh:c-1", "c-1")
 	mux := newToolMux(store, &fakeToolSvc{err: context.DeadlineExceeded})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-tools/ssh/exec", strings.NewReader(`{"command":"systemctl restart nginx"}`))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", rec.Code)
+	}
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["error"] == "approval timed out" {
+		t.Fatal("a transport deadline was reported to the agent as an approval timeout")
+	}
+}
+
+// The exec timeout must reach the service as a value, not as a deadline on
+// the context — that is what keeps it off the operator's clock.
+func TestExecPassesTimeoutAsAValueNotADeadline(t *testing.T) {
+	store := sshtool.NewTokenStore()
+	tok := store.Mint("ssh:c-1", "c-1")
+	svc := &fakeToolSvc{}
+	mux := newToolMux(store, svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-tools/ssh/exec", strings.NewReader(`{"command":"ls","timeoutSec":30}`))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body)
+	}
+	if svc.gotExecTimeout != 30*time.Second {
+		t.Fatalf("execTimeout = %v, want 30s", svc.gotExecTimeout)
+	}
+}
+
+func TestExecApprovalTimeoutReturns403(t *testing.T) {
+	store := sshtool.NewTokenStore()
+	tok := store.Mint("ssh:c-1", "c-1")
+	mux := newToolMux(store, &fakeToolSvc{err: service.ErrApprovalTimeout})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agent-tools/ssh/exec", strings.NewReader(`{"command":"systemctl restart nginx"}`))
@@ -248,17 +294,25 @@ func TestWriteFileIgnoresBodyConnectionID(t *testing.T) {
 	}
 }
 
-func TestExecAcceptsQueryKeyFallback(t *testing.T) {
+// A token in the query string is rejected even when it is otherwise valid.
+// AccessLog writes the raw query string to disk and the secret-redaction pass
+// only covers bodies, so accepting ?key= would mean logging a credential that
+// grants shell on a production host. The header is the only way in.
+func TestExecRejectsQueryKeyFallback(t *testing.T) {
 	store := sshtool.NewTokenStore()
 	tok := store.Mint("ssh:c-1", "c-1")
-	mux := newToolMux(store, &fakeToolSvc{})
+	svc := &fakeToolSvc{}
+	mux := newToolMux(store, svc)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agent-tools/ssh/exec?key="+tok, strings.NewReader(`{"command":"ls"}`))
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body = %s)", rec.Code, rec.Body)
+	}
+	if svc.gotCommand != "" {
+		t.Fatalf("a query-string token reached the service: %q", svc.gotCommand)
 	}
 }
 

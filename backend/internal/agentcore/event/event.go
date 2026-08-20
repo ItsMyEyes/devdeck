@@ -35,11 +35,12 @@ const (
 	ThreadTokenUsageUpdated Type = "thread.token-usage.updated"
 
 	// --- Turn (one user→agent round) --- CORE
-	TurnStarted     Type = "turn.started"
-	TurnCompleted   Type = "turn.completed"
-	TurnAborted     Type = "turn.aborted"
-	TurnPlanUpdated Type = "turn.plan.updated"
-	TurnDiffUpdated Type = "turn.diff.updated"
+	TurnStarted           Type = "turn.started"
+	TurnCompleted         Type = "turn.completed"
+	TurnAborted           Type = "turn.aborted"
+	TurnPlanUpdated       Type = "turn.plan.updated"
+	TurnDiffUpdated       Type = "turn.diff.updated"
+	TurnProposedCompleted Type = "turn.proposed.completed"
 
 	// --- Item (content unit: message, reasoning, tool call) --- CORE
 	ItemStarted   Type = "item.started"
@@ -200,6 +201,20 @@ type Usage struct {
 	ContextWindow       int64 `json:"contextWindow,omitempty"`
 }
 
+// ProposedPlanPayload carries the plan text the agent proposed via
+// ExitPlanMode. Emitted once per proposed plan (deduped by ToolUseID in the
+// provider adapter) — see design.md §2/§1.2.
+type ProposedPlanPayload struct {
+	PlanMarkdown string `json:"planMarkdown"`
+	// PlanFilePath is the agent-host path the CLI wrote the plan to
+	// (~/.claude/plans/<slug>.md). Metadata only — never read, linked, or
+	// opened; that path is not on the user's machine for a remote runtime.
+	PlanFilePath string `json:"planFilePath,omitempty"`
+	ToolUseID    string `json:"toolUseId,omitempty"`
+}
+
+func (ProposedPlanPayload) EventType() Type { return TurnProposedCompleted }
+
 type ItemStartedPayload struct {
 	ItemType ItemType        `json:"itemType"`
 	Title    string          `json:"title,omitempty"`
@@ -272,6 +287,18 @@ type UserInputRequestedPayload struct {
 
 func (UserInputRequestedPayload) EventType() Type { return UserInputRequested }
 
+// ToolDeniedPayload — a tool call the CLI asked permission for and the
+// system (not the operator — see event.Decision for operator answers)
+// answered deny. A1 uses this for ExitPlanMode and every other can_use_tool
+// it cannot yet route to a real decision; A2's real approval flow never
+// produces this event — a real deny goes through RequestResolved instead.
+type ToolDeniedPayload struct {
+	ToolName string `json:"toolName"`
+	Message  string `json:"message"`
+}
+
+func (ToolDeniedPayload) EventType() Type { return ToolDenied }
+
 type ErrorPayload struct {
 	Message   string `json:"message"`
 	Code      string `json:"code,omitempty"`
@@ -291,18 +318,20 @@ func (WarningPayload) EventType() Type { return RuntimeWarning }
 // ---------------------------------------------------------------------------
 
 var payloadRegistry = map[Type]func() Payload{
-	SessionStarted:     func() Payload { return &SessionStartedPayload{} },
-	SessionExited:      func() Payload { return &SessionExitedPayload{} },
-	TurnStarted:        func() Payload { return &TurnStartedPayload{} },
-	TurnCompleted:      func() Payload { return &TurnCompletedPayload{} },
-	ItemStarted:        func() Payload { return &ItemStartedPayload{} },
-	ItemCompleted:      func() Payload { return &ItemCompletedPayload{} },
-	ContentDelta:       func() Payload { return &ContentDeltaPayload{} },
-	RequestOpened:      func() Payload { return &RequestOpenedPayload{} },
-	RequestResolved:    func() Payload { return &RequestResolvedPayload{} },
-	UserInputRequested: func() Payload { return &UserInputRequestedPayload{} },
-	RuntimeError:       func() Payload { return &ErrorPayload{} },
-	RuntimeWarning:     func() Payload { return &WarningPayload{} },
+	SessionStarted:        func() Payload { return &SessionStartedPayload{} },
+	SessionExited:         func() Payload { return &SessionExitedPayload{} },
+	TurnStarted:           func() Payload { return &TurnStartedPayload{} },
+	TurnCompleted:         func() Payload { return &TurnCompletedPayload{} },
+	TurnProposedCompleted: func() Payload { return &ProposedPlanPayload{} },
+	ItemStarted:           func() Payload { return &ItemStartedPayload{} },
+	ItemCompleted:         func() Payload { return &ItemCompletedPayload{} },
+	ContentDelta:          func() Payload { return &ContentDeltaPayload{} },
+	RequestOpened:         func() Payload { return &RequestOpenedPayload{} },
+	RequestResolved:       func() Payload { return &RequestResolvedPayload{} },
+	UserInputRequested:    func() Payload { return &UserInputRequestedPayload{} },
+	ToolDenied:            func() Payload { return &ToolDeniedPayload{} },
+	RuntimeError:          func() Payload { return &ErrorPayload{} },
+	RuntimeWarning:        func() Payload { return &WarningPayload{} },
 }
 
 // RegisterPayload adds a new payload type. Call it from your package's

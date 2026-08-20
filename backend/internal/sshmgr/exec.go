@@ -206,7 +206,34 @@ func RunShell(ctx context.Context, pool *FilePool, connectionID, command string)
 		sess.Stdout = &stdout
 		sess.Stderr = &stderr
 
-		runErr := sess.Run(command)
+		// Start + watch ctx, never the one-shot sess.Run: the same shape
+		// runRemote above uses, and for the same reason its doc comment gives.
+		// An agent is free to run `tail -f` here — it classifies read-only, so
+		// nothing stops it — and sess.Run would then never return, holding this
+		// goroutine, this SSH channel, and these buffers open forever. Ten of
+		// those exhaust OpenSSH's default MaxSessions and take the SFTP half of
+		// the same connection (the file explorer, the stats poller) down with
+		// them.
+		if err := sess.Start(command); err != nil {
+			return output{}, fmt.Errorf("start command: %w", err)
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- sess.Wait() }()
+
+		var runErr error
+		select {
+		case runErr = <-done:
+			// Wait has returned, so its stdout/stderr copiers are finished and
+			// both buffers are safe to read without racing them.
+		case <-ctx.Done():
+			_ = sess.Close()
+			<-done
+			// Partial output is still worth returning: a command killed at its
+			// deadline usually printed the part that explains why.
+			return output{stdout: stdout.Bytes(), stderr: stderr.Bytes(), code: -1}, ctx.Err()
+		}
+
 		res := output{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
 		if runErr == nil {
 			return res, nil

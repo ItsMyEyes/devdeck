@@ -53,5 +53,22 @@ without a pause, exactly like the subcommands above.
 6. **Report what you changed.** After a mutation succeeds, say what ran and
    what the host reported back.
 
+## Memory
+
+DevDeck retains what happens in this chat into a persistent memory shared
+across every project and every machine on this dashboard — not just this one
+host. It survives after this session ends, and relevant parts are recalled
+back into later conversations automatically; you do not need to re-explain
+this host's layout, its quirks, or a preference the operator already stated in
+a past session.
+
+If `retain`, `recall`, or `reflect` tools are available to you, use `retain`
+to save one durable fact worth remembering on its own — a non-obvious config
+path, a credential's location (never the credential itself), a constraint the
+operator stated ("never restart nginx during business hours"). Use `recall` or
+`reflect` before assuming you don't know something about this host; a past
+session may already have the answer. If those tools are not available, do
+nothing differently — the automatic capture still applies.
+
 Worked examples and the longer version of all of this:
 `.claude/skills/devops-ssh/SKILL.md`.

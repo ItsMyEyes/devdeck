@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { currentResolvedTheme } from '@/features/theme/theme'
 
 const SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
@@ -50,7 +51,7 @@ export function TurnstileWidget({ siteKey, onToken }: { siteKey: string; onToken
         if (cancelled || !containerRef.current) return
         widgetId = ts.render(containerRef.current, {
           sitekey: siteKey,
-          theme: 'dark',
+          theme: currentResolvedTheme(),
           callback: (token: string) => onToken(token),
           'expired-callback': () => onToken(null),
           'error-callback': () => onToken(null),

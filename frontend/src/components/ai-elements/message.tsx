@@ -13,7 +13,6 @@ import {
 } from "@/components/shadcn/tooltip";
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
@@ -29,6 +28,9 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+
+// One Dark Pro Darker in place of `@streamdown/code`'s `github-dark` default.
+import { codeHighlighter as code } from "./codeHighlighter";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];

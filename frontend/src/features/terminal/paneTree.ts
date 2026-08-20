@@ -270,6 +270,22 @@ export function countUntitledContents(root: PaneNode): number {
   return root.children.reduce((sum, child) => sum + countUntitledContents(child), 0)
 }
 
+/** Every `threadKey` with a pane open right now, anywhere in the tree.
+ *
+ * `nextFreeThreadKey` (agent-chat/SessionsPanel.tsx) only knows about threads
+ * the *backend* has a row for — a thread is created by its WebSocket's hello,
+ * so a chat pane that's open but still empty (nobody has sent it a message
+ * yet, e.g. the primary pane of a worktree that was just created) has no
+ * backend row and would otherwise look "free" to reuse. Union this in with
+ * the backend list before asking for a free key, or "new chat" on a brand-new
+ * worktree just refocuses the empty pane that's already there. */
+export function collectOpenChatThreadKeys(root: PaneNode): string[] {
+  if (root.type === 'leaf') {
+    return root.tabs.filter((t) => t.kind === 'agent-chat').map((t) => t.threadKey)
+  }
+  return root.children.flatMap(collectOpenChatThreadKeys)
+}
+
 /** The default layout for a worktree with no persisted entry yet —
  *  mirrors today's single-terminal view exactly. */
 export function createDefaultLayout(worktreeId: string): WorktreeLayout {

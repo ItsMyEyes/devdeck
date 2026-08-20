@@ -59,13 +59,19 @@ func NewStaticRegistry() *StaticRegistry {
 		"pi": {
 			ID:          "pi",
 			Name:        "Pi",
-			Description: "Gemini-powered agent with 1M+ context window and multimodal understanding",
+			Description: "Multi-provider agent harness (pi.dev) — 15+ model providers with mid-session switching",
 			Icon:        "pi",
+			// IDs are "provider/id" — the form pi's own --model flag and its
+			// orchestration adapter's mid-session set_model switch expect
+			// (see agentcore/provider/pi). This static list is only a
+			// fallback shown before Pi's real, locally-configured catalog is
+			// merged in (registry.LocalRegistry.ListModels) — it is not
+			// exhaustive of what an installed Pi actually offers.
 			Models: []domain.Model{
-				{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextWindow: 1000000},
-				{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextWindow: 1000000},
-				{ID: "gemini-3-pro", Name: "Gemini 3 Pro", ContextWindow: 2000000},
-				{ID: "gemini-3-flash", Name: "Gemini 3 Flash", ContextWindow: 1000000},
+				{ID: "anthropic/claude-sonnet-5", Name: "Claude Sonnet 5 (via Pi)", ContextWindow: 200000},
+				{ID: "openai-codex/gpt-5.5", Name: "GPT-5.5 (via Pi)", ContextWindow: 272000},
+				{ID: "google/gemini-3-pro", Name: "Gemini 3 Pro (via Pi)", ContextWindow: 2000000},
+				{ID: "deepseek/deepseek-v4-pro", Name: "DeepSeek V4 Pro (via Pi)", ContextWindow: 1000000},
 			},
 			Skills: []domain.Skill{
 				{Name: "code-review", Description: "Comprehensive code analysis with deep context", Category: "analysis"},

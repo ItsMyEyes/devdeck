@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { ApiError, convertToMarkdown, type MarkitdownResult } from '@/lib/api'
+import { saveText } from '@/lib/saveFile'
 
 /** Uploads a document (pdf/docx/pptx/xlsx/image/audio/html/...) and converts it to markdown via markitdown. */
 export function MarkitdownCard() {
@@ -36,13 +37,10 @@ export function MarkitdownCard() {
 
   function downloadMarkdown() {
     if (!result) return
-    const blob = new Blob([result.markdown], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = result.filename.replace(/\.[^./]+$/, '') + '.md'
-    a.click()
-    URL.revokeObjectURL(url)
+    const name = result.filename.replace(/\.[^./]+$/, '') + '.md'
+    void saveText(result.markdown, name, 'text/markdown;charset=utf-8').catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : `Could not save ${name}`)
+    })
   }
 
   return (

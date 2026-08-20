@@ -374,7 +374,14 @@ func agentSkillLocations(agentID string) ([]skillLocation, error) {
 			{dir: filepath.Join(home, ".codex", "skills", ".system"), readOnly: true},
 		}, nil
 	case "pi":
-		return []skillLocation{{dir: filepath.Join(home, ".pi", "agent", "skills")}}, nil
+		// NOT filepath.Join(home, ".pi", "agent", "skills") — that directory
+		// is PI_CODING_AGENT_DIR/skills, which looks like the obvious guess
+		// but a live pi binary never scans it (verified: a skill planted
+		// there was invisible to `pi config`'s own resource picker). pi
+		// actually reads the same shared ~/.agents/skills codex already
+		// uses above — confirmed the same way, watching that directory's
+		// contents show up in `pi config` live.
+		return []skillLocation{{dir: filepath.Join(home, ".agents", "skills")}}, nil
 	case "opencode":
 		return []skillLocation{{dir: filepath.Join(home, ".config", "opencode", "skills")}}, nil
 	case "gemini":

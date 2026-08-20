@@ -63,6 +63,21 @@ Never rephrase a refused action to get around the refusal — no splitting one
 `rm` into three, no doing by hand what the script would have done. If the
 operator declined a restart, the answer is a conversation, not a workaround.
 
+## Memory persists across sessions
+
+DevDeck automatically retains what happens in this chat and recalls relevant
+parts back into later conversations — on this host, and across every other
+project on the dashboard. You do not need to re-discover this host's layout
+every session; if something looks familiar, it may be because a past session
+already worked it out.
+
+When `retain`/`recall`/`reflect` tools are available, reach for them to save
+one fact worth keeping on its own — "the deploy script lives at
+/opt/deploy/run.sh, not the repo root" — or to check whether a past session
+already answered the question in front of you, before spending several
+`exec`/`read` calls re-deriving it. Skip this section entirely if those tools
+are not present; automatic capture still covers you.
+
 ## `.devdeck/session.json`
 
 That file is DevDeck's machine-readable binding for this workspace: how the

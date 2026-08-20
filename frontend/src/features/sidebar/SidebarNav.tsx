@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { SquareTerminal, LayoutGrid, Server, Wrench, type LucideIcon } from 'lucide-react'
+import { BrainCog, SquareTerminal, LayoutGrid, Server, Wrench, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useScope } from '@/features/useScope'
@@ -7,7 +7,7 @@ import { useWorkspace } from '@/features/data/queries'
 import type { ModuleView } from '@/store/types'
 
 interface RailDef {
-  key: Extract<ModuleView, 'agents' | 'ssh' | 'database' | 'tools' | 'invoices' | 'machines'>
+  key: Extract<ModuleView, 'agents' | 'ssh' | 'database' | 'tools' | 'invoices' | 'machines' | 'memory'>
   label: string
   Icon: LucideIcon
   badge?: number
@@ -29,6 +29,7 @@ export function SidebarNav({ compact: _compact }: SidebarNavProps = {}) {
     { key: 'machines', label: 'Runtimes', Icon: Server },
     { key: 'ssh', label: 'SSH', Icon: SquareTerminal },
     { key: 'tools', label: 'Tools', Icon: Wrench },
+    { key: 'memory', label: 'Memory', Icon: BrainCog },
   ]
 
   function goto(key: RailDef['key']) {

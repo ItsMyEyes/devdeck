@@ -43,6 +43,8 @@ import { MAX_ROWS_PER_GROUP, flattenRanked, rankPaletteItems } from '@/features/
 import { bookmarkItems, normalizeUrl } from '@/features/palette/providers/bookmarks'
 import { matchVerb, sshCommandPreview, verbHintItems } from '@/features/palette/providers/commands'
 import { agentProjectRows, createActionItems } from '@/features/palette/providers/createActions'
+import { appearanceItems } from '@/features/palette/providers/appearance'
+import { useThemePreference } from '@/features/theme/useTheme'
 import type { CreateActionDeps } from '@/features/palette/providers/createActions'
 import { entityItems } from '@/features/palette/providers/entities'
 import type { EntityActions, EntitySources } from '@/features/palette/providers/entities'
@@ -65,6 +67,9 @@ export interface PaletteItemSources {
   bookmarks: PaletteItem[]
   verbHints: PaletteItem[]
   createActions: PaletteItem[]
+  /** Appearance. Light mode is disabled, so this is always empty — see
+   *  `providers/appearance.ts`. */
+  appearance: PaletteItem[]
   recent: PaletteItem[]
 }
 
@@ -77,9 +82,9 @@ export interface PaletteItemSources {
  * would flood the Results group the instant the palette opens.
  */
 export function assemblePaletteItems(sources: PaletteItemSources): PaletteItem[] {
-  const { query, openTabs, entities, bookmarks, verbHints, createActions, recent } = sources
+  const { query, openTabs, entities, bookmarks, verbHints, createActions, appearance, recent } = sources
   if (query.trim() === '') return [...openTabs, ...recent, ...createActions]
-  return [...openTabs, ...recent, ...entities, ...bookmarks, ...verbHints, ...createActions]
+  return [...openTabs, ...recent, ...entities, ...bookmarks, ...verbHints, ...createActions, ...appearance]
 }
 
 /**
@@ -517,6 +522,8 @@ export function useCommandPalette({
     ],
   )
   const createActions = useMemo(() => createActionItems(createDeps), [createDeps])
+  const [themePreference] = useThemePreference()
+  const appearance = useMemo(() => appearanceItems(themePreference), [themePreference])
 
   const openEntityIds = useMemo(() => collectOpenEntityIds(layout.root, new Set<string>()), [layout])
   const isEntityOpen = useCallback((id: string) => openEntityIds.has(id), [openEntityIds])
@@ -632,6 +639,7 @@ export function useCommandPalette({
       bookmarks: bookmarkRows,
       verbHints,
       createActions,
+      appearance,
       recent,
     })
   }, [
@@ -644,6 +652,7 @@ export function useCommandPalette({
     bookmarkRows,
     verbHints,
     createActions,
+    appearance,
     recent,
   ])
 

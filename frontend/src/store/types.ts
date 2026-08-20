@@ -80,6 +80,19 @@ export interface Attachment {
   createdAt: string
 }
 
+/** A file attached to an agent chat turn (image, today). Raw bytes are
+ *  fetched separately via GET /api/agent/attachments/{id}. threadId may name
+ *  a thread that does not exist yet — an upload can race ahead of the
+ *  thread's own EvtThreadCreated commit. */
+export interface AgentAttachment {
+  id: string
+  threadId: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+  createdAt: string
+}
+
 /** A comment on an issue's Activity timeline, or — when parentId is set — a
  *  single-level-deep reply to another comment. */
 export interface IssueComment {
@@ -163,6 +176,45 @@ export interface PublishedSOCKSStatus {
   /** Copy-ready `socks5://devdeck:<key>@host:port`; absent when not running. */
   url?: string
   key: string
+}
+
+/** Mirror of backend/internal/domain/TelegramConfig — one machine's Telegram
+ *  bridge state. `hasToken` is derived server-side from whether a token is
+ *  stored; the token itself never rides along in this type (see
+ *  port.Store.TelegramBotToken). */
+export interface TelegramConfig {
+  enabled: boolean
+  hasToken: boolean
+  botUsername: string
+  /** The RUNNING bridge's inbound state. Not stored — read from the live
+   *  bridge on every request. `botUsername` is not evidence anything works:
+   *  Telegram's `getMe` succeeds against a token whose `getUpdates` is
+   *  refused outright (a webhook registered on it, another process polling
+   *  it), so a panel showing only the @username rendered a completely dead
+   *  bridge as a healthy one. Older builds omit this field entirely. */
+  health?: 'off' | 'connecting' | 'ok' | 'error'
+  /** Why, for `health === 'error'` only — Telegram's own words plus the
+   *  remedy. Empty otherwise. */
+  healthDetail?: string
+}
+
+/** Mirror of backend/internal/domain/TelegramUser — one entry on the
+ *  Telegram allowlist. Enrolment is always `/pair`. */
+export interface TelegramUser {
+  userId: number
+  label: string
+  addedAt: number
+}
+
+/** Mirror of backend/internal/domain/TelegramBinding — publishes one thread
+ *  to one Telegram destination. `topicId` 0/absent means the destination is
+ *  a DM or a non-forum group. */
+export interface TelegramBinding {
+  threadId: string
+  chatId: number
+  topicId?: number
+  model?: string
+  lastSeq: number
 }
 
 /** Mirror of backend/internal/domain/Usage. */
@@ -359,7 +411,7 @@ export interface CatalogSnapshot {
   sshConnections: SSHConnection[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database'
+export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database' | 'memory'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {

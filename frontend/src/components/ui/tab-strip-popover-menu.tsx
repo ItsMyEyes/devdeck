@@ -10,6 +10,17 @@ export interface TabStripPopoverMenuProps {
   triggerAriaLabel: string
   align?: 'start' | 'end'
   children: ReactNode
+  /** Controlled open state. Omitting this (and `onOpenChange`) keeps today's
+   *  uncontrolled behaviour — the popover tracks its own open/closed state
+   *  via internal `useState`, driven by trigger clicks, outside press, and
+   *  Escape. Passing `open` hands truth to the caller instead: the popup's
+   *  visibility follows `open` directly (it can be opened without a trigger
+   *  click), and `onOpenChange` fires on every transition (trigger click,
+   *  outside press, Escape) without this component ever updating its own
+   *  state — same controlled/uncontrolled duality as `Popover.Root`'s own
+   *  `open` prop, which this threads straight onto. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 /** Shared popover shell for a tab strip's "..." overflow menu and "+"
@@ -23,13 +34,23 @@ export function TabStripPopoverMenu({
   triggerAriaLabel,
   align = 'start',
   children,
+  open: controlledOpen,
+  onOpenChange,
 }: TabStripPopoverMenuProps) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const resolvedOpen = controlledOpen ?? internalOpen
   const popupRef = useRef<HTMLDivElement>(null)
-  useNativeOverlayBlocker(open, popupRef)
+  useNativeOverlayBlocker(resolvedOpen, popupRef)
 
   return (
-    <Popover.Root onOpenChange={setOpen}>
+    <Popover.Root
+      open={controlledOpen}
+      onOpenChange={(next) => {
+        if (!isControlled) setInternalOpen(next)
+        onOpenChange?.(next)
+      }}
+    >
       <Popover.Trigger className={triggerClassName} title={triggerTitle} aria-label={triggerAriaLabel}>
         {trigger}
       </Popover.Trigger>

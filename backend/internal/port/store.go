@@ -25,6 +25,51 @@ type Store interface {
 	PublishedSOCKS() (domain.PublishedSOCKSConfig, error)
 	SetPublishedSOCKS(cfg domain.PublishedSOCKSConfig) error
 
+	// Telegram remote-chat bridge for THIS machine (one bot token per
+	// process — see docs/superpowers/plans/2026-08-18-telegram-remote-chat.md
+	// §0.1). TelegramConfig never includes the bot token — see
+	// TelegramBotToken, used only by the bridge, never returned by a handler.
+	TelegramConfig() (domain.TelegramConfig, error)
+	SetTelegramConfig(cfg domain.TelegramConfig) error
+	TelegramBotToken() (string, error)
+	SetTelegramBotToken(token string) error
+	TelegramUsers() ([]domain.TelegramUser, error)
+	AddTelegramUser(u domain.TelegramUser) error
+	DeleteTelegramUser(userID int64) error
+	TelegramBindings() ([]domain.TelegramBinding, error)
+	TelegramBindingByThread(threadID string) (domain.TelegramBinding, error)
+	SetTelegramBinding(b domain.TelegramBinding) error
+	SetTelegramBindingSeq(threadID string, seq uint64) error
+	SetTelegramBindingPin(threadID string, messageID int64) error
+	SetTelegramBindingAgent(threadID, agent string) error
+	SetTelegramBindingModel(threadID, model string) error
+
+	TelegramProjectBindings() ([]domain.TelegramProjectBinding, error)
+	TelegramProjectBindingByID(projectID string) (domain.TelegramProjectBinding, error)
+	SetTelegramProjectBinding(b domain.TelegramProjectBinding) error
+	SetTelegramProjectBindingPin(projectID string, messageID int64) error
+	SetTelegramProjectBindingAgent(projectID, agent string) error
+	DeleteTelegramProjectBinding(projectID string) error
+	DeleteTelegramBinding(threadID string) error
+
+	// Completions (BYOK inline completions). CompletionsConfig never
+	// includes the API key — see CompletionsAPIKey, used only by the
+	// completions service, never returned by a handler.
+	CompletionsConfig() (domain.CompletionsConfig, error)
+	UpdateCompletionsConfig(p CompletionsConfigPatch) (domain.CompletionsConfig, error)
+	CompletionsConfigured() (bool, error)
+	CompletionsAPIKey() (string, error)
+
+	// Memory (persistent agent memory, hub-only — see domain.MemoryConfig's
+	// doc comment). MemoryConfig never includes either key; MemoryAPIKey and
+	// MemoryLLMAPIKey are used only by the memory service, never returned by
+	// a handler.
+	MemoryConfig() (domain.MemoryConfig, error)
+	UpdateMemoryConfig(p MemoryConfigPatch) (domain.MemoryConfig, error)
+	MemoryConfigured() (bool, error)
+	MemoryAPIKey() (string, error)
+	MemoryLLMAPIKey() (string, error)
+
 	// Workspaces (returns full nested tree)
 	Workspaces() ([]domain.Workspace, error)
 	CreateWorkspace(name string) (domain.Workspace, error)
@@ -201,6 +246,15 @@ type Store interface {
 	// DeleteAgentThread erases a thread outright — row, events and receipts.
 	// See the implementation's comment on why this is not a tombstone.
 	DeleteAgentThread(threadID string) error
+
+	// Agent chat attachments (images uploaded from the composer). ThreadID
+	// need not name an existing agent_thread row — an upload can race ahead
+	// of the thread's own EvtThreadCreated commit.
+	CreateAgentAttachment(threadID, name, mimeType string, data []byte, createdAt string) (domain.AgentAttachment, error)
+	AgentAttachmentData(id string) (domain.AgentAttachment, []byte, error)
+	// DeleteOrphanAgentAttachments sweeps attachments whose thread was
+	// deleted (or never committed) — see the implementation's comment.
+	DeleteOrphanAgentAttachments() (int, error)
 }
 
 // SettingsPatch carries optional fields for a partial settings update.
@@ -208,6 +262,45 @@ type SettingsPatch struct {
 	ActiveWorkspaceID *string
 	DefaultModel      *string
 	HasActive         bool // true when the JSON key was present (allows explicit null)
+}
+
+// CompletionsConfigPatch carries optional fields for a partial BYOK
+// completions config update.
+type CompletionsConfigPatch struct {
+	Provider   *string
+	BaseURL    *string
+	HasBaseURL bool // true when "baseUrl" key was in the JSON body — distinguishes "not provided" from "set to empty"
+	Model      *string
+	Enabled    *bool
+	APIKey     *string // nil = leave stored key unchanged; non-nil (including "") = replace
+}
+
+// MemoryConfigPatch carries optional fields for a partial memory config
+// update. Nil means "not provided"; Has* flags distinguish that from an
+// explicit empty string, the same convention CompletionsConfigPatch uses.
+type MemoryConfigPatch struct {
+	Enabled    *bool
+	BaseURL    *string
+	HasBaseURL bool
+	BankID     *string
+	HasBankID  bool
+
+	Hosting      *string
+	LocalPort    *int
+	LocalRunning *bool
+
+	LLMProvider   *string
+	LLMModel      *string
+	LLMBaseURL    *string
+	HasLLMBaseURL bool
+
+	AutoRecall   *bool
+	AutoRetain   *bool
+	RecallBudget *string
+	MaxTokens    *int
+
+	APIKey    *string // nil = leave stored key unchanged; non-nil (including "") = replace
+	LLMAPIKey *string // nil = leave stored key unchanged; non-nil (including "") = replace
 }
 
 // WorktreePatch carries optional fields for a partial worktree update.

@@ -36,6 +36,12 @@ func (a *fakeAdapter) RespondToRequest(context.Context, string, string, event.De
 func (a *fakeAdapter) RespondToUserInput(context.Context, string, string, map[string]any) error {
 	return nil
 }
+func (a *fakeAdapter) SetInteractionMode(context.Context, string, InteractionMode) error {
+	return nil
+}
+func (a *fakeAdapter) SetRuntimeMode(context.Context, string, RuntimeMode) error {
+	return nil
+}
 func (a *fakeAdapter) StopSession(context.Context, string) error { return nil }
 func (a *fakeAdapter) StopAll(context.Context) error             { return nil }
 func (a *fakeAdapter) HasSession(string) bool                    { return true }
@@ -122,5 +128,67 @@ func TestServiceRoutesThreadToItsInstance(t *testing.T) {
 	// An unbound thread must fail loudly rather than silently pick an adapter.
 	if _, err := svc.SendTurn(ctx, SendTurnInput{ThreadID: "w-unbound", Text: "hi"}); err == nil {
 		t.Fatal("unbound thread should error")
+	}
+}
+
+// The Reactor answers a user-input request through the Service, so the Service
+// has to resolve the thread to its own instance the same way every other call
+// does. Routing this to the wrong adapter would answer a question the agent
+// behind it never asked.
+func TestServiceRoutesUserInputResponseToItsInstance(t *testing.T) {
+	d := &fakeDriver{}
+	r := NewRegistry(d)
+	ctx := context.Background()
+	if _, err := r.StartInstance(ctx, "fake", InstanceSpec{InstanceID: "fake:work"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	svc := &Service{Registry: r, Dir: mapDirectory{"w-abc": "fake:work"}}
+	if err := svc.RespondToUserInput(ctx, "w-abc", "req-1", map[string]any{"q": "a"}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+
+	if err := svc.RespondToUserInput(ctx, "w-unbound", "req-1", nil); err == nil {
+		t.Fatal("unbound thread should error")
+	}
+}
+
+// Attachment must carry the same JSON-tag discipline as ModelSelection
+// (provider.go:150-154's own comment): this is decoded straight off the
+// WebSocket as part of TurnStartPayload, and an untagged struct would send
+// PascalCase keys the client never emits, silently dropping every field.
+func TestAttachmentJSONRoundTrip(t *testing.T) {
+	in := Attachment{ID: "a-1", Kind: "image", MIME: "image/png", Name: "x.png"}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	wantKeys := map[string]bool{"id": true, "kind": true, "mime": true, "name": true}
+	if len(m) != len(wantKeys) {
+		t.Fatalf("keys = %v, want exactly %v", m, wantKeys)
+	}
+	for k := range wantKeys {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("marshaled output %s missing key %q", b, k)
+		}
+	}
+	if _, ok := m["Data"]; ok {
+		t.Fatalf("marshaled output %s must not include Data", b)
+	}
+	if _, ok := m["Path"]; ok {
+		t.Fatalf("marshaled output %s must not include Path", b)
+	}
+
+	var out Attachment
+	if err := json.Unmarshal([]byte(`{"id":"a-1","kind":"image","mime":"image/png","name":"x.png"}`), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.ID != "a-1" || out.Kind != "image" || out.MIME != "image/png" || out.Name != "x.png" {
+		t.Fatalf("unmarshal = %+v, want id/kind/mime/name populated", out)
 	}
 }

@@ -8,6 +8,15 @@ export function buildEditorOptions(
   overrides: editor.IStandaloneEditorConstructionOptions = {},
 ): editor.IStandaloneEditorConstructionOptions {
   return {
+    // Paints identifiers from the language server's semantic tokens instead of
+    // the monarch grammar alone, which is what separates a function name from a
+    // plain identifier (see `editorTheme.ts`).
+    //
+    // Required explicitly: this option defaults to 'configuredByTheme', and a
+    // *standalone* monaco theme can never satisfy that — `StandaloneTheme`
+    // hardcodes `semanticHighlighting = false` and never reads the flag back
+    // out of the theme data, so `devdeckDarkTheme` cannot opt in on its own.
+    'semanticHighlighting.enabled': true,
     fontFamily: "'Geist Mono', ui-monospace, monospace",
     fontSize: 12.5,
     lineHeight: 1.5,

@@ -250,7 +250,7 @@ export const ComposerPromptEditor = forwardRef<ComposerPromptEditorHandle, Compo
       editorProps: {
         attributes: {
           class: cn(
-            'composer-prompt-editor min-w-0 whitespace-pre-wrap break-words text-sm text-foreground outline-none',
+            'composer-prompt-editor min-h-6 min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-foreground outline-none',
           ),
           // A `contenteditable` div has no implicit role, so without these it
           // is not a text input to anything that isn't a sighted mouse user:
@@ -301,11 +301,23 @@ export const ComposerPromptEditor = forwardRef<ComposerPromptEditorHandle, Compo
   }, [editor, value])
 
   return (
-    <div className="relative min-w-0">
+    // `max-h`/`overflow-y-auto`: a long prompt scrolls inside the box instead
+    // of growing it without bound. The editor is the composer's only
+    // auto-height child, so before this a pasted essay pushed the transcript
+    // (or, in the hero placement, the heading) off screen.
+    <div className="relative max-h-[min(40vh,220px)] min-w-0 overflow-y-auto">
       {value.length === 0 && placeholder ? (
+        // `inset-x-0` + `truncate`, NOT `left-0`: the placeholder is
+        // absolutely positioned over a one-line-tall editor, so an unbounded
+        // one wraps to a second line the editor has no height for and lands
+        // on top of the control row below it — which is exactly what a 300px
+        // SSH rail did to "Ask for changes, or describe what to build".
+        // Clipping to one line makes that structurally impossible at any
+        // width. `leading-6` matches the editor's own line box so the
+        // placeholder sits exactly where the caret does.
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 select-none text-sm text-muted-foreground"
+          className="pointer-events-none absolute inset-x-0 top-0 truncate leading-6 select-none text-sm text-muted-foreground"
         >
           {placeholder}
         </span>

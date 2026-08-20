@@ -7,6 +7,7 @@
 
 import type {
   Agent,
+  AgentAttachment,
   AgentModel,
   AgentSkill,
   AgentSummary,
@@ -375,6 +376,42 @@ export function gitPush(machine: Machine, worktreeId: string): Promise<void> {
 
 export function gitPull(machine: Machine, worktreeId: string): Promise<void> {
   return machineRequest<void>(machine, 'POST', `/worktrees/${worktreeId}/git/pull`)
+}
+
+// ---- Agent chat attachments (composer-context-attachments, C1/C2) ----
+//
+// Both routes live under `/api/agent/...` on every role (chat, and its
+// attachments, run on runtimes too — see backend/cmd/server/main.go). Same
+// `machineXhr` direct-first/proxy routing as the worktree file transfers
+// above, and for the same two reasons: upload needs progress (a screenshot
+// can be several MB even after downscaling) and download needs the runtime's
+// `Authorization` header, which a bare `<img src>` cannot carry — CONTRACTS.md's
+// key-auth section rejects `?key=` on a plain (non-WebSocket-upgrade) request,
+// so the caller fetches the bytes here and renders an object URL instead.
+
+export function uploadAgentAttachment(
+  machine: Machine,
+  threadId: string,
+  file: File,
+  onProgress: (progress: TransferProgress) => void,
+): Promise<AgentAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  return machineXhr<AgentAttachment>(machine, {
+    method: 'POST',
+    path: `/agent/threads/${threadId}/attachments`,
+    body: form,
+    onUploadProgress: onProgress,
+    responseType: 'json',
+  })
+}
+
+export function fetchAgentAttachmentBlob(machine: Machine, id: string): Promise<Blob> {
+  return machineXhr<Blob>(machine, {
+    method: 'GET',
+    path: `/agent/attachments/${id}`,
+    responseType: 'blob',
+  })
 }
 
 // ---- Project branches (the repo lives on this machine's disk) ----

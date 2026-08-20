@@ -23,7 +23,7 @@ vi.mock('@/features/data/queries', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
-const { SessionsPanel, nextFreeThreadKey } = await import('./SessionsPanel')
+const { SessionsPanel, nextFreeThreadKey, filterSessions } = await import('./SessionsPanel')
 
 const machine: Machine = {
   id: 'm1',
@@ -45,6 +45,7 @@ function thread(overrides: Partial<AgentThread> = {}): AgentThread {
     status: 'idle',
     createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
+    planReady: false,
     ...overrides,
   }
 }
@@ -141,26 +142,65 @@ describe('SessionsPanel', () => {
     expect(onSelectThread).toHaveBeenCalledWith('wt-1')
   })
 
-  it('deletes a session once the confirm is accepted', () => {
+  // These two used to stub `window.confirm` — which is exactly why the suite
+  // stayed green while deleting was impossible in the shipped desktop app.
+  // Tauri's WKWebView implements no `runJavaScriptConfirmPanelWithMessage`
+  // delegate, so the real `confirm()` returns false with no dialog, and the
+  // guard returned early every time. Stubbing it to `true` tested a browser
+  // that DevDeck does not run in. The confirmation is an in-app dialog now,
+  // and these drive it the way a user does.
+  it('deletes a session once the confirmation is accepted', async () => {
+    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: [thread({ id: 'wt-1', title: 'Fix the redirect' })] })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /delete session/i }))
+    // Nothing may happen on the strength of the row button alone.
+    expect(mockDeleteMutate).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete session' }))
+    expect(mockDeleteMutate).toHaveBeenCalledWith('wt-1', expect.anything())
+  })
+
+  // Erasing a transcript is irreversible, so declining must be a true no-op.
+  it('does not delete when the confirmation is dismissed', async () => {
+    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: [thread({ id: 'wt-1', title: 'Fix the redirect' })] })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /delete session/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(mockDeleteMutate).not.toHaveBeenCalled()
+  })
+
+  // The regression guard proper: no code path here may depend on the native
+  // dialog, because in the desktop build it silently answers "no".
+  it('never calls window.confirm', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: [thread({ id: 'wt-1', title: 'Fix the redirect' })] })
     render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
 
     fireEvent.click(screen.getByRole('button', { name: /delete session/i }))
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(mockDeleteMutate).toHaveBeenCalledWith('wt-1', expect.anything())
+    expect(confirmSpy).not.toHaveBeenCalled()
     confirmSpy.mockRestore()
   })
 
-  // Erasing a transcript is irreversible, so declining must be a true no-op.
-  it('does not delete when the confirm is declined', () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: [thread({ id: 'wt-1', title: 'Fix the redirect' })] })
+  // Plan `2026-08-15-composer-plan-surface.md` T6: a "Plan" pill beside the
+  // status dot when the thread has a plan on the table.
+  it('renders a Plan pill for a thread with planReady true', () => {
+    mockUseAgentThreads.mockReturnValue({
+      ...idleQuery,
+      data: [thread({ id: 'wt-1', title: 'Fix the redirect', planReady: true })],
+    })
     render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+    expect(screen.getByText('Plan')).toBeInTheDocument()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /delete session/i }))
-    expect(mockDeleteMutate).not.toHaveBeenCalled()
-    confirmSpy.mockRestore()
+  it('renders no Plan pill for a thread with planReady false', () => {
+    mockUseAgentThreads.mockReturnValue({
+      ...idleQuery,
+      data: [thread({ id: 'wt-1', title: 'Fix the redirect', planReady: false })],
+    })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+    expect(screen.queryByText('Plan')).toBeNull()
   })
 
   it('renders no disclosure with five or fewer threads', () => {
@@ -190,5 +230,76 @@ describe('nextFreeThreadKey', () => {
   // carries nothing forward and is safe to hand out again.
   it('reuses a number freed by a delete', () => {
     expect(nextFreeThreadKey('wt-1', ['wt-1', 'wt-1::chat-2'])).toBe('wt-1::chat-1')
+  })
+})
+
+// Session history is only useful if you can find things in it — a worktree or
+// an SSH host accumulates threads faster than a 5-row list can show.
+describe('SessionsPanel — search', () => {
+  // The search box is the only way to reach a session that has scrolled past
+  // "Show more", so it must filter the WHOLE list, not just the visible slice.
+  it('searches beyond the folded rows', () => {
+    const threads = Array.from({ length: 7 }, (_, i) => thread({ id: `wt-1::chat-${i}`, title: `Session ${i}` }))
+    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: threads })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+
+    // Session 6 is folded away behind "Show more" to begin with.
+    expect(screen.queryByRole('button', { name: /^Session 6/ })).toBeNull()
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search sessions/i }), { target: { value: 'Session 6' } })
+
+    expect(screen.getByRole('button', { name: /^Session 6/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Session 1/ })).toBeNull()
+  })
+
+  it('says so when nothing matches, rather than showing an empty list', () => {
+    const threads = Array.from({ length: 3 }, (_, i) => thread({ id: `wt-1::chat-${i}`, title: `Session ${i}` }))
+    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: threads })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search sessions/i }), { target: { value: 'zzz' } })
+    expect(screen.getByText(/no sessions match/i)).toBeInTheDocument()
+  })
+
+  // A search box over one or two rows is furniture.
+  it('does not offer search for a list short enough to read at a glance', () => {
+    mockUseAgentThreads.mockReturnValue({ ...idleQuery, data: [thread({ id: 'wt-1', title: 'Only one' })] })
+    render(<SessionsPanel worktreeId="wt-1" machine={machine} />)
+    expect(screen.queryByRole('searchbox', { name: /search sessions/i })).toBeNull()
+  })
+})
+
+describe('filterSessions', () => {
+  const rows = [
+    thread({ id: 't1', title: 'Fix the auth redirect' }),
+    thread({ id: 't2', title: 'Add rate limiting' }),
+    thread({ id: 't3', title: '' }),
+  ]
+
+  it('returns everything for an empty or whitespace query', () => {
+    expect(filterSessions(rows, '')).toHaveLength(3)
+    expect(filterSessions(rows, '   ')).toHaveLength(3)
+  })
+
+  it('matches titles case-insensitively on a substring', () => {
+    expect(filterSessions(rows, 'AUTH').map((t) => t.id)).toEqual(['t1'])
+    expect(filterSessions(rows, 'rate').map((t) => t.id)).toEqual(['t2'])
+  })
+
+  // Every term has to match, so a second word narrows instead of widening —
+  // otherwise typing more makes the list grow, which reads as broken.
+  it('narrows on each additional term rather than widening', () => {
+    expect(filterSessions(rows, 'fix redirect').map((t) => t.id)).toEqual(['t1'])
+    expect(filterSessions(rows, 'fix limiting')).toHaveLength(0)
+  })
+
+  // An untitled thread is still a real session someone may be looking for, and
+  // it renders as "Untitled session" — so that is what it must match on.
+  it('finds an untitled session by the label it actually shows', () => {
+    expect(filterSessions(rows, 'untitled').map((t) => t.id)).toEqual(['t3'])
+  })
+
+  it('returns nothing when no session matches', () => {
+    expect(filterSessions(rows, 'nonexistent')).toHaveLength(0)
   })
 })

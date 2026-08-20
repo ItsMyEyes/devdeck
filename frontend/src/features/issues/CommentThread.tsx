@@ -24,7 +24,7 @@ function CommentBubble({ comment, onDelete, deleting }: { comment: IssueComment;
           {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
         </button>
       </div>
-      <MarkdownPreview source={comment.body} />
+      <MarkdownPreview source={comment.body} compact />
     </div>
   )
 }

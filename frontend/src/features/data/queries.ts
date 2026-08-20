@@ -240,6 +240,7 @@ import {
   downloadSSHFileWithProgress,
 } from '@/lib/sshFileApi'
 import type { FilesTarget } from '@/features/terminal/filesTarget'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { qk } from './keys'
 
 // ---- Queries ----
@@ -391,6 +392,32 @@ export function useMachineVersion(id: string | undefined) {
     queryKey: qk.machineVersion(id ?? ''),
     queryFn: () => fetchMachineVersion(id!),
     enabled: !!id,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** Optional features a machine's process can serve, read from that machine's
+ *  own `/api/whoami` (never from the hub's registry — the answer is a property
+ *  of the running process, and a hub and its runtimes are upgraded
+ *  independently and are often on different builds).
+ *
+ *  Returns `null` when the machine answered but reported no `capabilities`
+ *  array at all: that build predates capability reporting, which is a
+ *  DIFFERENT answer from "reports an empty list" and callers must be able to
+ *  tell them apart. An unreachable machine rejects instead, so a network blip
+ *  never reads as "feature missing".
+ *
+ *  Cached hard rather than polled, like `useMachineVersion`: the answer cannot
+ *  change until that process restarts. */
+export function useMachineCapabilities(machine: Machine | undefined) {
+  return useQuery({
+    queryKey: qk.machineCapabilities(machine?.id ?? ''),
+    queryFn: async () => {
+      const who = await machineRequest<{ capabilities?: unknown }>(machine as Machine, 'GET', '/whoami')
+      if (!Array.isArray(who.capabilities)) return null
+      return who.capabilities.filter((c): c is string => typeof c === 'string')
+    },
+    enabled: !!machine,
     staleTime: 5 * 60_000,
   })
 }
@@ -1366,6 +1393,10 @@ export interface AgentThread {
   status: string
   createdAt: number
   updatedAt: number
+  /** Overlaid from the engine's live Thread.ProposedPlan, the same as
+   *  `status` — no stored column behind it. True while a plan the agent
+   *  proposed is still on the table. */
+  planReady: boolean
 }
 
 function fetchAgentThreads(machine: Machine, worktreeId: string): Promise<AgentThread[]> {
@@ -1392,13 +1423,19 @@ function deleteAgentThread(machine: Machine, threadId: string): Promise<void> {
 
 /** Erases a chat session — its sidebar row, its transcript and the command
  *  receipts behind it (see the backend's `DeleteAgentThread` on why this is an
- *  erase rather than a tombstone). Irreversible, so callers confirm first. */
+ *  erase rather than a tombstone). Irreversible, so callers confirm first.
+ *  Also clears the thread's composer draft (plan
+ *  `2026-08-15-composer-drafts-and-stash.md` Task 11): once the backend has
+ *  confirmed the erase, a surviving local draft would be the only trace left
+ *  of a conversation the user asked to delete. */
 export function useDeleteAgentThread(machine: Machine | undefined, worktreeId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (threadId: string) => deleteAgentThread(machine!, threadId),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: qk.agentThreads(machine?.id ?? '', worktreeId ?? '') }),
+    onSuccess: (_data, threadId) => {
+      queryClient.invalidateQueries({ queryKey: qk.agentThreads(machine?.id ?? '', worktreeId ?? '') })
+      useDevDeckStore.getState().clearComposerDraft(threadId)
+    },
   })
 }
 

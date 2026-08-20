@@ -1,6 +1,6 @@
 /**
  * Chat input, t3code shell: a TipTap prompt editor and the control row live
- * inside one frame/surface pair, a status strip sits below it. Enter sends,
+ * inside one frame/surface pair. Enter sends,
  * Shift+Enter inserts a newline — that contract now belongs to
  * `ComposerPromptEditor`'s own keymap (see that file's doc comment), not this
  * one; sending is never disabled by `status === 'running'` — the decider
@@ -11,14 +11,19 @@
  *
  * Two placements, one component. `variant="docked"` is the composer a live
  * thread scrolls above; `variant="hero"` is the same box parked in the middle
- * of an empty thread under "What should we build in …?" — no top border, no
- * status strip, nothing to divide it from the heading it belongs to. Both
- * share the transcript's `max-w-3xl` measure so the box never sits wider than
- * the messages it produces.
+ * of an empty thread under "What should we build in …?" — no top border,
+ * nothing to divide it from the heading it belongs to. Both share the
+ * transcript's `max-w-3xl` measure so the box never sits wider than the
+ * messages it produces.
+ *
+ * There is no worktree/branch strip under the box any more. It restated what
+ * the pane's own header and tab already say, on the one line of every chat
+ * pane that is closest to the thing the user is actually typing into.
  *
  * The mode/model pills come from `ComposerControls`, which owns their
  * options and dispatches the real commands. The row is rendered twice —
- * once inline (shown above the `@sm/composer` container breakpoint) and
+ * once inline (shown above the `@2xl/composer` container breakpoint, which is
+ * measured from the row's own laid-out width — see the footer) and
  * once inside the "More controls" overflow popup (shown below it) —
  * mirroring `BrowserToolbar.tsx`'s existing pattern for the same problem:
  * wrapping must be structurally impossible, not merely unlikely, so the
@@ -46,20 +51,26 @@
  * their button chrome and status-driven icon swap, same as before.
  *
  * The `@container/composer` dual render of `ComposerControls` stays, sized
- * off the whole form (not just the control row) so the `@sm/composer`
- * breakpoint measures the same box it always has. The pills also stay on
+ * off the whole form (not just the control row) — note that a container query
+ * measures the form's CONTENT box, so the stop is 40px of horizontal padding
+ * short of the form's border-box width. The pills also stay on
  * `@base-ui/react`, because they carry `useNativeOverlayBlocker` for the
  * Tauri webview.
  */
 import { useEffect, useRef, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent, FormEvent } from 'react'
+import type {
+  ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
+  DragEvent as ReactDragEvent,
+  FormEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react'
 import { ArrowUp, MoreHorizontal, Paperclip, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { PromptInputButton, PromptInputSubmit } from '@/components/ai-elements/prompt-input'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { promptChatStatus } from '@/features/agent-chat/adapter'
-import { ChatStatusStrip } from '@/features/agent-chat/ChatStatusStrip'
 import { composerControlClassName } from '@/features/agent-chat/ComposerControl'
 import { ComposerAttachments } from '@/features/agent-chat/ComposerAttachments'
 import type { AgentAttachmentRef, ComposerAttachmentsHandle } from '@/features/agent-chat/ComposerAttachments'
@@ -208,8 +219,6 @@ export interface ChatComposerProps {
    *  prop existed, so no existing caller needs to change. Not wired by this
    *  task — a later task passes the SSH source in from the SSH chat pane. */
   mentionSource?: MentionSource
-  worktree?: string
-  branch?: string | null
   /** `'docked'` (default) pins the composer under a live transcript;
    *  `'hero'` centres it in an empty thread. See the file's doc comment. */
   variant?: 'docked' | 'hero'
@@ -282,8 +291,15 @@ const FRAME = 'group rounded-[22px] p-px'
  *  `relative` so the stash badge (plan T9, design spec §6) can anchor to
  *  this box's top-right shoulder. */
 const SURFACE = [
-  'relative flex flex-col gap-2 rounded-[20px] border border-devdeck-hairline bg-devdeck-raised',
-  'px-4 pt-3.5 pb-2 shadow-none transition-colors',
+  'relative flex flex-col gap-1.5 rounded-[20px] border border-devdeck-hairline bg-devdeck-raised',
+  // Padding scales with the box, not the viewport: this composer is as likely
+  // to be 260px wide in the SSH rail as 768px in a full pane, and the wide
+  // inset that reads as generous at 768px eats a third of the line at 260px.
+  'px-3 pt-3 pb-2 @sm/composer:gap-2 @sm/composer:px-4 @sm/composer:pt-3.5',
+  'shadow-none transition-colors',
+  // Ring only, never ring + accent border: both together paint 2px of full
+  // accent around the box, which at rail width is the loudest thing on the
+  // pane by a distance. The hairline border stays where it is underneath.
   'has-[[contenteditable]:focus]:ring-1 has-[[contenteditable]:focus]:ring-devdeck-border-accent',
 ].join(' ')
 
@@ -322,8 +338,6 @@ export function ChatComposer({
   machine,
   worktreeId,
   mentionSource,
-  worktree,
-  branch,
   controls,
   variant = 'docked',
   pendingUserInputs = [],
@@ -638,8 +652,37 @@ export function ChatComposer({
     if (event.dataTransfer?.types.includes('Files')) event.preventDefault()
   }
 
+  // The box's padding is part of the box: clicking the empty strip beside or
+  // under the text put focus nowhere, so a click that visibly landed "in the
+  // input" did nothing — the single most common way to miss a one-line-tall
+  // editor inside a 20px-padded surface. Gated on the surface being the click
+  // target ITSELF, so every descendant (the pills, the paperclip, the send
+  // button, the approval panels, the attachment strip) keeps its own click
+  // untouched; `mousedown` rather than `click` so focus lands before the
+  // browser would otherwise move it.
+  function handleSurfaceMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return
+    const editable = surfaceRef.current?.querySelector<HTMLElement>('[contenteditable="true"]')
+    if (!editable) return
+    event.preventDefault()
+    editable.focus()
+  }
+
   return (
-    <div className={cn('flex flex-none flex-col', hero ? 'w-full' : 'border-t border-devdeck-hairline bg-devdeck-pane')}>
+    // A SECOND container, wrapping the first. `@container/composer` below
+    // sits on the `<form>` and therefore cannot size the form's OWN padding —
+    // a container query only ever matches descendants of its container. That
+    // padding is exactly what needs to shrink in a 300px rail (20px a side of
+    // outer gutter, on top of the surface's own inset, pushed the first
+    // character ~32px in from the pane edge), so it queries this outer shell
+    // instead. The inner `@sm/composer` breakpoint keeps measuring the same
+    // box it always has.
+    <div
+      className={cn(
+        '@container/composer-shell flex flex-none flex-col',
+        hero ? 'w-full' : 'border-t border-devdeck-hairline bg-devdeck-pane',
+      )}
+    >
       {/* Ambient conditions render above the form, in the same measure —
           its own copy of `mx-auto w-full min-w-0 max-w-3xl` plus the
           variant's horizontal inset, NOT hoisted onto a shared wrapper with
@@ -647,18 +690,22 @@ export function ChatComposer({
           whole form on purpose (see this file's doc comment, and spec
           Design §7). Returns `null` when empty, so an empty stack costs no
           DOM and no space. */}
-      <ComposerBannerStack items={banners} className={cn('w-full min-w-0', hero ? undefined : 'px-5')} />
+      <ComposerBannerStack
+        items={banners}
+        className={cn('w-full min-w-0', hero ? undefined : 'px-3 @sm/composer-shell:px-5')}
+      />
       <form
         onSubmit={handleFormSubmit}
         className={cn(
           '@container/composer mx-auto w-full min-w-0 max-w-3xl',
-          hero ? 'px-0' : cn('px-5 pb-2', banners.length > 0 ? 'pt-0' : 'pt-3'),
+          hero ? 'px-0' : cn('px-3 pb-2 @sm/composer-shell:px-5', banners.length > 0 ? 'pt-0' : 'pt-2.5 @sm/composer-shell:pt-3'),
         )}
       >
         <div className={FRAME}>
           <div
             ref={surfaceRef}
             className={SURFACE}
+            onMouseDown={handleSurfaceMouseDown}
             onPaste={handleSurfacePaste}
             onDrop={handleSurfaceDrop}
             onDragOver={handleSurfaceDragOver}
@@ -714,7 +761,14 @@ export function ChatComposer({
                 agent does next; an approval can wait one extra render. Both
                 panels already show their own n/m counter, so this is not the
                 combined multi-kind queue UI the spec explicitly defers. */}
-            <div data-slot="composer-panels">
+            {/* `empty:hidden` — the slot is always rendered so its position in
+                the stack is reserved, but an empty div is still a flex child
+                and still collects the surface's `gap` on both sides. With two
+                of these (this and the attachment strip) that was ~18px of
+                blank space wedged between the caret and the control row on
+                every composer that had neither a pending panel nor an
+                attachment, which is nearly all of them. */}
+            <div data-slot="composer-panels" className="empty:hidden">
               {pendingUserInputs.length > 0 ? (
                 <ComposerPendingUserInputPanel
                   pendingUserInputs={pendingUserInputs}
@@ -727,6 +781,11 @@ export function ChatComposer({
                 <ComposerPendingApprovalPanel
                   pendingApprovals={pendingApprovals}
                   onRespondToApproval={onRespondToApproval}
+                  // The SAME pair the permission pill is driven by, on purpose:
+                  // the card's mode buttons and the pill must never be able to
+                  // disagree about what the thread's mode is.
+                  runtimeMode={controls.runtimeMode}
+                  onChangeRuntimeMode={controls.setRuntimeMode}
                 />
               ) : null}
               {/* T12 — B's own panel joins A's stack rather than replacing
@@ -747,7 +806,12 @@ export function ChatComposer({
               value={text}
               onChange={setText}
               onSubmit={submit}
-              placeholder={hero ? 'Ask for changes, or describe what to build' : 'Ask anything…'}
+              // Short enough to fit one line in the narrowest box this
+              // composer ships in (the ~260px SSH rail). The editor clips its
+              // placeholder to one line now, so a longer string would not
+              // break the layout — it would just read as "Ask for changes, or
+              // desc…", which is worse than a sentence that fits.
+              placeholder={hero ? 'Describe what to build…' : 'Ask anything…'}
               machine={machine ?? NO_MACHINE}
               worktreeId={worktreeId ?? ''}
               mentionSource={mentionSource}
@@ -755,15 +819,28 @@ export function ChatComposer({
               onInteractionModeChange={controls.setInteractionMode}
             />
 
-            <footer className="flex items-center gap-2">
+            <footer className="flex items-center gap-1 @sm/composer:gap-2">
               <div className="min-w-0 flex-1 overflow-hidden">
+                {/* ── Where the row actually fits ──
+                    `@2xl` (42rem), not `@sm` (24rem), and the number is
+                    measured rather than picked: the five pills lay out at
+                    549px with the model pill already floored, and this row is
+                    handed `container - 116px` (the surface inset, the
+                    paperclip, the send button and the gaps between them). So
+                    it needs ~665px of container and had been rendering from
+                    384px, where its own `overflow-hidden` cut the trailing
+                    pills mid-glyph — "Approval requ" and a half-drawn hammer
+                    in the screenshots. Note the query measures the form's
+                    CONTENT box, i.e. 40px less than its border box.
+                    Below the stop the "More controls" popup carries the
+                    identical row, legibly, one click away. */}
                 <div
                   data-testid="composer-controls-inline"
-                  className="hidden min-w-0 flex-nowrap items-center gap-0.5 overflow-hidden @sm/composer:flex"
+                  className="hidden min-w-0 flex-nowrap items-center gap-0.5 overflow-hidden @2xl/composer:flex"
                 >
                   <ComposerControls {...controls} variant="inline" />
                 </div>
-                <div className="@sm/composer:hidden">
+                <div className="@2xl/composer:hidden">
                   <TabStripPopoverMenu
                     trigger={<MoreHorizontal size={14} aria-hidden="true" />}
                     triggerClassName={cn(composerControlClassName, 'flex w-7 items-center justify-center px-0')}
@@ -824,8 +901,6 @@ export function ChatComposer({
           </div>
         </div>
       </form>
-
-      {hero ? null : <ChatStatusStrip worktree={worktree ?? '—'} branch={branch} />}
     </div>
   )
 }
