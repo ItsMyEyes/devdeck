@@ -1,0 +1,1 @@
+{"type":"control_request","request_id":"a11ce000-0000-0000-0000-000000000002","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","display_name":"ExitPlanMode","input":{"planFilePath":"/home/user/.claude/plans/plan-1.md"},"tool_use_id":"toolu_01ExitPlanExample","requires_user_interaction":true}}

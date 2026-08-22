@@ -1,0 +1,2 @@
+{"type":"control_request","request_id":"c33ce000-0000-0000-0000-000000000004","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Yes"}],"multiSelect":false}]},"tool_use_id":"toolu_01CancelExample","requires_user_interaction":true}}
+{"type":"control_cancel_request","request_id":"c33ce000-0000-0000-0000-000000000004"}

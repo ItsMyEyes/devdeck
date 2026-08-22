@@ -2,10 +2,38 @@ package memoryhost
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
 )
+
+// requireContainerE2E gates the tests that start a REAL Hindsight container.
+//
+// ContainerName is a single fixed name (`devdeck-hindsight`) — one per
+// machine, by design, since it names a deployment an operator is meant to
+// find and manage. That makes it an exclusive machine-wide resource, and two
+// tests wanting it cannot both have it: `go test ./...` runs packages
+// concurrently, so this test and internal/service's
+// TestLocalContainerStartStopUpdatesConfig each saw "no container yet", each
+// ran `docker run`, and the loser failed with `Conflict. The container name
+// "/devdeck-hindsight" is already in use`. Their own "already exists" guards
+// cannot fix that: the check and the create are not atomic.
+//
+// So the real-container lifecycle is opt-in rather than part of the default
+// suite. Run it deliberately, one package at a time:
+//
+//	DEVDECK_CONTAINER_E2E=1 go test ./internal/memoryhost/
+//
+// Everything else in this file — the env construction, the base-URL
+// rewriting, inspect-on-a-missing-container — runs unconditionally and needs
+// no engine.
+func requireContainerE2E(t *testing.T) {
+	t.Helper()
+	if os.Getenv("DEVDECK_CONTAINER_E2E") == "" {
+		t.Skip("set DEVDECK_CONTAINER_E2E=1 to run the real-container lifecycle (exclusive: one devdeck-hindsight per machine)")
+	}
+}
 
 func TestContainerEnvIncludesRequiredVars(t *testing.T) {
 	env := containerEnv(EngineDocker, StartConfig{LLMProvider: "openai", LLMAPIKey: "sk-test", LLMModel: "gpt-5-mini"})
@@ -82,12 +110,16 @@ func TestInspectContainerReportsNotExistsForAnUnknownName(t *testing.T) {
 // TestContainerStartStopStatusRoundTrip drives the real lifecycle against
 // whatever engine is on this machine, using the actual Hindsight image —
 // this is the end-to-end proof the rest of this file's tests can only
-// approximate. Skips if no engine is present, or if devdeck-hindsight
-// already exists (so it never disturbs a real deployment on the test
-// machine); cleans up unconditionally via t.Cleanup.
+// approximate. Skips unless DEVDECK_CONTAINER_E2E is set, if no engine is
+// present, or if devdeck-hindsight already exists (so it never disturbs a
+// real deployment on the test machine); cleans up unconditionally via
+// t.Cleanup.
 func TestContainerStartStopStatusRoundTrip(t *testing.T) {
+	requireContainerE2E(t)
 	_, bin := availableContainerEngine(t)
 
+	// TOCTOU against anything else driving the same container — which is
+	// exactly why requireContainerE2E exists; see its doc comment.
 	before := GetStatus(context.Background(), ModeContainer, "")
 	if before.Exists {
 		t.Skip("devdeck-hindsight already exists on this machine — skipping to avoid disturbing it")

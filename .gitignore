@@ -20,4 +20,3 @@ temp
 
 # @gg/ — reference only, kept locally but not tracked.
 gg/
-backend/internal/agentcore/provider/**/testdata/

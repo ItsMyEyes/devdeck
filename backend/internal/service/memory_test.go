@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -689,8 +690,19 @@ func TestExportBrainReturnsErrMemoryNotConfiguredWhenDisabled(t *testing.T) {
 // through the service layer (not just internal/memoryhost's own tests),
 // proving the config side effects LocalStart/LocalStop document — BaseURL
 // derived from the port, Enabled and LocalRunning flipped on a real success,
-// LocalRunning cleared on stop. Skips when no engine is on this machine.
+// LocalRunning cleared on stop.
+//
+// Opt-in, for the same reason memoryhost's own requireContainerE2E is: the
+// container name is one fixed name per machine, and `go test ./...` runs this
+// package and internal/memoryhost concurrently. Both used to pass their
+// "already exists?" guard and then race on `docker run`, so whichever lost got
+// `Conflict. The container name "/devdeck-hindsight" is already in use`.
+//
+//	DEVDECK_CONTAINER_E2E=1 go test ./internal/service/ -run TestLocalContainer
 func TestLocalContainerStartStopUpdatesConfig(t *testing.T) {
+	if os.Getenv("DEVDECK_CONTAINER_E2E") == "" {
+		t.Skip("set DEVDECK_CONTAINER_E2E=1 to run the real-container lifecycle (exclusive: one devdeck-hindsight per machine)")
+	}
 	if _, _, err := memoryhost.DetectEngine(); err != nil {
 		t.Skip("no docker/podman on this machine")
 	}
