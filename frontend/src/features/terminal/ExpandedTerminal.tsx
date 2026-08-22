@@ -32,7 +32,6 @@ import {
 } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
-import { agentChatEnabled } from '@/features/agent-chat/enabled'
 import { insertTerminalContext } from '@/features/agent-chat/ChatComposer'
 import { nextFreeThreadKey } from '@/features/agent-chat/SessionsPanel'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
@@ -116,10 +115,6 @@ function basename(path: string) {
  *  tab, neither of which has an agent to chat with; defaulting it to chat
  *  would give every SSH connection a dead-end pane. */
 function createDefaultWorktreeLayout(worktreeId: string): WorktreeLayout {
-  // With chat hidden (shipped builds — see `@/features/agent-chat/enabled`)
-  // there is no chat pane to default to, so fall back to the shared
-  // terminal-primary layout the SSH shells already use.
-  if (!agentChatEnabled()) return createDefaultLayout(worktreeId)
   const rootId = generateId()
   const chat = createAgentChatPane(worktreeId)
   return {
@@ -1067,16 +1062,13 @@ function TerminalWorkspace({
     return (
       <div className="flex min-w-[168px] flex-col gap-0.5">
         {/* Chat is the default content for a new worktree (see
-            createDefaultWorktreeLayout above), so it leads this menu too —
-            hidden outright rather than disabled when shipped builds have no
-            agent to chat with (@/features/agent-chat/enabled). SSHShellPane's
-            own "+" menu has no agent either, so it never gets this item. */}
-        {agentChatEnabled() ? (
-          <OverflowItem onClick={() => handleNewChatTab(pane.id)}>
-            <MessageSquare size={13} />
-            New Chat
-          </OverflowItem>
-        ) : null}
+            createDefaultWorktreeLayout above), so it leads this menu too.
+            SSHShellPane's own "+" menu has no agent to chat with, so it
+            never gets this item. */}
+        <OverflowItem onClick={() => handleNewChatTab(pane.id)}>
+          <MessageSquare size={13} />
+          New Chat
+        </OverflowItem>
         <OverflowItem onClick={() => handleNewTerminalTab(pane.id)}>
           <TerminalSquare size={13} />
           New Terminal

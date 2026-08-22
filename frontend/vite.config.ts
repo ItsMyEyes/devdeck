@@ -221,7 +221,6 @@ export default defineConfig({
       'src/features/agent-chat/SessionsPanel.test.tsx',
       'src/features/agent-chat/ModelPicker.test.tsx',
       'src/features/machines/TerminalSessionsDialog.test.tsx',
-      'src/features/agent-chat/enabled.test.ts',
       'src/features/agent-chat/composerDrafts.test.ts',
       'src/features/agent-chat/promptStash.test.ts',
       'src/features/agent-chat/ComposerStashBadge.test.tsx',

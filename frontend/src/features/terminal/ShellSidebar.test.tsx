@@ -166,35 +166,6 @@ describe('ShellSidebar panel switcher', () => {
   })
 })
 
-// Shipped builds hide the chat feature (see `@/features/agent-chat/enabled`).
-// Vitest runs non-production, so the suite above sees the feature as visible;
-// these two stub the flag off to cover the shipped path.
-describe('ShellSidebar with agent-chat hidden', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-
-  it('drops the Sessions entry but keeps Explorer and Git', () => {
-    vi.stubEnv('VITE_AGENT_CHAT', '0')
-    render(<ShellSidebar {...baseProps} git={{ worktreeId: 'wt-1', machine }} />)
-
-    expect(screen.queryByRole('button', { name: 'Sessions' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Explorer' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Git' })).toBeInTheDocument()
-  })
-
-  // Without this fallback a sidebar that was left on Sessions before the
-  // feature was hidden would render an empty body with no button to leave it.
-  it('falls back to explorer for a panel value persisted while it was visible', () => {
-    vi.stubEnv('VITE_AGENT_CHAT', '0')
-    useDevDeckStore.setState({ shellSidebars: { 'wt:worktree-1': { open: true, panel: 'sessions', width: 280 } } })
-    render(<ShellSidebar {...baseProps} git={{ worktreeId: 'wt-1', machine }} />)
-
-    expect(screen.queryByTestId('mock-sessions')).toBeNull()
-    expect(screen.getByTestId('mock-explorer')).toBeInTheDocument()
-  })
-})
-
 describe('ShellSidebar close/hide behaviour', () => {
   it('hides with display:none instead of unmounting the explorer subtree', () => {
     useDevDeckStore.setState({ shellSidebars: { 'wt:worktree-1': { open: true, panel: 'explorer', width: 280 } } })

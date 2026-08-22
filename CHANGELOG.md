@@ -3,6 +3,29 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.1
+
+**Agent chat is on.** v0.2.0 shipped the whole chat engine but hid it in
+release builds behind a build-time flag, so the only way to reach it was to
+compile your own with `VITE_AGENT_CHAT=1`. That gate is gone — deleted, not
+defaulted — and the feature is simply part of the app now.
+
+What that turns on:
+
+- The **Sessions** tab in a worktree's shell sidebar, listing that worktree's
+  threads.
+- **New Chat** in a pane's "+" menu, alongside New Terminal and New File.
+- Chat as the **default pane for a brand-new worktree**. Opening one now lands
+  you in a chat rather than a terminal; the terminal is one split away. Every
+  layout you have already arranged is persisted and keeps rendering exactly as
+  it did — this only changes what a worktree you have never opened starts as.
+
+SSH connections are unaffected: their DevOps Chat panel was already visible in
+v0.2.0, and an SSH shell still opens as a shell.
+
+`VITE_AGENT_CHAT` no longer does anything and has been removed from the env
+declarations. Nothing else changed.
+
 ## v0.2.0
 
 Remote operation. An agent that can actually drive an SSH host, a Telegram

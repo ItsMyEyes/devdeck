@@ -6,7 +6,6 @@ import type { Machine } from '@/store/types'
 import type { ShellSidebarPanel } from '@/store/useDevDeckStore'
 import { SHELL_SIDEBAR_MAX_WIDTH, SHELL_SIDEBAR_MIN_WIDTH, shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { SessionsPanel } from '@/features/agent-chat/SessionsPanel'
-import { agentChatEnabled } from '@/features/agent-chat/enabled'
 import type { FilesTarget } from './filesTarget'
 import type { GitDiffTarget } from './paneTree'
 import { GitPanel } from './GitPanel'
@@ -81,18 +80,12 @@ export function ShellSidebar({
   const setShellSidebarWidth = useDevDeckStore((s) => s.setShellSidebarWidth)
 
   const { open, panel, width } = shellSidebarState(shellSidebars, shellKey)
-  // Hidden in shipped builds while the feature is in flight — see
-  // `@/features/agent-chat/enabled`.
-  const chatEnabled = agentChatEnabled()
   // A shell with no git support can still carry a stale 'git'/'sessions'
   // panel value (persisted from before, or hand-edited) — fall back to
   // explorer rather than mounting a GitPanel/SessionsPanel with no
   // worktree/machine to give it. Sessions is gated on `git` the same way
-  // Git is: both need the worktree/machine pair an SSH shell doesn't have,
-  // and additionally on `chatEnabled`, so a value persisted while the
-  // feature was visible degrades to explorer rather than stranding the
-  // sidebar on a panel with no button to leave it.
-  const sessionsAllowed = Boolean(git) && chatEnabled
+  // Git is: both need the worktree/machine pair an SSH shell doesn't have.
+  const sessionsAllowed = Boolean(git)
   const effectivePanel: ShellSidebarPanel =
     panel === 'sessions' ? (sessionsAllowed ? 'sessions' : 'explorer') : panel === 'git' && git ? 'git' : 'explorer'
 
@@ -159,14 +152,12 @@ export function ShellSidebar({
               active={effectivePanel === 'git'}
               onClick={() => setShellSidebarPanel(shellKey, 'git')}
             />
-            {chatEnabled ? (
-              <PanelButton
-                label="Sessions"
-                icon={<MessagesSquare size={13} />}
-                active={effectivePanel === 'sessions'}
-                onClick={() => setShellSidebarPanel(shellKey, 'sessions')}
-              />
-            ) : null}
+            <PanelButton
+              label="Sessions"
+              icon={<MessagesSquare size={13} />}
+              active={effectivePanel === 'sessions'}
+              onClick={() => setShellSidebarPanel(shellKey, 'sessions')}
+            />
           </div>
         ) : null}
 
@@ -194,7 +185,7 @@ export function ShellSidebar({
             />
           </div>
         ) : null}
-        {git && chatEnabled ? (
+        {git ? (
           <div className={cn('min-h-0 min-w-0 flex-1 flex-col', effectivePanel === 'sessions' ? 'flex' : 'hidden')}>
             <SessionsPanel
               worktreeId={git.worktreeId}

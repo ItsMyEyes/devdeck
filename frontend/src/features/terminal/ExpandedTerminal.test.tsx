@@ -321,16 +321,6 @@ describe('ExpandedTerminal - "+" menu: New Chat', () => {
     expect(screen.getByText('Chat 3')).toBeInTheDocument()
   })
 
-  it('is hidden from the menu when the chat feature is off', () => {
-    vi.stubEnv('VITE_AGENT_CHAT', '0')
-    render(<ExpandedTerminal worktree={worktree} wsId="ws1" projectId="p1" isFocused />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'New tab' }))
-    expect(screen.queryByRole('button', { name: 'New Chat' })).not.toBeInTheDocument()
-    // The rest of the menu is unaffected — this worktree's default layout
-    // also falls back to a terminal primary pane when chat is off.
-    expect(screen.getByRole('button', { name: 'New Terminal' })).toBeInTheDocument()
-  })
 })
 
 describe('ExpandedTerminal - regression: in-pane explorer/git tabs', () => {
