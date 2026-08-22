@@ -41,6 +41,30 @@ interface ActivityAppendedPayload {
   stream: string
   text: string
   sequence: number
+  /** Present ONLY on a delta the server merged during replay
+   *  (`orchestration.CoalesceReplay`, `backend/.../replay.go`).
+   *
+   *  A streamed turn is durably logged one event per token, which is right for
+   *  a live socket and ruinous for replay — the JSON envelope is ~27x the text
+   *  it carries. So the replay path merges each consecutive run of same-item
+   *  deltas into ONE event holding the run's whole text, and these two fields
+   *  are what the run loses by becoming a single event:
+   *
+   *  `firstSequence` is the run's first `sequence` (`sequence` itself is the
+   *  last). The gap check below needs the first, or a perfectly contiguous
+   *  100-token run reads as a 99-token hole and the thread grows a false
+   *  "Some updates may be missing" banner.
+   *
+   *  Both are absent on a live delta, where the run is one event and the two
+   *  values are just `sequence` and the event's own `createdAt`. */
+  firstSequence?: number
+  /** The merged run's FIRST event `createdAt` — see `firstSequence`. The
+   *  merged event itself carries the run's LAST `createdAt` (it has to: the
+   *  client's `sinceSeq` cursor and `updatedAt` both need the tail), so
+   *  without this an item created by a merged delta would be stamped with
+   *  when the agent FINISHED writing it. Every replayed turn's duration and
+   *  "Worked for 11s" would collapse to zero. */
+  startedAt?: number
 }
 
 function isActivityAppendedPayload(payload: unknown): payload is ActivityAppendedPayload {
@@ -356,7 +380,9 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, created
       id: payload.itemId,
       kind: itemKindForStream(payload.stream),
       text: payload.text,
-      createdAt,
+      // `startedAt` on a merged run, the event's own stamp on a live delta —
+      // see the field's doc comment. Both mean "when this item began".
+      createdAt: payload.startedAt ?? createdAt,
       updatedAt: createdAt,
       lastSequence: payload.sequence,
     }
@@ -364,7 +390,10 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, created
   }
 
   const existing = items[idx]
-  const gap = payload.sequence > existing.lastSequence + 1
+  // The run's FIRST sequence is what has to be contiguous with what we already
+  // hold; `payload.sequence` is its last. They are the same number on a live
+  // delta, and differ by the whole run length on a replayed one.
+  const gap = (payload.firstSequence ?? payload.sequence) > existing.lastSequence + 1
   const updated: ChatItem = {
     ...existing,
     text: existing.text + payload.text,

@@ -27,7 +27,7 @@
  * its "approximate after a reconnect replays a whole thread" caveat are both
  * gone.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlertTriangle, ChevronRight, Copy, History, ImageOff, Info, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -69,6 +69,75 @@ const NO_MACHINE: Machine = { id: '', name: '', url: '', key: '', isLocal: false
  *  tool cards, the composer above it — shares this width so the eye tracks a
  *  single left edge down the thread. */
 const COLUMN = 'mx-auto flex w-full max-w-3xl flex-col'
+
+/**
+ * How much of a long thread is rendered on open, and how much each "show
+ * earlier" click adds — see `visibleCount` in `MessagesTimeline`.
+ *
+ * Chosen to cover several whole turns, so the default view is never a reply
+ * with its own question scrolled out of reach. Threads shorter than this
+ * render exactly as they always did: `firstVisible` clamps to 0 and no
+ * control appears, which is why no existing fixture changes behaviour.
+ */
+const INITIAL_VISIBLE_ENTRIES = 80
+const LOAD_MORE_ENTRIES = 120
+
+/**
+ * A hard ceiling on how many entries are ever in the DOM at once, enforced on
+ * top of every other rule below (freeze, reveal, tail-tracking).
+ *
+ * The freeze rule deliberately stops the window shedding off the top while a
+ * turn streams — correct for a normal turn, but it leaves one hole: reattaching
+ * to a thread whose turn is ALREADY mid-stream means the whole history arrives
+ * (in replay chunks) with the status already `running`, so the frozen cut sits
+ * at the first chunk's tail and every later chunk mounts in full. This cap
+ * closes that hole — nothing mounts more than this many rows, in any state — so
+ * a 1400-entry thread can never blow up into 1400 live Streamdown/mermaid
+ * components at once. Set well above a single turn's entries so it never trims a
+ * live turn mid-stream; it only ever bites on the reattach-to-a-huge-thread
+ * case the freeze rule can't.
+ */
+const MAX_MOUNTED_ENTRIES = 400
+
+/**
+ * The head of a windowed transcript: how much history is folded above, and the
+ * two ways to open it.
+ *
+ * Both actions exist because they answer different questions. "Show earlier"
+ * is for reading back a few turns and keeps the cost proportional; "Show all"
+ * is for searching the thread with the browser's own find, which cannot see
+ * what was never mounted. The count is stated rather than implied — a silent
+ * fold reads as a thread that lost its beginning.
+ */
+function EarlierEntriesButton({
+  hidden,
+  onShowMore,
+  onShowAll,
+}: {
+  hidden: number
+  onShowMore: () => void
+  onShowAll: () => void
+}) {
+  return (
+    <div className="mb-5 flex items-center justify-center gap-2">
+      <button
+        type="button"
+        onClick={onShowMore}
+        className="flex items-center gap-1.5 rounded-full border border-devdeck-hairline bg-devdeck-raised px-3 py-1 text-[11.5px] text-devdeck-fg-2 transition-colors hover:text-devdeck-fg"
+      >
+        <History size={11} aria-hidden="true" />
+        Show earlier ({hidden} {hidden === 1 ? 'entry' : 'entries'} above)
+      </button>
+      <button
+        type="button"
+        onClick={onShowAll}
+        className="rounded-full px-2 py-1 text-[11.5px] text-devdeck-dim-pane transition-colors hover:text-devdeck-fg"
+      >
+        Show all
+      </button>
+    </div>
+  )
+}
 
 /**
  * ── One box for every row of the work log ──
@@ -463,7 +532,10 @@ function ReasoningLabel() {
           Working…
         </Shimmer>
       ) : (
-        <span>{duration === undefined ? 'Worked for a few seconds' : `Worked for ${duration}s`}</span>
+        // `duration` is now always a number for a stamped block (0 under a
+        // second) — see `reasoningDuration` — so a falsy value, not just
+        // `undefined`, is what still reads as "a few seconds".
+        <span>{duration ? `Worked for ${duration}s` : 'Worked for a few seconds'}</span>
       )}
       <ChevronRight aria-hidden="true" className={cn('size-3.5 flex-none transition-transform', isOpen && 'rotate-90')} />
       <span className="flex-1" />
@@ -477,10 +549,17 @@ function ReasoningLabel() {
  *  a stream it watched itself, so on reconnect every block read "a few
  *  seconds". `undefined` for a block that never advanced, which is what makes
  *  the label fall back rather than claim "0s". */
+/** Seconds this reasoning block spanned, from the orchestration event's own
+ *  stamps — see `ReasoningRow`. Returns a NUMBER for the whole life of a
+ *  stamped block (0 while it is under a second), never flipping to `undefined`
+ *  as it advances: the vendored `Reasoning` takes this as a controlled
+ *  `duration` prop, and an `undefined`↔number flip makes React warn that the
+ *  value is "changing from uncontrolled to controlled" on every streamed block.
+ *  `undefined` is reserved for a block with no timestamp at all (nothing to
+ *  control with), which is a stable answer for that block's whole life. */
 function reasoningDuration(item: ChatItem): number | undefined {
   if (item.createdAt === undefined) return undefined
-  const seconds = Math.round(((item.updatedAt ?? item.createdAt) - item.createdAt) / 1000)
-  return seconds > 0 ? seconds : undefined
+  return Math.max(0, Math.round(((item.updatedAt ?? item.createdAt) - item.createdAt) / 1000))
 }
 
 function ReasoningRow({ entry, streaming }: { entry: ReasoningEntry; streaming: boolean }) {
@@ -769,9 +848,88 @@ function runningTurnStartedAt(items: ChatItem[]): number | undefined {
 }
 
 export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelineProps) {
-  const entries = buildTimeline(view)
-  const spans = turnSpans(entries)
+  // Both are O(items) and neither depends on this component's own state, so
+  // without memoising them every disclosure toggle — a tool row, a reasoning
+  // block — rebuilt the entire timeline. `view` is referentially stable
+  // between event batches (the reducer only returns a new object when the
+  // thread actually changed), which is exactly the window these renders fall
+  // in.
+  const entries = useMemo(() => buildTimeline(view), [view])
+  const spans = useMemo(() => turnSpans(entries), [entries])
+  // Keyed lookup rather than `spans.find(...)` once per entry, which made
+  // deciding where the turn stamps go quadratic in the length of the thread.
+  const spanByLastEntry = useMemo(() => {
+    const byIndex = new Map<number, (typeof spans)[number]>()
+    for (const span of spans) byIndex.set(span.lastEntryIndex, span)
+    return byIndex
+  }, [spans])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+
+  // ── The transcript window ──
+  //
+  // A long thread reaches hundreds of entries, and every agent message is a
+  // full markdown parse (Streamdown + katex + mermaid); mounting them all at
+  // once is seconds of blocked main thread for history nobody scrolled to, and
+  // — mounted inside `use-stick-to-bottom`'s initial smooth scroll — a storm of
+  // resize/scroll updates on load. So only the last `INITIAL_VISIBLE_ENTRIES`
+  // render, and the rest is one click away.
+  //
+  // The subtlety that took two tries to get right: the thread grows for two
+  // completely different reasons, and the window must treat them oppositely.
+  //
+  //   - SETTLED growth (replay arriving in chunks, or a finished turn) — cost
+  //     is the only concern, so keep the cut pinned to "last N": as the thread
+  //     grows the cut moves DOWN with it, shedding old entries off the top.
+  //   - RUNNING growth (a live turn streaming a token at a time) — here
+  //     shedding off the top is a NEGATIVE content resize (the shed entry is
+  //     taller than the token that replaced it), and `use-stick-to-bottom` only
+  //     re-pins to the bottom on a POSITIVE resize. Shed during a stream and the
+  //     reply keeps rendering while the viewport stops following it — the exact
+  //     "it's in the websocket but not on screen" report. So the cut FREEZES for
+  //     the duration of the turn: streaming only ever grows the bottom, the
+  //     resize stays positive, and the scroll lock holds.
+  //
+  // One fixed rule cannot do both, which is why the first cut-from-the-end
+  // version broke streaming and the anchored version rendered a chunked replay
+  // in full. This is the two rules, switched on `view.status`.
+  /** Entries the reader deliberately pulled into view with "Show earlier",
+   *  beyond the default tail. Widens the window on both sides of the
+   *  settled/running split; reset per thread. */
+  const [revealed, setRevealed] = useState(0)
+  const settledCut = Math.max(0, entries.length - INITIAL_VISIBLE_ENTRIES - revealed)
+  const isRunning = view.status === 'running'
+  /** The cut frozen for the duration of a running turn, or `null` when the
+   *  thread is settled and the cut simply tracks the tail. See the block
+   *  comment above for why a live turn must not shed off the top.
+   *
+   *  Seeded from the MOUNT status, not just from later transitions: reattaching
+   *  to a thread whose turn is already mid-stream never crosses an idle→running
+   *  edge, so a `null` default would leave it shedding exactly when it must not. */
+  const [frozenCut, setFrozenCut] = useState<number | null>(
+    isRunning ? Math.max(0, entries.length - INITIAL_VISIBLE_ENTRIES) : null,
+  )
+  /** The thread this window belongs to. `MessagesTimeline` is not remounted
+   *  when the pane switches threads (see `AgentChatPane`), so without this the
+   *  fold and the frozen cut from one thread would carry into the next — and a
+   *  cut index into the old list would point into the middle of the new one.
+   *  The first item's id is stable for a thread's whole life and unique across
+   *  threads (a `crypto` eventId), so a change is a real thread switch. */
+  const threadAnchorId = view.items[0]?.id ?? ''
+  const [windowThread, setWindowThread] = useState(threadAnchorId)
+  const [wasRunning, setWasRunning] = useState(isRunning)
+
+  if (threadAnchorId !== windowThread) {
+    // New thread: forget everything and re-anchor on its live edge.
+    setWindowThread(threadAnchorId)
+    setRevealed(0)
+    setWasRunning(isRunning)
+    setFrozenCut(isRunning ? Math.max(0, entries.length - INITIAL_VISIBLE_ENTRIES) : null)
+  } else if (isRunning !== wasRunning) {
+    // A turn started or ended: freeze the cut where it stands so the stream
+    // can only grow the bottom, or release it back to tracking the tail.
+    setWasRunning(isRunning)
+    setFrozenCut(isRunning ? settledCut : null)
+  }
 
   function toggle(id: string) {
     setExpanded((current) => {
@@ -783,6 +941,12 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
   }
 
   const lastIndex = entries.length - 1
+  // Clamped in case the thread shrank (a delete/reset) below the stored cut.
+  const baseCut = frozenCut !== null ? Math.min(frozenCut, Math.max(0, entries.length)) : settledCut
+  // The hard ceiling wins over the freeze: never mount more than
+  // MAX_MOUNTED_ENTRIES rows, whatever the cut rules computed. See the
+  // constant's doc comment for the reattach-mid-stream case this catches.
+  const firstVisible = Math.max(baseCut, entries.length - MAX_MOUNTED_ENTRIES)
 
   // Whenever the thread is running — see `WorkingRow`. The one exception is a
   // turn that ended in an error: the reducer can leave `status` at 'running'
@@ -808,7 +972,28 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
     // one list and close up, matching the rhythm a group already had. Prose — a
     // message, a plan card, an error — is a paragraph break and keeps the 20px.
     <div className={cn(COLUMN, 'gap-0 px-5 py-6 text-[14px] text-devdeck-fg')}>
-      {entries.map((entry, index) => {
+      {firstVisible > 0 ? (
+        <EarlierEntriesButton
+          hidden={firstVisible}
+          // Widen `revealed` (the settled cut) AND pull the frozen cut down in
+          // lockstep, so "Show earlier" works identically whether or not a turn
+          // is currently streaming.
+          onShowMore={() => {
+            setRevealed((r) => r + LOAD_MORE_ENTRIES)
+            setFrozenCut((c) => (c === null ? null : Math.max(0, c - LOAD_MORE_ENTRIES)))
+          }}
+          onShowAll={() => {
+            setRevealed(entries.length)
+            setFrozenCut((c) => (c === null ? null : 0))
+          }}
+        />
+      ) : null}
+
+      {entries.slice(firstVisible).map((entry, offset) => {
+        // The ABSOLUTE index, not the sliced one: turn spans, the flush rule
+        // and `lastIndex` are all stated in terms of the whole thread, and the
+        // window is only ever a rendering decision.
+        const index = offset + firstVisible
         const key = entryKey(entry, index)
         const flush = index > 0 && isWorkEntry(entry) && isWorkEntry(entries[index - 1])
 
@@ -817,7 +1002,7 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
         // neither running nor blocked waiting on the user (a turn parked on an
         // approval has not finished); an earlier turn always is, because the
         // next turn's user message already arrived after it.
-        const span = spans.find((s) => s.lastEntryIndex === index)
+        const span = spanByLastEntry.get(index)
         const isTrailingTurn = span?.lastEntryIndex === lastIndex
         const inFlight = view.status === 'running' || view.status === 'waiting'
         const settled = span !== undefined && (!isTrailingTurn || !inFlight)

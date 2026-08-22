@@ -80,6 +80,8 @@ type fakeAdapter struct {
 
 	mu                   sync.Mutex
 	failSendTurn         bool
+	sessionDead          bool
+	startSessionInputs   []provider.SessionStartInput
 	sendTurnCalls        []provider.SendTurnInput
 	userInputCalls       []userInputCall
 	interactionModeCalls []interactionModeCall
@@ -120,7 +122,28 @@ func (a *fakeAdapter) Capabilities() provider.Capabilities {
 }
 func (a *fakeAdapter) StartSession(_ context.Context, in provider.SessionStartInput) (provider.Session, error) {
 	a.rec.record("StartSession")
+	a.mu.Lock()
+	a.startSessionInputs = append(a.startSessionInputs, in)
+	// A fresh session is alive again — models the real adapters, whose
+	// StartSession repopulates a.sessions[threadID].
+	a.sessionDead = false
+	a.mu.Unlock()
 	return provider.Session{ThreadID: in.ThreadID}, nil
+}
+
+func (a *fakeAdapter) startInputs() []provider.SessionStartInput {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]provider.SessionStartInput(nil), a.startSessionInputs...)
+}
+
+// setSessionDead simulates the per-thread CLI process exiting: the real
+// adapters' readLoop deletes a.sessions[threadID] on stdout close while the
+// instance adapter itself stays registered, so HasSession then reports false.
+func (a *fakeAdapter) setSessionDead(v bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionDead = v
 }
 func (a *fakeAdapter) SendTurn(_ context.Context, in provider.SendTurnInput) (provider.TurnStartResult, error) {
 	a.rec.record("SendTurn")
@@ -179,7 +202,11 @@ func (a *fakeAdapter) runtimeModeSnapshot() []runtimeModeCall {
 }
 func (a *fakeAdapter) StopSession(context.Context, string) error { return nil }
 func (a *fakeAdapter) StopAll(context.Context) error             { return nil }
-func (a *fakeAdapter) HasSession(string) bool                    { return true }
+func (a *fakeAdapter) HasSession(string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.sessionDead
+}
 func (a *fakeAdapter) ListSessions() []provider.Session          { return nil }
 func (a *fakeAdapter) ReadThread(context.Context, string) (provider.ThreadSnapshot, error) {
 	return provider.ThreadSnapshot{}, nil
@@ -552,6 +579,74 @@ func TestReactorDoesNotRestartTheSessionOnEveryTurn(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Fatalf("StartSession called %d times across two turns, want 1", starts)
+	}
+}
+
+// The pi bug behind "the agent stopped by itself and now nothing happens when
+// I type": a provider with a per-thread child process (pi, claude) can have
+// that process die mid-life — its readLoop deletes a.sessions[threadID] — while
+// the INSTANCE adapter (one per instance, shared across threads) stays
+// registered. ensureSession only checked that the instance adapter was alive,
+// so it returned "already ready" without restarting, and the next SendTurn hit
+// an adapter with no session for the thread: it returned "no active session"
+// and emitted no TurnStarted, so the UI showed no spinner and no error — the
+// turn silently did nothing. The reactor must restart the dead session first.
+func TestReactorRestartsADeadSessionOnTheNextTurn(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	// The CLI process exits: the per-thread session is gone, the instance
+	// adapter stays registered.
+	h.adapter.setSessionDead(true)
+
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "continue"}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 1 })
+
+	starts := 0
+	for _, c := range h.rec.snapshot() {
+		if c == "StartSession" {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("StartSession called %d times across the turn, want 2 — a dead session must be restarted before SendTurn", starts)
+	}
+	if n := countErrorEntries(h.store.All()); n != 0 {
+		t.Fatalf("turn reported %d errors, want none once the session is restarted", n)
+	}
+}
+
+// Restarting a dead session must carry the thread's stored resume cursor into
+// the fresh StartSession, or "continue" reattaches a blank CLI that has
+// forgotten the whole conversation — for pi this is the native --session id, so
+// the restarted process resumes the same on-disk session instead of a new one.
+func TestReactorRestartResumesTheDeadSessionWithItsCursor(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	// The provider announced its native session id (pi's get_state response,
+	// claude's init): the engine stored it as the thread's resume cursor.
+	h.dispatch(t, "w-abc", CmdThreadSessionSet, mustRaw(t, map[string]any{
+		"status":       string(ThreadIdle),
+		"resumeCursor": json.RawMessage(`"pi-session-uuid"`),
+	}))
+
+	h.adapter.setSessionDead(true)
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustRaw(t, TurnStartPayload{Text: "continue"}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) == 1 })
+
+	inputs := h.adapter.startInputs()
+	if len(inputs) != 2 {
+		t.Fatalf("StartSession called %d times, want 2 (initial + restart)", len(inputs))
+	}
+	if got := string(inputs[1].ResumeCursor); got != `"pi-session-uuid"` {
+		t.Fatalf("restart ResumeCursor = %q, want the stored cursor so the conversation survives", got)
 	}
 }
 

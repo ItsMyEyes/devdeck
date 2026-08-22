@@ -115,7 +115,7 @@ func (h *AgentWSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 	// Send nothing when there is nothing to replay — a client already at
 	// head must see silence, not an empty events frame.
 	if len(missed) > 0 {
-		if err := h.writeEvents(ctx, conn, missed); err != nil {
+		if err := h.writeReplay(ctx, conn, missed); err != nil {
 			return
 		}
 	}
@@ -285,6 +285,40 @@ func (h *AgentWSHandler) resolveInstanceID(threadID string) (string, error) {
 
 func (h *AgentWSHandler) writeEvents(ctx context.Context, conn *websocket.Conn, evts []orchestration.Event) error {
 	return h.writeFrame(ctx, conn, wsServerFrame{Kind: "events", Events: evts})
+}
+
+// replayChunkSize caps how many events ride in one replay frame.
+//
+// Not a limit on how much history is replayed — every event still arrives,
+// and reattach stays exact. It bounds the size of any SINGLE frame, which
+// matters because the client does one JSON.parse and one synchronous reducer
+// fold per frame: a whole thread in one frame is one long main-thread stall
+// with nothing on screen until it ends, whereas the same events in chunks
+// paint the transcript as they land.
+const replayChunkSize = 400
+
+// writeReplay sends the durable tail as coalesced, chunked frames.
+//
+// Both halves matter, and they fix different things. CoalesceReplay is the
+// byte fix: a streamed turn is logged one event per token, so replaying it
+// verbatim ships a ~27x JSON envelope tax over the text it carries — one
+// field thread held 274,851 delta events carrying 1.03 MB of text in 28.2 MB
+// of payload, close to 70 MB once marshalled with the Event wrapper, and it
+// went out on EVERY page load because the client's view is deliberately not
+// persisted and so always says sinceSeq: 0. Chunking is the latency fix: it
+// stops whatever remains from arriving as one indivisible frame.
+//
+// Live events (writeLoop) are deliberately NOT coalesced — merging tokens as
+// they arrive is precisely how you stop text from streaming.
+func (h *AgentWSHandler) writeReplay(ctx context.Context, conn *websocket.Conn, evts []orchestration.Event) error {
+	coalesced := orchestration.CoalesceReplay(evts)
+	for start := 0; start < len(coalesced); start += replayChunkSize {
+		end := min(start+replayChunkSize, len(coalesced))
+		if err := h.writeEvents(ctx, conn, coalesced[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *AgentWSHandler) writeError(ctx context.Context, conn *websocket.Conn, msg string) {

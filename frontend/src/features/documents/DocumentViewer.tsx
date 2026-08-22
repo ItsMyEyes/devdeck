@@ -6,6 +6,7 @@ import { useFileBytesTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { FilesTarget } from '@/features/terminal/filesTarget'
 import type { DocumentFormat } from './documentKind'
+import { mediaMimeForPath } from './documentKind'
 
 // The three Office readers pull in DOM parsing and the zip reader, and the
 // PDF path allocates a blob URL — none of which a session that never opens a
@@ -15,6 +16,8 @@ const DocxView = lazy(() => import('./DocxView').then((m) => ({ default: m.DocxV
 const SheetView = lazy(() => import('./SheetView').then((m) => ({ default: m.SheetView })))
 const SlidesView = lazy(() => import('./SlidesView').then((m) => ({ default: m.SlidesView })))
 const PdfView = lazy(() => import('./PdfView').then((m) => ({ default: m.PdfView })))
+const CsvView = lazy(() => import('./CsvView').then((m) => ({ default: m.CsvView })))
+const MediaView = lazy(() => import('./MediaView').then((m) => ({ default: m.MediaView })))
 
 export function DocumentViewer({
   target,
@@ -31,9 +34,15 @@ export function DocumentViewer({
   const { query, progress } = useFileBytesTarget(target, path, enabled && format.renderable)
 
   if (!format.renderable) {
-    return (
+    const extension = path.split('.').pop()?.toLowerCase()
+    return format.kind === 'video' ? (
       <Unsupported
-        message={`${format.label}s in the legacy binary format (.${path.split('.').pop()?.toLowerCase()}) can't be previewed here.`}
+        message={`.${extension} is a container no browser can decode, so it can't be played here.`}
+        hint="Download the file to play it, or re-encode it as MP4 (H.264) or WebM."
+      />
+    ) : (
+      <Unsupported
+        message={`${format.label}s in the legacy binary format (.${extension}) can't be previewed here.`}
         hint="Download the file to open it, or re-save it in the modern Office format."
       />
     )
@@ -92,6 +101,15 @@ export function DocumentViewer({
         <DocxView bytes={bytes} />
       ) : format.kind === 'excel' ? (
         <SheetView bytes={bytes} />
+      ) : format.kind === 'csv' ? (
+        <CsvView bytes={bytes} />
+      ) : format.kind === 'image' || format.kind === 'video' ? (
+        <MediaView
+          bytes={bytes}
+          mime={mediaMimeForPath(path)}
+          kind={format.kind}
+          name={path.split('/').pop() ?? path}
+        />
       ) : (
         <SlidesView bytes={bytes} />
       )}

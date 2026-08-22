@@ -1279,6 +1279,26 @@
   overflow: visible;
 }
 
+/* The classic transparency checkerboard, behind an image preview only.
+   Without it a transparent PNG is a guess: an all-white logo is invisible on
+   the dark pane and an all-black one is invisible on the light one, and in
+   both cases the file looks empty rather than transparent. Built from two
+   crossed 45deg gradients rather than an asset so it costs no request and
+   scales with the tile size. The tint is theme-agnostic on purpose — a
+   checkerboard that changed lightness with the theme would read as part of
+   the image. */
+.devdeck-alpha-checkerboard {
+  --devdeck-checker-size: 16px;
+  background-color: #7e8483;
+  background-image:
+    linear-gradient(45deg, #676c6c 25%, transparent 25%, transparent 75%, #676c6c 75%),
+    linear-gradient(45deg, #676c6c 25%, transparent 25%, transparent 75%, #676c6c 75%);
+  background-size: var(--devdeck-checker-size) var(--devdeck-checker-size);
+  background-position:
+    0 0,
+    calc(var(--devdeck-checker-size) / 2) calc(var(--devdeck-checker-size) / 2);
+}
+
 /* Notion's links are body-coloured with a dim underline, not a second accent
    colour in the middle of a sentence. */
 .notion-doc a {

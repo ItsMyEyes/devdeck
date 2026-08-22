@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { Activity, Eye, FolderTree, RotateCcw, Save, TerminalSquare, Trash2 } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
 import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
-import { isDocumentPath } from '@/features/documents/documentKind'
 import { OverflowItem, ShellSidebarToggle, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
 import { MarkdownPreviewPane } from '@/features/terminal/MarkdownPreviewPane'
@@ -502,13 +501,18 @@ export function SSHShellPane({
       : undefined
 
   /** The active file tab's imperative handle, when the focused pane's active
-   *  tab is an editable (non-document) file — powers the overflow menu's
-   *  Save/Revert/Delete entries, the new home for what used to be
-   *  SSHFileEditor's own per-tab header buttons. */
-  const activeFileHandle =
-    focusedActiveContent?.kind === 'file' && !isDocumentPath(focusedActiveContent.path)
-      ? fileHandles.current.get(focusedActiveContent.path)
-      : undefined
+   *  tab is an editable file — powers the overflow menu's Save/Revert/Delete
+   *  entries, the new home for what used to be SSHFileEditor's own per-tab
+   *  header buttons.
+   *
+   *  Asked of the HANDLE (`revert` exists only on an editing tab), not of the
+   *  path — see ExpandedTerminal.tsx's copy of this for why the path test was
+   *  wrong once CSV started opening as a grid with an "Edit as text" way back. */
+  const activeFileHandle = (() => {
+    if (focusedActiveContent?.kind !== 'file') return undefined
+    const handle = fileHandles.current.get(focusedActiveContent.path)
+    return handle?.revert ? handle : undefined
+  })()
 
   function renderOverflowActions() {
     return (

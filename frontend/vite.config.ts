@@ -145,6 +145,8 @@ export default defineConfig({
       'src/features/editor/useVsCodeMode.test.ts',
       'src/features/editor/languageForPath.test.ts',
       'src/features/documents/documentKind.test.ts',
+      'src/features/screens/AppErrorBoundary.test.tsx',
+      'src/features/documents/CsvView.test.ts',
       'src/features/documents/zip.test.ts',
       'src/features/documents/ooxml.test.ts',
       'src/features/documents/docx.test.ts',

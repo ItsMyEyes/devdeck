@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
-import { Download, Loader2, RotateCcw, Trash2 } from 'lucide-react'
+import { Download, Loader2, PenLine, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
@@ -37,8 +37,12 @@ export const DocumentFileTab = forwardRef<
     active: boolean
     onDirtyChange: (path: string, dirty: boolean) => void
     onDeleted: (path: string) => void
+    /** Switches this tab to the text editor. Passed only for the formats that
+     *  ARE text (CSV/TSV — see DocumentFormat.textEditable); undefined for
+     *  every binary format, which has nothing to edit. */
+    onEditAsText?: () => void
   }
->(function DocumentFileTab({ target, path, active, onDirtyChange, onDeleted }, ref) {
+>(function DocumentFileTab({ target, path, active, onDirtyChange, onDeleted, onEditAsText }, ref) {
   const format = documentFormatForPath(path)
   const deleteFile = useDeleteFileTarget(target)
   const { downloadFile, downloading } = useFileTransfers(target)
@@ -112,6 +116,17 @@ export const DocumentFileTab = forwardRef<
         <span className="flex-none rounded bg-devdeck-glass-solid px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
           {format?.label ?? 'Document'} · read-only
         </span>
+        {onEditAsText ? (
+          <button
+            type="button"
+            onClick={onEditAsText}
+            title="Open this file in the text editor"
+            className="flex h-7 flex-none cursor-pointer items-center gap-1.5 rounded border border-devdeck-border-strong bg-devdeck-glass-solid px-2.5 text-[11px] text-devdeck-fg-2 hover:border-devdeck-line hover:text-devdeck-fg"
+          >
+            <PenLine size={12} />
+            Edit as text
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={refresh}

@@ -1139,3 +1139,104 @@ describe('reduceAgentEvents — DevDeck’s own refusals are visible', () => {
     expect(view.items[0].text).toMatch(/A tool was not allowed to run/)
   })
 })
+
+/**
+ * The replay path merges each consecutive run of same-item deltas into one
+ * event (`orchestration.CoalesceReplay`, backend `replay.go`) because a
+ * streamed turn is durably logged one event per token — a ~27x JSON envelope
+ * tax that had one real thread replaying 274,851 events / ~70 MB in a single
+ * frame on every page load.
+ *
+ * The contract these tests pin is equivalence: a merged run must fold to
+ * exactly the view the per-token run it replaces would have produced. If that
+ * ever stops holding, replayed threads and live ones disagree about their own
+ * history.
+ */
+describe('reduceAgentEvents / coalesced replay deltas', () => {
+  /** One merged run: `sequence`/`createdAt` are the run's LAST, and
+   *  `firstSequence`/`startedAt` its first — see `ActivityAppendedPayload`. */
+  function merged(
+    seq: number,
+    itemId: string,
+    text: string,
+    firstSequence: number,
+    lastSequence: number,
+    { stream = 'text', startedAt = 1000, createdAt = 1000 } = {},
+  ): AgentEvent {
+    return {
+      seq,
+      eventId: `ae-${seq}`,
+      type: 'thread.activity-appended',
+      threadId: 'w-abc',
+      commandId: `ac-${seq}`,
+      createdAt,
+      payload: { itemId, stream, text, sequence: lastSequence, firstSequence, startedAt },
+    }
+  }
+
+  it('folds a merged run into the same item the per-token run produces', () => {
+    const perToken = reduceAgentEvents(emptyThreadView(), [
+      delta(1, 'i1', 'Hel', 1),
+      delta(2, 'i1', 'lo ', 2),
+      delta(3, 'i1', 'world', 3),
+    ])
+    const coalesced = reduceAgentEvents(emptyThreadView(), [merged(3, 'i1', 'Hello world', 1, 3)])
+
+    expect(coalesced.items).toHaveLength(1)
+    expect(coalesced.items[0].text).toBe(perToken.items[0].text)
+    expect(coalesced.items[0].kind).toBe(perToken.items[0].kind)
+    expect(coalesced.items[0].lastSequence).toBe(perToken.items[0].lastSequence)
+    // The cursor has to land on the run's last Seq, or the next reconnect asks
+    // for events it already applied and concatenates the tail a second time.
+    expect(coalesced.lastSeq).toBe(3)
+    expect(coalesced.hasGap).toBe(false)
+  })
+
+  it('does not flag a gap when a contiguous run resumes after a tool call', () => {
+    // 36 of 902 items in the field thread resume like this. The run carries
+    // firstSequence 3 against the item's lastSequence 2 — contiguous.
+    const view = reduceAgentEvents(emptyThreadView(), [
+      merged(1, 'i1', 'before', 1, 2),
+      merged(2, 'i1', ' after', 3, 4),
+    ])
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].text).toBe('before after')
+    expect(view.hasGap).toBe(false)
+  })
+
+  it('still flags a real hole between two merged runs', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      merged(1, 'i1', 'ab', 1, 2),
+      merged(2, 'i1', 'cd', 7, 8),
+    ])
+    expect(view.hasGap).toBe(true)
+  })
+
+  it('stamps a merged item with when the agent started writing it, not finished', () => {
+    // Without `startedAt` the item would take the merged event's own createdAt
+    // — the run's END — and every replayed turn would report a zero duration.
+    const view = reduceAgentEvents(emptyThreadView(), [
+      merged(1, 'i1', 'a long reply', 1, 400, { startedAt: 5_000, createdAt: 17_000 }),
+    ])
+    expect(view.items[0].createdAt).toBe(5_000)
+    expect(view.items[0].updatedAt).toBe(17_000)
+  })
+
+  it('leaves a live delta (no merge fields) behaving exactly as before', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [delta(1, 'i1', 'x', 1), delta(2, 'i1', 'y', 2)])
+    expect(view.items[0].text).toBe('xy')
+    expect(view.items[0].createdAt).toBe(1000)
+    expect(view.hasGap).toBe(false)
+  })
+
+  it('applies a merged run on top of an item a live delta already opened', () => {
+    // The replay/live boundary: a reconnect replays the run, the socket then
+    // delivers its own tail. Both must land on one item.
+    const live = reduceAgentEvents(emptyThreadView(), [delta(1, 'i1', 'start', 1)])
+    const after = reduceAgentEvents(live, [merged(2, 'i1', ' and more', 2, 9)])
+    expect(after.items).toHaveLength(1)
+    expect(after.items[0].text).toBe('start and more')
+    expect(after.items[0].lastSequence).toBe(9)
+    expect(after.hasGap).toBe(false)
+  })
+})

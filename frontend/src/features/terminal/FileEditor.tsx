@@ -3,7 +3,7 @@ import { FileWarning } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { isDocumentPath } from '@/features/documents/documentKind'
+import { documentFormatForPath } from '@/features/documents/documentKind'
 import type { Machine } from '@/store/types'
 import {
   useDeleteWorktreeFile,
@@ -90,20 +90,30 @@ function toLineReveal(reveal: DefinitionReveal | undefined): LineReveal | undefi
 }
 
 /**
- * A worktree file tab. Dispatches on the path: PDF/Word/Excel/PowerPoint open
- * as a rendered document, everything else as a text buffer.
+ * A worktree file tab. Dispatches on the path: PDF/Word/Excel/PowerPoint, CSV,
+ * images and video open as a rendered document; everything else as a text
+ * buffer.
  *
- * The split has to happen *here*, above any hook, because the two paths need
+ * The split has to happen *here*, above the body, because the two paths need
  * different data. `TextFileEditor` fetches the file's UTF-8 text, which the
- * backend refuses for these formats (see `WorktreeFileService.Read`), so
+ * backend refuses for the binary formats (see `WorktreeFileService.Read`), so
  * merely swapping the rendered body would still fire a request that always
  * fails.
+ *
+ * `asText` is the one way back for a format that IS text — today only CSV/TSV.
+ * It lives here rather than inside the document tab because switching views
+ * means mounting a completely different tab, and only this component can do
+ * that. Keyed on nothing: `useState` runs unconditionally, before the branch,
+ * so the rule about hooks still holds.
  */
 export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function FileEditor(
   props,
   ref,
 ) {
-  if (isDocumentPath(props.path)) {
+  const [asText, setAsText] = useState(false)
+  const format = documentFormatForPath(props.path)
+
+  if (format && !asText) {
     return (
       <Suspense fallback={<DocumentTabFallback active={props.active} />}>
         <DocumentFileTab
@@ -113,6 +123,7 @@ export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function
           active={props.active}
           onDirtyChange={props.onDirtyChange}
           onDeleted={props.onDeleted}
+          onEditAsText={format.textEditable ? () => setAsText(true) : undefined}
         />
       </Suspense>
     )

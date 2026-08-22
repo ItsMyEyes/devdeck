@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
 import { MessagesTimeline } from '@/features/agent-chat/MessagesTimeline'
 import { emptyThreadView } from '@/features/agent-chat/eventReducer'
 import { buildTerminalContextBlock } from '@/features/agent-chat/terminalContext'
@@ -822,3 +823,314 @@ describe('MessagesTimeline — notices', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('claude exited 1')
   })
 })
+
+/**
+ * A thread that has run for a while reaches hundreds of entries, and every
+ * agent message in one is a full markdown parse. Mounting all of them at once
+ * is seconds of blocked main thread for history nobody scrolled to — see
+ * `INITIAL_VISIBLE_ENTRIES`.
+ */
+describe('MessagesTimeline / long threads', () => {
+  /** `n` alternating user/assistant messages, each its own timeline entry. */
+  function longThread(n: number): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({ id: `m${i}`, kind: i % 2 === 0 ? 'user' : 'assistant', text: `message ${i}` }),
+    )
+  }
+
+  it('renders a short thread whole, with no window control', () => {
+    render(<MessagesTimeline view={view(longThread(10))} />)
+
+    expect(screen.getByText('message 0')).toBeInTheDocument()
+    expect(screen.getByText('message 9')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /show earlier/i })).not.toBeInTheDocument()
+  })
+
+  it('opens a long thread on its live edge and folds the rest', () => {
+    render(<MessagesTimeline view={view(longThread(300))} />)
+
+    // The newest turn is what the reader needs first, and it is present.
+    expect(screen.getByText('message 299')).toBeInTheDocument()
+    // The oldest is not mounted at all — that is the whole point.
+    expect(screen.queryByText('message 0')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /show earlier/i })).toBeInTheDocument()
+  })
+
+  it('reveals more history on request, and all of it on demand', async () => {
+    const user = userEvent.setup()
+    render(<MessagesTimeline view={view(longThread(300))} />)
+
+    const before = screen.queryAllByText(/^message \d+$/).length
+    await user.click(screen.getByRole('button', { name: /show earlier/i }))
+    expect(screen.queryAllByText(/^message \d+$/).length).toBeGreaterThan(before)
+
+    await user.click(screen.getByRole('button', { name: /show all/i }))
+    expect(screen.getByText('message 0')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /show earlier/i })).not.toBeInTheDocument()
+  })
+
+  it('states how much history is folded rather than hiding it silently', () => {
+    render(<MessagesTimeline view={view(longThread(300))} />)
+
+    expect(screen.getByRole('button', { name: /\d+ entries above/i })).toBeInTheDocument()
+  })
+})
+
+/**
+ * Regression: the window is anchored to the START of the thread, not sized
+ * from its end. A live turn appends entries at the bottom; if the window shed
+ * one entry off the top per streamed token, that top unmount is a NEGATIVE
+ * content resize and `use-stick-to-bottom` only re-pins to the bottom on a
+ * positive one — so the reply streamed on while the viewport stopped following
+ * it (rendered, but below the fold). These pin the anchor that prevents it.
+ */
+describe('MessagesTimeline / window is anchored, not sized from the end', () => {
+  function thread(n: number, opts: { anchorId?: string } = {}): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({
+        id: i === 0 && opts.anchorId ? opts.anchorId : `m${i}`,
+        kind: i % 2 === 0 ? 'user' : 'assistant',
+        text: `message ${i}`,
+      }),
+    )
+  }
+
+  it('does not unmount already-visible entries while a turn streams', () => {
+    // `running` is what streaming is: the cut freezes so new tokens only grow
+    // the bottom. (When settled, the window instead tracks the tail — see the
+    // chunked-replay test below.)
+    const { rerender } = render(<MessagesTimeline view={view(thread(300), { status: 'running' })} />)
+    // Newest 80 shown; the top of the window is message 220.
+    expect(screen.getByText('message 220')).toBeInTheDocument()
+    expect(screen.queryByText('message 219')).not.toBeInTheDocument()
+
+    // Two more entries stream in — the same thread (m0 still first).
+    rerender(<MessagesTimeline view={view(thread(302), { status: 'running' })} />)
+
+    // The newest are shown...
+    expect(screen.getByText('message 301')).toBeInTheDocument()
+    // ...and the top of the window has NOT advanced: message 220 is still
+    // mounted. A count-from-the-end window would have dropped 220 and 221 —
+    // the negative resize that broke the scroll lock.
+    expect(screen.getByText('message 220')).toBeInTheDocument()
+  })
+
+  it('resets the window to the live edge when the pane switches threads', () => {
+    const { rerender } = render(<MessagesTimeline view={view(thread(300, { anchorId: 'A0' }))} />)
+    expect(screen.queryByText('message 0')).not.toBeInTheDocument()
+
+    // A different thread (different first-item id), short enough to show whole.
+    rerender(<MessagesTimeline view={view(thread(5, { anchorId: 'B0' }))} />)
+
+    expect(screen.getByText('message 4')).toBeInTheDocument()
+    expect(screen.getByText('message 1')).toBeInTheDocument()
+    // No stale fold carried over from the long thread.
+    expect(screen.queryByRole('button', { name: /show earlier/i })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #185 hunt: React "Maximum update depth exceeded" is a setState-during-render
+ * loop. The window's thread-anchor reset is the only setState-during-render in
+ * this component, so stress the exact triggers — rapid streaming growth and
+ * repeated thread switches, under StrictMode's double-invoke.
+ */
+describe('MessagesTimeline / no render loop (#185)', () => {
+  function thread(n: number, anchorId: string): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({ id: i === 0 ? anchorId : `${anchorId}-m${i}`, kind: i % 2 === 0 ? 'user' : 'assistant', text: `${anchorId} ${i}` }),
+    )
+  }
+
+  it('survives rapid streaming growth without an update-depth loop', () => {
+    const { rerender } = render(
+      <StrictMode>
+        <MessagesTimeline view={view(thread(200, 'A'))} />
+      </StrictMode>,
+    )
+    for (let n = 201; n <= 260; n++) {
+      rerender(
+        <StrictMode>
+          <MessagesTimeline view={view(thread(n, 'A'), { status: 'running' })} />
+        </StrictMode>,
+      )
+    }
+    expect(screen.getByText('A 259')).toBeInTheDocument()
+  })
+
+  it('survives repeated thread switches without an update-depth loop', () => {
+    const { rerender } = render(
+      <StrictMode>
+        <MessagesTimeline view={view(thread(150, 'A'))} />
+      </StrictMode>,
+    )
+    for (let i = 0; i < 12; i++) {
+      const id = i % 2 === 0 ? 'B' : 'A'
+      rerender(
+        <StrictMode>
+          <MessagesTimeline view={view(thread(150, id))} />
+        </StrictMode>,
+      )
+    }
+    expect(screen.getByText('A 149')).toBeInTheDocument()
+  })
+})
+
+/**
+ * #185 hunt, streaming paths. The earlier stress test used only user/assistant
+ * items; the live turn in the report streamed a reasoning block then a text
+ * answer, and those hit the vendored `Reasoning` (effects + Radix
+ * `useControllableState`) and `MessageResponse` (Streamdown) — neither
+ * exercised before. Simulate the token-by-token growth the socket produces.
+ */
+describe('MessagesTimeline / streaming render has no update-depth loop (#185)', () => {
+  function streamingView(reasoningText: string, answerText: string, createdAt: number, updatedAt: number): AgentThreadView {
+    return view(
+      [
+        item({ id: 'u1', kind: 'user', text: 'go', createdAt, updatedAt: createdAt }),
+        item({ id: 'r1', kind: 'reasoning', text: reasoningText, createdAt, updatedAt }),
+        ...(answerText ? [item({ id: 'a1', kind: 'assistant', text: answerText, createdAt, updatedAt })] : []),
+      ],
+      { status: 'running' },
+    )
+  }
+
+  it('streams a reasoning block then a text answer without looping', () => {
+    const t0 = 1_000_000
+    const { rerender } = render(
+      <StrictMode>
+        <MessagesTimeline view={streamingView('The', '', t0, t0)} />
+      </StrictMode>,
+    )
+    // Reasoning streams: updatedAt advances so reasoningDuration crosses 0 -> N,
+    // which flips the vendored `duration` prop uncontrolled -> controlled.
+    let reasoning = 'The'
+    for (let i = 1; i <= 20; i++) {
+      reasoning += ' tok'
+      rerender(
+        <StrictMode>
+          <MessagesTimeline view={streamingView(reasoning, '', t0, t0 + i * 500)} />
+        </StrictMode>,
+      )
+    }
+    // Then the text answer streams in as a second item.
+    let answer = ''
+    for (let i = 1; i <= 20; i++) {
+      answer += ' word'
+      rerender(
+        <StrictMode>
+          <MessagesTimeline view={streamingView(reasoning, answer, t0, t0 + (20 + i) * 500)} />
+        </StrictMode>,
+      )
+    }
+    expect(screen.getByText(/word word/)).toBeInTheDocument()
+  })
+
+  it('settles from running to idle (stream end) without looping', () => {
+    const t0 = 2_000_000
+    const { rerender } = render(
+      <StrictMode>
+        <MessagesTimeline view={streamingView('thinking a lot here', 'answer text', t0, t0 + 5000)} />
+      </StrictMode>,
+    )
+    // The closing session-set flips status running -> idle; the vendored
+    // Reasoning fires its stream-ended effect (setDuration/auto-close).
+    rerender(
+      <StrictMode>
+        <MessagesTimeline
+          view={view(
+            [
+              item({ id: 'u1', kind: 'user', text: 'go', createdAt: t0, updatedAt: t0 }),
+              item({ id: 'r1', kind: 'reasoning', text: 'thinking a lot here', createdAt: t0, updatedAt: t0 + 5000 }),
+              item({ id: 'a1', kind: 'assistant', text: 'answer text', createdAt: t0, updatedAt: t0 + 5000 }),
+            ],
+            { status: 'idle' },
+          )}
+        />
+      </StrictMode>,
+    )
+    expect(screen.getByText('answer text')).toBeInTheDocument()
+  })
+})
+
+/**
+ * The replay now arrives in several frames (backend chunks it), so the FIRST
+ * render sees only the first chunk. If the window anchor freezes on that first
+ * render it points at the first chunk's tail, and every later chunk then
+ * renders in full — the window stops limiting anything on reload, which is the
+ * heavy mount that fights the scroll container.
+ */
+describe('MessagesTimeline / window must limit a chunked replay', () => {
+  function thread(n: number): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({ id: `m${i}`, kind: i % 2 === 0 ? 'user' : 'assistant', text: `message ${i}` }),
+    )
+  }
+
+  it('keeps only the live edge visible after later replay chunks land', () => {
+    // First render = first replay chunk (100 entries).
+    const { rerender } = render(<MessagesTimeline view={view(thread(100), { status: 'idle' })} />)
+    // Later chunks bring the same thread to 1400 entries, still idle (replay).
+    rerender(<MessagesTimeline view={view(thread(1400), { status: 'idle' })} />)
+
+    // A middle entry from the extra chunks must NOT be mounted — otherwise the
+    // window limited nothing and we mounted ~1300 full-markdown rows.
+    expect(screen.queryByText('message 700')).not.toBeInTheDocument()
+    expect(screen.getByText('message 1399')).toBeInTheDocument()
+  })
+})
+
+/**
+ * The settled/running split's other half: once a turn ends the window must go
+ * back to tracking the tail, so a long session doesn't accumulate every turn's
+ * entries mounted forever. (During the turn it was frozen — see the streaming
+ * test above.)
+ */
+describe('MessagesTimeline / re-windows when a turn settles', () => {
+  function thread(n: number): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({ id: `m${i}`, kind: i % 2 === 0 ? 'user' : 'assistant', text: `message ${i}` }),
+    )
+  }
+
+  it('freezes the cut while running, then sheds the top once idle', () => {
+    // Mid-stream: 300 entries, running -> cut frozen at 220.
+    const { rerender } = render(<MessagesTimeline view={view(thread(300), { status: 'running' })} />)
+    rerender(<MessagesTimeline view={view(thread(360), { status: 'running' })} />)
+    // Frozen: the whole turn's growth stayed mounted, top did not advance.
+    expect(screen.getByText('message 220')).toBeInTheDocument()
+
+    // Turn ends: settle to idle at 360 entries. Window re-tracks the tail (280).
+    rerender(<MessagesTimeline view={view(thread(360), { status: 'idle' })} />)
+    expect(screen.getByText('message 359')).toBeInTheDocument()
+    expect(screen.queryByText('message 220')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The hard mount ceiling: the freeze rule can't cap a reattach to a thread
+ * that is ALREADY mid-stream (its whole history arrives in replay chunks with
+ * status already `running`, so the frozen cut sits at the first chunk's tail).
+ * MAX_MOUNTED_ENTRIES catches that so a huge thread never mounts in full.
+ */
+describe('MessagesTimeline / hard mount ceiling', () => {
+  function thread(n: number): ChatItem[] {
+    return Array.from({ length: n }, (_, i) =>
+      item({ id: `m${i}`, kind: i % 2 === 0 ? 'user' : 'assistant', text: `message ${i}` }),
+    )
+  }
+
+  it('never mounts a whole huge thread even while running with a small frozen cut', () => {
+    // Mount running at 100 (frozen cut ~20), then chunks grow it to 1400 while
+    // STILL running — the freeze would keep the cut at 20 and mount ~1380.
+    const { rerender } = render(<MessagesTimeline view={view(thread(100), { status: 'running' })} />)
+    rerender(<MessagesTimeline view={view(thread(1400), { status: 'running' })} />)
+
+    // The ceiling bit: an entry older than the last MAX_MOUNTED (400) is not
+    // mounted, so ~1000 entries never rendered.
+    expect(screen.queryByText('message 900')).not.toBeInTheDocument()
+    // The live edge is still there.
+    expect(screen.getByText('message 1399')).toBeInTheDocument()
+  })
+})
+

@@ -22,7 +22,6 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
-import { isDocumentPath } from '@/features/documents/documentKind'
 import type { Machine, Worktree } from '@/store/types'
 import {
   useAgentThreads,
@@ -999,13 +998,19 @@ function TerminalWorkspace({
 
 
   /** The active file tab's imperative handle, when the focused pane's active
-   *  tab is an editable (non-document) file — powers the overflow menu's
-   *  Save/Revert/Delete entries, the new home for what used to be
-   *  FileEditor/SSHFileEditor's own per-tab header buttons. */
-  const activeFileHandle =
-    focusedActiveContent?.kind === 'file' && !isDocumentPath(focusedActiveContent.path)
-      ? fileHandles.current.get(focusedActiveContent.path)
-      : undefined
+   *  tab is an editable file — powers the overflow menu's Save/Revert/Delete
+   *  entries, the new home for what used to be FileEditor/SSHFileEditor's own
+   *  per-tab header buttons.
+   *
+   *  Asked of the HANDLE (`revert` exists only on an editing tab), not of the
+   *  path. A path test used to stand in for this and now gets it wrong: a CSV
+   *  is a document path, yet "Edit as text" swaps the very same tab to a real
+   *  editor, and the menu has to follow what is actually mounted. */
+  const activeFileHandle = (() => {
+    if (focusedActiveContent?.kind !== 'file') return undefined
+    const handle = fileHandles.current.get(focusedActiveContent.path)
+    return handle?.revert ? handle : undefined
+  })()
 
   function renderOverflowActions() {
     return (

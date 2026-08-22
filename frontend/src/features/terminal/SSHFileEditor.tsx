@@ -3,7 +3,7 @@ import { FileWarning } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { isDocumentPath } from '@/features/documents/documentKind'
+import { documentFormatForPath } from '@/features/documents/documentKind'
 import { useDeleteFileTarget, useFileTarget, useWriteFileTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { FilesTarget } from './filesTarget'
@@ -64,13 +64,17 @@ function isMarkdownPath(path: string) {
  *  file over SFTP and there is no per-language server, so it renders
  *  PlainCodeEditor instead of the worktree's LSP-backed CodeFileEditor.
  *
- *  Documents (PDF/Word/Excel/PowerPoint) branch off above every hook for the
- *  same reason FileEditor.tsx does — see that file's dispatch comment. */
+ *  Documents (PDF/Word/Excel/PowerPoint, CSV, images, video) branch off above
+ *  the body for the same reason FileEditor.tsx does — see that file's dispatch
+ *  comment, including why `asText` lives here. */
 export const SSHFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(function SSHFileEditor(
   props,
   ref,
 ) {
-  if (isDocumentPath(props.path)) {
+  const [asText, setAsText] = useState(false)
+  const format = documentFormatForPath(props.path)
+
+  if (format && !asText) {
     return (
       <Suspense
         fallback={
@@ -91,6 +95,7 @@ export const SSHFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>
           active={props.active}
           onDirtyChange={props.onDirtyChange}
           onDeleted={props.onDeleted}
+          onEditAsText={format.textEditable ? () => setAsText(true) : undefined}
         />
       </Suspense>
     )

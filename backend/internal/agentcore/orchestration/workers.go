@@ -1041,7 +1041,17 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provi
 	}
 
 	if bound, ok := r.Provider.Dir.InstanceFor(threadID); ok && bound == id {
-		if _, err := r.Provider.Registry.Adapter(id); err == nil {
+		// The instance adapter being alive is not enough: a provider with a
+		// per-thread child process (pi, claude) can have THAT process exit —
+		// its readLoop deletes the thread's session — while the instance
+		// adapter, one per instance and shared across every thread, stays
+		// registered. Returning "already ready" on that stale binding is what
+		// left "the agent stopped by itself, and now typing does nothing": the
+		// next SendTurn found no session for the thread, returned "no active
+		// session", and emitted no TurnStarted, so the UI showed no spinner and
+		// no error. HasSession is the per-thread liveness check the adapter
+		// check alone was silently standing in for.
+		if a, err := r.Provider.Registry.Adapter(id); err == nil && a.HasSession(threadID) {
 			return nil
 		}
 	}
@@ -1061,6 +1071,14 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provi
 	if t, ok := r.Engine.State().Thread(threadID); ok {
 		sessionIn.Mode = t.Mode
 		sessionIn.Interact = t.Interact
+		// Resume from the last native session id the provider announced, so a
+		// re-provisioned session — a process that died mid-conversation, or the
+		// first turn after a server restart — reattaches to the existing CLI
+		// session instead of a blank one that has forgotten the conversation.
+		// Empty for a brand-new thread (nothing has started yet), which is the
+		// only time a fresh session is actually wanted; every adapter treats an
+		// empty cursor as "no --resume/--session".
+		sessionIn.ResumeCursor = t.ResumeCursor
 	}
 	_, err = a.StartSession(ctx, sessionIn)
 	return err

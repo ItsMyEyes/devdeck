@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { routeTree } from './routeTree.gen'
 import { qk } from './features/data/keys'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { AppErrorBoundary } from '@/features/screens/AppErrorBoundary'
 import './styles/globals.css'
 
 // Must run before first paint: flags the transparent-window CSS path in
@@ -82,13 +83,32 @@ function renderApp() {
   const rootEl = document.getElementById('root')
   if (!rootEl) throw new Error('#root not found')
 
-  createRoot(rootEl).render(
+  createRoot(rootEl, {
+    // React 19 routes errors an ErrorBoundary re-throws or never sees (an
+    // update-depth loop can surface here rather than in a boundary) through
+    // these. Logging `componentStack` is what makes a minified #185
+    // diagnosable at all — see AppErrorBoundary's doc comment.
+    onUncaughtError: (error, info) => {
+      // eslint-disable-next-line no-console
+      console.error(`[DevDeck] uncaught error: ${errMsg(error)}\ncomponent stack:${info.componentStack ?? ' (none)'}`, error)
+    },
+    onCaughtError: (error, info) => {
+      // eslint-disable-next-line no-console
+      console.error(`[DevDeck] caught error: ${errMsg(error)}\ncomponent stack:${info.componentStack ?? ' (none)'}`, error)
+    },
+  }).render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+      <AppErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </AppErrorBoundary>
     </StrictMode>,
   )
+}
+
+function errMsg(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 void bootstrapDesktopSession().finally(renderApp)

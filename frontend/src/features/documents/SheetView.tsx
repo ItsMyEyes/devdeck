@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { columnLabel, MAX_COLUMNS, MAX_ROWS, readWorkbook } from './sheet'
-import type { SheetGrid, Workbook } from './sheet'
+import { MAX_COLUMNS, MAX_ROWS, readWorkbook } from './sheet'
+import type { Workbook } from './sheet'
 import { DocumentParseState } from './DocumentParseState'
+import { SheetGridTable } from './SheetGridTable'
 import { useAsyncParse } from './useAsyncParse'
 import { readZip } from './zip'
 
@@ -26,7 +27,11 @@ export function SheetView({ bytes }: { bytes: Uint8Array }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-devdeck-pane">
-      <Grid sheet={sheet} />
+      <SheetGridTable
+        rows={sheet.rows}
+        columnCount={sheet.columnCount}
+        emptyLabel={`${sheet.name} is empty`}
+      />
 
       {sheet.truncated ? (
         <div className="flex-none border-t border-devdeck-border bg-devdeck-card-wash px-3 py-1.5 font-mono text-[10px] text-devdeck-yellow">
@@ -60,63 +65,3 @@ export function SheetView({ bytes }: { bytes: Uint8Array }) {
   )
 }
 
-function Grid({ sheet }: { sheet: SheetGrid }) {
-  if (sheet.rows.length === 0) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <span className="font-mono text-[11px] text-devdeck-fg-2">{sheet.name} is empty</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <table className="border-collapse font-mono text-[11.5px]">
-        <thead>
-          {/* Sticky spreadsheet headers: the A/B/C row and the 1/2/3 gutter
-              both pin, so a wide sheet stays navigable while scrolled. */}
-          <tr>
-            <th className="sticky left-0 top-0 z-20 w-12 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 text-devdeck-fg-2" />
-            {Array.from({ length: sheet.columnCount }, (_, index) => (
-              <th
-                key={index}
-                className="sticky top-0 z-10 min-w-24 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 font-normal text-devdeck-fg-2"
-              >
-                {columnLabel(index)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sheet.rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              <td className="sticky left-0 z-10 border border-devdeck-border bg-devdeck-card-wash px-2 py-1 text-right text-devdeck-fg-2">
-                {rowIndex + 1}
-              </td>
-              {row.map((cell, columnIndex) => (
-                <td
-                  key={columnIndex}
-                  title={cell || undefined}
-                  className={cn(
-                    'max-w-80 truncate border border-devdeck-border px-2 py-1 text-devdeck-fg-2',
-                    // Right-align things that read as numbers, the way a
-                    // spreadsheet does — purely a display heuristic on the
-                    // already-formatted string.
-                    isNumericText(cell) && 'text-right tabular-nums',
-                  )}
-                >
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function isNumericText(value: string): boolean {
-  if (value === '') return false
-  return /^-?[\d,]+(\.\d+)?%?$/.test(value)
-}

@@ -925,3 +925,82 @@ describe('AgentChatPane — model pill restore', () => {
     expect(screen.queryByTitle('claude-sonnet-5')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * React #185 (Maximum update depth) is a reconciler guard that fires under
+ * jsdom too — it is not layout-dependent like a scroll loop. So mounting the
+ * REAL pane (composer, banners, header, controls, timeline) and driving the
+ * rapid view/status churn the reported thread went through — replay arriving
+ * in chunks, a turn streaming, status oscillating idle<->running, an error
+ * banner appearing and clearing — reproduces a setState-in-effect loop in any
+ * of those components if one exists.
+ */
+describe('AgentChatPane / no update-depth loop (#185) under churn', () => {
+  type Item = { id: string; kind: string; text: string; lastSequence: number; toolName?: string; status?: string; createdAt?: number; updatedAt?: number }
+  function it_(id: string, kind: string, text: string): Item {
+    return { id, kind, text, lastSequence: 0, createdAt: 1_700_000_000_000, updatedAt: 1_700_000_004_000 }
+  }
+  function bigThread(n: number): Item[] {
+    const out: Item[] = []
+    for (let i = 0; i < n; i++) {
+      out.push(it_(`u${i}`, 'user', `q ${i}`))
+      out.push(it_(`r${i}`, 'reasoning', `reasoning ${i} `.repeat(4)))
+      out.push({ ...it_(`t${i}`, 'tool', ''), toolName: 'Bash', status: 'done' })
+      out.push(it_(`a${i}`, 'assistant', `## answer ${i}\n\n- a\n- b`))
+    }
+    return out
+  }
+  function mkView(items: Item[], status: string, error: string | null = null) {
+    return {
+      ...emptyThreadView(),
+      items,
+      status,
+      error,
+      lastSeq: items.length,
+    }
+  }
+  function setSocket(view: unknown, socketStatus: string) {
+    mockSocket.mockReturnValue({
+      view,
+      status: socketStatus,
+      sendTurn: vi.fn(),
+      abortTurn: vi.fn(),
+      setRuntimeMode: vi.fn(),
+      setInteractionMode: vi.fn(),
+      respondToUserInput: vi.fn(),
+      respondToApproval: vi.fn(),
+      clearError: vi.fn(),
+    })
+  }
+
+  it('survives chunked replay + streaming + status/error churn without looping', () => {
+    const FULL = bigThread(200) // 800 entries
+    setSocket(mkView(FULL.slice(0, 100), 'idle'), 'connecting')
+    const { rerender } = render(
+      <AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />,
+    )
+
+    // Chunked replay: grow 100 -> 800, socket transitioning connecting->open,
+    // status oscillating as historical turns replay.
+    for (let n = 100; n <= 800; n += 100) {
+      setSocket(mkView(FULL.slice(0, n), n % 200 === 0 ? 'running' : 'idle'), 'open')
+      rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    }
+
+    // A live turn streams, then an error banner appears and clears, then the
+    // socket flaps closed->open (banner churn) — each a fresh render.
+    const base = FULL.slice()
+    let answer = ''
+    for (let step = 1; step <= 30; step++) {
+      answer += 'tok '
+      const items = [...base, it_('a-live', 'assistant', answer)]
+      const socketStatus = step === 10 ? 'closed' : step === 12 ? 'unreachable' : 'open'
+      const err = step === 15 ? 'provider unreachable' : null
+      setSocket(mkView(items, step >= 28 ? 'idle' : 'running', err), socketStatus)
+      rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    }
+
+    // Reaching here without RTL surfacing a thrown #185 is the assertion.
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
+  })
+})
