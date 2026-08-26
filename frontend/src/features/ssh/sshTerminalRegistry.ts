@@ -2,6 +2,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame } from '@/lib/terminalClient'
+import { openExternalUrl } from '@/lib/openExternalUrl'
 import { sshShellWsUrl } from '@/lib/sshClient'
 import { isAppShortcut, terminalTheme } from '@/features/terminal/Terminal'
 import { currentResolvedTheme, subscribeResolvedTheme } from '@/features/theme/theme'
@@ -71,7 +72,7 @@ function createSession(connectionId: string): SSHSession {
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
-  term.loadAddon(new WebLinksAddon())
+  term.loadAddon(new WebLinksAddon((_event, url) => openExternalUrl(url)))
   // See Terminal.tsx's isAppShortcut doc comment: without this, Ctrl/Cmd+P
   // never reaches SSHShellPane's window-level quick-open shortcut while the
   // terminal has focus — xterm swallows it as its own "send DLE" binding.

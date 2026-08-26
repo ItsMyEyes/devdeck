@@ -14,6 +14,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   RotateCcw,
   Save,
   Settings2,
@@ -69,6 +70,7 @@ import {
   focusPane,
   generateId,
   moveTab,
+  renameContentInTree,
   selectTabInTree,
   splitLeaf,
 } from './paneTree'
@@ -991,6 +993,15 @@ function TerminalWorkspace({
     return false
   }
 
+  function renameFocusedTerminal() {
+    if (focusedActiveContent?.kind !== 'terminal') return
+    const value = window.prompt('Terminal name', focusedActiveContent.label)
+    const label = value?.trim()
+    if (!label) return
+    const root = renameContentInTree(layout.root, focusedActiveContent.id, label)
+    if (root !== layout.root) commitLayout({ ...layout, root })
+  }
+
 
   /** The active file tab's imperative handle, when the focused pane's active
    *  tab is an editable file — powers the overflow menu's Save/Revert/Delete
@@ -1014,6 +1025,12 @@ function TerminalWorkspace({
           <OverflowItem onClick={() => approve(true)}>
             <Check size={13} />
             Approve
+          </OverflowItem>
+        ) : null}
+        {focusedActiveContent?.kind === 'terminal' ? (
+          <OverflowItem onClick={renameFocusedTerminal}>
+            <Pencil size={13} />
+            Rename terminal
           </OverflowItem>
         ) : null}
         {activeFileHandle ? (

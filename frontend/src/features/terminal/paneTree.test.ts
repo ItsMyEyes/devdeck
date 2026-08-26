@@ -27,6 +27,7 @@ import {
   firstLeafId,
   focusPane,
   moveTabInLayout,
+  renameContentInTree,
   resizeSplitInLayout,
   serializeLayout,
   splitLeaf,
@@ -66,6 +67,13 @@ check('createDefaultLayout builds a single terminal leaf', () => {
   assertEqual(root.tabs[0].id, 'w-1', 'primary terminal id === worktree id')
   assertEqual(root.activeTabId, 'w-1', 'active tab is the terminal')
   assertEqual(layout.focusedPaneId, root.id, 'focused pane is the root leaf')
+})
+
+check('renameContentInTree changes a terminal label without changing its session', () => {
+  const layout = createDefaultLayout('w-1')
+  const root = renameContentInTree(layout.root, 'w-1', 'API server') as LeafPane
+  assertEqual(root.tabs[0].label, 'API server', 'renamed label')
+  assertEqual(root.tabs[0].id, 'w-1', 'terminal id stays stable')
 })
 
 check('split: splitLeaf turns a leaf into a 2-child row split', () => {

@@ -184,6 +184,7 @@ pub fn run() {
             get_startup_error,
             read_sidecar_log,
             open_log_file,
+            open_external_url,
             get_runtime_warning,
         ])
         .setup(|app| {
@@ -721,4 +722,31 @@ fn read_sidecar_log(app: AppHandle) -> Result<SidecarLog, String> {
 fn open_log_file(app: AppHandle) -> Result<(), String> {
     let path = app_log_path(&app, "sidecar.log")?;
     app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Opens a terminal URL in the operating system's default browser.
+#[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed = external_url(&url)?;
+    app.opener().open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())
+}
+
+fn external_url(value: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(value).map_err(|_| "invalid URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("only http and https URLs can be opened".to_string());
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::external_url;
+
+    #[test]
+    fn external_url_allows_only_web_urls() {
+        assert!(external_url("http://localhost:3000").is_ok());
+        assert!(external_url("https://example.com").is_ok());
+        assert!(external_url("file:///tmp/nope").is_err());
+    }
 }
