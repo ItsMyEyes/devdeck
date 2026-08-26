@@ -137,7 +137,7 @@ func tryHandoverToken(w http.ResponseWriter, r *http.Request, svc *service.AuthS
 	if err != nil {
 		return false
 	}
-	setAuthCookie(w, sessionCookieName, sessionToken, 12*time.Hour, http.SameSiteLaxMode)
+	setAuthCookie(w, r, sessionCookieName, sessionToken, 12*time.Hour, http.SameSiteLaxMode)
 
 	clean := *r.URL
 	q := clean.Query()

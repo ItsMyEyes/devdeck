@@ -104,7 +104,7 @@ func (h *AuthHandler) PostPINSession(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
-	setAuthCookie(w, sessionCookieName, sessionToken, h.maxAge(), h.sameSite())
+	setAuthCookie(w, r, sessionCookieName, sessionToken, h.maxAge(), h.sameSite())
 	writeJSON(w, http.StatusOK, user)
 }
 
