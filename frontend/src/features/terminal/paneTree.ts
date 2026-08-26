@@ -345,6 +345,24 @@ export function selectTabInTree(node: PaneNode, paneId: string, tabId: string): 
   return changed ? { ...node, children } : node
 }
 
+/** Changes a tab label without changing its identity or session. */
+export function renameContentInTree(node: PaneNode, contentId: string, label: string): PaneNode {
+  if (node.type === 'leaf') {
+    const index = node.tabs.findIndex((tab) => tab.id === contentId)
+    if (index < 0 || node.tabs[index].label === label) return node
+    const tabs = [...node.tabs]
+    tabs[index] = { ...tabs[index], label }
+    return { ...node, tabs }
+  }
+  let changed = false
+  const children = node.children.map((child) => {
+    const next = renameContentInTree(child, contentId, label)
+    changed ||= next !== child
+    return next
+  })
+  return changed ? { ...node, children } : node
+}
+
 /** Adds `content` as a new tab in leaf `paneId` (or focuses it there if a
  *  tab with that id already exists) — the "open this content in a specific
  *  pane" primitive behind Explorer's onOpenFile, "new tab" buttons, etc. */

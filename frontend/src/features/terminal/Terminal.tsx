@@ -7,6 +7,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { ChevronDown, ChevronUp, MessageSquarePlus, X } from 'lucide-react'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
+import { openExternalUrl } from '@/lib/openExternalUrl'
 import { createTerminalWriter } from '@/features/terminal/terminalWriter'
 import { useResolvedTheme } from '@/features/theme/useTheme'
 import type { Machine } from '@/store/types'
@@ -256,7 +257,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const search = new SearchAddon()
     const serialize = new SerializeAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon())
+    term.loadAddon(new WebLinksAddon((_event, url) => openExternalUrl(url)))
     term.loadAddon(search)
     term.loadAddon(serialize)
     searchAddonRef.current = search
