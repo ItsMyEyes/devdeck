@@ -226,16 +226,139 @@ func TestSetSecureCookiesTogglesSecureAttribute(t *testing.T) {
 	t.Cleanup(func() { SetSecureCookies(true) })
 
 	rec := httptest.NewRecorder()
-	setAuthCookie(rec, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	setAuthCookie(rec, nil, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
 	if c := rec.Result().Cookies()[0]; !c.Secure {
-		t.Fatal("expected Secure cookie by default")
+		t.Fatal("expected Secure cookie by default when r is nil")
 	}
 
 	SetSecureCookies(false)
 	rec = httptest.NewRecorder()
-	setAuthCookie(rec, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	setAuthCookie(rec, nil, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
 	if c := rec.Result().Cookies()[0]; c.Secure {
 		t.Fatal("expected non-Secure cookie after SetSecureCookies(false)")
+	}
+}
+
+func TestAuthCookieSecureOnlyOnTLSOrHTTPS(t *testing.T) {
+	t.Cleanup(func() { SetSecureCookies(true) })
+	SetSecureCookies(true)
+
+	// Plain HTTP: should NOT set Secure (fixes Issue #1 and Issue #2)
+	httpReq := httptest.NewRequest(http.MethodPost, "http://192.168.1.100:8989/api/auth/login", nil)
+	rec := httptest.NewRecorder()
+	setAuthCookie(rec, httpReq, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	if c := rec.Result().Cookies()[0]; c.Secure {
+		t.Errorf("plain HTTP request must NOT have Secure cookie, got Secure=%v", c.Secure)
+	}
+
+	// HTTPS via TLS
+	httpsReq := httptest.NewRequest(http.MethodPost, "https://example.com/api/auth/login", nil)
+	rec = httptest.NewRecorder()
+	setAuthCookie(rec, httpsReq, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	if c := rec.Result().Cookies()[0]; !c.Secure {
+		t.Errorf("HTTPS request must have Secure cookie, got Secure=%v", c.Secure)
+	}
+
+	// HTTPS via X-Forwarded-Proto
+	forwardedReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8989/api/auth/login", nil)
+	forwardedReq.Header.Set("X-Forwarded-Proto", "https")
+	rec = httptest.NewRecorder()
+	setAuthCookie(rec, forwardedReq, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	if c := rec.Result().Cookies()[0]; !c.Secure {
+		t.Errorf("X-Forwarded-Proto: https request must have Secure cookie, got Secure=%v", c.Secure)
+	}
+
+	// HTTPS with SetSecureCookies(false) disabled
+	SetSecureCookies(false)
+	rec = httptest.NewRecorder()
+	setAuthCookie(rec, httpsReq, sessionCookieName, "tok", time.Hour, http.SameSiteStrictMode)
+	if c := rec.Result().Cookies()[0]; c.Secure {
+		t.Errorf("SetSecureCookies(false) must not set Secure cookie even on HTTPS, got Secure=%v", c.Secure)
+	}
+}
+
+func TestRegisterTotpSetupOnHTTP(t *testing.T) {
+	h := newTestAuthHandler(t)
+
+	// 1. Register over plain HTTP (Issue #1 reproduction)
+	regRec := httptest.NewRecorder()
+	regReq := httptest.NewRequest(http.MethodPost, "http://192.168.1.100:8989/api/auth/register", jsonBody(t, map[string]string{
+		"email": "owner@example.com", "password": "correct horse battery staple",
+	}))
+	h.PostRegister(regRec, regReq)
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201, body=%s", regRec.Code, regRec.Body)
+	}
+	pendingCookie := regRec.Result().Cookies()[0]
+	if pendingCookie.Name != pendingCookieName || pendingCookie.Value == "" {
+		t.Fatal("register did not set devdeck_pending cookie")
+	}
+	if pendingCookie.Secure {
+		t.Errorf("pending cookie over plain HTTP must not be Secure, got Secure=%v", pendingCookie.Secure)
+	}
+
+	// 2. Setup TOTP over HTTP with the pending cookie (previously failed with 401 in Issue #1)
+	setupRec := httptest.NewRecorder()
+	setupReq := httptest.NewRequest(http.MethodPost, "http://192.168.1.100:8989/api/auth/totp/setup", nil)
+	setupReq.AddCookie(pendingCookie)
+	h.PostTotpSetup(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("totp setup status = %d, want 200, body=%s", setupRec.Code, setupRec.Body)
+	}
+	var setupResp struct {
+		OtpauthUri string `json:"otpauthUri"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResp); err != nil || setupResp.OtpauthUri == "" {
+		t.Fatalf("invalid setup response: %s", setupRec.Body.String())
+	}
+}
+
+func TestLoginWithout2FAOnHTTP(t *testing.T) {
+	h := newTestAuthHandler(t)
+	h.svc.SetTOTPRequired(false)
+
+	// Register over HTTP
+	regRec := httptest.NewRecorder()
+	regReq := httptest.NewRequest(http.MethodPost, "http://192.168.1.100:8989/api/auth/register", jsonBody(t, map[string]string{
+		"email": "owner@example.com", "password": "correct horse battery staple",
+	}))
+	h.PostRegister(regRec, regReq)
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201, body=%s", regRec.Code, regRec.Body)
+	}
+	regCookie := regRec.Result().Cookies()[0]
+	if regCookie.Secure {
+		t.Errorf("register cookie over HTTP must not be Secure, got Secure=%v", regCookie.Secure)
+	}
+
+	// Login over HTTP with 2FA disabled (Issue #2 scenario)
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "http://192.168.1.100:8989/api/auth/login", jsonBody(t, map[string]string{
+		"email": "owner@example.com", "password": "correct horse battery staple",
+	}))
+	h.PostLogin(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200, body=%s", loginRec.Code, loginRec.Body)
+	}
+	var loginResp map[string]string
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &loginResp); err != nil || loginResp["status"] != "ok" {
+		t.Fatalf("login response = %v, want status ok", loginResp)
+	}
+	loginCookie := loginRec.Result().Cookies()[0]
+	if loginCookie.Name != sessionCookieName || loginCookie.Value == "" {
+		t.Fatal("login did not set devdeck_session cookie")
+	}
+	if loginCookie.Secure {
+		t.Errorf("login cookie over HTTP must not be Secure, got Secure=%v", loginCookie.Secure)
+	}
+
+	// Subsequent GetMe with session cookie
+	meRec := httptest.NewRecorder()
+	meReq := httptest.NewRequest(http.MethodGet, "http://192.168.1.100:8989/api/auth/me", nil)
+	meReq.AddCookie(loginCookie)
+	h.GetMe(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("GetMe status = %d, want 200, body=%s", meRec.Code, meRec.Body)
 	}
 }
 
@@ -357,7 +480,7 @@ func TestSetAuthCookieHonoursSameSite(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			setAuthCookie(rec, "devdeck_session", "tok", time.Hour, tt.sameSite)
+			setAuthCookie(rec, nil, "devdeck_session", "tok", time.Hour, tt.sameSite)
 			got := rec.Header().Get("Set-Cookie")
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("Set-Cookie = %q, want it to contain %q", got, tt.want)
