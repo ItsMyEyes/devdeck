@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core'
 import { MoreHorizontal, PanelBottom, PanelRight, Plus, X } from 'lucide-react'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { cn } from '@/lib/utils'
+import { useCommandChordLabel } from '@/features/keybindings/store'
 
 /**
  * One tab rendered in a pane's header. Deliberately a local, minimal mirror
@@ -68,6 +69,7 @@ export function PanelHeader({
   newTabActions,
   className,
 }: PanelHeaderProps) {
+  const newTabShortcut = useCommandChordLabel('terminal.newPaneTab')
   return (
     <div
       className={cn(
@@ -91,7 +93,7 @@ export function PanelHeader({
           <TabStripPopoverMenu
             trigger={<Plus size={13} />}
             triggerClassName={cn(iconButtonClass, 'my-1 ml-1 flex-none self-center')}
-            triggerTitle="New tab (Ctrl+T)"
+            triggerTitle={newTabShortcut ? `New tab (${newTabShortcut})` : 'New tab'}
             triggerAriaLabel="New tab"
           >
             {newTabActions}

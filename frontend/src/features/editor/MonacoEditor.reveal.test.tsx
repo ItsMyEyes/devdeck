@@ -56,6 +56,8 @@ vi.mock('./monacoSetup', () => {
             record.focused += 1
           },
           updateOptions: () => {},
+          saveViewState: () => null,
+          restoreViewState: () => {},
           onDidChangeModelContent: () => ({ dispose: () => {} }),
           dispose: () => {
             record.disposed = true

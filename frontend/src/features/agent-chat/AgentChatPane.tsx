@@ -29,6 +29,7 @@ import type { AgentChatTarget, InteractionMode, RuntimeMode, TurnModelSelection 
 import { useAgentModels, useAgents, useAgentThreads, useMachineCapabilities } from '@/features/data/queries'
 import { agentChatSupport } from '@/features/agent-chat/agentChatSupport'
 import type { MentionSource } from '@/features/agent-chat/composerMention'
+import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Machine } from '@/store/types'
 
 /** icon key → glyph — the only place `composerBanners`' output (icon-agnostic
@@ -117,14 +118,24 @@ export interface AgentChatPaneProps {
  * so it rides on `max`, the closest real level; see ComposerControls.tsx's
  * `REASONING_OPTIONS` doc comment for why.
  */
-function turnModel(model: ModelChoice | null, effort: string, contextWindow: string): TurnModelSelection | undefined {
-  const options: Record<string, unknown> = {
-    effort: effort === 'ultrathink' ? 'max' : effort,
-    contextWindow,
-  }
+export function turnModel(model: ModelChoice | null, effort: string, contextWindow: string): TurnModelSelection | undefined {
+  // Only NON-default picks go on the wire. "Default" on the picker means
+  // "let the CLI decide", and the backend now applies these as start-time
+  // flags by restarting the thread's session whenever they differ from the
+  // ones it was launched with (`Reactor.ensureSession`) — so a default that
+  // was sent explicitly would force a needless restart on every fresh
+  // thread's first turn, just to pass the CLI the value it already uses.
+  const options: Record<string, unknown> = {}
+  if (effort !== DEFAULT_EFFORT) options.effort = effort === 'ultrathink' ? 'max' : effort
+  if (contextWindow !== DEFAULT_CONTEXT_WINDOW) options.contextWindow = contextWindow
+  const hasOptions = Object.keys(options).length > 0
 
-  if (!model) return { options }
-  return { instanceId: instanceIdForAgent(model.agentId), model: model.modelId, options }
+  if (!model) return hasOptions ? { options } : undefined
+  return {
+    instanceId: instanceIdForAgent(model.agentId),
+    model: model.modelId,
+    ...(hasOptions ? { options } : {}),
+  }
 }
 
 /** A whole-pane state (connecting, thread error, transcript still loading).
@@ -327,11 +338,60 @@ export function AgentChatPane({
     [pickedHere, resumedModel, defaultModel],
   )
   const setModel = useCallback((choice: ModelChoice | null) => setPicked({ threadKey, choice }), [threadKey])
-  const [effort, setEffort] = useState(DEFAULT_EFFORT)
-  // Same "rides the next turn" rule as effort — see the comment above.
-  const [contextWindow, setContextWindow] = useState(DEFAULT_CONTEXT_WINDOW)
-  const [runtimeMode, setRuntimeModeValue] = useState<RuntimeMode>('approval-required')
-  const [interactionMode, setInteractionModeValue] = useState<InteractionMode>('default')
+
+  // Effort and context window also ride the next turn, but unlike the model
+  // the thread's own history cannot answer for them — nothing on the wire
+  // carries them back. They live in the store, per thread and persisted
+  // (`composerTurnOptions.ts`), so a remount or a reload reads back what was
+  // picked instead of quietly returning to "High · 200k" while the live
+  // session keeps running under something else.
+  const turnOptions = useDevDeckStore((s) => s.composerTurnOptions[threadKey])
+  const setComposerTurnOptions = useDevDeckStore((s) => s.setComposerTurnOptions)
+  const effort = turnOptions?.effort ?? DEFAULT_EFFORT
+  const contextWindow = turnOptions?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  const setEffort = useCallback((value: string) => setComposerTurnOptions(threadKey, { effort: value }), [setComposerTurnOptions, threadKey])
+  const setContextWindow = useCallback(
+    (value: string) => setComposerTurnOptions(threadKey, { contextWindow: value }),
+    [setComposerTurnOptions, threadKey],
+  )
+
+  // The two modes are THREAD state, read straight off the view. The engine
+  // persists every mode change as a `thread.runtime-mode-set` /
+  // `thread.interaction-mode-set` event and replays it on connect, so this
+  // is the mode the agent is actually in — whoever set it, however long ago.
+  // These used to be `useState` here, defaulting to approval-required /
+  // default on every mount, which meant every tab or pane switch showed a
+  // full-access thread as "Approval required" (and the approval card's own
+  // mode buttons, which share this value, agreed with the lie). The pill's
+  // optimistic pick lives inside `ComposerControls` and settles against this
+  // once the engine echoes the accepted command back; a rejection leaves this
+  // untouched, which is exactly what the pill reverts to.
+  const runtimeMode = view.runtimeMode
+  const interactionMode = view.interactionMode
+
+  // A mode pick opens the connect gate exactly the way a send does (see
+  // `hasSentThisSession`). Without this, on a brand-new worktree the gate
+  // flaps: the fail-open `isPending` connect auto-creates the thread on the
+  // server, then the settled (empty, not yet invalidated) threads query
+  // closes the socket again — and a mode picked in that draft state sits in
+  // the socket's in-memory outbox until the first message. Reload or switch
+  // panes before typing and the pick is silently gone; the thread stays in
+  // approval-required while the pill claimed otherwise. A mode change is a
+  // deliberate act on the thread, so it connects and commits right away.
+  const dispatchRuntimeMode = useCallback(
+    (mode: RuntimeMode) => {
+      setHasSentThisSession(true)
+      setRuntimeMode(mode)
+    },
+    [setRuntimeMode],
+  )
+  const dispatchInteractionMode = useCallback(
+    (mode: InteractionMode) => {
+      setHasSentThisSession(true)
+      setInteractionMode(mode)
+    },
+    [setInteractionMode],
+  )
 
   const controls = useMemo(
     () => ({
@@ -345,29 +405,26 @@ export function AgentChatPane({
       onContextWindowChange: setContextWindow,
       contextTokens: view.contextTokens,
       interactionMode,
-      setInteractionMode: (mode: InteractionMode) => {
-        setInteractionModeValue(mode)
-        setInteractionMode(mode)
-      },
+      setInteractionMode: dispatchInteractionMode,
       runtimeMode,
-      setRuntimeMode: (mode: RuntimeMode) => {
-        setRuntimeModeValue(mode)
-        setRuntimeMode(mode)
-      },
+      setRuntimeMode: dispatchRuntimeMode,
       error: view.error,
     }),
     [
       model,
+      setModel,
       effort,
+      setEffort,
       contextWindow,
+      setContextWindow,
       machine,
       agentId,
       interactionMode,
       runtimeMode,
       view.error,
       view.contextTokens,
-      setInteractionMode,
-      setRuntimeMode,
+      dispatchInteractionMode,
+      dispatchRuntimeMode,
     ],
   )
 
@@ -473,8 +530,7 @@ export function AgentChatPane({
   // dispatches a redundant `thread.interaction-mode.set`.
   function handlePlanFollowUp(submission: PlanFollowUpSubmission) {
     if (submission.mode !== interactionMode) {
-      setInteractionModeValue(submission.mode)
-      setInteractionMode(submission.mode)
+      dispatchInteractionMode(submission.mode)
     }
     // A plan follow-up sends canned text, never a user's own attachment —
     // ChatComposer's own attachment strip belongs to `submit()`, not this

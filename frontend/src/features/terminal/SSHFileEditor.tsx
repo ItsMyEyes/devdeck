@@ -1,4 +1,4 @@
-import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useState } from 'react'
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { FileWarning } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
@@ -6,8 +6,13 @@ import { cn } from '@/lib/utils'
 import { documentFormatForPath } from '@/features/documents/documentKind'
 import { useDeleteFileTarget, useFileTarget, useWriteFileTarget } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { ExternalChangeBar } from './ExternalChangeBar'
+import { editBuffer, hasExternalChange, seedBuffer, syncBuffer } from './fileBuffer'
+import type { FileBuffer } from './fileBuffer'
+import { useFileAutoSave } from './useFileAutoSave'
 import type { FilesTarget } from './filesTarget'
 import type { LineReveal } from './PlainCodeEditor'
+import { matchesBinding } from '@/features/keybindings/store'
 
 const PlainCodeEditor = lazy(() =>
   import('./PlainCodeEditor').then((module) => ({ default: module.PlainCodeEditor })),
@@ -49,6 +54,9 @@ export interface SSHFileEditorHandle {
   /** Deletes this file from disk after a confirm prompt — the pane overflow
    *  menu's "Delete file" action. Optional for the same reason as `revert`. */
   remove?: () => void
+  /** Abandons the draft, cancelling any pending auto-save — see
+   *  `FileEditorHandle.discard`, which this mirrors. */
+  discard?: () => void
 }
 
 function basename(path: string) {
@@ -108,27 +116,48 @@ const SSHTextFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(fu
   ref,
 ) {
   const target: FilesTarget = { kind: 'ssh', connectionId }
-  const [draft, setDraft] = useState('')
-  const [initialized, setInitialized] = useState(false)
-  const file = useFileTarget(target, path)
+  // Same buffer contract as the worktree editor — see `FileEditor.tsx` and
+  // `fileBuffer.ts`. A remote file is edited by exactly the same things (an
+  // agent, a shell on that host), so it gets the same reconciliation.
+  const [buffer, setBuffer] = useState<FileBuffer | null>(null)
+  const file = useFileTarget(target, path, { live: active })
   const writeFile = useWriteFileTarget(target)
   const deleteFile = useDeleteFileTarget(target)
-  const dirty = initialized && file.data ? draft !== file.data.content : false
+  const content = file.data?.content
+  // Reconciled during render as well as in the effect — see `FileEditor.tsx`
+  // for why the one-frame lag matters.
+  const synced = content === undefined ? buffer : syncBuffer(buffer, content)
+  const draft = synced?.draft ?? ''
+  const initialized = synced !== null
+  const dirty = initialized && content !== undefined ? draft !== content : false
+  const externallyChanged = hasExternalChange(synced, content)
 
   useEffect(() => {
-    if (!file.data || initialized) return
-    setDraft(file.data.content)
-    setInitialized(true)
-  }, [file.data, initialized])
+    if (content === undefined) return
+    setBuffer((current) => syncBuffer(current, content))
+  }, [content])
+
+  const setDraft = useCallback((next: string) => {
+    setBuffer((current) => editBuffer(current, next))
+  }, [])
+
+  const wasActive = useRef(active)
+  const refetch = file.refetch
+  useEffect(() => {
+    const becameActive = active && !wasActive.current
+    wasActive.current = active
+    if (becameActive) void refetch()
+  }, [active, refetch])
 
   useEffect(() => {
     onDirtyChange(path, dirty)
   }, [dirty, onDirtyChange, path])
 
-  async function saveNow() {
+  /** See `FileEditor.tsx` for why the auto-save path passes `silent`. */
+  async function saveNow(options?: { silent?: boolean }) {
     if (!initialized || !dirty) return
     await writeFile.mutateAsync({ path, content: draft })
-    toast.success(`Saved ${basename(path)}`)
+    if (!options?.silent) toast.success(`Saved ${basename(path)}`)
   }
 
   function save() {
@@ -136,9 +165,18 @@ const SSHTextFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(fu
     void saveNow().catch(() => undefined)
   }
 
+  const discardAutoSave = useFileAutoSave({
+    ready: initialized,
+    active,
+    dirty,
+    draft,
+    conflicted: externallyChanged,
+    save: () => saveNow({ silent: true }),
+  })
+
   function revert() {
-    if (!dirty || writeFile.isPending || !file.data) return
-    setDraft(file.data.content)
+    if (!dirty || writeFile.isPending || content === undefined) return
+    setBuffer(seedBuffer(content))
   }
 
   function remove() {
@@ -152,12 +190,17 @@ const SSHTextFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(fu
     })
   }
 
-  useImperativeHandle(ref, () => ({ save: saveNow, revert, remove }))
+  useImperativeHandle(ref, () => ({
+    save: () => saveNow(),
+    revert,
+    remove,
+    discard: discardAutoSave,
+  }))
 
   useEffect(() => {
     if (!active) return
     function handleKeydown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (matchesBinding(event, 'editor.save')) {
         event.preventDefault()
         save()
       }
@@ -193,33 +236,38 @@ const SSHTextFileEditor = forwardRef<SSHFileEditorHandle, SSHFileEditorProps>(fu
             Retry
           </button>
         </div>
-      ) : isMarkdownPath(path) ? (
-        <Suspense
-          fallback={
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
-              <DataLoading compact label="loading editor…" />
-            </div>
-          }
-        >
-          <MarkdownFileEditor
-            path={path}
-            value={draft}
-            ready={initialized}
-            onChange={setDraft}
-            reveal={reveal}
-            onOpenPreviewTab={onOpenPreviewTab}
-          />
-        </Suspense>
       ) : (
-        <Suspense
-          fallback={
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
-              <DataLoading compact label="loading editor…" />
-            </div>
-          }
-        >
-          <PlainCodeEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={reveal} />
-        </Suspense>
+        <>
+          {externallyChanged ? <ExternalChangeBar onReload={revert} /> : null}
+          {isMarkdownPath(path) ? (
+            <Suspense
+              fallback={
+                <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+                  <DataLoading compact label="loading editor…" />
+                </div>
+              }
+            >
+              <MarkdownFileEditor
+                path={path}
+                value={draft}
+                ready={initialized}
+                onChange={setDraft}
+                reveal={reveal}
+                onOpenPreviewTab={onOpenPreviewTab}
+              />
+            </Suspense>
+          ) : (
+            <Suspense
+              fallback={
+                <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+                  <DataLoading compact label="loading editor…" />
+                </div>
+              }
+            >
+              <PlainCodeEditor path={path} value={draft} ready={initialized} onChange={setDraft} reveal={reveal} />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   )

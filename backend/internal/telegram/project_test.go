@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/domain"
@@ -759,5 +760,113 @@ func TestRunningAndWaitingDoNotEndTheTurn(t *testing.T) {
 	})
 	if got.EndTurn {
 		t.Fatal("a status-less session-set ended the turn")
+	}
+}
+
+// A callback whose message is GONE — Telegram omits it once the card is older
+// than 48 hours, and it is absent entirely for an inline-mode callback — must
+// not take the process down with it. handleUpdate runs on the poll goroutine,
+// so a nil dereference there is not a dropped update: it is the whole bridge,
+// and with it every other published thread.
+func TestAgentCallbackWithNoMessageDoesNotPanic(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	mustAllow(t, st, 42)
+	seedThread(t, engine, "ssh:c-a1b2")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "ssh:c-a1b2", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	b.handleUpdate(context.Background(), dm(100, "/agents"))
+	last := transport.sent[len(transport.sent)-1]
+	if len(last.Keyboard) == 0 {
+		t.Fatalf("no agent picker was sent: %+v", transport.sent)
+	}
+
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cb-tap", From: &User{ID: 42}, Data: last.Keyboard[0][0].CallbackData,
+	}})
+
+	// The tap still has to be ANSWERED, or the button spins forever.
+	if len(transport.answers) == 0 {
+		t.Fatalf("the callback was never answered: %+v", transport.answers)
+	}
+}
+
+// The same class of failure, one layer up: whatever an update handler does,
+// pollLoop must survive it. Without a recover, one panicking update ends the
+// only goroutine reading from Telegram and the bridge goes silent forever —
+// indistinguishable, from the operator's side, from a dead bot.
+func TestAPanickingUpdateDoesNotKillThePollLoop(t *testing.T) {
+	transport := &fakeTransport{}
+	b, _, _ := newTestBridge(t, transport)
+
+	// now is called by every path that touches the allowlist; panicking here
+	// stands in for any handler bug, without needing one to exist.
+	b.now = func() time.Time { panic("boom") }
+
+	b.handleUpdateSafely(context.Background(), dm(100, "halo"))
+}
+
+// Resuming a session that STILL has a binding row must not replay its backlog.
+//
+// SetTelegramBinding's ON CONFLICT deliberately never writes last_seq — a
+// re-point must not rewind a cursor — so passing LastSeq: head through it is
+// silently ignored for any thread that is already published somewhere. That is
+// not hypothetical: a session published on its own with /init, then resumed
+// into a project topic, keeps whatever cursor that other destination had, and
+// the whole conversation is mirrored again into the topic. The narrow setter is
+// what actually moves it.
+func TestResumingAnAlreadyBoundThreadStartsFromItsHead(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	mustAllow(t, st, 42)
+	projectID := seedProject(t, st, "devdeck")
+
+	b.handleUpdate(context.Background(), dm(100, "/init "+projectID))
+	b.handleUpdate(context.Background(), dm(100, "sesi pertama"))
+	bindings, _ := st.TelegramBindings()
+	firstThread := bindings[0].ThreadID
+
+	b.handleUpdate(context.Background(), dm(100, "/new"))
+
+	// The earlier session is published on its OWN destination too, so its row
+	// exists again — with a cursor of its own, at the very beginning.
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: firstThread, ChatID: 555}); err != nil {
+		t.Fatalf("re-publish the old session: %v", err)
+	}
+	seedDelta(t, engine, firstThread, "old-1", "JAWABAN LAMA", 1)
+	seedTurnEnd(t, engine, firstThread, "old-end")
+
+	b.handleUpdate(context.Background(), dm(100, "/resume"))
+	last := transport.sent[len(transport.sent)-1]
+	var token string
+	for _, row := range last.Keyboard {
+		if row[0].CallbackData != noopCallback {
+			token = row[0].CallbackData
+		}
+	}
+	if token == "" {
+		t.Fatalf("no resumable session offered: %+v", last.Keyboard)
+	}
+
+	head, err := b.headSeq(firstThread)
+	if err != nil {
+		t.Fatalf("head seq: %v", err)
+	}
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cb1", From: &User{ID: 42}, Data: token,
+		Message: &Message{MessageID: 9, Chat: Chat{ID: 100}},
+	}})
+
+	binding, err := st.TelegramBindingByThread(firstThread)
+	if err != nil {
+		t.Fatalf("binding: %v", err)
+	}
+	if binding.ChatID != 100 {
+		t.Fatalf("resume did not re-point the session: %+v", binding)
+	}
+	if binding.LastSeq != head {
+		t.Fatalf("cursor at %d after resuming, want the head %d — the backlog will be replayed", binding.LastSeq, head)
 	}
 }

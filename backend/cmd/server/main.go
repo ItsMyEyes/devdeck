@@ -518,6 +518,11 @@ func main() {
 	})
 	go agentEngine.Run(context.Background())
 
+	// Built here rather than folded into selfH above, because selfH is
+	// constructed before the engine exists and a construction argument cannot
+	// reach backwards. Its route lives beside the other /api/self/* ones.
+	busyH := handler.NewBusyHandler(agentEngine)
+
 	agentDir := orchestration.NewThreadDirectory()
 	agentChatSvc := &provider.Service{Registry: agentRegistry, Dir: agentDir}
 
@@ -1093,6 +1098,9 @@ func main() {
 	mux.HandleFunc("POST /api/self/restart", selfH.PostRestart)
 	mux.HandleFunc("POST /api/self/stop", selfH.PostStop)
 	mux.HandleFunc("GET /api/self/version", selfH.GetVersion)
+	// What a restart of this process would destroy — PTYs *and* agent runs.
+	// Not on selfH: see busyH's construction above.
+	mux.HandleFunc("GET /api/self/busy", busyH.GetBusy)
 	mux.HandleFunc("GET /api/self/update-check", selfH.GetUpdateCheck)
 	mux.HandleFunc("POST /api/self/update", selfH.PostUpdate)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
@@ -1135,6 +1143,7 @@ func main() {
 	mux.HandleFunc("POST /api/worktrees/{id}/files/copy", fileH.Copy)
 
 	mux.HandleFunc("GET /api/worktrees/{id}/git/status", gitH.Status)
+	mux.HandleFunc("POST /api/worktrees/{id}/git/init", gitH.Init)
 	mux.HandleFunc("GET /api/worktrees/{id}/git/diff", gitH.Diff)
 	mux.HandleFunc("GET /api/worktrees/{id}/git/log", gitH.Log)
 	mux.HandleFunc("POST /api/worktrees/{id}/git/stage", gitH.Stage)
@@ -1231,6 +1240,7 @@ func main() {
 		mux.HandleFunc("POST /api/machines/{id}/restart", machineH.PostMachineRestart)
 		mux.HandleFunc("POST /api/machines/{id}/stop", machineH.PostMachineStop)
 		mux.HandleFunc("GET /api/machines/{id}/version", machineH.GetMachineVersion)
+		mux.HandleFunc("GET /api/machines/{id}/busy", machineH.GetMachineBusy)
 		mux.HandleFunc("GET /api/machines/{id}/update-check", machineH.GetMachineUpdateCheck)
 		mux.HandleFunc("POST /api/machines/{id}/update", machineH.PostMachineUpdate)
 		mux.Handle("/api/machines/{id}/proxy/{rest...}", handler.NewMachineProxyHandler(st))
@@ -1544,7 +1554,8 @@ func main() {
 		log.Fatalf("resolve UI URL: %v", err)
 	}
 	// NOTE: the desktop shell (frontend/src-tauri/src/sidecar.rs) parses this
-	// exact line to discover the bound port when launched with --addr 127.0.0.1:0.
+	// exact line to discover the bound port — it asks for a fixed one but falls
+	// back to --addr 127.0.0.1:0 when that port is taken, so it never assumes.
 	log.Printf("devdeck listening on %s (db: %s)", uiURL, *dbPath)
 	if *tailscaleServe {
 		if err := startTailscaleServe(listener.Addr()); err != nil {
@@ -1695,6 +1706,32 @@ func startForwardProxies(socks5Addr, httpProxyAddr, proxyKey string) {
 	}
 }
 
+// tailscaleServeClearArgs removes any existing HTTPS listener on 443 before
+// this process claims it.
+//
+// It exists because `tailscale serve <port>` REFUSES to replace a listener
+// rather than overwriting it — it exits 1 with "sending serve config:
+// updating config: listener already exists for port 443". A single leftover
+// mapping (an older build's `--bg`, or a run that was killed before its
+// foreground child could clean up) therefore breaks the flag permanently: not
+// just once, but on every launch from then on.
+//
+// The failure mode that causes is genuinely misleading, because this hub may
+// bind an OS-ASSIGNED port (the desktop shell asks for 8989 but falls back to
+// --addr 127.0.0.1:0 when something already holds it — see
+// frontend/src-tauri/src/sidecar.rs's listen_addr). The stale mapping keeps
+// pointing at whatever port a previous run happened to get, so the
+// tailnet URL answers 502 while the process itself is perfectly healthy and
+// still serving on loopback — and anything that reaches this hub only over
+// the tailnet (a remote runtime's self-registration and catalog sync) fails
+// with no symptom on this side at all.
+//
+// Scoped to `--https=443 off`, never `serve reset`: reset drops the whole
+// machine's serve configuration — other ports, TCP forwarders, funnel — none
+// of which belongs to devdeck. 443's `/` is the one mapping this function
+// owns, and it owns it exclusively.
+func tailscaleServeClearArgs() []string { return []string{"serve", "--https=443", "off"} }
+
 // startTailscaleServe runs `tailscale serve <port>` as a foreground child
 // process: the serve config exists only while the child runs, so tailscaled
 // is left clean when devdeck exits, and ctrl-c reaches both through the shared
@@ -1708,6 +1745,14 @@ func startTailscaleServe(addr net.Addr) error {
 	bin, err := detect.ResolveTailscale()
 	if err != nil {
 		return fmt.Errorf("tailscale CLI not found in PATH or common install locations; install it or drop the flag")
+	}
+	// Best-effort and deliberately not fatal: "there was nothing to remove" is
+	// the normal, healthy case and reports itself as a non-zero exit here, so
+	// treating this as an error would fail the common path to fix the rare one.
+	// If it genuinely could not clear the listener, the serve below fails with
+	// tailscale's own message, which is the one worth showing.
+	if err := exec.Command(bin, tailscaleServeClearArgs()...).Run(); err != nil {
+		log.Printf("tailscale: no existing 443 listener to clear (%v)", err)
 	}
 	cmd := exec.Command(bin, "serve", port)
 	cmd.Stdout = os.Stdout

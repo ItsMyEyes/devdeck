@@ -2,6 +2,8 @@ import { forwardRef } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Machine, Project, Worktree } from '@/store/types'
+import { chordLabel } from '@/features/keybindings/chord'
+import { chordsFor } from '@/features/keybindings/store'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { ExpandedTerminal } from './ExpandedTerminal'
 import { createAgentChatPane, createDefaultLayout, createExplorerContent, createTerminalContent, splitLeaf } from './paneTree'
@@ -219,7 +221,10 @@ describe('ExpandedTerminal - ShellSidebar mount site (spec §2)', () => {
     expect(props.shellKey).toBe('wt:wt-1')
     expect(props.target).toEqual({ kind: 'worktree', machine, worktreeId: 'wt-1' })
     expect(props.git).toEqual({ worktreeId: 'wt-1', machine })
-    expect(props.contentSearchShortcut).toBe('Ctrl Shift F')
+    // Read off the shortcut registry rather than hard-coded: the hint is now
+    // derived from the `terminal.searchInFiles` binding, so it follows a rebind
+    // (and renders ⌘⇧F vs Ctrl+Shift+F per platform).
+    expect(props.contentSearchShortcut).toBe(chordLabel(chordsFor('terminal.searchInFiles')[0]))
   })
 
   it('gives ShellSidebar the exact openFile/onFileDeleted callbacks the in-pane explorer tab uses', () => {

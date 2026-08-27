@@ -17,7 +17,36 @@ export interface AgentEvent {
  *  understand. Not `error`: nothing crashed, and painting it red would make an
  *  ordinary "this isn't built yet" read as a failure. Not silence either, which
  *  is what it used to be — see `applyForwarded`'s `tool.denied` branch. */
-export type ChatItemKind = 'user' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'plan' | 'notice'
+export type ChatItemKind = 'user' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'plan' | 'notice' | 'question'
+
+/** One question of an `AskUserQuestion` request, paired with the answer the
+ *  operator gave it — the payload of a `question` chat item.
+ *
+ *  ── Why the transcript has to carry this ──
+ *  Answering the card produced `thread.user-input-response-requested`, which the
+ *  reducer used ONLY to close the pending prompt. So the question and the
+ *  choice both vanished the instant the card closed: nothing in the thread
+ *  recorded what the agent had asked or what it was told, and after a reload
+ *  there was no trace at all — while the agent's next turn was already acting
+ *  on the answer. */
+export interface AnsweredQuestion {
+  /** The question's own text. Also the key `UserInputRespondPayload.Answers` is
+   *  keyed by (see that struct's comment in `orchestration/command.go`), which
+   *  is what lets this be reconstructed from the response event alone. */
+  question: string
+  /** The question's short label, when the request is still in the view to read
+   *  it from. Absent for a response whose `user-input.requested` fell outside
+   *  the replay window. */
+  header?: string
+  /** What the operator picked: the option labels for a select, or the single
+   *  free-text answer they typed. Multi-select carries several; everything else
+   *  carries one. */
+  chosen: string[]
+  /** The picked options' own descriptions, keyed by label — the sentence under
+   *  the option, which is usually where the actual consequence of the choice
+   *  was written. Same availability caveat as `header`. */
+  descriptions?: Record<string, string>
+}
 
 export interface ChatItem {
   id: string
@@ -67,6 +96,16 @@ export interface ChatItem {
    *  Absent on turns recorded before this existed. */
   turnAgent?: string
   turnModel?: string
+  /** The SUBAGENT this item's work belongs to, or absent for the main
+   *  conversation — mirrors `event.Event.AgentID` (Go). An opaque grouping
+   *  key; never parse it.
+   *
+   *  `timeline.ts` pulls every item carrying one out of the main flow and
+   *  folds it under the agent's own row, so a subagent that reads forty files
+   *  costs the transcript exactly one line whatever it does inside. An item
+   *  that lost this stamp would leak into the parent's narrative as if the
+   *  main agent had done it. */
+  agentId?: string
   /** Highest delta sequence folded into this item, per stream. */
   lastSequence: number
   /** User rows only, present only when the message carried one or more
@@ -76,6 +115,10 @@ export interface ChatItem {
    *  `name` — deliberately not `mimeType`). Raw bytes are never carried here;
    *  a thumbnail is fetched separately via `fetchAgentAttachmentBlob`. */
   attachments?: { id: string; kind: string; mime: string; name: string }[]
+  /** `question` rows only: the `AskUserQuestion` request this row records the
+   *  answer to, one entry per question in the order the agent asked them. See
+   *  `AnsweredQuestion` for why the transcript keeps this at all. */
+  answeredQuestions?: AnsweredQuestion[]
 }
 
 /** One open `AskUserQuestion` request, derived from the forwarded
@@ -103,9 +146,98 @@ export interface PendingApproval {
   options: string[]
 }
 
+/** Mirrors `provider.RuntimeMode` (`backend/internal/agentcore/provider/provider.go`)
+ *  — string values match exactly, one enum on both sides of the wire. */
+export type RuntimeMode = 'approval-required' | 'auto-accept-edits' | 'auto' | 'full-access'
+
+/** Mirrors `provider.InteractionMode`. */
+export type InteractionMode = 'default' | 'plan'
+
+export const RUNTIME_MODES: readonly RuntimeMode[] = ['approval-required', 'auto-accept-edits', 'auto', 'full-access']
+export const INTERACTION_MODES: readonly InteractionMode[] = ['default', 'plan']
+
+export function isRuntimeMode(value: unknown): value is RuntimeMode {
+  return typeof value === 'string' && (RUNTIME_MODES as readonly string[]).includes(value)
+}
+
+export function isInteractionMode(value: unknown): value is InteractionMode {
+  return typeof value === 'string' && (INTERACTION_MODES as readonly string[]).includes(value)
+}
+
+/** What a subagent has spent — mirrors Go's `event.TaskUsage`. Deliberately
+ *  narrower than a turn's usage: providers report a subagent's cost as one
+ *  running total plus a tool count, never the input/output/cache breakdown,
+ *  and inventing zeros for the rest would read as "no cache reads" rather
+ *  than "not reported".
+ *
+ *  Cumulative, not deltas — every provider observed reports a running total,
+ *  so the reducer merges by taking the LARGER value. Summing would
+ *  double-count on every progress tick. */
+export interface SubagentUsage {
+  totalTokens?: number
+  toolUses?: number
+  durationMs?: number
+}
+
+/** One subagent's life, folded from the `task.*` events the backend forwards.
+ *
+ *  Derived in the client rather than projected onto the backend's `Thread`,
+ *  which makes it replay-correct by construction: the same durable events
+ *  produce the same roster on every reconnect, and the engine's read model
+ *  did not have to grow a field.
+ *
+ *  Identity (`title`/`role`) is repeated by the backend on the progress and
+ *  terminal rows, not just the start, so an agent whose start row fell
+ *  outside the replay window still renders completely. */
+export interface SubagentRecord {
+  /** The grouping key every attributed item carries as `ChatItem.agentId`. */
+  id: string
+  /** The tool call that SPAWNED it, when the provider says. This is what
+   *  anchors the agent's row in place of that call's row — the parent's own
+   *  tool item carries the same value as `toolCallId`. */
+  toolCallId?: string
+  /** The provider's own task id, kept for debugging; never used for grouping
+   *  (only `id` is), because it is absent from every content frame. */
+  taskId?: string
+  /** The job, in words: claude's `description` ("Run three echo commands"). */
+  title?: string
+  /** The agent kind — claude's `subagent_type`, opencode's agent name. */
+  role?: string
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  /** The most recent progress line, and the tool it was last seen running. */
+  progress?: string
+  lastTool?: string
+  /** Its report back to the parent, on the terminal row. The single most
+   *  useful thing it produces — it is what the parent actually consumes. */
+  summary?: string
+  usage?: SubagentUsage
+  createdAt: number
+  updatedAt: number
+}
+
 export interface AgentThreadView {
   items: ChatItem[]
+  /** Subagents this thread has spawned, oldest first — see `SubagentRecord`.
+   *  Empty for the overwhelming majority of threads, which never spawn one. */
+  subagents: SubagentRecord[]
   status: 'idle' | 'running' | 'waiting' | 'stopped'
+  /** The thread's ACTUAL permission policy — mirrors the backend's
+   *  `Thread.Mode` (`orchestration/engine.go`), seeded from `thread.created`
+   *  and moved by every `thread.runtime-mode-set` since, whichever client
+   *  sent it (this composer, another pane, Telegram's mode keyboard).
+   *
+   *  This is what the composer's Permission pill shows and what the pending
+   *  approval card's mode buttons read. It used to be component state in
+   *  `AgentChatPane` defaulting to `approval-required`, which was right until
+   *  the first remount: every tab, pane or SSH-session switch reset it, so a
+   *  thread running in full access showed "Approval required" — and the
+   *  pill's revert-on-rejection had nothing true to revert to. */
+  runtimeMode: RuntimeMode
+  /** The thread's actual collaboration mode — mirrors `Thread.Interact`, same
+   *  provenance and same reasoning as `runtimeMode`. Read by the `/plan` and
+   *  `/build` slash commands' effect (the plan follow-up banner and the
+   *  Implement/Refine action). */
+  interactionMode: InteractionMode
   /** Highest Seq applied. Sent as `sinceSeq` when reconnecting. */
   lastSeq: number
   /** True when a delta arrived with a sequence gap — the UI shows a subtle

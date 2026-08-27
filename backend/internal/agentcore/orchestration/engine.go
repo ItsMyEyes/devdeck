@@ -42,6 +42,35 @@ type Thread struct {
 	// CLI reports none, so the composer divides by whatever context-window
 	// size the user has selected, not a value carried on the thread.
 	ContextTokens int64
+	// Turns counts every EvtThreadTurnStartRequested this thread has ever
+	// committed. It exists for one decision: whether the provider has a
+	// conversation to RESUME. Reactor.ensureSession restarts a live session to
+	// apply changed start-time options (claude's --effort/--autocompact, pi's
+	// --thinking are process flags, not live settings), and it must pass the
+	// thread's ResumeCursor only when a turn has actually been sent before —
+	// claude's --resume on a session id that never received a message exits
+	// with "No conversation found with session ID" (verified against the real
+	// binary), which would turn "pick Max before the first message" into a
+	// dead thread. A cursor alone cannot tell the two apart: system/init hands
+	// one out the moment the process starts, before any conversation exists.
+	Turns int
+	// TurnInFlight is true from a turn's EvtThreadTurnStartRequested until
+	// the session-set that settles the thread (idle or stopped). It is NOT
+	// the same as Status == Running: Ingestion marks a thread running the
+	// moment its session STARTS (SessionStarted -> session-set running), long
+	// before any turn is sent, so Status alone reads a freshly spawned, idle
+	// process as busy. Waiting (an approval card mid-turn) keeps it true.
+	TurnInFlight bool
+	// Steered is true when the most recent EvtThreadTurnStartRequested
+	// arrived while a turn was already in flight (TurnInFlight) — the
+	// "steering" case Decide's CmdThreadTurnStart comment describes, where
+	// the provider merges the message into the running turn. Recorded here
+	// because by the time the Reactor reacts to that event the projector has
+	// already flipped TurnInFlight for it, so the flag alone can no longer
+	// say whether the thread was idle a moment ago. ensureSession needs
+	// exactly that answer: restarting a session to apply new start-time
+	// options is only safe between turns, never under one.
+	Steered bool
 	// ProposedPlan is the plan currently on the table, or nil. Set by
 	// EvtThreadPlanProposed; cleared by the next
 	// EvtThreadTurnStartRequested, because any following turn supersedes it
@@ -187,17 +216,40 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 	case CmdThreadSessionStop:
 		return []Event{mk(EvtThreadSessionStopRequested, nil)}, nil
 
+	// Both mode commands are validated here, not merely decoded. They come
+	// straight off a client socket (ClientDispatchable), and before this
+	// check a typo'd or stale mode string was committed to the durable log,
+	// replayed to every client as the thread's mode, and enforced by
+	// AllowsUnprompted as "unknown: ask for everything" — while the pill
+	// that sent it kept showing the value it sent. A rejected command is an
+	// error frame on the socket, which is the one signal the composer's
+	// pills know how to revert on. Requiring the thread to exist matches
+	// every other thread-scoped command above: a mode set before the
+	// thread's own creation is committed would be projected onto nothing
+	// and lost, so it must fail loudly rather than vanish.
 	case CmdThreadRuntimeModeSet:
+		if t, ok := s.Threads[cmd.ThreadID]; !ok || t.Deleted {
+			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
+		}
 		var p RuntimeModeSetPayload
 		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 			return nil, err
 		}
+		if !p.Mode.Valid() {
+			return nil, fmt.Errorf("invalid runtime mode %q", p.Mode)
+		}
 		return []Event{mk(EvtThreadRuntimeModeSet, p)}, nil
 
 	case CmdThreadInteractionModeSet:
+		if t, ok := s.Threads[cmd.ThreadID]; !ok || t.Deleted {
+			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
+		}
 		var p InteractionModeSetPayload
 		if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 			return nil, err
+		}
+		if !p.Mode.Valid() {
+			return nil, fmt.Errorf("invalid interaction mode %q", p.Mode)
 		}
 		return []Event{mk(EvtThreadInteractionModeSet, p)}, nil
 
@@ -268,7 +320,10 @@ func applyOne(s *State, e Event) {
 
 	case EvtThreadTurnStartRequested:
 		if t, ok := s.Threads[e.ThreadID]; ok {
+			t.Steered = t.TurnInFlight
+			t.TurnInFlight = true
 			t.Status = ThreadRunning
+			t.Turns++
 			// A following turn supersedes whatever plan was on the table —
 			// see Thread.ProposedPlan.
 			t.ProposedPlan = nil
@@ -356,6 +411,13 @@ func applyOne(s *State, e Event) {
 			_ = json.Unmarshal(e.Payload, &p)
 			if p.Status != "" {
 				t.Status = p.Status
+				// Idle and stopped both settle whatever turn was in flight —
+				// see Thread.TurnInFlight for why `running` here does NOT
+				// mean a turn started (it is also what a fresh session
+				// announces).
+				if p.Status == ThreadIdle || p.Status == ThreadStopped {
+					t.TurnInFlight = false
+				}
 			}
 			if len(p.ResumeCursor) > 0 {
 				t.ResumeCursor = p.ResumeCursor
@@ -564,6 +626,34 @@ func (e *Engine) State() *State {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.state
+}
+
+// BusyThreadCount reports how many threads currently hold work that killing
+// this process would destroy: ThreadRunning (a turn is in flight) and
+// ThreadWaiting (a turn is parked on an approval or a question) both mean an
+// unfinished turn, and the agent process dies with this one either way. Idle
+// and stopped threads lose nothing, and a deleted thread is not a thread.
+//
+// This is the agent-side half of the restart-safety signal — the PTY half is
+// terminal.ActiveSessionCount(). A nil engine reports 0 rather than panicking,
+// mirroring that function's nil-registry guard, so a caller wired up before
+// (or without) an engine still gets an answer.
+func (e *Engine) BusyThreadCount() int {
+	if e == nil {
+		return 0
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	n := 0
+	for _, t := range e.state.Threads {
+		if t.Deleted {
+			continue
+		}
+		if t.Status == ThreadRunning || t.Status == ThreadWaiting {
+			n++
+		}
+	}
+	return n
 }
 
 // ForgetThread drops a thread from the in-memory read model.

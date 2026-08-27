@@ -163,6 +163,14 @@ func (b *Bridge) createProjectSession(ctx context.Context, project domain.Telegr
 	}); err != nil {
 		return "", err
 	}
+	// Same reason as in handleResumeSelection: the LastSeq above is only honoured
+	// on an INSERT — the upsert's ON CONFLICT never writes last_seq. A fresh id
+	// normally means a fresh row, so this is belt to that braces; it costs one
+	// statement and the alternative, should an id ever be re-issued, is the whole
+	// of that thread's history landing in the topic.
+	if err := b.store.SetTelegramBindingSeq(threadID, head); err != nil {
+		log.Printf("telegram: session cursor for %s: %v", threadID, err)
+	}
 	return threadID, nil
 }
 
@@ -408,6 +416,15 @@ func (b *Bridge) handleResumeSelection(ctx context.Context, cq *CallbackQuery, t
 		log.Printf("telegram: resume session %s: %v", target.ThreadID, err)
 		b.answerCallback(ctx, cq.ID, "gagal pindah sesi")
 		return
+	}
+	// The LastSeq above only lands when the row is NEW: SetTelegramBinding's ON
+	// CONFLICT deliberately never writes last_seq, so that a re-point cannot
+	// rewind a cursor. A session that is still published elsewhere (its own
+	// /init, in another chat) therefore keeps that destination's cursor and
+	// mirrors its entire conversation into this topic. The narrow setter is what
+	// actually moves it.
+	if err := b.store.SetTelegramBindingSeq(target.ThreadID, head); err != nil {
+		log.Printf("telegram: resume cursor for %s: %v", target.ThreadID, err)
 	}
 	b.forgetCallback(cq.Data)
 	b.answerCallback(ctx, cq.ID, "")
@@ -718,6 +735,17 @@ func (b *Bridge) handleAgentSelection(ctx context.Context, cq *CallbackQuery, ta
 	}
 	b.forgetCallback(cq.Data)
 	b.answerCallback(ctx, cq.ID, "")
+
+	// Telegram omits the message on a callback whose card is older than 48
+	// hours, and on an inline-mode callback there is never one at all. The
+	// choice above is already saved and the tap already answered; what is
+	// missing is the card to edit and the (chat, topic) the session below is
+	// resolved from. Dereferencing it anyway took down the poll goroutine —
+	// and with it the entire bridge, since handleUpdate runs on it.
+	if cq.Message == nil {
+		log.Printf("telegram: agent %q recorded, but the callback carried no message to edit", target.Agent)
+		return
+	}
 
 	label := b.agentLabel(target.Agent)
 	// Whether a session is already running here decides what the operator

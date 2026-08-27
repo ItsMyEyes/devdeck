@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1489,4 +1490,101 @@ func TestSSHFileServiceExtractRejectsOversizeUncompressedTotal(t *testing.T) {
 		t.Fatalf("over-cap uncompressed size error = %v, want ErrValidation", err)
 	}
 	assertDirEmpty(t, filepath.Join(homeDir, "dest"))
+}
+
+// startKillableTestSSHFileServer is startTestSSHFileServer plus a handle on
+// the accepted connections, so a test can drop them the way a flaky link
+// does — the socket dies while the listener stays up, exactly the state
+// behind "my SSH dropped and the folders never came back, but my shell
+// still works" (the shell holds a different connection entirely).
+func startKillableTestSSHFileServer(t *testing.T, homeDir string) (addr string, killConns func()) {
+	t.Helper()
+	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostSigner, err := ssh.NewSignerFromKey(hostPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &ssh.ServerConfig{
+		PasswordCallback: func(md ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			if md.User() == "tester" && string(pass) == "secret" {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("wrong credentials for %q", md.User())
+		},
+	}
+	cfg.AddHostKey(hostSigner)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var mu sync.Mutex
+	var live []net.Conn
+	go func() {
+		for {
+			nc, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			live = append(live, nc)
+			mu.Unlock()
+			go serveTestSSHFileConn(nc, cfg, homeDir, "")
+		}
+	}()
+
+	return ln.Addr().String(), func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, nc := range live {
+			_ = nc.Close()
+		}
+		live = nil
+	}
+}
+
+// The file browser has to survive its own connection dying, because nothing
+// else in the app notices that it did: the terminal holds a separate SSH
+// connection and keeps working, so the operator sees a healthy shell beside a
+// file tree that has collapsed to an error and will not come back no matter
+// how often they press Retry.
+//
+// sshmgr.WithSFTPClient already had the recovery — evict the dead client,
+// redial, run the operation again — but it is gated on errors.Is over what
+// the operation returned, and every SFTP operation's error goes through
+// fileOperationError on the way out. While that flattened its cause, the
+// recovery was unreachable code and the pool handed the same dead client to
+// every retry forever.
+func TestSSHFileServiceListRecoversFromADeadPooledConnection(t *testing.T) {
+	homeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(homeDir, "notes.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addr, killConns := startKillableTestSSHFileServer(t, homeDir)
+	svc := NewSSHFileService(newTestSSHFilePool(t, addr))
+
+	first, err := svc.List(context.Background(), "sc-test", "")
+	if err != nil {
+		t.Fatalf("first list: %v", err)
+	}
+	if len(first) != 1 || first[0].Name != "notes.txt" {
+		t.Fatalf("first list = %+v, want the one fixture file", first)
+	}
+
+	// The link drops. The pool does not know: nothing evicted the entry, so
+	// the next call is handed the same, now-dead, *sftp.Client.
+	killConns()
+
+	second, err := svc.List(context.Background(), "sc-test", "")
+	if err != nil {
+		t.Fatalf("list after the connection died: %v — the pool never redialed, so Retry can only fail again", err)
+	}
+	if len(second) != 1 || second[0].Name != "notes.txt" {
+		t.Fatalf("list after redial = %+v, want the one fixture file", second)
+	}
 }

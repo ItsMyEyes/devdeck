@@ -35,6 +35,14 @@ tauri-plugin-opener = "2"
 # for a location the user picked at runtime. See frontend/src/lib/saveFile.ts.
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# Desktop auto-update. The Go sidecar's own selfupdate refuses to run when
+# `managed` (it lives inside the signed bundle, so overwriting it in place
+# invalidates the bundle and races the respawn loop), which left the desktop
+# app with no way to update at all — the About panel could report a new
+# version and offer nothing. This plugin updates the whole .app/.exe/.AppImage,
+# sidecar included, verified against the minisign pubkey in tauri.conf.json.
+# See docs/superpowers/specs/2026-08-24-desktop-auto-update-design.md.
+tauri-plugin-updater = "2"
 getrandom = "0.4"
 tokio = { version = "1", features = ["time", "signal", "macros", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }

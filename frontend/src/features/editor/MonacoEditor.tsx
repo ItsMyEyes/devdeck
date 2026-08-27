@@ -148,10 +148,23 @@ export function MonacoEditor({
 
   // Controlled-value sync. Guarded on inequality so echoing our own onChange
   // back in does not reset the cursor on every keystroke.
+  //
+  // The value can now change for a reason that is not the operator typing: a
+  // file tab re-reads itself while it is on screen and adopts what an agent (or
+  // a terminal, or a checkout) wrote — see `terminal/fileBuffer.ts`. That makes
+  // the view state load-bearing. `setValue` resets the model outright, which
+  // parks the viewport at line 1 and drops the cursor, so an operator reading
+  // line 400 of a file an agent is actively editing would be thrown back to the
+  // top every few seconds. Saving and restoring around the swap keeps the
+  // scroll position, selection and folding across a reload; monaco clamps them
+  // itself if the new content is shorter.
   useEffect(() => {
     const instance = editorRef.current
     if (!instance) return
-    if (instance.getValue() !== value) instance.setValue(value)
+    if (instance.getValue() === value) return
+    const viewState = instance.saveViewState()
+    instance.setValue(value)
+    if (viewState) instance.restoreViewState(viewState)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
 

@@ -41,6 +41,21 @@ func (svc *WorktreeGitService) Status(worktreeID string) (gitpkg.Status, error) 
 	return status, nil
 }
 
+// Init creates a git repository at the worktree root. An existing repository
+// is left untouched: `git init` would silently reinitialize it, and the only
+// caller is the client's "not a repository yet" empty state, so reaching here
+// with a real repo means the client's view is stale.
+func (svc *WorktreeGitService) Init(worktreeID string) error {
+	root, err := svc.root(worktreeID)
+	if err != nil {
+		return err
+	}
+	if gitpkg.IsRepo(root) {
+		return fmt.Errorf("already a git repository: %w", ErrValidation)
+	}
+	return gitError(gitpkg.InitRepo(root))
+}
+
 func (svc *WorktreeGitService) Diff(worktreeID, relativePath string, staged, untracked bool) (GitFileDiff, error) {
 	root, clean, err := svc.rootAndPath(worktreeID, relativePath)
 	if err != nil {

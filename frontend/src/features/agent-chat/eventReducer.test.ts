@@ -186,6 +186,31 @@ describe('reduceAgentEvents — non-delta events', () => {
     expect(view.items[0].text).toContain('claude exited with code 1')
   })
 
+  // The OTHER runtime.error shape, and the one that matters most: a reactor
+  // failure (`Reactor.reportError`, orchestration/workers.go) dispatches a bare
+  // `{kind, message}` payload, NOT the `{type, payload}` envelope Ingestion's
+  // `appendNotice` forwards above. It is the only report the operator ever gets
+  // for the class of failure where the CLI never spawned at all — a session
+  // start that could not resolve its worktree or SSH connection — so dropping
+  // it leaves the pane showing a sent message, no reply, and status Idle, with
+  // the reason visible only in the durable log.
+  it('renders a reactor-reported error, which carries `kind` instead of `type`', () => {
+    const view = reduceAgentEvents(EMPTY_THREAD_VIEW, [
+      {
+        seq: 1,
+        eventId: 'ae-1',
+        type: 'thread.activity-appended',
+        threadId: 'ssh:sc-1',
+        commandId: 'ac-reactor-err-ae-1',
+        createdAt: 1000,
+        payload: { kind: 'runtime.error', message: 'agent thread ssh:sc-1: not found' },
+      },
+    ])
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].kind).toBe('error')
+    expect(view.items[0].text).toContain('agent thread ssh:sc-1: not found')
+  })
+
   it('interleaves a whole turn in order', () => {
     const view = reduceAgentEvents(EMPTY_THREAD_VIEW, [
       userMessage(1, 'fix it'),
@@ -1238,5 +1263,162 @@ describe('reduceAgentEvents / coalesced replay deltas', () => {
     expect(after.items[0].text).toBe('start and more')
     expect(after.items[0].lastSequence).toBe(9)
     expect(after.hasGap).toBe(false)
+  })
+})
+
+// ── The answered AskUserQuestion lands in the transcript ──
+//
+// `thread.user-input-response-requested` used to only CLOSE the pending card,
+// so the whole exchange left no trace: the question and the pick both vanished
+// with the card, and the agent's next turn acted on an answer that appeared
+// nowhere in the thread. See `answeredQuestionsOf` and `AnsweredQuestion`.
+describe('reduceAgentEvents — answered questions become a transcript item', () => {
+  function askedEvent(seq: number, requestId: string, questions: unknown[]): AgentEvent {
+    return {
+      seq, eventId: `e${seq}`, type: 'thread.activity-appended', threadId: 't1', commandId: `c${seq}`,
+      createdAt: seq * 1000,
+      payload: { type: 'user-input.requested', requestId, threadId: 't1', payload: { questions } },
+    }
+  }
+  function answeredEvent(seq: number, requestId: string, answers: Record<string, string | string[]>): AgentEvent {
+    return {
+      seq, eventId: `e${seq}`, type: 'thread.user-input-response-requested', threadId: 't1', commandId: `c${seq}`,
+      createdAt: seq * 1000, payload: { requestId, answers },
+    }
+  }
+  const scopeQuestion = {
+    id: 'In scope?', header: 'Fix source check?', question: 'In scope?', multiSelect: false,
+    options: [
+      { label: 'Yes, fix it', description: 'Switch the condition to IsSemiAutomate().' },
+      { label: 'No, leave it', description: 'Only add the settings.' },
+    ],
+  }
+
+  it('records the question, the pick, its header and the picked option description', () => {
+    const asked = reduceAgentEvents(emptyThreadView(), [askedEvent(1, 'req-1', [scopeQuestion])])
+    const view = reduceAgentEvents(asked, [answeredEvent(2, 'req-1', { 'In scope?': 'Yes, fix it' })])
+
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].kind).toBe('question')
+    expect(view.items[0].createdAt).toBe(2000)
+    expect(view.items[0].answeredQuestions).toEqual([
+      {
+        question: 'In scope?',
+        header: 'Fix source check?',
+        chosen: ['Yes, fix it'],
+        descriptions: { 'Yes, fix it': 'Switch the condition to IsSemiAutomate().' },
+      },
+    ])
+  })
+
+  it('carries every pick of a multi-select answer', () => {
+    const multi = { ...scopeQuestion, multiSelect: true }
+    const asked = reduceAgentEvents(emptyThreadView(), [askedEvent(1, 'req-1', [multi])])
+    const view = reduceAgentEvents(asked, [answeredEvent(2, 'req-1', { 'In scope?': ['Yes, fix it', 'No, leave it'] })])
+
+    expect(view.items[0].answeredQuestions?.[0].chosen).toEqual(['Yes, fix it', 'No, leave it'])
+  })
+
+  it('reads the questions in the order they were ASKED, not the answer map order', () => {
+    const second = { ...scopeQuestion, id: 'Also this?', question: 'Also this?', header: 'Second' }
+    const asked = reduceAgentEvents(emptyThreadView(), [askedEvent(1, 'req-1', [scopeQuestion, second])])
+    const view = reduceAgentEvents(asked, [
+      answeredEvent(2, 'req-1', { 'Also this?': 'No, leave it', 'In scope?': 'Yes, fix it' }),
+    ])
+
+    expect(view.items[0].answeredQuestions?.map((q) => q.question)).toEqual(['In scope?', 'Also this?'])
+  })
+
+  // The replay window can start after the `user-input.requested` that opened the
+  // prompt, in which case the answers map — keyed by the full question text — is
+  // the whole record. A degraded row beats a missing one.
+  it('degrades to question-and-answer when the request is no longer in the view', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [answeredEvent(1, 'req-gone', { 'In scope?': 'Yes, fix it' })])
+
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].answeredQuestions).toEqual([{ question: 'In scope?', chosen: ['Yes, fix it'] }])
+  })
+
+  it('adds nothing for an approval response, which carries no answers', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [{
+      seq: 1, eventId: 'e1', type: 'thread.approval-response-requested', threadId: 't1', commandId: 'c1',
+      createdAt: 1000, payload: { requestId: 'req-1', decision: 'accept' },
+    }])
+
+    expect(view.items).toHaveLength(0)
+  })
+
+  it('drops an empty or non-string answer rather than recording a blank pick', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      answeredEvent(1, 'req-1', { 'In scope?': '   ', 'Other?': [] }),
+    ])
+
+    expect(view.items).toHaveLength(0)
+  })
+})
+
+// The two modes are thread state, mirrored from the backend projector
+// (`applyOne`'s EvtThreadCreated / EvtThreadRuntimeModeSet /
+// EvtThreadInteractionModeSet cases). Before the reducer carried them the
+// composer held them as per-mount defaults, so every remount showed
+// "Approval required" on a full-access thread.
+describe('reduceAgentEvents — thread modes', () => {
+  function modeEvent(seq: number, type: string, payload: unknown): AgentEvent {
+    return { seq, eventId: `ae-${seq}`, type, threadId: 'w-abc', commandId: `ac-${seq}`, createdAt: 1000, payload }
+  }
+
+  it('starts every thread on the projector defaults', () => {
+    expect(emptyThreadView().runtimeMode).toBe('approval-required')
+    expect(emptyThreadView().interactionMode).toBe('default')
+    expect(EMPTY_THREAD_VIEW.runtimeMode).toBe('approval-required')
+  })
+
+  it('seeds both modes from thread.created, with the same fallbacks as the backend', () => {
+    const named = reduceAgentEvents(emptyThreadView(), [
+      modeEvent(1, 'thread.created', { instanceId: 'claude:default', mode: 'full-access', interactionMode: 'plan' }),
+    ])
+    expect(named.runtimeMode).toBe('full-access')
+    expect(named.interactionMode).toBe('plan')
+
+    const bare = reduceAgentEvents(emptyThreadView(), [modeEvent(1, 'thread.created', { instanceId: 'claude:default' })])
+    expect(bare.runtimeMode).toBe('approval-required')
+    expect(bare.interactionMode).toBe('default')
+  })
+
+  it('moves the runtime mode on thread.runtime-mode-set, whoever sent it', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      modeEvent(1, 'thread.created', {}),
+      modeEvent(2, 'thread.runtime-mode-set', { mode: 'auto' }),
+    ])
+    expect(view.runtimeMode).toBe('auto')
+    expect(view.items).toHaveLength(0)
+  })
+
+  it('moves the interaction mode on thread.interaction-mode-set', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [modeEvent(1, 'thread.interaction-mode-set', { mode: 'plan' })])
+    expect(view.interactionMode).toBe('plan')
+    const back = reduceAgentEvents(view, [modeEvent(2, 'thread.interaction-mode-set', { mode: 'default' })])
+    expect(back.interactionMode).toBe('default')
+  })
+
+  // The decider rejects anything outside the enum, so a stray value can only
+  // come from a newer backend than this client — leave the mode alone rather
+  // than paint an unknown one.
+  it('ignores a mode it does not recognise', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [
+      modeEvent(1, 'thread.runtime-mode-set', { mode: 'full-access' }),
+      modeEvent(2, 'thread.runtime-mode-set', { mode: 'yolo' }),
+      modeEvent(3, 'thread.interaction-mode-set', { mode: 'architect' }),
+    ])
+    expect(view.runtimeMode).toBe('full-access')
+    expect(view.interactionMode).toBe('default')
+    // Still applied — the event was consumed, only its value was refused.
+    expect(view.lastSeq).toBe(3)
+  })
+
+  it('survives a replay overlap without resetting the mode', () => {
+    const first = reduceAgentEvents(emptyThreadView(), [modeEvent(1, 'thread.runtime-mode-set', { mode: 'full-access' })])
+    const again = reduceAgentEvents(first, [modeEvent(1, 'thread.runtime-mode-set', { mode: 'full-access' })])
+    expect(again).toBe(first)
   })
 })

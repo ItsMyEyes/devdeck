@@ -3,6 +3,66 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.3
+
+**The desktop app can update itself, subagents are visible, and Full access
+finally means full access.**
+
+### Desktop auto-update
+
+The About panel used to correctly report "a newer version is available" and
+then offer no way to get it. It now checks on its own, downloads in the
+background, and installs on an explicit click that names what the restart will
+destroy. The release pipeline publishes a signed `latest.json` alongside the
+`.dmg`/`.msi`/`.AppImage` for the updater to read.
+
+### Subagent observability
+
+Every CLI agent DevDeck drives can spawn subagents, and DevDeck modelled none
+of them — a `Task`/`Agent` call that ran for ten minutes was ten minutes of a
+motionless tool row. Subagent work is now attributed and streamed across all
+four providers (claude, codex, opencode, pi).
+
+Found while implementing this, and fixed here: `codex/adapter.go` handed the
+parser only the `params` object, but the parser switches on the envelope's own
+`method`. Every codex notification therefore arrived with an empty method and
+came back as a warning — the **codex transcript was, in production, nothing
+but warnings**: no assistant text, no tool calls, no turn lifecycle.
+
+### Fixes
+
+- **"Full access" was never reaching the agent.** Switching the Permission
+  pill to Full access mid-session is refused outright by the claude CLI —
+  `Cannot set permission mode to bypassPermissions because the session was not
+  launched with --dangerously-skip-permissions` — and DevDeck never read the
+  refusal, so the pill said one thing while every command kept raising an
+  approval card. Sessions now launch with the unlock flag
+  (`--allow-dangerously-skip-permissions`, which permits the switch without
+  enabling bypass by default), and a refused control request is surfaced
+  instead of dropped.
+- **Leaving Plan mode silently discarded the thread's permission policy.**
+  The interaction mode's two values double as the CLI's own permission-mode
+  names, so exiting plan put the session in `default` — ask for everything —
+  no matter what the pill read. The runtime mode is now re-asserted on the way
+  out.
+- **A dropped SFTP connection could never recover.** `fileOperationError`
+  flattened its cause, so the pool's evict-and-redial check could never
+  recognise a dead connection and kept handing the same dead client to every
+  retry. The file tree collapsed to `read folder "" failed` with a Retry that
+  could not work, while the terminal beside it — a separate SSH connection —
+  carried on fine.
+- **One failed refresh no longer wipes the file tree.** A listing that fails
+  after a successful one keeps the last good listing on screen and shows the
+  failure as a retry row above it, instead of replacing every expanded folder
+  with an error screen.
+
+### Also in this release
+
+Keybindings are configurable from Settings; the editor gained auto-save and
+external-change detection; the Telegram bridge got callback-deadline, card
+retirement and mid-run publish fixes; multi-runtime machine handling and
+per-turn session options were reworked.
+
 ## v0.2.1
 
 **Agent chat is on.** v0.2.0 shipped the whole chat engine but hid it in

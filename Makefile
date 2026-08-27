@@ -1,11 +1,20 @@
-.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri dev-tauri-full e2e-tauri-smoke
+.PHONY: dev dev-web dev-api dev-hub dev-runtime free-ports seed-clean build build-web prepare-webui build-api portable portable-current portable-all typecheck lint vet test install clean tag prepare-sidecar sidecar-host dev-tauri dev-tauri-full e2e-tauri-smoke e2e-agent-chat
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 DIST_DIR := dist
 WEBUI_DIR := backend/internal/webui/dist
 WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# `?=`, not `:=`, so CI can pass the release tag explicitly: `VERSION=v1.2.3 make …`.
+# The desktop release job MUST do that. It stamps the tag into the tracked
+# `frontend/src-tauri/tauri.conf.json` before building (the updater compares
+# against that value), which makes the tree dirty — and `tauri build`'s
+# beforeBuildCommand then runs `make prepare-sidecar` from inside that dirty
+# tree. Left to `git describe --dirty`, every sidecar shipped inside a desktop
+# bundle would be stamped `v1.2.3-dirty`, and `selfupdate.NeedsUpdate` sorts a
+# prerelease below its release — so the bundled runtime would report an
+# available update against its own tag, forever.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X devdeck/backend/internal/version.Version=$(VERSION)
 
 # Shared dev hub bearer key: gives the hub started by `make dev`/`make
@@ -191,6 +200,13 @@ dev-tauri-full:
 # docs/superpowers/specs/2026-07-17-tauri-desktop-e2e-smoke-harness-design.md.
 e2e-tauri-smoke:
 	./frontend/src-tauri/scripts/e2e-smoke.sh
+
+# Real-browser check of the agent-chat composer (mode/effort/context pills,
+# session restarts, socket error path) against an isolated `--role both`
+# server with a fake `claude` on PATH. Opt-in like the smoke above: needs Go,
+# Node and Python Playwright with Chromium. See scripts/e2e-agent-chat/README.md.
+e2e-agent-chat:
+	python3 scripts/e2e-agent-chat/run.py
 
 # ── Quality ──────────────────────────────────────────────────
 # TypeScript type-check

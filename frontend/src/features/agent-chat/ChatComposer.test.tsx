@@ -328,7 +328,7 @@ describe('ChatComposer — t3code layout', () => {
     const row = screen.getByTestId('composer-controls-inline')
     expect(row.className).toContain('flex-nowrap')
     expect(row.className).not.toContain(' flex-wrap')
-    for (const label of ['Sonnet 5', 'High · 200k', 'Build', 'Full access']) {
+    for (const label of ['Sonnet 5', 'High · 200k', 'Full access']) {
       expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThanOrEqual(1)
     }
   })
@@ -346,7 +346,7 @@ describe('ChatComposer — t3code layout', () => {
     // merely unlikely (design spec: "structurally impossible, not merely
     // unlikely").
     expect(await screen.findAllByRole('button', { name: 'Sonnet 5' })).toHaveLength(2)
-    for (const label of ['High · 200k', 'Build', 'Full access']) {
+    for (const label of ['High · 200k', 'Full access']) {
       expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThanOrEqual(2)
     }
   })

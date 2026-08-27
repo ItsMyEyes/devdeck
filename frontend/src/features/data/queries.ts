@@ -72,6 +72,7 @@ import {
   fetchHubKey,
   fetchIssueEvents,
   fetchLocalPublishedSocks,
+  fetchMachineBusy,
   fetchMachineHealth,
   fetchMachineUpdateCheck,
   fetchMachines,
@@ -188,6 +189,7 @@ import {
   downloadWorktreeFileWithProgress,
   gitCommit,
   gitDiscard,
+  gitInit,
   gitPull,
   gitPush,
   gitStage,
@@ -393,6 +395,37 @@ export function useMachineVersion(id: string | undefined) {
     queryFn: () => fetchMachineVersion(id!),
     enabled: !!id,
     staleTime: 5 * 60_000,
+  })
+}
+
+/** How much live work a restart of this machine's runtime would destroy —
+ *  PTY sessions plus in-flight agent runs (`GET /api/machines/{id}/busy`,
+ *  decision D3 of `2026-08-24-desktop-auto-update-design.md`). Sibling of
+ *  `useMachineVersion`, but the opposite caching posture: the answer changes
+ *  every time a terminal opens or a turn starts, so it is short-lived.
+ *
+ *  `retry: false` on purpose. This is advisory data behind the desktop update
+ *  pill; a machine that cannot answer must fail fast and let the pill render
+ *  with no counts rather than hold an update behind three backoff attempts.
+ *
+ *  The key is spelled out rather than added to `qk`: `keys.ts` is outside this
+ *  change's file set. It follows `qk.machineVersion`'s `['machines', id, …]`
+ *  shape so an invalidation of `['machines', id]` still sweeps it up. */
+export function useMachineBusy(id: string | undefined) {
+  return useQuery({
+    queryKey: ['machines', id ?? '', 'busy'] as const,
+    queryFn: () => fetchMachineBusy(id!),
+    enabled: !!id,
+    staleTime: 5_000,
+    // Polled, like `useMachinesHealth` (15s) and `useMachineStats` (2s), and
+    // for a sharper reason than either: this answer gates a DESTRUCTIVE
+    // confirm. Opening a terminal or starting an agent turn travels over the
+    // WebSocket and invalidates nothing, and an operator working inside the
+    // desktop window fires no refocus event — so without a poll the counts
+    // stay frozen at whatever was true the moment the update staged, and a
+    // restart that kills five terminals reads as "nothing running".
+    refetchInterval: 5_000,
+    retry: false,
   })
 }
 
@@ -1819,6 +1852,13 @@ export function useGitDiscard(machine: Machine, worktreeId: string) {
   })
 }
 
+/** `git init` on a worktree that has no repository yet. Shares the git-root
+ *  invalidation so status flips out of its empty state without waiting for
+ *  the 5s status poll. */
+export function useGitInit(machine: Machine, worktreeId: string) {
+  return useGitMutation(machine, worktreeId, (_: void) => gitInit(machine, worktreeId))
+}
+
 export function useGitCommit(machine: Machine, worktreeId: string) {
   return useGitMutation(machine, worktreeId, (message: string) => gitCommit(machine, worktreeId, message))
 }
@@ -1865,12 +1905,13 @@ export function useInvalidateWorktreeFiles(machine: Machine, worktreeId: string)
   return () => queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
 }
 
-export function useWorktreeFile(machine: Machine, worktreeId: string, path: string) {
+export function useWorktreeFile(machine: Machine, worktreeId: string, path: string, options: LiveFileOptions = {}) {
   return useQuery({
     queryKey: qk.worktreeFile(machine.id, worktreeId, path),
     queryFn: () => fetchWorktreeFile(machine, worktreeId, path),
     enabled: worktreeId.length > 0 && path.length > 0,
     staleTime: 0,
+    refetchInterval: (query) => livePollInterval(options.live, query.state.data?.content),
   })
 }
 
@@ -1878,8 +1919,13 @@ export function useWriteWorktreeFile(machine: Machine, worktreeId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: { path: string; content: string }) => writeWorktreeFile(machine, worktreeId, body),
-    onSuccess: (content) => {
-      queryClient.setQueryData(qk.worktreeFile(machine.id, worktreeId, content.path), content)
+    onSuccess: async (content) => {
+      const key = qk.worktreeFile(machine.id, worktreeId, content.path)
+      // See `livePollInterval` — a poll already in flight when the save lands
+      // would resolve with the PRE-save bytes and overwrite the line below,
+      // handing the editor back the content it just replaced.
+      await queryClient.cancelQueries({ queryKey: key })
+      queryClient.setQueryData(key, content)
       return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(machine.id, worktreeId) })
     },
   })
@@ -1999,7 +2045,48 @@ export function useInstallRipgrepTarget(target: FilesTarget) {
   })
 }
 
-export function useFileTarget(target: FilesTarget, path: string) {
+/**
+ * How often a *visible* file buffer re-reads itself, and the size above which
+ * it stops.
+ *
+ * DevDeck's whole premise is that something else is editing these files — an
+ * agent in a chat pane, an agent in a terminal, a `git checkout` from the git
+ * panel. None of them announce a write: there is no filesystem watcher on the
+ * runtime and no event on the wire that says "this path changed". Polling the
+ * open buffer is therefore the only signal that exists today, and it has the
+ * useful property of covering every writer rather than just the one we happen
+ * to have events for.
+ *
+ * 4s is chosen against the read being cheap (a source file is tens of kB) and
+ * against this deployment sitting behind a tunnel. The size ceiling is the
+ * guard on that second point: `maxEditableFileSize` is 2 MB
+ * (`backend/internal/service/worktree_file.go`), and re-pulling 2 MB every 4
+ * seconds is a quarter of a megabyte a second of tunnel bandwidth to watch one
+ * file. Above the ceiling the tab still refreshes on activation and on window
+ * focus — it just stops doing it on a timer.
+ *
+ * TanStack pauses `refetchInterval` while the window is in the background
+ * (`refetchIntervalInBackground` defaults to false), so an unfocused DevDeck
+ * polls nothing.
+ */
+const LIVE_FILE_POLL_MS = 4_000
+const LIVE_FILE_POLL_MAX_CHARS = 512 * 1024
+
+export interface LiveFileOptions {
+  /** Poll this file while it is on screen. Callers pass their tab's `active`
+   *  flag: every file tab stays mounted under `display: none` when it is not
+   *  the front one (see `FileEditor.tsx`), so "mounted" is not "visible" and
+   *  polling on mount would poll every tab the operator ever opened. */
+  live?: boolean
+}
+
+function livePollInterval(live: boolean | undefined, content: string | undefined): number | false {
+  if (!live) return false
+  if (content !== undefined && content.length > LIVE_FILE_POLL_MAX_CHARS) return false
+  return LIVE_FILE_POLL_MS
+}
+
+export function useFileTarget(target: FilesTarget, path: string, options: LiveFileOptions = {}) {
   return useQuery({
     queryKey:
       target.kind === 'ssh' ? qk.sshFile(target.connectionId, path) : qk.worktreeFile(target.machine.id, target.worktreeId, path),
@@ -2007,6 +2094,7 @@ export function useFileTarget(target: FilesTarget, path: string) {
       target.kind === 'ssh' ? fetchSSHFile(target.connectionId, path) : fetchWorktreeFile(target.machine, target.worktreeId, path),
     enabled: (target.kind === 'ssh' || target.worktreeId.length > 0) && path.length > 0,
     staleTime: 0,
+    refetchInterval: (query) => livePollInterval(options.live, query.state.data?.content),
   })
 }
 
@@ -2064,13 +2152,17 @@ export function useWriteFileTarget(target: FilesTarget) {
   return useMutation({
     mutationFn: (body: { path: string; content: string }) =>
       target.kind === 'ssh' ? writeSSHFile(target.connectionId, body) : writeWorktreeFile(target.machine, target.worktreeId, body),
-    onSuccess: (content) => {
-      if (target.kind === 'ssh') {
-        queryClient.setQueryData(qk.sshFile(target.connectionId, content.path), content)
-        return queryClient.invalidateQueries({ queryKey: qk.sshFilesRoot(target.connectionId) })
-      }
-      queryClient.setQueryData(qk.worktreeFile(target.machine.id, target.worktreeId, content.path), content)
-      return queryClient.invalidateQueries({ queryKey: qk.worktreeFilesRoot(target.machine.id, target.worktreeId) })
+    onSuccess: async (content) => {
+      const key =
+        target.kind === 'ssh'
+          ? qk.sshFile(target.connectionId, content.path)
+          : qk.worktreeFile(target.machine.id, target.worktreeId, content.path)
+      // Same in-flight-poll race `useWriteWorktreeFile` guards — see there.
+      await queryClient.cancelQueries({ queryKey: key })
+      queryClient.setQueryData(key, content)
+      return queryClient.invalidateQueries({
+        queryKey: target.kind === 'ssh' ? qk.sshFilesRoot(target.connectionId) : qk.worktreeFilesRoot(target.machine.id, target.worktreeId),
+      })
     },
   })
 }

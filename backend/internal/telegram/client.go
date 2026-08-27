@@ -231,6 +231,17 @@ func (c *Client) SendMessage(ctx context.Context, o SendOptions) (Message, error
 	var msg Message
 	err := c.call(ctx, c.httpClient(), "sendMessage", sendMessageBody(o, true), &msg)
 	if isParseEntitiesError(err) {
+		err = c.call(ctx, c.httpClient(), "sendMessage", sendMessageBody(o, false), &msg)
+	}
+	if isTooLongError(err) {
+		// The same reasoning, for the other 400 that cannot be retried as-is.
+		// splitForTelegram budgets in the units Telegram counts, so this should
+		// be unreachable — but "should be" is what wedges a mirror for good, and
+		// a message the pump can never send stops that thread's transcript
+		// permanently and silently. Cut to the cap and send it unformatted:
+		// truncating an already-escaped string can leave a half entity behind,
+		// which parse_mode would then reject all over again.
+		o.Text = string([]rune(o.Text)[:runesWithinUTF16([]rune(o.Text), telegramMessageLimit)])
 		return msg, c.call(ctx, c.httpClient(), "sendMessage", sendMessageBody(o, false), &msg)
 	}
 	return msg, err
@@ -258,9 +269,9 @@ func sendMessageBody(o SendOptions, formatted bool) map[string]any {
 }
 
 // isParseEntitiesError picks out the one failure worth retrying unformatted.
-// Any other 400 (chat not found, bot blocked, message too long) is a real
-// error the caller must see: retrying those in plain text would just fail
-// again while hiding the reason.
+// Any other 400 (chat not found, bot blocked) is a real error the caller must
+// see: retrying those in plain text would just fail again while hiding the
+// reason. The one exception is length — see isTooLongError.
 func isParseEntitiesError(err error) bool {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
@@ -269,27 +280,56 @@ func isParseEntitiesError(err error) bool {
 	return apiErr.Code == 400 && strings.Contains(strings.ToLower(apiErr.Desc), "can't parse entities")
 }
 
+// isTooLongError picks out the length refusal. Worth its own retry for the same
+// reason the parse failure is: it is not transient, so the pump would re-send
+// the identical message every sweep, forever, and that thread's transcript
+// would simply stop.
+func isTooLongError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.Code == 400 && strings.Contains(strings.ToLower(apiErr.Desc), "message is too long")
+}
+
 // EditMessageText rewrites the live message in place. "message is not
 // modified" is treated as success rather than an error: the 1s pump flushes
 // on a ticker regardless of whether new text actually arrived since the last
 // flush, and Telegram rejects a no-op edit — that rejection is not a failure
 // the caller should retry or surface.
+//
+// The unformatted retry is the same one SendMessage has, for the same reason:
+// an edit that 400s on entities is dropped, and the card it was replacing KEEPS
+// its inline keyboard — so a request already decided still looks answerable.
+// Formatting is cosmetic; a card that lies about its state is not.
 func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, text string, kb InlineKeyboard) error {
-	body := map[string]any{
-		"chat_id":    chatID,
-		"message_id": messageID,
-		"text":       text,
-		"parse_mode": parseModeMarkdownV2,
+	err := c.call(ctx, c.httpClient(), "editMessageText", editMessageBody(chatID, messageID, text, kb, true), nil)
+	if isParseEntitiesError(err) {
+		err = c.call(ctx, c.httpClient(), "editMessageText", editMessageBody(chatID, messageID, text, kb, false), nil)
 	}
-	if len(kb) > 0 {
-		body["reply_markup"] = map[string]any{"inline_keyboard": kb}
-	}
-
-	err := c.call(ctx, c.httpClient(), "editMessageText", body, nil)
 	if apiErr, ok := err.(*APIError); ok && strings.Contains(apiErr.Desc, "message is not modified") {
 		return nil
 	}
 	return err
+}
+
+func editMessageBody(chatID, messageID int64, text string, kb InlineKeyboard, formatted bool) map[string]any {
+	body := map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+	}
+	if formatted {
+		body["parse_mode"] = parseModeMarkdownV2
+	} else {
+		// Same as sendMessageBody: with no parse mode the converter's
+		// backslashes are literal characters, not markup.
+		text = StripMarkdownV2Escapes(text)
+	}
+	body["text"] = text
+	if len(kb) > 0 {
+		body["reply_markup"] = map[string]any{"inline_keyboard": kb}
+	}
+	return body
 }
 
 // AnswerCallbackQuery dismisses the loading spinner on a tapped inline
@@ -303,6 +343,28 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string) error
 		body["text"] = text
 	}
 	return c.call(ctx, c.httpClient(), "answerCallbackQuery", body, nil)
+}
+
+// DeleteMessage removes one message the bot sent. Used to retire an approval
+// card once its request has been decided — anywhere, by any surface — so a
+// chat mirroring a busy agent is not left with a wall of dead cards whose
+// buttons still look live (see retireCards).
+//
+// "message to delete not found" is treated as success: the card is gone,
+// which is exactly what the caller asked for, and a retried sweep must not
+// keep reporting a failure for work that is already done. Telegram also only
+// lets a bot delete its own message for 48 hours; past that the caller falls
+// back to editing it, so the error still has to come back for anything else.
+func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) error {
+	err := c.call(ctx, c.httpClient(), "deleteMessage", map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+	}, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Desc), "message to delete not found") {
+		return nil
+	}
+	return err
 }
 
 // SendChatAction shows the "…is typing" hint in the destination. Telegram

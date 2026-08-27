@@ -10,6 +10,7 @@ import (
 
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/detect"
 )
 
 func TestDriverKindAndDefaults(t *testing.T) {
@@ -534,5 +535,66 @@ func TestSendTurnDoesNotResendAnUnchangedModel(t *testing.T) {
 				t.Fatalf("sess.model = %q, must not drift", sess.model)
 			}
 		})
+	}
+}
+
+// The Permission pill's "Full access" is a LIVE switch, and the CLI refuses
+// it outright on a session that was not launched with the unlock flag:
+//
+//	{"type":"control_response","response":{"subtype":"error",
+//	 "error":"Cannot set permission mode to bypassPermissions because the
+//	          session was not launched with --dangerously-skip-permissions"}}
+//
+// (live-captured against 2.1.247 — see SetRuntimeMode). Without the flag the
+// operator switches to full access, the CLI keeps enforcing the mode it was
+// spawned with, and every command keeps raising an approval card under a pill
+// that says the opposite.
+func TestBuildArgsUnlocksTheLiveSwitchToFullAccess(t *testing.T) {
+	if _, err := detect.ResolveBinary("claude"); err != nil {
+		t.Skip("claude CLI not installed; the probe resolves a real binary path")
+	}
+	probeCfg := Config{BinaryName: "claude"}
+
+	original := probeHelpText
+	t.Cleanup(func() {
+		probeHelpText = original
+		helpFlagCache.Clear()
+	})
+
+	helpFlagCache.Clear()
+	probeHelpText = func(string) string {
+		return "  --allow-dangerously-skip-permissions  Enable bypassing all permission checks\n"
+	}
+	// Every mode, not just full-access: the switch can happen at any moment on
+	// a session that started in any other mode, which is the whole bug.
+	for _, in := range []provider.SessionStartInput{
+		{},
+		{Mode: provider.ModeApprovalRequired},
+		{Mode: provider.ModeAutoAcceptEdits},
+		{Mode: provider.ModeFullAccess},
+		{Interact: provider.InteractionPlan},
+	} {
+		joined := strings.Join(buildArgs(probeCfg, in), " ")
+		if !strings.Contains(joined, allowBypassPermissionsFlag) {
+			t.Fatalf("mode=%q interact=%q missing %s; full access can never be switched on later. got: %s",
+				in.Mode, in.Interact, allowBypassPermissionsFlag, joined)
+		}
+	}
+
+	// The flag UNLOCKS bypass, it must not ENABLE it: a thread in
+	// approval-required has to still launch in the CLI's own default mode
+	// (verified live — `system/init` reports permissionMode "default" with the
+	// flag present and no --permission-mode).
+	joined := strings.Join(buildArgs(probeCfg, provider.SessionStartInput{Mode: provider.ModeApprovalRequired}), " ")
+	if strings.Contains(joined, "--permission-mode") {
+		t.Fatalf("approval-required must not be given a --permission-mode flag; got: %s", joined)
+	}
+
+	// An older CLI rejects an unknown option and exits 1 on the spot, so the
+	// flag is probed exactly like --forward-subagent-text.
+	helpFlagCache.Clear()
+	probeHelpText = func(string) string { return "  --print   Print response and exit\n" }
+	if strings.Contains(strings.Join(buildArgs(probeCfg, provider.SessionStartInput{}), " "), allowBypassPermissionsFlag) {
+		t.Fatal("a CLI that does not advertise the flag must not be given it — it would exit 1 on startup")
 	}
 }

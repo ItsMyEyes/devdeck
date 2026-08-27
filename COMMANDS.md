@@ -586,6 +586,21 @@ cd frontend && npx @tanstack/router-plugin --target react
   part of `test`/`lint` (needs a full Tauri/Cargo build and a real Go
   sidecar build), so it's opt-in. See
   `docs/superpowers/specs/2026-07-17-tauri-desktop-e2e-smoke-harness-design.md`.
+- `make e2e-agent-chat` (or `python3 scripts/e2e-agent-chat/run.py`) — a
+  real-browser check of the agent-chat composer against an isolated
+  `--role both` server on a throwaway HOME/DB, with a fake `claude` first on
+  PATH (`scripts/e2e-agent-chat/fake-claude`, which echoes the flags it was
+  launched with into every reply). Proves the Permission pill shows the
+  thread's replayed mode after a reload, that Reasoning/Context picks reach
+  the CLI as `--effort`/`--autocompact` by restarting the session (with
+  `--resume` only once a conversation exists), that an unchanged pick does
+  not restart, and that an invalid mode over `/ws/agent` is rejected with an
+  error frame. Also covers subagents: that the session is started with
+  `--forward-subagent-text`, that a spawned agent renders as ONE folded row
+  carrying its status and spend, and that expanding it reveals the agent's own
+  narration, tool calls and report back. Prints PASS/FAIL per step,
+  screenshots to a temp dir. Opt-in (needs Go, Node, Python Playwright +
+  Chromium), not part of `test`.
 - The dev backend (`dev:api` in `frontend/package.json`, and `make
   dev-api`/`dev-hub`) always passes `--secure-cookies=false`. Without it,
   login appears to succeed but every following request 401s: WebKit's
@@ -596,6 +611,17 @@ cd frontend && npx @tanstack/router-plugin --target react
 - `cd frontend && npm run tauri:build` — full release build: web UI →
   embedded into the Go sidecars (`make prepare-sidecar`, 3 target triples) →
   platform bundles under `frontend/src-tauri/target/release/bundle/`.
+  **Requires the updater signing key.** `tauri.conf.json` carries a
+  `plugins.updater.pubkey`, and the bundler refuses to bundle with a public key
+  present and no private one ("A public key has been found, but no private
+  key…"). Only `.github/workflows/release.yml` has the secret, so locally
+  either export `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`) or use
+  `npm run tauri:build:unsigned`, which passes `--no-sign`. An unsigned bundle
+  is fine for local testing and **must never be published** — the updater
+  rejects any payload whose signature does not verify, so a release built that
+  way would strand every installed client.
+  `make dev-tauri`, `make dev-tauri-full` and `make e2e-tauri-smoke` are
+  unaffected: none of them bundle.
 - Desktop data lives in the app-data dir (macOS:
   `~/Library/Application Support/dev.kiyora.devdeck/` — `devdeck.db`, `.env`,
   `local-machine-id`); sidecar logs in the app log dir (`sidecar.log`).

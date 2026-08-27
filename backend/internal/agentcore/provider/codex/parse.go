@@ -44,6 +44,18 @@ type parseState struct {
 	// original JSON-RPC id and method to reply on. Mirrors claude/parse.go's
 	// pendingRequest map one-for-one.
 	pending map[string]pendingRequest
+	// agents remembers each subagent thread's identity — see subagent.go's
+	// codexAgent for why the union of three disjoint frames is needed to
+	// describe one agent. Guarded by mu above.
+	agents map[string]*codexAgent
+	// seenItems dedupes item lifecycle notifications whose two halves carry
+	// identical information — see firstSightOfItem.
+	seenItems map[string]bool
+	// onChildThread is how the parser tells the ADAPTER that another codex
+	// thread id belongs to this session, so a notification arriving on it is
+	// re-homed here instead of being dropped for having no session. Set by
+	// the adapter; nil in tests that do not exercise routing.
+	onChildThread func(childThreadID string)
 }
 
 // pendingRequest is what a later decision needs to answer a server->client
@@ -93,6 +105,8 @@ func newParseState(threadID, codexID string, instanceID provider.InstanceID) *pa
 		codexID:    codexID,
 		instanceID: instanceID,
 		seq:        map[event.StreamKind]uint64{},
+		agents:     map[string]*codexAgent{},
+		seenItems:  map[string]bool{},
 	}
 }
 
@@ -247,6 +261,14 @@ func parseNotification(line []byte, st *parseState) []event.Event {
 		if p.Item.Type == "userMessage" {
 			return nil
 		}
+		// Subagent items are NOT ordinary tool calls: routed through
+		// itemTypeOf's `default:` they became untitled `ItemToolCall` rows
+		// with a null detail — blank lines in the parent's transcript, with
+		// no warning — while the agent they described was invisible. See
+		// subagent.go.
+		if isSubagentItemType(p.Item.Type) {
+			return parseSubagentItem(n.Params, p.Item.Type, phaseStarted, st)
+		}
 		e := st.envelope(event.ItemStarted)
 		e.ItemID = p.Item.ID
 		e.Payload = &event.ItemStartedPayload{ItemType: itemTypeOf(p.Item.Type)}
@@ -259,6 +281,9 @@ func parseNotification(line []byte, st *parseState) []event.Event {
 		}
 		if p.Item.Type == "userMessage" {
 			return nil
+		}
+		if isSubagentItemType(p.Item.Type) {
+			return parseSubagentItem(n.Params, p.Item.Type, phaseCompleted, st)
 		}
 		e := st.envelope(event.ItemCompleted)
 		e.ItemID = p.Item.ID
@@ -342,7 +367,22 @@ func parseNotification(line []byte, st *parseState) []event.Event {
 		"account/rateLimits/updated", "account/login/completed",
 		"hook/started", "hook/completed", "skills/changed", "fs/changed",
 		"process/exited", "process/outputDelta", "serverRequest/resolved",
-		"app/list/updated", "command/exec/outputDelta":
+		"app/list/updated", "command/exec/outputDelta",
+		// Added for app-server 0.145.0. Each of these was reaching the
+		// `default:` below and emitting one RuntimeWarning PER EVENT — the
+		// realtime family alone is nine methods that tick continuously — so a
+		// perfectly healthy session filled its own transcript with notices
+		// about frames DevDeck has no use for.
+		"externalAgentConfig/import/completed", "externalAgentConfig/import/progress",
+		"fuzzyFileSearch/sessionCompleted", "fuzzyFileSearch/sessionUpdated",
+		"thread/environment/connected", "thread/environment/disconnected",
+		"thread/goal/updated", "thread/goal/cleared", "thread/settings/updated",
+		"thread/realtime/connected", "thread/realtime/disconnected",
+		"thread/realtime/started", "thread/realtime/stopped",
+		"thread/realtime/updated", "thread/realtime/error",
+		"thread/realtime/audioDelta", "thread/realtime/transcriptDelta",
+		"thread/realtime/status",
+		"windows/worldWritableWarning", "windowsSandbox/setupCompleted":
 		return nil
 
 	default:

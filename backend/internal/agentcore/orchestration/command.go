@@ -122,8 +122,18 @@ type InteractionModeSetPayload struct {
 }
 
 type AssistantDeltaPayload struct {
-	TurnID   string           `json:"turnId"`
-	ItemID   string           `json:"itemId"`
+	TurnID string `json:"turnId"`
+	ItemID string `json:"itemId"`
+	// AgentID names the subagent this text came from, empty for the parent
+	// conversation — see event.Event.AgentID.
+	//
+	// It has to be repeated here, unlike on every other forwarded event,
+	// because this is the ONE path that does not carry the whole canonical
+	// event through to the client: Ingestion re-packs a ContentDelta into
+	// this narrow payload (and buffers it), so a field left off here is
+	// simply gone, and the subagent's narration would render as the parent
+	// talking.
+	AgentID  string           `json:"agentId,omitempty"`
 	Stream   event.StreamKind `json:"stream"`
 	Text     string           `json:"text"`
 	Sequence uint64           `json:"sequence"`

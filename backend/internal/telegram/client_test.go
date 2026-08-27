@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func TestGetUpdatesParsesMessageAndCallback(t *testing.T) {
@@ -111,6 +112,42 @@ func TestGetWebhookInfoReportsNoWebhookAsEmptyURL(t *testing.T) {
 	}
 }
 
+// An edit gets the same plain-text second chance a send does. It is the same
+// hazard for a different surface: a card whose edit 400s keeps its inline
+// keyboard, so a request that has already been decided still looks answerable,
+// and tapping it again answers a request that no longer exists.
+func TestEditMessageTextFallsBackToPlainTextOnAParseError(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		if len(bodies) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: character '(' is reserved"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Token: "123:ABC"}
+	if err := c.EditMessageText(context.Background(), 5, 77, `✅ Terima \(sesi ini\)`, nil); err != nil {
+		t.Fatalf("EditMessageText: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("want a retry after the parse error, got %d call(s)", len(bodies))
+	}
+	if _, formatted := bodies[1]["parse_mode"]; formatted {
+		t.Fatalf("the retry must carry no parse_mode: %v", bodies[1])
+	}
+	// The escapes are markup only while a parse mode is set; left in, the
+	// fallback reads like source code.
+	if bodies[1]["text"] != "✅ Terima (sesi ini)" {
+		t.Fatalf("retry text = %v, want the unescaped label", bodies[1]["text"])
+	}
+}
+
 func TestAPIErrorCarriesRetryAfter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -126,5 +163,44 @@ func TestAPIErrorCarriesRetryAfter(t *testing.T) {
 	}
 	if apiErr.Code != 429 || apiErr.RetryAfter != 7*time.Second {
 		t.Fatalf("apiErr = %+v", apiErr)
+	}
+}
+
+// "message is too long" is the OTHER 400 the pump cannot retry its way out of:
+// the cursor never advances past a message that would not send, so one
+// oversized message freezes that thread's mirror forever. splitForTelegram now
+// budgets in the units Telegram counts, which should make this unreachable —
+// this is the belt to that braces, on the same reasoning as the parse-entities
+// fallback: a truncated message is cosmetic, a wedged mirror is a silent outage.
+func TestSendMessageRecoversFromMessageIsTooLong(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		if len(bodies) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is too long"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":77}}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Token: "123:ABC"}
+	if _, err := c.SendMessage(context.Background(), SendOptions{
+		ChatID: 5, Text: strings.Repeat("🙂", 5000),
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("want a retry after the length error, got %d call(s)", len(bodies))
+	}
+	text, _ := bodies[1]["text"].(string)
+	if n := len(utf16.Encode([]rune(text))); n > telegramMessageLimit {
+		t.Fatalf("the retry was still %d UTF-16 units, over the %d cap", n, telegramMessageLimit)
+	}
+	if text == "" {
+		t.Fatal("the retry sent nothing at all")
 	}
 }

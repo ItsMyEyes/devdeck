@@ -106,8 +106,13 @@ type assistantBuffer struct {
 	threadID string
 	turnID   string
 	itemID   string
-	text     []byte
-	seq      uint64
+	// agentID is carried so a flush can re-emit the attribution. flushThread
+	// rebuilds a bare event.Event from these fields alone, so anything not
+	// remembered here is lost on the way out — and a subagent's buffered
+	// narration would be delivered as the parent's.
+	agentID string
+	text    []byte
+	seq     uint64
 }
 
 func NewIngestion(e *Engine, b approval.Broker, newID func() string) *Ingestion {
@@ -366,7 +371,12 @@ func (in *Ingestion) noteSignal(ev event.Event) {
 		}
 
 	case event.ItemStarted, event.ItemCompleted, event.RequestOpened,
-		event.UserInputRequested, event.TurnProposedCompleted:
+		event.UserInputRequested, event.TurnProposedCompleted,
+		// A turn whose visible work is a subagent has very much produced
+		// something — without this a "spawn one agent and report back" turn
+		// could close with the "finished without producing any output"
+		// notice appended under a transcript full of the agent's work.
+		event.TaskStarted, event.TaskCompleted:
 		sig.produced = true
 	}
 }
@@ -481,7 +491,7 @@ func (in *Ingestion) appendBuffered(ctx context.Context, ev event.Event, p *even
 	in.mu.Lock()
 	buf := in.buffers[key]
 	if buf == nil {
-		buf = &assistantBuffer{threadID: ev.ThreadID, turnID: ev.TurnID, itemID: ev.ItemID}
+		buf = &assistantBuffer{threadID: ev.ThreadID, turnID: ev.TurnID, itemID: ev.ItemID, agentID: ev.AgentID}
 		in.buffers[key] = buf
 	}
 	overflow := len(buf.text)+len(p.Text) > in.Delivery.MaxChars
@@ -515,7 +525,7 @@ func (in *Ingestion) flushThread(ctx context.Context, threadID string) error {
 	in.mu.Unlock()
 
 	for _, b := range pending {
-		ev := event.Event{ThreadID: b.threadID, TurnID: b.turnID, ItemID: b.itemID}
+		ev := event.Event{ThreadID: b.threadID, TurnID: b.turnID, ItemID: b.itemID, AgentID: b.agentID}
 		if err := in.emitDelta(ctx, ev, string(b.text), event.StreamText, b.seq); err != nil {
 			return err
 		}
@@ -531,7 +541,8 @@ func (in *Ingestion) emitDelta(ctx context.Context, ev event.Event, text string,
 		Type:     CmdThreadAssistantDelta,
 		ThreadID: ev.ThreadID,
 		Payload: mustJSON(AssistantDeltaPayload{
-			TurnID: ev.TurnID, ItemID: ev.ItemID, Stream: s, Text: text, Sequence: seq,
+			TurnID: ev.TurnID, ItemID: ev.ItemID, AgentID: ev.AgentID,
+			Stream: s, Text: text, Sequence: seq,
 		}),
 	})
 }
@@ -668,6 +679,53 @@ type Reactor struct {
 	// silently drops every delta and tool call, leaving a chat that echoes the
 	// user's own message and never shows a reply.
 	OnInstanceStarted func(ctx context.Context, a provider.Adapter)
+
+	// sessionOptions remembers, per thread, the ModelSelection.Options the
+	// thread's LIVE session was started with (canonicalised by optionsKey).
+	// It is what lets ensureSession notice that a turn wants different
+	// start-time options than the running process was launched with — see
+	// its restart rule. In-memory only, like the thread directory: a server
+	// restart empties both, and the first turn after one starts a fresh
+	// session with whatever options it carries anyway. Lazily allocated so
+	// the bare Reactor{} literals in this package's tests keep working.
+	optsMu         sync.Mutex
+	sessionOptions map[string]string
+}
+
+// optionsKey canonicalises a ModelSelection.Options map for comparison —
+// json.Marshal sorts map keys, so two maps with the same entries always
+// produce the same string, and a nil or empty map produces "" (a session
+// started with no options at all).
+func optionsKey(opts map[string]any) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(opts)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func (r *Reactor) sessionOptionsFor(threadID string) string {
+	r.optsMu.Lock()
+	defer r.optsMu.Unlock()
+	return r.sessionOptions[threadID]
+}
+
+func (r *Reactor) rememberSessionOptions(threadID, key string) {
+	r.optsMu.Lock()
+	defer r.optsMu.Unlock()
+	if r.sessionOptions == nil {
+		r.sessionOptions = make(map[string]string)
+	}
+	r.sessionOptions[threadID] = key
+}
+
+func (r *Reactor) forgetSessionOptions(threadID string) {
+	r.optsMu.Lock()
+	defer r.optsMu.Unlock()
+	delete(r.sessionOptions, threadID)
 }
 
 // Start subscribes on the CALLER's goroutine, then runs the loop on a new
@@ -765,7 +823,7 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		// side effect (spawning a CLI process). The commit already happened —
 		// EvtThreadCreated is durable — so a failure here is a visible error
 		// via reportError, never a lost thread.
-		return r.ensureSession(ctx, e.ThreadID, "")
+		return r.ensureSession(ctx, e.ThreadID, provider.ModelSelection{})
 
 	case EvtThreadTurnStartRequested:
 		var p TurnStartPayload
@@ -790,8 +848,13 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		//     either way, since each CLI owns its own session.
 		//
 		// ensureSession is a no-op when the thread is already on the requested
-		// instance, so the common turn pays one map lookup.
-		if err := r.ensureSession(ctx, e.ThreadID, p.Model.InstanceID); err != nil {
+		// instance with the options it already runs under, so the common turn
+		// pays one map lookup. The whole ModelSelection goes in, not just the
+		// instance: the composer's Reasoning/Context Window picks ride
+		// p.Model.Options and are start-time CLI flags (claude --effort /
+		// --autocompact, pi --thinking), so they can only ever take effect
+		// through StartSession — see ensureSession for the restart rule.
+		if err := r.ensureSession(ctx, e.ThreadID, p.Model); err != nil {
 			return err
 		}
 		// The command payload only ever carries an attachment's id — Data is
@@ -994,7 +1057,38 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		if err != nil {
 			return err
 		}
-		return a.SetInteractionMode(ctx, e.ThreadID, p.Mode)
+		if err := a.SetInteractionMode(ctx, e.ThreadID, p.Mode); err != nil {
+			return err
+		}
+		if p.Mode == provider.InteractionPlan {
+			return nil
+		}
+		// Leaving plan hands the permission policy away unless we take it
+		// back. The two InteractionMode values ARE claude's own
+		// --permission-mode names (which is what lets SetInteractionMode send
+		// them untranslated), so the call above just put the live session in
+		// "default" — the CLI's ask-for-everything mode — no matter what the
+		// thread's RuntimeMode is. A thread in full access that visited Plan
+		// once came back gated, with the Permission pill still reading "Full
+		// access" because nothing touched Thread.Mode: the same
+		// operator-facing symptom as never pushing the mode at all.
+		//
+		// Only on the way OUT: while plan is on it is meant to outrank the
+		// runtime mode (buildArgs makes the same call at session start), so
+		// re-asserting on the way in would cancel the flag the operator just
+		// set. Best-effort — this is a correction to a mode change that has
+		// already succeeded, and failing the whole event because the
+		// correction did not land would report the mode switch itself as
+		// broken.
+		t, known := r.Engine.State().Thread(e.ThreadID)
+		if !known || t.Mode == "" {
+			return nil
+		}
+		if err := a.SetRuntimeMode(ctx, e.ThreadID, t.Mode); err != nil {
+			log.Printf("agentcore: thread=%s left plan mode but its runtime mode %s did not re-apply: %v",
+				e.ThreadID, t.Mode, err)
+		}
+		return nil
 
 	case EvtThreadSessionStopRequested:
 		r.Broker.CancelThread(e.ThreadID)
@@ -1011,7 +1105,30 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		if err != nil {
 			return err
 		}
-		return a.StopSession(ctx, e.ThreadID)
+		if err := a.StopSession(ctx, e.ThreadID); err != nil {
+			return err
+		}
+		r.forgetSessionOptions(e.ThreadID)
+		// Settle the thread here, deterministically, rather than waiting for
+		// the adapter's own SessionExited to do it. The per-process adapters
+		// (claude, pi) no longer emit that event for a stop THEY were asked
+		// for — a deliberate stop is not a death, and telling the two apart is
+		// what lets ensureSession restart a session under a thread without
+		// the old process's exit landing, seconds later, as a spurious
+		// "stopped" on top of the new turn. The server-backed adapters
+		// (codex, opencode) never emitted anything on StopSession at all, so
+		// before this a user-initiated Stop on those left the thread showing
+		// whatever status it had. Same shape as the interrupt case above:
+		// an idempotent command id derived from the intent event.
+		if _, err := r.Engine.Dispatch(ctx, Command{
+			CommandID: "ac-stop-stopped-" + e.EventID,
+			Type:      CmdThreadSessionSet,
+			ThreadID:  e.ThreadID,
+			Payload:   mustJSON(map[string]any{"status": string(ThreadStopped)}),
+		}); err != nil {
+			log.Printf("agentcore: failed to settle thread=%s after stop err=%v", e.ThreadID, err)
+		}
+		return nil
 	}
 	return nil
 }
@@ -1019,26 +1136,74 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 // ensureSession makes a thread ready to receive a turn: the instance running,
 // the thread bound to it, and a provider session started against it.
 //
-// `want` names the instance to use. Empty means "whatever this worktree is
-// configured for", which is the only answer EvtThreadCreated has; a turn may
-// instead pass an explicit instance, which is how the composer's agent picker
-// switches a thread from one CLI to another.
+// `sel` is the turn's own ModelSelection. Its InstanceID names the instance
+// to use — empty means "whatever this worktree is configured for", which is
+// the only answer EvtThreadCreated has; a turn may instead pass an explicit
+// instance, which is how the composer's agent picker switches a thread from
+// one CLI to another. Its Model and Options ride the session start too:
+// Options are start-time CLI flags on every provider that honours them
+// (claude --effort/--autocompact, pi --thinking), so StartSession is the ONLY
+// place they can ever take effect. Before this took the whole selection, the
+// composer's Reasoning/Context Window picker reached the wire as
+// TurnStartPayload.Model.Options and was then dropped on the floor right
+// here — no session was ever started with them, and the picker was
+// decorative for the whole life of the feature.
 //
 // Idempotent by design — it is called on every turn. When the thread is
-// already bound to `want` AND that instance's adapter is alive, it does
+// already bound to the wanted instance, that instance's adapter is alive, AND
+// the live session was started with the options this turn wants, it does
 // nothing. The adapter check is not redundant with the binding: the directory
 // is in-memory and the registry is too, but they are separate maps and an
 // instance can die (or a restart can empty both) independently of what the
 // directory remembers. Re-binding without a live adapter is exactly the
 // "not bound to an instance" failure this exists to prevent.
-func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provider.InstanceID) error {
+//
+// The options check is the third leg, and it is what makes changing effort
+// or the context window on a thread you are already talking to actually do
+// something: a live session whose options differ is stopped and started
+// again — resuming the provider's own conversation — so the next turn runs
+// under the new flags. Two guards keep that safe:
+//
+//   - Never under a turn. A message sent while a turn is in flight is
+//     steering (Thread.Steered), and the running process is the one doing
+//     the work; killing it would abort that work to apply a setting. The
+//     options then apply the next time the session starts for any reason.
+//   - Resume only a conversation that exists. claude's --resume on a session
+//     id that never received a message exits immediately with "No
+//     conversation found" (verified against the binary), and system/init
+//     hands out that id the moment the process starts — so a thread whose
+//     first turn carries non-default options would die on the spot.
+//     Thread.Turns counts sent turns; this turn is already counted by the
+//     time the reactor runs, so "a previous turn exists" is Turns > 1.
+func (r *Reactor) ensureSession(ctx context.Context, threadID string, sel provider.ModelSelection) error {
 	id, sessionIn, err := r.InstanceFor(threadID)
 	if err != nil {
 		return err
 	}
-	if want != "" {
-		id = want
+	if sel.InstanceID != "" {
+		id = sel.InstanceID
 	}
+	if sel.Model != "" {
+		sessionIn.Model.Model = sel.Model
+	}
+	if len(sel.Options) > 0 {
+		merged := make(map[string]any, len(sessionIn.Model.Options)+len(sel.Options))
+		for k, v := range sessionIn.Model.Options {
+			merged[k] = v
+		}
+		for k, v := range sel.Options {
+			merged[k] = v
+		}
+		sessionIn.Model.Options = merged
+	}
+	wantOptions := optionsKey(sessionIn.Model.Options)
+
+	thread, known := r.Engine.State().Thread(threadID)
+	// Whether StartSession below gets the thread's resume cursor. Only the
+	// options-restart path ever clears it (the doc comment's second guard) —
+	// a dead session is re-provisioned with its cursor exactly as before,
+	// whatever Turns says.
+	resume := true
 
 	if bound, ok := r.Provider.Dir.InstanceFor(threadID); ok && bound == id {
 		// The instance adapter being alive is not enough: a provider with a
@@ -1052,7 +1217,18 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provi
 		// no error. HasSession is the per-thread liveness check the adapter
 		// check alone was silently standing in for.
 		if a, err := r.Provider.Registry.Adapter(id); err == nil && a.HasSession(threadID) {
-			return nil
+			if r.sessionOptionsFor(threadID) == wantOptions {
+				return nil
+			}
+			if known && thread.Steered {
+				log.Printf("agentcore: thread=%s options changed under a running turn; they apply on the next session start", threadID)
+				return nil
+			}
+			if err := a.StopSession(ctx, threadID); err != nil {
+				return fmt.Errorf("agentcore: restart session for new options: %w", err)
+			}
+			r.forgetSessionOptions(threadID)
+			resume = known && thread.Turns > 1
 		}
 	}
 
@@ -1068,9 +1244,9 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provi
 		return err
 	}
 	sessionIn.ThreadID = threadID
-	if t, ok := r.Engine.State().Thread(threadID); ok {
-		sessionIn.Mode = t.Mode
-		sessionIn.Interact = t.Interact
+	if known {
+		sessionIn.Mode = thread.Mode
+		sessionIn.Interact = thread.Interact
 		// Resume from the last native session id the provider announced, so a
 		// re-provisioned session — a process that died mid-conversation, or the
 		// first turn after a server restart — reattaches to the existing CLI
@@ -1078,10 +1254,15 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, want provi
 		// Empty for a brand-new thread (nothing has started yet), which is the
 		// only time a fresh session is actually wanted; every adapter treats an
 		// empty cursor as "no --resume/--session".
-		sessionIn.ResumeCursor = t.ResumeCursor
+		if resume {
+			sessionIn.ResumeCursor = thread.ResumeCursor
+		}
 	}
-	_, err = a.StartSession(ctx, sessionIn)
-	return err
+	if _, err := a.StartSession(ctx, sessionIn); err != nil {
+		return err
+	}
+	r.rememberSessionOptions(threadID, wantOptions)
+	return nil
 }
 
 // ensureInstanceStarted starts the instance if it is not already running.

@@ -39,6 +39,15 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/test/install_ps_test.ps1
 
+      # Guards the updater manifest generator. Nothing else runs this file:
+      # it lives outside frontend/, so `npm test` (vitest) never sees it, and
+      # release.yml only *invokes* the generator. Without this step a change
+      # that drops the missing-platform hard error, or breaks an asset URL,
+      # reaches a published tag unchallenged — and latest.json is what every
+      # installed desktop client fetches.
+      - name: Updater manifest generator tests
+        run: node --test scripts/gen-latest-json.test.mjs
+
       - name: Frontend install
         run: cd frontend && npm ci
 

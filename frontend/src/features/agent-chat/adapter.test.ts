@@ -113,6 +113,41 @@ describe('toolSummary', () => {
     expect(toolSummary(['go test'])).toBeUndefined()
     expect(toolSummary(null)).toBeUndefined()
   })
+
+  // ── Paths are shortened from the LEFT ──
+  // The row truncates with CSS, which cuts the END — and for a path the end is
+  // the only identifying part. Six reads under one deep tree used to render as
+  // six rows of the same 70-character prefix with every filename cut off.
+  describe('long file paths', () => {
+    it('keeps the tail of a deep POSIX path, whole segments only', () => {
+      expect(toolSummary({ file_path: '/Users/andsy/code/superapps/internal/api/v1/usecase/kyc/usecase.go' })).toBe(
+        '…/internal/api/v1/usecase/kyc/usecase.go',
+      )
+    })
+
+    it('keeps a Windows path a Windows path', () => {
+      expect(
+        toolSummary({ file_path: 'C:\\Users\\andsy\\Documents\\code\\superapps\\internal\\usecase\\usecase.go' }),
+      ).toBe('…\\code\\superapps\\internal\\usecase\\usecase.go')
+    })
+
+    it('leaves a path that already fits exactly as it arrived', () => {
+      expect(toolSummary({ file_path: '/a/b.go' })).toBe('/a/b.go')
+      expect(toolSummary({ path: 'internal/api/v1/usecase/kyc/usecase.go' })).toBe('internal/api/v1/usecase/kyc/usecase.go')
+    })
+
+    it('still shows the filename when it is the only segment that fits', () => {
+      const summary = toolSummary({ file_path: `/a/b/${'name'.repeat(20)}.go` })
+      expect(summary).toBe(`…/${'name'.repeat(20)}.go`)
+    })
+
+    // A command's information is at the front: `git -C /very/long/path status`
+    // cut from the left would misreport what ran.
+    it('never shortens a command, however many slashes it has', () => {
+      const command = 'go test ./internal/api/v1/usecase/kyc/... -run TestSubmitSemiAutomate -count 1'
+      expect(toolSummary({ command })).toBe(command)
+    })
+  })
 })
 
 describe('toolUIState', () => {

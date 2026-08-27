@@ -197,6 +197,14 @@ func (h *MachineHandler) GetMachineVersion(w http.ResponseWriter, r *http.Reques
 	h.proxySelf(w, r, machineclient.Version)
 }
 
+// GetMachineBusy handles GET /api/machines/{id}/busy, forwarding what a
+// restart of that machine would destroy: its live terminal and agent-run
+// counts. Like GetMachineVersion it is network-free on the target, so it is
+// cheap enough to ask before offering a restart.
+func (h *MachineHandler) GetMachineBusy(w http.ResponseWriter, r *http.Request) {
+	h.proxySelf(w, r, machineclient.Busy)
+}
+
 // GetMachineUpdateCheck handles GET /api/machines/{id}/update-check. The
 // target reaches GitHub, so this is operator-initiated only — never polled.
 func (h *MachineHandler) GetMachineUpdateCheck(w http.ResponseWriter, r *http.Request) {

@@ -73,6 +73,11 @@ type parseState struct {
 	// arguments once content_block_stop arrives.
 	blockInput map[int][]byte
 
+	// agents remembers each subagent's identity by claude's own task_id, so
+	// the one frame that carries nothing else — task_updated, a bare status
+	// patch — can still be attributed. See subagent.go's taskAgent.
+	agents map[string]*taskAgent
+
 	// blockToolName records a tool_use content block's native tool name by
 	// index, set at content_block_start. blockKind alone ("tool_use") is not
 	// enough to single out ExitPlanMode's block for the §1.4 dead-row skip —
@@ -108,6 +113,41 @@ type parseState struct {
 	// can_use_tool it does not yet route to a real decision, including
 	// ExitPlanMode) for the adapter's readLoop to write back over stdin.
 	autoDenies []autoDenyReply
+
+	// capabilities is what system/init announced this CLI build can do. Guarded
+	// by mu for the same reason pending is: it is written by readLoop's
+	// goroutine and read by the Reactor's (InterruptTurn).
+	capabilities map[string]bool
+}
+
+// capInterruptCancelQueued is the CLI capability that makes an interrupt drop
+// the messages QUEUED behind the turn it aborts, instead of only aborting the
+// turn in flight.
+//
+// Without it, live capture against 2.1.241 shows the CLI start the next queued
+// message ~200ms after the abort, entirely on its own: Stop genuinely stopped
+// the turn, and then the agent "suddenly ran again". See InterruptTurn.
+const capInterruptCancelQueued = "interrupt_cancel_queued_v1"
+
+// hasCapability reports whether system/init announced `name`.
+//
+// Absence is treated as "this build does not have it", which is the safe
+// reading in both directions: an older CLI that never announces capabilities
+// gets the plain interrupt it has always understood, and a newer one gets the
+// extra field only after saying it accepts it.
+func (st *parseState) hasCapability(name string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.capabilities[name]
+}
+
+func (st *parseState) setCapabilities(names []string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.capabilities = make(map[string]bool, len(names))
+	for _, n := range names {
+		st.capabilities[n] = true
+	}
 }
 
 // newParseState creates parser state scoped to one adapter session. threadID
@@ -123,6 +163,7 @@ func newParseState(threadID string, instanceID provider.InstanceID) *parseState 
 		blockKind:     make(map[int]string),
 		blockInput:    make(map[int][]byte),
 		blockToolName: make(map[int]string),
+		agents:        make(map[string]*taskAgent),
 		capturedPlans: make(map[string]bool),
 		seq:           make(map[string]uint64),
 	}
@@ -195,6 +236,44 @@ type wireLine struct {
 	Event     json.RawMessage `json:"event"`
 	RequestID string          `json:"request_id"`
 	Request   json.RawMessage `json:"request"`
+	Response  json.RawMessage `json:"response"`
+	// Capabilities is the CLI's own feature list, announced once on
+	// system/init (live-captured against 2.1.241:
+	// ["interrupt_receipt_v1","interrupt_cancel_queued_v1","msg_lifecycle_v1"]).
+	// It is how a control_request field may be sent only to a build that
+	// understands it — see parseState.hasCapability.
+	Capabilities []string `json:"capabilities"`
+
+	// ── Subagent attribution (see subagent.go) ──
+	//
+	// ParentToolUseID is THREE-valued and the pointer is load-bearing:
+	// absent (system/*, result, rate_limit_event), null (the parent
+	// conversation), or the spawning Agent tool call's id (produced inside
+	// that subagent). A plain string would collapse the first two into "",
+	// which is the same as the third being empty — and every subagent frame
+	// would read as parent traffic.
+	ParentToolUseID *string `json:"parent_tool_use_id"`
+	// UUID is the frame's own identity, unique per line and the join key the
+	// on-disk transcript uses. Item ids for forwarded subagent content are
+	// built from it.
+	UUID string `json:"uuid"`
+	// SubagentType/TaskDescription ride every subagent-attributed frame, so a
+	// row is self-describing without correlating back to task_started.
+	SubagentType    string `json:"subagent_type"`
+	TaskDescription string `json:"task_description"`
+
+	// ── system/task_* fields (subagent lifecycle) ──
+	TaskID         string          `json:"task_id"`
+	ToolUseID      string          `json:"tool_use_id"`
+	Description    string          `json:"description"`
+	Prompt         string          `json:"prompt"`
+	SpawnDepth     int             `json:"spawn_depth"`
+	IsBackgrounded bool            `json:"is_backgrounded"`
+	LastToolName   string          `json:"last_tool_name"`
+	Status         string          `json:"status"`
+	Summary        string          `json:"summary"`
+	OutputFile     string          `json:"output_file"`
+	Patch          json.RawMessage `json:"patch"`
 }
 
 // controlRequestBody is the nested `"request"` object on
@@ -233,20 +312,26 @@ func parseLine(line []byte, st *parseState) []event.Event {
 		return parseControlRequest(w, st, line)
 	case "control_cancel_request":
 		return parseControlCancelRequest(w, st)
+	case "control_response":
+		return parseControlResponse(w, st, line)
 	case "assistant":
+		// A frame produced INSIDE a subagent is the only copy of that content
+		// there will ever be — no stream_event ever carries a non-null
+		// parent_tool_use_id (0 of 179 frames across three captures) — so it
+		// goes down a different path entirely. See subagent.go.
+		if w.ParentToolUseID != nil && *w.ParentToolUseID != "" {
+			return parseSubagentAssistant(w, st, line)
+		}
 		// Scans the message's content for an ExitPlanMode tool_use block —
 		// see parseAssistant (design.md §1.1). Every other "assistant" line
 		// still contributes nothing: it duplicates content already streamed
 		// via content_block_delta, same as "user" below.
 		return parseAssistant(st, line)
-	case "user", "rate_limit_event", "control_response",
+	case "user", "rate_limit_event",
 		"tool_progress", "tool_use_summary", "auth_status", "autocompact_state":
 		// Recognized shapes, deliberately not mapped to a canonical event:
-		// "user" duplicates content already streamed via content_block_delta,
-		// rate-limit telemetry has no CORE payload type yet, and
-		// "control_response" is the CLI's ack of a control_response WE sent
-		// (the interrupt-ack shape, capture e10) — it must not assume
-		// request_id is present (e10's second line has none). This is
+		// "user" duplicates content already streamed via content_block_delta
+		// and rate-limit telemetry has no CORE payload type yet. This is
 		// understood, not unparseable, so it is not a warning — see the
 		// package comment for the distinction this file draws between
 		// "ignored on purpose" and "never seen before".
@@ -439,6 +524,12 @@ type assistantContentBlock struct {
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
+	// Text/Thinking are read only off FORWARDED SUBAGENT frames
+	// (subagent.go): the parent's own text arrives through stream_event
+	// deltas long before its assistant frame does, so these stay unread on
+	// that path.
+	Text     string `json:"text"`
+	Thinking string `json:"thinking"`
 }
 
 // parseAssistant scans a "type":"assistant" line's content blocks for an
@@ -635,6 +726,42 @@ func withCallID(refs *event.Refs, callID string) *event.Refs {
 	return &out
 }
 
+// parseControlResponse surfaces the CLI's REFUSAL of a control_request this
+// package sent (set_permission_mode, set_model, interrupt). Successful acks
+// stay silent — every one of those requests answers one, and a notice apiece
+// would bury the turn, which is why the whole shape used to be dropped.
+//
+// Dropping the errors with them is what let the Permission pill and the live
+// process disagree without a word: an operator switching a thread to Full
+// access on a session the CLI will not let leave its launch mode gets
+//
+//	{"subtype":"error","error":"Cannot set permission mode to
+//	 bypassPermissions because the session was not launched with
+//	 --dangerously-skip-permissions"}
+//
+// and, before this, no symptom at all except approval cards that never
+// stopped. buildArgs' --allow-dangerously-skip-permissions is what prevents
+// that particular refusal; this is what makes the next one visible.
+func parseControlResponse(w wireLine, st *parseState, raw []byte) []event.Event {
+	if len(w.Response) == 0 {
+		return nil
+	}
+	var body struct {
+		Subtype string `json:"subtype"`
+		Error   string `json:"error"`
+	}
+	// A shape this cannot decode is not worth a notice: the ack carries no
+	// information DevDeck acts on, so an unreadable one costs nothing.
+	if json.Unmarshal(w.Response, &body) != nil || body.Subtype != "error" {
+		return nil
+	}
+	message := body.Error
+	if message == "" {
+		message = "claude CLI refused a control request"
+	}
+	return warning(st, message, raw, "control_response")
+}
+
 // parseControlCancelRequest retires whatever pending entry the CLI just
 // cancelled — the CLI sends this itself when an interrupt lands on a pending
 // prompt (spec §0 "Cancellation", capture e10_int_pending). A1 can only ever
@@ -782,11 +909,18 @@ func firstNonBlank(vals ...string) string {
 // switch draws.
 func parseSystem(w wireLine, st *parseState, raw []byte) []event.Event {
 	switch w.Subtype {
+	case "task_started", "task_progress", "task_updated", "task_notification":
+		// A subagent's whole lifecycle — see subagent.go. These used to fall
+		// through to the "recognized noise" tail below, which is why a Task
+		// call showed as one opaque row that never said anything again.
+		return parseTaskSystem(w, st, raw)
+
 	case "init":
 		if w.SessionID == "" {
 			return warning(st, "system/init message missing session_id", raw, "system.init")
 		}
 		st.sessionID = w.SessionID
+		st.setCapabilities(w.Capabilities)
 		resume, _ := json.Marshal(w.SessionID)
 		e := st.envelope(event.SessionStarted)
 		e.Payload = &event.SessionStartedPayload{Resume: resume}

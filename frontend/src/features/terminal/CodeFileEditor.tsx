@@ -98,6 +98,16 @@ export function CodeFileEditor({
 }) {
   const languageId = languageIdForPath(path)
   const [session, setSession] = useState<LspSession | null>(null)
+  /** Bumped when the session this editor holds loses its server, to re-run the
+   *  session effect below. Nothing else reopens the socket: the pool hands back
+   *  a cached session, `MonacoLspClient` never looks at the transport's state,
+   *  and a dead transport answers every request with a plausible `null` — so
+   *  without this, one dropped connection (a gopls crash, a hub restart, a
+   *  laptop waking up) left this file with no language support until the tab
+   *  was closed or the page reloaded. Only a session that had been *working*
+   *  triggers it — see `LspSession.isLost` for why a server that never came up
+   *  must not be retried. */
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const { data: completionsConfig } = useCompletionsConfig()
 
   const fallbackDefinition = useCallback(
@@ -227,10 +237,11 @@ export function CodeFileEditor({
     handlersRef.current = { onOpenDefinition, fallbackDefinition, startRename, hasSession: session !== null }
   })
 
-  // The session effect keys on `[languageId, worktreeId, machine]`, not on
-  // `path` — a session is shared by every file of that language in the
-  // worktree. The definition provider it registers still needs the current
-  // path to pick a Monaco language id, so it reads it through this ref.
+  // The session effect keys on `[languageId, worktreeId, machine]` (plus
+  // `reconnectAttempt`), not on `path` — a session is shared by every file of
+  // that language in the worktree. The definition provider it registers still
+  // needs the current path to pick a Monaco language id, so it reads it
+  // through this ref.
   const pathRef = useRef(path)
   useEffect(() => {
     pathRef.current = path
@@ -345,7 +356,7 @@ export function CodeFileEditor({
       definitionDisposable?.dispose()
       referencesDisposable?.dispose()
     }
-  }, [languageId, worktreeId, machine])
+  }, [languageId, worktreeId, machine, reconnectAttempt])
 
   useEffect(() => {
     if (!session || !languageId) return
@@ -359,6 +370,13 @@ export function CodeFileEditor({
         toast.success('Language server ready', { id: toastId })
       } else if (status === 'error') {
         toast.error(message ?? 'Language server unavailable', { id: toastId })
+        // A server that was answering and then stopped gets one reconnect per
+        // loss. The bump re-runs the session effect, whose cleanup releases
+        // this holder first, so the pool sees the errored entry and replaces it
+        // with a fresh socket. A server that never started is left alone — the
+        // toast above already names what the operator has to fix, and retrying
+        // it would spin.
+        if (session.isLost()) setReconnectAttempt((attempt) => attempt + 1)
       }
     }
     handleStatus(session.getStatus(), session.getStatusMessage())

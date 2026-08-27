@@ -152,6 +152,21 @@ func (m RuntimeMode) AllowsUnprompted(mutating bool) bool {
 	}
 }
 
+// Valid reports whether m is one of the four modes this package defines.
+// The composer's Permission pill and Telegram's mode keyboard both dispatch
+// a RuntimeMode by string, and a value outside this set would otherwise be
+// committed to the thread's durable log and then silently treated as
+// "unrecognised, ask for everything" by AllowsUnprompted — with the pill
+// showing whatever it sent. Rejecting it at the decider keeps the log clean
+// and gives the client an error frame to revert on.
+func (m RuntimeMode) Valid() bool {
+	switch m {
+	case ModeApprovalRequired, ModeAutoAcceptEdits, ModeAuto, ModeFullAccess:
+		return true
+	}
+	return false
+}
+
 // InteractionMode separates "collaboration style" from "permission policy".
 // The two are orthogonal: plan mode still needs a runtime mode.
 type InteractionMode string
@@ -160,6 +175,13 @@ const (
 	InteractionDefault InteractionMode = "default"
 	InteractionPlan    InteractionMode = "plan"
 )
+
+// Valid mirrors RuntimeMode.Valid for the two interaction modes. The values
+// double as claude's own --permission-mode names (see claude/adapter.go's
+// SetInteractionMode), so an unknown one would reach the CLI verbatim.
+func (m InteractionMode) Valid() bool {
+	return m == InteractionDefault || m == InteractionPlan
+}
 
 type SessionStartInput struct {
 	ThreadID string

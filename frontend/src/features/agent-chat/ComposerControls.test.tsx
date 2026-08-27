@@ -3,7 +3,10 @@
  * payload, and a command the decider rejects reverts the pill to the
  * thread's actual mode instead of continuing to show a value the agent
  * isn't in (design spec's error-handling table: "Mode command rejected by
- * the decider -> Pill reverts to the thread's actual mode").
+ * the decider -> Pill reverts to the thread's actual mode"). The
+ * interaction-mode (Build/Plan) pill has since been removed from the row;
+ * the `/plan` and `/build` slash commands (`composerSlashTrigger.ts`) are
+ * how the mode is switched now.
  *
  * The permission picker's rows now carry a description alongside their
  * label (`PermissionPicker`), so a row's accessible NAME is the label and
@@ -59,22 +62,21 @@ describe('ComposerControls — wired to real commands', () => {
     render(<ComposerControls {...baseProps()} />)
     expect(screen.getByRole('button', { name: 'Sonnet 5' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'High · 200k' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Build' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Full access' })).toBeInTheDocument()
     // The context-window ring carries no visible text in the inline row — its
     // accessible name is the usage summary.
     expect(screen.getByRole('button', { name: /Context window: 0\.0% used/ })).toBeInTheDocument()
   })
 
-  it('dispatches thread.interaction-mode.set with the picked mode', async () => {
-    const setInteractionMode = vi.fn()
-    render(<ComposerControls {...baseProps({ setInteractionMode })} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Build' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Plan' }))
-
-    expect(setInteractionMode).toHaveBeenCalledTimes(1)
-    expect(setInteractionMode).toHaveBeenCalledWith('plan')
+  // The Build/Plan pill was removed from the row: interaction mode is still
+  // thread state and still switchable (`/plan` and `/build` in the editor),
+  // but it no longer spends width here. The prop stays on the interface for
+  // `ChatComposer`'s plan follow-up, so this pins that the ROW ignores it.
+  it('renders no Build/Plan pill, whichever interaction mode the thread is in', () => {
+    const { rerender } = render(<ComposerControls {...baseProps({ interactionMode: 'default' })} />)
+    expect(screen.queryByRole('button', { name: 'Build' })).not.toBeInTheDocument()
+    rerender(<ComposerControls {...baseProps({ interactionMode: 'plan' })} />)
+    expect(screen.queryByRole('button', { name: 'Plan' })).not.toBeInTheDocument()
   })
 
   it('dispatches thread.runtime-mode.set with the picked mode', async () => {
@@ -195,27 +197,36 @@ describe('ComposerControls — wired to real commands', () => {
     expect(screen.queryByRole('button', { name: 'Approval required' })).not.toBeInTheDocument()
   })
 
-  it("reverts the interaction-mode pill to the thread's actual mode when the command is rejected", async () => {
-    const setInteractionMode = vi.fn()
-    const props = baseProps({ setInteractionMode })
-    const { rerender } = render(<ComposerControls {...props} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Build' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Plan' }))
-    expect(screen.getByRole('button', { name: 'Plan' })).toBeInTheDocument()
-
-    rerender(<ComposerControls {...props} error="thread w-abc: interaction mode rejected" />)
-
-    expect(screen.getByRole('button', { name: 'Build' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Plan' })).not.toBeInTheDocument()
-  })
-
   it('does not revert a pill that has no change pending when an unrelated error arrives', () => {
     const { rerender } = render(<ComposerControls {...baseProps()} />)
     rerender(<ComposerControls {...baseProps()} error="some other error" />)
 
     expect(screen.getByRole('button', { name: 'Full access' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Build' })).toBeInTheDocument()
+  })
+
+  // The optimistic pick must SETTLE, not stick. `runtimeMode` is the thread's
+  // actual mode off the event log; the engine echoes an accepted command
+  // back as a `thread.runtime-mode-set`, so `runtimeMode` catches up with the
+  // pick — and from then on the pill has to follow the thread, or a change
+  // made anywhere else (another pane, the approval card's mode buttons,
+  // Telegram) would stay hidden behind a pick confirmed long ago.
+  it('settles the optimistic pick once the thread confirms it, then tracks later changes from elsewhere', async () => {
+    const props = baseProps({ runtimeMode: 'full-access' })
+    const { rerender } = render(<ComposerControls {...props} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full access' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Approval required/ }))
+    expect(screen.getByRole('button', { name: 'Approval required' })).toBeInTheDocument()
+
+    // The engine's echo lands: the thread really is in approval-required now.
+    rerender(<ComposerControls {...baseProps({ runtimeMode: 'approval-required' })} />)
+    expect(screen.getByRole('button', { name: 'Approval required' })).toBeInTheDocument()
+
+    // Someone else moves the thread to Auto. No pick is pending here, so the
+    // pill must show the thread's mode, not the one this pane last chose.
+    rerender(<ComposerControls {...baseProps({ runtimeMode: 'auto' })} />)
+    expect(screen.getByRole('button', { name: 'Auto' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approval required' })).not.toBeInTheDocument()
   })
 })
 

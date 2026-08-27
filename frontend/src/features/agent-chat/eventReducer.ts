@@ -6,12 +6,34 @@
  * re-apply an overlapping tail after a reconnect-and-replay.
  */
 import type { UserInputQuestion } from '@/features/agent-chat/pendingUserInput'
-import type { AgentEvent, AgentThreadView, ChatItem, ChatItemKind, PendingApproval, PendingUserInput } from '@/features/agent-chat/types'
+import { isInteractionMode, isRuntimeMode } from '@/features/agent-chat/types'
+import type {
+  AgentEvent,
+  AgentThreadView,
+  AnsweredQuestion,
+  ChatItem,
+  ChatItemKind,
+  InteractionMode,
+  PendingApproval,
+  PendingUserInput,
+  RuntimeMode,
+  SubagentRecord,
+  SubagentUsage,
+} from '@/features/agent-chat/types'
+
+/** The backend projector's own defaults for a `thread.created` payload that
+ *  names no mode (`applyOne`'s `EvtThreadCreated` case) — a thread the socket
+ *  auto-created carries neither, so this is what every fresh thread is in. */
+export const DEFAULT_RUNTIME_MODE: RuntimeMode = 'approval-required'
+export const DEFAULT_INTERACTION_MODE: InteractionMode = 'default'
 
 export function emptyThreadView(): AgentThreadView {
   return {
     items: [],
+    subagents: [],
     status: 'idle',
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    interactionMode: DEFAULT_INTERACTION_MODE,
     lastSeq: 0,
     hasGap: false,
     error: null,
@@ -19,6 +41,24 @@ export function emptyThreadView(): AgentThreadView {
     pendingUserInputs: [],
     pendingApprovals: [],
   }
+}
+
+/** `thread.created`'s optional `mode` / `interactionMode` — the same two
+ *  optional keys the backend projector reads off the creation payload, with
+ *  the same fallbacks. Anything unrecognised falls back too, mirroring the
+ *  backend's tolerance rather than inventing a stricter client. */
+function createdModesOf(payload: unknown): { runtimeMode: RuntimeMode; interactionMode: InteractionMode } {
+  const p = (payload ?? {}) as Record<string, unknown>
+  return {
+    runtimeMode: isRuntimeMode(p.mode) ? p.mode : DEFAULT_RUNTIME_MODE,
+    interactionMode: isInteractionMode(p.interactionMode) ? p.interactionMode : DEFAULT_INTERACTION_MODE,
+  }
+}
+
+/** `thread.runtime-mode-set` / `thread.interaction-mode-set` carry the
+ *  command's own `{ mode }` payload verbatim (`RuntimeModeSetPayload`). */
+function modeOf(payload: unknown): unknown {
+  return payload && typeof payload === 'object' ? (payload as Record<string, unknown>).mode : undefined
 }
 
 /** The stable, shared empty view — use this (never a fresh `emptyThreadView()`)
@@ -57,6 +97,11 @@ interface ActivityAppendedPayload {
    *
    *  Both are absent on a live delta, where the run is one event and the two
    *  values are just `sequence` and the event's own `createdAt`. */
+  /** `AssistantDeltaPayload.AgentID` — the subagent whose narration this is.
+   *  Unlike every other forwarded event this one is re-packed into a narrow
+   *  payload by `Ingestion.emitDelta`, so the attribution rides IN the
+   *  payload here rather than on the envelope. */
+  agentId?: string
   firstSequence?: number
   /** The merged run's FIRST event `createdAt` — see `firstSequence`. The
    *  merged event itself carries the run's LAST `createdAt` (it has to: the
@@ -139,6 +184,11 @@ interface ForwardedProviderEvent {
   type: string
   itemId?: string
   requestId?: string
+  /** `event.Event.AgentID` — the SUBAGENT that produced this event, absent
+   *  for the parent conversation. On the ENVELOPE, not in `payload`, because
+   *  attribution applies uniformly to every kind of event a subagent can
+   *  produce. See `ChatItem.agentId`. */
+  agentId?: string
   /** `event.Event.Provider` — the agent kind that produced this event
    *  (`claude`, `pi`, …). Present on every forwarded envelope; read only off
    *  `turn.started`, to label the turn with what actually ran it. */
@@ -279,6 +329,36 @@ function isForwardedProviderEvent(payload: unknown): payload is ForwardedProvide
   return typeof p.type === 'string'
 }
 
+/** The SECOND shape a `runtime.error` arrives in, and the one nothing above
+ *  matches.
+ *
+ *  There are two producers of that event and they do not agree on the wire.
+ *  `Ingestion.appendNotice` forwards a whole canonical `event.Event`, so its
+ *  payload has a `type` and `isForwardedProviderEvent` claims it. But
+ *  `Reactor.reportError` (`orchestration/workers.go`) dispatches a bare
+ *  `{kind, message}` map instead — no `type`, no nested `payload` — so it
+ *  matched neither guard and fell out of the reducer's chain entirely.
+ *
+ *  That silent drop is worse than it sounds, because of WHICH failures the
+ *  reactor reports: the ones where the provider call never happened at all —
+ *  a session start that could not resolve its worktree or its SSH connection,
+ *  a CLI that never spawned. `reportError` also settles the thread to idle, so
+ *  the whole visible result was a sent message, no reply, and status Idle. The
+ *  reason existed, durably logged, and only the transcript never showed it. */
+interface ReactorErrorPayload {
+  kind: string
+  message?: string
+}
+
+function isReactorErrorPayload(payload: unknown): payload is ReactorErrorPayload {
+  if (typeof payload !== 'object' || payload === null) return false
+  const p = payload as Record<string, unknown>
+  // `runtime.error` is the only kind `reportError` emits; anything else in
+  // this shape is unknown to this side and deliberately left alone rather
+  // than rendered as a guess.
+  return p.kind === 'runtime.error'
+}
+
 function itemKindForStream(stream: string): ChatItemKind {
   return stream === 'reasoning' ? 'reasoning' : 'assistant'
 }
@@ -307,6 +387,68 @@ function openPendingUserInput(pending: PendingUserInput[], ev: ForwardedProvider
   const questions = ev.payload?.questions
   if (!isUserInputQuestionArray(questions)) return pending
   return [...pending, { requestId: ev.requestId, createdAt, questions }]
+}
+
+/**
+ * The transcript row for an answered `AskUserQuestion` — the questions the
+ * agent asked paired with what the operator told it.
+ *
+ * ── Reconstructed from the RESPONSE event, enriched from the request ──
+ * `UserInputRespondPayload.Answers` is keyed by the full question TEXT (see its
+ * struct comment in `orchestration/command.go`), so the response alone always
+ * yields a complete, honest row: every question that got an answer, with that
+ * answer. The still-pending request adds what only it knows — each question's
+ * short `header`, and the description under the option that was picked, which
+ * is usually where the consequence of the choice was actually written.
+ *
+ * That split matters for durability. A thread's replay window can start AFTER
+ * the `user-input.requested` that opened a prompt (see the window rules in
+ * `MessagesTimeline`), in which case `pending` no longer holds the request —
+ * and a row that degrades to question-and-answer beats a row that disappears.
+ *
+ * Order follows the REQUEST's questions when it is available, so a multi-
+ * question prompt reads in the order it was asked rather than in whatever order
+ * the answers map happens to iterate.
+ */
+function answeredQuestionsOf(
+  pending: PendingUserInput[],
+  requestId: string | undefined,
+  payload: unknown,
+): AnsweredQuestion[] {
+  if (typeof payload !== 'object' || payload === null) return []
+  const answers = (payload as Record<string, unknown>).answers
+  if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) return []
+  const byQuestion = answers as Record<string, unknown>
+
+  const request = requestId === undefined ? undefined : pending.find((p) => p.requestId === requestId)
+  const questionOrder = request ? request.questions.map((q) => q.question) : Object.keys(byQuestion)
+  // A question the request never carried but the answers map does (or vice
+  // versa) is not dropped: the union is what was actually asked and answered.
+  const seen = new Set(questionOrder)
+  for (const key of Object.keys(byQuestion)) if (!seen.has(key)) questionOrder.push(key)
+
+  const rows: AnsweredQuestion[] = []
+  for (const question of questionOrder) {
+    const raw = byQuestion[question]
+    const chosen = (Array.isArray(raw) ? raw : [raw]).filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )
+    if (chosen.length === 0) continue
+    const asked = request?.questions.find((q) => q.question === question)
+    const descriptions: Record<string, string> = {}
+    for (const option of asked?.options ?? []) {
+      if (chosen.includes(option.label) && option.description && option.description !== option.label) {
+        descriptions[option.label] = option.description
+      }
+    }
+    rows.push({
+      question,
+      ...(asked?.header ? { header: asked.header } : {}),
+      chosen,
+      ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}),
+    })
+  }
+  return rows
 }
 
 /** Folds a `user-input.resolved` event into `pending`, removing the matching
@@ -365,6 +507,123 @@ function openProposedPlan(items: ChatItem[], id: string, planMarkdown: string, c
   return [...items, { id, kind: 'plan', text: planMarkdown, createdAt, updatedAt: createdAt, lastSequence: 0 }]
 }
 
+// ── Subagents ───────────────────────────────────────────────────────────────
+
+/** The four forwarded event types that describe a subagent's life. */
+const TASK_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'task.started',
+  'task.progress',
+  'task.updated',
+  'task.completed',
+])
+
+function subagentStatusOf(value: unknown): SubagentRecord['status'] | undefined {
+  return value === 'running' || value === 'completed' || value === 'failed' || value === 'stopped' ? value : undefined
+}
+
+/** Field-wise MAX, never a sum.
+ *
+ *  Every provider reports a subagent's usage as a RUNNING TOTAL, so adding
+ *  successive progress ticks together would multiply the cost several times
+ *  over. Max is also idempotent, which is what makes a replayed or
+ *  out-of-order tail harmless — and it means a terminal row that carries only
+ *  `totalTokens` cannot wipe a tool count the progress rows already
+ *  established. */
+function mergeSubagentUsage(previous: SubagentUsage | undefined, next: unknown): SubagentUsage | undefined {
+  if (typeof next !== 'object' || next === null) return previous
+  const n = next as Record<string, unknown>
+  const pick = (key: keyof SubagentUsage): number | undefined => {
+    const value = n[key]
+    const incoming = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+    const held = previous?.[key]
+    if (incoming === undefined) return held
+    return held === undefined ? incoming : Math.max(held, incoming)
+  }
+  const merged: SubagentUsage = {}
+  const total = pick('totalTokens')
+  const tools = pick('toolUses')
+  const duration = pick('durationMs')
+  if (total !== undefined) merged.totalTokens = total
+  if (tools !== undefined) merged.toolUses = tools
+  if (duration !== undefined) merged.durationMs = duration
+  return merged.totalTokens === undefined && merged.toolUses === undefined && merged.durationMs === undefined
+    ? previous
+    : merged
+}
+
+/**
+ * Folds one `task.*` event into the subagent roster, returning a new array
+ * (or the same reference when nothing changed).
+ *
+ * Keyed by `ev.agentId` — the envelope's grouping key, the same one every
+ * attributed item carries — and NOT by the payload's `taskId`, which is
+ * absent from every content frame and so could never join the two halves.
+ *
+ * Identity is taken from whichever row carries it. The backend repeats
+ * `title`/`role` on the progress and terminal rows precisely so a client
+ * whose replay window no longer reaches `task.started` can still render a
+ * complete agent; taking "last non-empty wins" here is what cashes that in.
+ */
+function foldSubagent(
+  records: SubagentRecord[],
+  ev: ForwardedProviderEvent,
+  createdAt: number,
+): SubagentRecord[] {
+  const id = ev.agentId
+  if (!id) return records
+  const inner = (ev.payload ?? {}) as Record<string, unknown>
+  const str = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.length > 0 ? value : undefined
+
+  const idx = records.findIndex((record) => record.id === id)
+  const existing = idx === -1 ? undefined : records[idx]
+
+  // A subagent that reports progress before its start row arrived (or whose
+  // start fell outside the replay window) still gets a record — an agent
+  // visibly doing work is not something to hide because its opening frame is
+  // missing.
+  const next: SubagentRecord = {
+    id,
+    status: existing?.status ?? 'running',
+    createdAt: existing?.createdAt ?? createdAt,
+    updatedAt: createdAt,
+    ...(existing ?? {}),
+  }
+  next.updatedAt = createdAt
+
+  next.taskId = str(inner.taskId) ?? next.taskId
+  next.toolCallId = str(inner.toolCallId) ?? next.toolCallId
+  next.title = str(inner.title) ?? next.title
+  next.role = str(inner.role) ?? next.role
+  next.summary = str(inner.summary) ?? next.summary
+  next.lastTool = str(inner.lastToolName) ?? next.lastTool
+  next.usage = mergeSubagentUsage(next.usage, inner.usage)
+
+  if (ev.type === 'task.progress') {
+    // The progress line is the agent's activity text; it replaces rather than
+    // accumulates, because it describes what is happening NOW.
+    next.progress = str(inner.title) ?? next.progress
+  }
+  if (ev.type === 'task.started') {
+    next.status = 'running'
+  } else {
+    // `task.updated` and `task.completed` both carry a status. A terminal
+    // status must never be walked back to `running` by a late tick, or an
+    // agent that finished would start spinning again.
+    const status = subagentStatusOf(inner.status)
+    if (status && (next.status === 'running' || status !== 'running')) next.status = status
+  }
+  if (ev.type === 'task.completed' && next.status === 'running') {
+    // A terminal row that named no status is still terminal.
+    next.status = 'completed'
+  }
+
+  const out = records.slice()
+  if (idx === -1) out.push(next)
+  else out[idx] = next
+  return out
+}
+
 /** Folds one `thread.activity-appended` event into `items`, returning a new
  *  array. A delta is keyed by `itemId` alone — reasoning and text streams
  *  for the same logical turn arrive under different `itemId`s upstream, so
@@ -384,6 +643,9 @@ function applyDelta(items: ChatItem[], payload: ActivityAppendedPayload, created
       // see the field's doc comment. Both mean "when this item began".
       createdAt: payload.startedAt ?? createdAt,
       updatedAt: createdAt,
+      // Stamped once, at creation: every later delta for this item carries
+      // the same attribution, and an item cannot change owner.
+      ...(payload.agentId ? { agentId: payload.agentId } : {}),
       lastSequence: payload.sequence,
     }
     return { items: [...items, item], gap: false }
@@ -527,6 +789,9 @@ function applyForwarded(items: ChatItem[], eventId: string, ev: ForwardedProvide
         toolCallId: toolCallIdOf(inner.detail),
         ...(input === undefined ? {} : { input }),
         ...(output === undefined ? {} : { output }),
+        // A tool call a SUBAGENT made — folded under its agent's row rather
+        // than left in the parent's narrative. See `ChatItem.agentId`.
+        ...(ev.agentId ? { agentId: ev.agentId } : {}),
         createdAt,
         updatedAt: createdAt,
         lastSequence: 0,
@@ -585,6 +850,9 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
   let turnAgent = view.turnAgent
   let turnModel = view.turnModel
   let pendingApprovals = view.pendingApprovals
+  let runtimeMode = view.runtimeMode
+  let interactionMode = view.interactionMode
+  let subagents = view.subagents
   let changed = false
 
   for (const event of events) {
@@ -596,6 +864,22 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
     // item — they only move the status.
     if (event.type === 'thread.turn-start-requested') {
       status = 'running'
+    } else if (event.type === 'thread.created') {
+      // The projector's `EvtThreadCreated` case: the two modes start from the
+      // creation payload, or from the same defaults it applies. Nothing else
+      // on this event reaches the view — the instance it names is the
+      // reactor's business.
+      ;({ runtimeMode, interactionMode } = createdModesOf(event.payload))
+    } else if (event.type === 'thread.runtime-mode-set') {
+      // Whoever moved it — this pane's pill, another pane, the approval
+      // card's mode buttons, Telegram. The decider rejects any value outside
+      // the enum, so an unrecognised one here can only be a client older than
+      // the backend; leaving the mode alone is the safe reading.
+      const mode = modeOf(event.payload)
+      if (isRuntimeMode(mode)) runtimeMode = mode
+    } else if (event.type === 'thread.interaction-mode-set') {
+      const mode = modeOf(event.payload)
+      if (isInteractionMode(mode)) interactionMode = mode
     } else if (event.type === 'thread.approval-response-requested' || event.type === 'thread.user-input-response-requested') {
       // The CLICKED path. `request.resolved` / `user-input.resolved` below only
       // ever cover the paths the user did NOT answer (timeout, interrupt) —
@@ -603,6 +887,23 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
       // produces this event and nothing else, so without these two lines a
       // clicked approval left the card on screen and the thread `waiting`.
       const requestId = respondedRequestIdOf(event.payload)
+      // Read BEFORE the close below: the questions live on the pending request,
+      // and this event is the only place the answers to them ever appear.
+      const answered = answeredQuestionsOf(pendingUserInputs, requestId, event.payload)
+      if (answered.length > 0) {
+        items = [
+          ...items,
+          {
+            id: event.eventId,
+            kind: 'question',
+            text: '',
+            answeredQuestions: answered,
+            createdAt: event.createdAt,
+            updatedAt: event.createdAt,
+            lastSequence: 0,
+          },
+        ]
+      }
       pendingApprovals = closePendingApproval(pendingApprovals, requestId)
       pendingUserInputs = closePendingUserInput(pendingUserInputs, requestId)
       status = settleAfterPending(status, pendingApprovals, pendingUserInputs)
@@ -665,6 +966,32 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
       const result = applyDelta(items, event.payload, event.createdAt)
       items = result.items
       hasGap = hasGap || result.gap
+    } else if (isReactorErrorPayload(event.payload)) {
+      // Same error row `applyForwarded` builds for the other producer's shape,
+      // and the same reason for settling `running` alongside it: an error ends
+      // the turn, so a transcript showing a failure under a composer still on
+      // Stop is the trap that fix closed. The backend settles the thread too
+      // (`reportError` dispatches its own session-set), so this is the belt to
+      // its braces — it costs one comparison and covers a replay whose
+      // session-set was lost.
+      items = [
+        ...items,
+        {
+          id: event.eventId,
+          kind: 'error',
+          text: event.payload.message ?? 'The agent reported an error.',
+          createdAt: event.createdAt,
+          updatedAt: event.createdAt,
+          lastSequence: 0,
+        },
+      ]
+      if (status === 'running') status = 'idle'
+    } else if (isForwardedProviderEvent(event.payload) && TASK_EVENT_TYPES.has(event.payload.type)) {
+      // A subagent's lifecycle. It moves the roster and produces NO chat item
+      // of its own: the agent renders as one folded row anchored on the tool
+      // call that spawned it (see `timeline.ts`), so appending a row here
+      // would put a second, duplicate entry in the transcript.
+      subagents = foldSubagent(subagents, event.payload, event.createdAt)
     } else if (isForwardedProviderEvent(event.payload) && event.payload.type === 'turn.started') {
       // Remembered, not rendered: `turn.started` has nothing to show on its
       // own. It is the only place the turn's agent and model appear, and they
@@ -712,5 +1039,8 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
     pendingApprovals,
     turnAgent,
     turnModel,
+    runtimeMode,
+    interactionMode,
+    subagents,
   }
 }

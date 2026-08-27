@@ -55,6 +55,10 @@ type parseState struct {
 	// identity.
 	sessionID string
 
+	// agents remembers each subagent tool call's identity by its toolCallId,
+	// so the progress and terminal rows can repeat it — see subagent.go.
+	agents map[string]piAgent
+
 	// messageSeq counts assistant message_start events seen this session.
 	// Pi's message objects carry no id of their own (unlike claude's
 	// message.id), so contentIndex alone is not a stable item key across
@@ -122,19 +126,23 @@ func warning(st *parseState, message string, raw []byte, method string) []event.
 // on are typed; every byte of the line survives untouched in Raw for the
 // warning path.
 type wireLine struct {
-	Type                   string          `json:"type"`
-	ID                     string          `json:"id"`
-	Command                string          `json:"command"`
-	Success                *bool           `json:"success"`
-	Error                  string          `json:"error"`
-	Data                   json.RawMessage `json:"data"`
-	Message                json.RawMessage `json:"message"`
-	AssistantMessageEvent  json.RawMessage `json:"assistantMessageEvent"`
-	ToolCallID             string          `json:"toolCallId"`
-	ToolName               string          `json:"toolName"`
-	Args                   json.RawMessage `json:"args"`
-	Result                 json.RawMessage `json:"result"`
-	IsError                bool            `json:"isError"`
+	Type                  string          `json:"type"`
+	ID                    string          `json:"id"`
+	Command               string          `json:"command"`
+	Success               *bool           `json:"success"`
+	Error                 string          `json:"error"`
+	Data                  json.RawMessage `json:"data"`
+	Message               json.RawMessage `json:"message"`
+	AssistantMessageEvent json.RawMessage `json:"assistantMessageEvent"`
+	ToolCallID            string          `json:"toolCallId"`
+	ToolName              string          `json:"toolName"`
+	Args                  json.RawMessage `json:"args"`
+	Result                json.RawMessage `json:"result"`
+	IsError               bool            `json:"isError"`
+	// PartialResult is the output a long-running tool has produced so far.
+	// Read only for the subagent tool — see subagent.go — because it is the
+	// only liveness signal pi offers for a delegated job.
+	PartialResult json.RawMessage `json:"partialResult"`
 }
 
 // parseLine turns one JSON line into zero or more canonical events. It never
@@ -163,8 +171,18 @@ func parseLine(line []byte, st *parseState) []event.Event {
 		return parseExtensionUIRequest(w, st, line)
 	case "extension_error":
 		return parseExtensionError(w, st, line)
+	case "tool_execution_update":
+		// Still dropped for every ordinary tool (no ItemUpdated payload type
+		// exists, and the whole result arrives again on tool_execution_end) —
+		// but a SUBAGENT's update is the only sign of life a delegated job
+		// gives, and dropping it is what made a multi-minute fan-out a single
+		// motionless row. See subagent.go.
+		if isSubagentTool(w.ToolName) && w.ToolCallID != "" {
+			return st.subagentProgress(w, w.PartialResult)
+		}
+		return nil
 	case "message_end", "agent_start", "turn_start", "turn_end",
-		"tool_execution_update", "queue_update", "compaction_start",
+		"queue_update", "compaction_start",
 		"compaction_end", "auto_retry_start", "auto_retry_end",
 		"bash_execution_update":
 		// Recognized, deliberately not mapped:
@@ -351,7 +369,11 @@ func (st *parseState) toolExecutionStarted(w wireLine, raw []byte) []event.Event
 	e.ItemID = w.ToolCallID
 	detail, _ := json.Marshal(toolDetail{ToolCallID: w.ToolCallID, Name: w.ToolName, Args: w.Args})
 	e.Payload = &event.ItemStartedPayload{ItemType: event.ItemToolCall, Title: w.ToolName, Detail: detail}
-	return []event.Event{e}
+	out := []event.Event{e}
+	if isSubagentTool(w.ToolName) {
+		out = append(out, st.subagentStarted(w)...)
+	}
+	return out
 }
 
 func (st *parseState) toolExecutionCompleted(w wireLine, raw []byte) []event.Event {
@@ -366,7 +388,11 @@ func (st *parseState) toolExecutionCompleted(w wireLine, raw []byte) []event.Eve
 	e.ItemID = w.ToolCallID
 	detail, _ := json.Marshal(toolDetail{ToolCallID: w.ToolCallID, Name: w.ToolName, Result: w.Result})
 	e.Payload = &event.ItemCompletedPayload{ItemType: event.ItemToolCall, Status: status, Detail: detail}
-	return []event.Event{e}
+	out := []event.Event{e}
+	if isSubagentTool(w.ToolName) {
+		out = append(out, st.subagentFinished(w)...)
+	}
+	return out
 }
 
 // parseExtensionUIRequest surfaces an approval/input dialog raised by an

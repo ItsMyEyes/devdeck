@@ -1566,12 +1566,46 @@ func ensureInside(root, target string) error {
 	return nil
 }
 
+// opError carries a fixed, user-facing message over a cause the caller can
+// still reach with errors.Is.
+//
+// Both halves are load-bearing and they pull in opposite directions, which is
+// why this is a type rather than an fmt.Errorf. The message goes straight into
+// the API envelope (handleStoreErr writes err.Error()), so it must stay a clean
+// sentence with no transport internals in it. The CAUSE is what
+// sshmgr.WithSFTPClient reads to decide whether a remote operation failed
+// because the pooled SSH connection is dead — the one signal that makes it
+// evict and redial. Flattening the two together, as an
+// `fmt.Errorf("...failed")` does, silently disables that recovery for every
+// SFTP operation in the app: the pool hands the same dead client to every
+// retry, the file tree never comes back, and the terminal (which holds its own
+// connection) keeps working, so nothing about the app looks disconnected.
+type opError struct {
+	message string
+	cause   error
+}
+
+func (e *opError) Error() string { return e.message }
+func (e *opError) Unwrap() error { return e.cause }
+
 func fileOperationError(operation, relativePath string, err error) error {
 	if os.IsNotExist(err) {
-		return fmt.Errorf("%s %q: %w", operation, relativePath, store.ErrNotFound)
+		return fmt.Errorf("%s %s: %w", operation, quotedPath(relativePath), store.ErrNotFound)
 	}
 	if errors.Is(err, fs.ErrPermission) {
-		return fmt.Errorf("permission denied for %q: %w", relativePath, ErrValidation)
+		return fmt.Errorf("permission denied for %s: %w", quotedPath(relativePath), ErrValidation)
 	}
-	return fmt.Errorf("%s %q failed", operation, relativePath)
+	return &opError{message: strings.TrimSuffix(operation+" "+quotedPath(relativePath), " ") + " failed", cause: err}
+}
+
+// quotedPath renders relativePath for a message, or nothing at all when it is
+// empty. Empty is not a missing value here: it is how both file sources spell
+// their own root (a worktree's checkout directory, an SSH connection's home),
+// and quoting it produced `read folder "" failed` — a message naming no folder
+// on the one listing whose failure blanks the entire tree.
+func quotedPath(relativePath string) string {
+	if relativePath == "" {
+		return ""
+	}
+	return strconv.Quote(relativePath)
 }

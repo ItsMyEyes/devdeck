@@ -41,6 +41,7 @@ import { StatsPane } from '@/features/stats/StatsPane'
 import { SSHRightSidebar } from './SSHRightSidebar'
 import { SSHTerminal } from './SSHTerminal'
 import { disposeSSHSession } from './sshTerminalRegistry'
+import { matchesBinding } from '@/features/keybindings/store'
 
 function basename(path: string) {
   return path.split('/').pop() ?? path
@@ -148,6 +149,10 @@ export function SSHShellPane({
   }, [dirtyFiles.size])
 
   const cleanupFileBookkeeping = useCallback((path: string) => {
+    // Veto this tab's auto-save before it unmounts — see the same call in
+    // `ExpandedTerminal.tsx` for why a discarded draft would otherwise be
+    // written back on the way out.
+    fileHandles.current.get(path)?.discard?.()
     setDirtyFiles((current) => {
       if (!current.has(path)) return current
       const next = new Set(current)
@@ -438,25 +443,25 @@ export function SSHShellPane({
       // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
       // i.e. some other tab within *this* tile is the one currently on screen.
       if (!isFocused || containerRef.current?.offsetParent === null) return
-      const primary = event.ctrlKey || event.metaKey
-      const key = event.key.toLowerCase()
-      if (primary && key === 'p') {
+      // Same catalog rows the worktree pane uses (`features/keybindings`), so
+      // rebinding "New shell tab" once moves it in both places.
+      if (matchesBinding(event, 'terminal.quickOpenFile')) {
         event.preventDefault()
         setQuickOpen(true)
         return
       }
-      // Deliberately no Ctrl/Cmd+Shift+F binding here, unlike the worktree
-      // pane (ExpandedTerminal.tsx): content search over SSH is reachable
-      // only from the explorer's "Search in files" action, so the chord stays
-      // free for the browser/OS while an SSH shell has focus. TerminalExplorer
-      // is told not to advertise it either (contentSearchShortcut is omitted
-      // in this file's renderers).
-      if (primary && key === 't') {
+      // Deliberately no `terminal.searchInFiles` binding here, unlike the
+      // worktree pane (ExpandedTerminal.tsx): content search over SSH is
+      // reachable only from the explorer's "Search in files" action, so the
+      // chord stays free for the browser/OS while an SSH shell has focus.
+      // TerminalExplorer is told not to advertise it either
+      // (contentSearchShortcut is omitted in this file's renderers).
+      if (matchesBinding(event, 'terminal.newPaneTab')) {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
         return
       }
-      if (primary && key === 'w') {
+      if (matchesBinding(event, 'terminal.closePaneTab')) {
         const pane = findPane(layout.root, layout.focusedPaneId)
         if (!pane || pane.type !== 'leaf') return
         const active = pane.tabs.find((t) => t.id === pane.activeTabId)
@@ -465,12 +470,12 @@ export function SSHShellPane({
         handleCloseTab(pane.id, active.id)
         return
       }
-      if (primary && key === 'e') {
+      if (matchesBinding(event, 'terminal.toggleExplorer')) {
         event.preventDefault()
         toggleExplorerInFocusedPane()
         return
       }
-      if (primary && key === 'b') {
+      if (matchesBinding(event, 'terminal.toggleSidebar')) {
         event.preventDefault()
         const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
         setShellSidebarOpen(shellKey, !isOpen)
@@ -602,9 +607,9 @@ export function SSHShellPane({
         />
       )
     },
-    'markdown-preview': ({ content }) => {
+    'markdown-preview': ({ content, isActive }) => {
       if (content.kind !== 'markdown-preview') return null
-      return <MarkdownPreviewPane target={{ kind: 'ssh', connectionId }} path={content.path} />
+      return <MarkdownPreviewPane target={{ kind: 'ssh', connectionId }} path={content.path} active={isActive} />
     },
     explorer: () => (
       <TerminalExplorer

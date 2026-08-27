@@ -142,18 +142,31 @@ type Raw struct {
 // Event is the canonical envelope. Payload is typed as an interface so it
 // stays type-safe in Go; it unmarshals through the registry below.
 type Event struct {
-	EventID    string    `json:"eventId"`
-	Type       Type      `json:"type"`
-	Provider   string    `json:"provider"`
-	InstanceID string    `json:"providerInstanceId,omitempty"`
-	ThreadID   string    `json:"threadId"`
-	TurnID     string    `json:"turnId,omitempty"`
-	ItemID     string    `json:"itemId,omitempty"`
-	RequestID  string    `json:"requestId,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	Refs       *Refs     `json:"providerRefs,omitempty"`
-	Raw        *Raw      `json:"raw,omitempty"`
-	Payload    Payload   `json:"payload,omitempty"`
+	EventID    string `json:"eventId"`
+	Type       Type   `json:"type"`
+	Provider   string `json:"provider"`
+	InstanceID string `json:"providerInstanceId,omitempty"`
+	ThreadID   string `json:"threadId"`
+	TurnID     string `json:"turnId,omitempty"`
+	ItemID     string `json:"itemId,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+	// AgentID names the SUBAGENT that produced this event; empty for the
+	// parent conversation. Every layer above the provider treats it as an
+	// opaque grouping key — it is the provider's own task/agent id (claude's
+	// `task_id`, codex's `agentThreadId`, opencode's child session id), and
+	// nothing outside the adapter may parse or interpret it.
+	//
+	// It is on the ENVELOPE rather than on each payload because attribution
+	// applies uniformly to every kind of event a subagent can produce (text,
+	// reasoning, tool calls) — and because a client filters on it to keep
+	// subagent work out of the main transcript, so a payload that forgot to
+	// carry it would leak its row (see the same lesson in t3code, where the
+	// stamp has to be repeated on item.started/updated/completed alike).
+	AgentID   string    `json:"agentId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	Refs      *Refs     `json:"providerRefs,omitempty"`
+	Raw       *Raw      `json:"raw,omitempty"`
+	Payload   Payload   `json:"payload,omitempty"`
 }
 
 // Payload is tagged by the Type it matches.
@@ -314,6 +327,109 @@ type WarningPayload struct {
 func (WarningPayload) EventType() Type { return RuntimeWarning }
 
 // ---------------------------------------------------------------------------
+// Sub-agent / task payloads
+// ---------------------------------------------------------------------------
+
+// TaskStatus is the one vocabulary every provider's subagent state is
+// normalised into. Providers spell their own differently (claude:
+// completed/failed/stopped plus a `killed`/`paused` pair on task_updated;
+// codex: started/interacted/interrupted), and the client renders only these.
+type TaskStatus string
+
+// Prefixed `TaskStatus…` rather than `Task…`: the four event TYPES above are
+// already named TaskStarted/TaskProgress/TaskUpdated/TaskCompleted, and a
+// status constant sharing one of those names would compile while meaning
+// something entirely different at every use site.
+const (
+	TaskStatusRunning   TaskStatus = "running"
+	TaskStatusCompleted TaskStatus = "completed"
+	TaskStatusFailed    TaskStatus = "failed"
+	TaskStatusStopped   TaskStatus = "stopped"
+)
+
+// TaskUsage is what a subagent has spent so far. Deliberately narrower than
+// Usage above: the providers report a subagent's cost as a single running
+// total plus a tool count, never the input/output/cache breakdown a turn
+// gets, and inventing zeros for the rest would read as "no cache reads"
+// rather than "not reported".
+//
+// Cumulative, not deltas — every provider observed reports a running total,
+// so a consumer merges these by taking the LARGER value rather than summing
+// (summing double-counts on every progress tick).
+type TaskUsage struct {
+	TotalTokens int64 `json:"totalTokens,omitempty"`
+	ToolUses    int64 `json:"toolUses,omitempty"`
+	DurationMs  int64 `json:"durationMs,omitempty"`
+}
+
+// TaskStartedPayload announces a subagent. TaskID is the grouping key every
+// later row repeats, and the one that appears as Event.AgentID on the work
+// this agent produces.
+//
+// ToolCallID is the id of the tool call that SPAWNED it (claude's
+// `tool_use_id`), which is what lets a client render the agent in place of
+// that tool row rather than as a second, unrelated row.
+type TaskStartedPayload struct {
+	TaskID     string `json:"taskId"`
+	ToolCallID string `json:"toolCallId,omitempty"`
+	// Title is the human description of the job ("Run three echo commands").
+	Title string `json:"title,omitempty"`
+	// Role is the provider's own agent kind — claude's `subagent_type`
+	// ("general-purpose", "Explore"), opencode's `Agent.name`.
+	Role string `json:"role,omitempty"`
+	// Prompt is the instruction the subagent was given, when the provider
+	// reports it. Not rendered by default (it can be thousands of characters)
+	// but it is the only record of what was actually delegated.
+	Prompt string `json:"prompt,omitempty"`
+	// Depth is 1 for a subagent of the main conversation, 2 for a subagent of
+	// a subagent. Reported by claude as `spawn_depth`.
+	Depth int `json:"depth,omitempty"`
+	// Backgrounded means the parent did not block on it.
+	Backgrounded bool `json:"backgrounded,omitempty"`
+}
+
+func (TaskStartedPayload) EventType() Type { return TaskStarted }
+
+// TaskProgressPayload is a liveness tick. Identity (Title/Role) is repeated
+// here rather than looked up from the start row on purpose: a client that
+// joined late, or whose replay window no longer reaches the start, must still
+// be able to render a complete agent row from this alone.
+type TaskProgressPayload struct {
+	TaskID       string     `json:"taskId"`
+	Title        string     `json:"title,omitempty"`
+	Role         string     `json:"role,omitempty"`
+	LastToolName string     `json:"lastToolName,omitempty"`
+	Usage        *TaskUsage `json:"usage,omitempty"`
+}
+
+func (TaskProgressPayload) EventType() Type { return TaskProgress }
+
+// TaskUpdatedPayload carries a status change with nothing else attached —
+// claude's `task_updated` is a bare patch. It is fold input, not narrative:
+// a client moves the agent's status and renders no new row for it.
+type TaskUpdatedPayload struct {
+	TaskID string     `json:"taskId"`
+	Status TaskStatus `json:"status,omitempty"`
+}
+
+func (TaskUpdatedPayload) EventType() Type { return TaskUpdated }
+
+// TaskCompletedPayload is terminal. Summary is the subagent's own report back
+// to its parent — the single most useful thing it produces, and the only part
+// the parent conversation actually consumes.
+type TaskCompletedPayload struct {
+	TaskID     string     `json:"taskId"`
+	Status     TaskStatus `json:"status,omitempty"`
+	Title      string     `json:"title,omitempty"`
+	Role       string     `json:"role,omitempty"`
+	Summary    string     `json:"summary,omitempty"`
+	OutputFile string     `json:"outputFile,omitempty"`
+	Usage      *TaskUsage `json:"usage,omitempty"`
+}
+
+func (TaskCompletedPayload) EventType() Type { return TaskCompleted }
+
+// ---------------------------------------------------------------------------
 // Registry for JSON decoding. Required because Payload is an interface.
 // ---------------------------------------------------------------------------
 
@@ -330,6 +446,10 @@ var payloadRegistry = map[Type]func() Payload{
 	RequestResolved:       func() Payload { return &RequestResolvedPayload{} },
 	UserInputRequested:    func() Payload { return &UserInputRequestedPayload{} },
 	ToolDenied:            func() Payload { return &ToolDeniedPayload{} },
+	TaskStarted:           func() Payload { return &TaskStartedPayload{} },
+	TaskProgress:          func() Payload { return &TaskProgressPayload{} },
+	TaskUpdated:           func() Payload { return &TaskUpdatedPayload{} },
+	TaskCompleted:         func() Payload { return &TaskCompletedPayload{} },
 	RuntimeError:          func() Payload { return &ErrorPayload{} },
 	RuntimeWarning:        func() Payload { return &WarningPayload{} },
 }

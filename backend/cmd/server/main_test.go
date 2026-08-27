@@ -459,3 +459,32 @@ func TestWriteDefaultConfigRoundTrips(t *testing.T) {
 		t.Errorf("two_fa from defaults file = %v, want true", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// tailscale serve
+// ---------------------------------------------------------------------------
+
+// `tailscale serve <port>` refuses to replace an existing 443 listener, so a
+// single leftover mapping breaks --enable-tailscale-serve on every subsequent
+// launch. Clearing it first is the fix; WHAT we clear is the part worth
+// pinning, because the obvious simplification — `tailscale serve reset` —
+// drops the whole machine's serve configuration, including forwarders and
+// funnel entries devdeck never created.
+func TestTailscaleServeClearArgsTargetOnly443(t *testing.T) {
+	got := tailscaleServeClearArgs()
+	want := []string{"serve", "--https=443", "off"}
+
+	if len(got) != len(want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %q, want %q", got, want)
+		}
+	}
+	for _, arg := range got {
+		if arg == "reset" {
+			t.Fatalf("args = %q: must clear only this hub's own 443 listener, never the machine's whole serve config", got)
+		}
+	}
+}

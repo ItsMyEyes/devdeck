@@ -293,7 +293,8 @@ returned.
 ### Desktop (Tauri sidecar)
 
 `frontend/src-tauri/` wraps the app for macOS/Windows/Linux: the Rust shell
-spawns the Go binary as a sidecar hub (`--addr 127.0.0.1:0`, ephemeral
+spawns the Go binary as a sidecar hub (`--addr 127.0.0.1:8989`, falling back
+to `:0` when that port is already taken — see `sidecar::listen_addr`; ephemeral
 `--key`), parses the bound port from the listen line, upserts a local
 Machine entry (terminals need one), and points the webview at the sidecar's
 embedded UI with `?key=`, which `main.tsx` exchanges for a session cookie via

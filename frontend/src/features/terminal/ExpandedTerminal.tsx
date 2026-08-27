@@ -91,6 +91,7 @@ import { TerminalExplorer } from './TerminalExplorer'
 import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 import { UntitledFileEditor } from './UntitledFileEditor'
 import { StatsPane } from '@/features/stats/StatsPane'
+import { matchesBinding, useCommandChordLabel } from '@/features/keybindings/store'
 
 interface Props {
   worktree: Worktree
@@ -129,9 +130,6 @@ function createDefaultWorktreeLayout(worktreeId: string): WorktreeLayout {
 
 /** Safely larger than any real line's length — see openAtLine's doc comment. */
 const LINE_END_CHAR_OFFSET = 1_000_000
-
-/** Matches the existing platform sniff in `WorkspaceTileCanvas.tsx`'s `primaryShortcutLabel`. */
-const IS_APPLE_PLATFORM = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 
 function isDeletedPath(filePath: string, deletedPath: string) {
   return filePath === deletedPath || filePath.startsWith(`${deletedPath}/`)
@@ -182,13 +180,13 @@ export function useIsDesktop() {
 export function ShellSidebarToggle({ shellKey }: { shellKey: string }) {
   const open = useDevDeckStore((s) => shellSidebarState(s.shellSidebars, shellKey).open)
   const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
-  const shortcut = IS_APPLE_PLATFORM ? '⌘B' : 'Ctrl+B'
+  const shortcut = useCommandChordLabel('terminal.toggleSidebar')
   return (
     <div className="flex flex-none items-center gap-1 px-1.5">
       <button
         type="button"
         onClick={() => setShellSidebarOpen(shellKey, !open)}
-        title={`Toggle sidebar (${shortcut})`}
+        title={shortcut ? `Toggle sidebar (${shortcut})` : 'Toggle sidebar'}
         aria-label="Toggle sidebar"
         className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
       >
@@ -275,6 +273,9 @@ function TerminalWorkspace({
   // looking at a *different* tab (another worktree, Agents, Browser) would silently
   // spawn a new terminal + PTY in a background worktree the user isn't even looking at.
   const containerRef = useRef<HTMLDivElement>(null)
+  // Advertised on the explorer's "Search in files" row — read from the registry
+  // so the hint follows a rebind.
+  const contentSearchShortcut = useCommandChordLabel('terminal.searchInFiles')
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
   const [contentSearch, setContentSearch] = useState(false)
@@ -363,6 +364,13 @@ function TerminalWorkspace({
   }, [dirtyFiles.size])
 
   const cleanupFileBookkeeping = useCallback((path: string) => {
+    // This path's tab is going away: closed, discarded via "Don't Save", or
+    // deleted out from under itself. Veto its auto-save first — the flush that
+    // runs on unmount would otherwise write a draft the operator just chose to
+    // throw away, or re-create a file they just deleted. Imperative because the
+    // unmount lands in the same commit as everything below it, so a state
+    // update carrying the decision would never be committed in time.
+    fileHandles.current.get(path)?.discard?.()
     setDirtyFiles((current) => {
       if (!current.has(path)) return current
       const next = new Set(current)
@@ -913,24 +921,25 @@ function TerminalWorkspace({
       // `offsetParent` is `null` when this tab (or an ancestor) is `display:none` —
       // i.e. some other tab within *this* tile is the one currently on screen.
       if (!isFocused || containerRef.current?.offsetParent === null) return
-      const primary = event.ctrlKey || event.metaKey
-      const key = event.key.toLowerCase()
-      if (primary && key === 'p') {
+      // Chords come from the shortcut catalog (`features/keybindings`) so they
+      // can be rebound in Settings › Keybindings; the focus and visibility
+      // guards above are what keep them scoped to this pane.
+      if (matchesBinding(event, 'terminal.quickOpenFile')) {
         event.preventDefault()
         setQuickOpen(true)
         return
       }
-      if (primary && event.shiftKey && key === 'f') {
+      if (matchesBinding(event, 'terminal.searchInFiles')) {
         event.preventDefault()
         setContentSearch(true)
         return
       }
-      if (primary && key === 't') {
+      if (matchesBinding(event, 'terminal.newPaneTab')) {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)
         return
       }
-      if (primary && key === 'w') {
+      if (matchesBinding(event, 'terminal.closePaneTab')) {
         const pane = findPane(layout.root, layout.focusedPaneId)
         if (!pane || pane.type !== 'leaf') return
         const active = pane.tabs.find((t) => t.id === pane.activeTabId)
@@ -939,17 +948,17 @@ function TerminalWorkspace({
         handleCloseTab(pane.id, active.id)
         return
       }
-      if (primary && key === 'g') {
+      if (matchesBinding(event, 'terminal.toggleGit')) {
         event.preventDefault()
         toggleKindInFocusedPane('git')
         return
       }
-      if (primary && key === 'e') {
+      if (matchesBinding(event, 'terminal.toggleExplorer')) {
         event.preventDefault()
         toggleKindInFocusedPane('explorer')
         return
       }
-      if (primary && key === 'b') {
+      if (matchesBinding(event, 'terminal.toggleSidebar')) {
         event.preventDefault()
         const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
         setShellSidebarOpen(shellKey, !isOpen)
@@ -1154,9 +1163,11 @@ function TerminalWorkspace({
         />
       )
     },
-    'markdown-preview': ({ content }) => {
+    'markdown-preview': ({ content, isActive }) => {
       if (content.kind !== 'markdown-preview') return null
-      return <MarkdownPreviewPane target={{ kind: 'worktree', machine, worktreeId: worktree.id }} path={content.path} />
+      return (
+        <MarkdownPreviewPane target={{ kind: 'worktree', machine, worktreeId: worktree.id }} path={content.path} active={isActive} />
+      )
     },
     explorer: () => (
       <TerminalExplorer
@@ -1167,7 +1178,7 @@ function TerminalWorkspace({
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
-        contentSearchShortcut="Ctrl Shift F"
+        contentSearchShortcut={contentSearchShortcut}
       />
     ),
     untitled: ({ content, isActive }) => {
@@ -1218,7 +1229,7 @@ function TerminalWorkspace({
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
-        contentSearchShortcut="Ctrl Shift F"
+        contentSearchShortcut={contentSearchShortcut}
         activeThreadKey={activeThreadKey}
         onOpenThread={openAgentChatThread}
       />

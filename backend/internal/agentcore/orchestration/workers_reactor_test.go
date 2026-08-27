@@ -200,14 +200,24 @@ func (a *fakeAdapter) runtimeModeSnapshot() []runtimeModeCall {
 	defer a.mu.Unlock()
 	return append([]runtimeModeCall(nil), a.runtimeModeCalls...)
 }
-func (a *fakeAdapter) StopSession(context.Context, string) error { return nil }
-func (a *fakeAdapter) StopAll(context.Context) error             { return nil }
+
+// StopSession models the real per-process adapters: the thread's session is
+// gone the moment this returns (HasSession false), and nothing is emitted —
+// see claude/adapter.go's session.stopped.
+func (a *fakeAdapter) StopSession(context.Context, string) error {
+	a.rec.record("StopSession")
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionDead = true
+	return nil
+}
+func (a *fakeAdapter) StopAll(context.Context) error { return nil }
 func (a *fakeAdapter) HasSession(string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return !a.sessionDead
 }
-func (a *fakeAdapter) ListSessions() []provider.Session          { return nil }
+func (a *fakeAdapter) ListSessions() []provider.Session { return nil }
 func (a *fakeAdapter) ReadThread(context.Context, string) (provider.ThreadSnapshot, error) {
 	return provider.ThreadSnapshot{}, nil
 }
@@ -870,5 +880,58 @@ func TestReactorIgnoresUserInputForARetiredRequest(t *testing.T) {
 
 	if calls := h.adapter.userInputSnapshot(); len(calls) != 1 {
 		t.Fatalf("userInputCalls = %+v, want the second answer never to reach the provider", calls)
+	}
+}
+
+// Leaving Plan mode used to hand the thread's permission policy away.
+//
+// provider.InteractionMode's two values ARE claude's own --permission-mode
+// names, which is what lets SetInteractionMode send them untranslated — but it
+// means exiting plan sends `set_permission_mode: "default"`, and "default" is
+// the CLI's ASK-FOR-EVERYTHING mode. A thread sitting in full access that
+// visited Plan mode once came back gated: the Permission pill still read "Full
+// access" (nothing touched Thread.Mode) while the live process asked for every
+// command, which is the same operator-facing symptom as never having pushed
+// the mode at all.
+//
+// So the runtime mode is re-asserted on the way out, and ONLY on the way out —
+// entering plan must not immediately undo itself.
+func TestReactorReassertsRuntimeModeWhenLeavingPlanMode(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	h.dispatch(t, "w-abc", CmdThreadRuntimeModeSet, mustRaw(t, RuntimeModeSetPayload{
+		Mode: provider.ModeFullAccess,
+	}))
+	h.waitForCall(t, "SetRuntimeMode")
+
+	// Entering plan: the interaction mode goes down, the runtime mode does not
+	// move (plan deliberately outranks it while it is on).
+	h.dispatch(t, "w-abc", CmdThreadInteractionModeSet, mustRaw(t, InteractionModeSetPayload{
+		Mode: provider.InteractionPlan,
+	}))
+	h.waitForCall(t, "SetInteractionMode")
+	if got := len(h.adapter.runtimeModeSnapshot()); got != 1 {
+		t.Fatalf("runtimeModeCalls = %d after ENTERING plan, want 1 — plan must not re-push", got)
+	}
+
+	// Leaving it: "default" reaches the CLI, and the thread's own mode has to
+	// follow it back.
+	h.dispatch(t, "w-abc", CmdThreadInteractionModeSet, mustRaw(t, InteractionModeSetPayload{
+		Mode: provider.InteractionDefault,
+	}))
+	// Not waitForCall: "SetRuntimeMode" is already in the recorder from the
+	// pill change above, so it would return without waiting for anything.
+	waitFor(t, func() bool { return len(h.adapter.runtimeModeSnapshot()) == 2 })
+
+	calls := h.adapter.runtimeModeSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("runtimeModeCalls = %+v, want two — the second re-asserts the thread's mode after plan", calls)
+	}
+	if calls[1].threadID != "w-abc" || calls[1].mode != provider.ModeFullAccess {
+		t.Fatalf("call = %+v, want {threadID: w-abc, mode: full-access}", calls[1])
 	}
 }

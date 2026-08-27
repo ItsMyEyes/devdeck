@@ -1085,6 +1085,19 @@ export interface MachineVersion {
   sha256: string
 }
 
+/** How much live work restarting a machine's runtime would destroy.
+ *
+ *  `terminals` is the PTY session count; `agentRuns` counts orchestration
+ *  threads that are running or waiting on the operator. Both matter because
+ *  DevDeck never reaps detached PTYs and an agent run needs no attached
+ *  terminal — `activeSessions` on the update-check response sees only the
+ *  former and therefore under-reports. See decision D3 of
+ *  `docs/superpowers/specs/2026-08-24-desktop-auto-update-design.md`. */
+export interface MachineBusy {
+  terminals: number
+  agentRuns: number
+}
+
 /** Result of a manual update check. `error` is non-empty when the check itself
  *  failed — the request still succeeds with 200 so one broken machine doesn't
  *  blank the page. */
@@ -1135,6 +1148,10 @@ export function fetchMachineHealth(id: string): Promise<MachineHealth> {
 
 export function fetchMachineVersion(id: string): Promise<MachineVersion> {
   return request<MachineVersion>('GET', `/machines/${id}/version`)
+}
+
+export function fetchMachineBusy(id: string): Promise<MachineBusy> {
+  return request<MachineBusy>('GET', `/machines/${id}/busy`)
 }
 
 export function fetchMachineUpdateCheck(id: string): Promise<MachineUpdateCheck> {

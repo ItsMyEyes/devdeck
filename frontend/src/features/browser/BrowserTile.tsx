@@ -34,6 +34,7 @@ import {
   setZoomBrowserTile,
   showBrowserTile,
 } from './browserTilesBridge'
+import { matchesBinding } from '@/features/keybindings/store'
 
 interface BrowserTileProps {
   tabId: string
@@ -409,10 +410,11 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
   useEffect(() => {
     if (!isFocused || !doc) return
     function handleKeydown(event: KeyboardEvent) {
-      const primary = event.metaKey || event.ctrlKey
-      if (!primary || event.altKey || !doc) return
-      const key = event.key
-      if (!event.shiftKey && key.toLowerCase() === 'l') {
+      if (!doc) return
+      // Chords live in the shortcut catalog (`features/keybindings`) and are
+      // rebindable from Settings › Keybindings. The zoom rows are flagged
+      // `looseShift` there, which is what keeps Cmd++ working alongside Cmd+=.
+      if (matchesBinding(event, 'browser.focusAddressBar')) {
         event.preventDefault()
         // Both halves matter: `editingAddress` swaps the URL display for the
         // input, and the signal re-selects its contents even when the bar is
@@ -421,15 +423,16 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
         setAddressFocusSignal((signal) => signal + 1)
         return
       }
-      if (!event.shiftKey && key.toLowerCase() === 'f') {
+      if (matchesBinding(event, 'browser.find')) {
         event.preventDefault()
         setFindOpen(true)
         return
       }
-      if (key === '=' || key === '+' || key === '-' || key === '_' || key === '0') {
+      const zoomReset = matchesBinding(event, 'browser.zoomReset')
+      const zoomOut = matchesBinding(event, 'browser.zoomOut')
+      if (zoomReset || zoomOut || matchesBinding(event, 'browser.zoomIn')) {
         event.preventDefault()
-        zoomLevelRef.current =
-          key === '0' ? DEFAULT_ZOOM : zoomStep(zoomLevelRef.current, key === '-' || key === '_' ? -1 : 1)
+        zoomLevelRef.current = zoomReset ? DEFAULT_ZOOM : zoomStep(zoomLevelRef.current, zoomOut ? -1 : 1)
         if (doc.url) void setZoomBrowserTile(tabId, doc.id, zoomLevelRef.current)
         // Stable `id` (design spec §3.6): a repeated zoom keypress replaces
         // the existing toast and resets its timer instead of stacking one.

@@ -101,6 +101,7 @@ import type { TerminalContextCapture } from '@/features/agent-chat/terminalConte
 import type { AgentThreadView, ChatItem, PendingApproval, PendingUserInput } from '@/features/agent-chat/types'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Machine } from '@/store/types'
+import { matchesBinding } from '@/features/keybindings/store'
 
 /** t3code's own `COMPOSER_PERSIST_DEBOUNCE_MS` (`composerDraftStore.ts:67`,
  *  design spec §2): a keystroke's mirror-write re-serializes zustand's whole
@@ -457,7 +458,7 @@ export function ChatComposer({
   // stops them from firing at all.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key.toLowerCase() !== 's' || !(event.metaKey || event.ctrlKey)) return
+      if (!matchesBinding(event, 'chat.stashPrompt')) return
       if (!surfaceRef.current?.contains(document.activeElement)) return
 
       event.preventDefault()

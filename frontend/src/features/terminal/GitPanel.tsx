@@ -5,6 +5,7 @@ import {
   Check,
   Columns2,
   GitBranch,
+  GitBranchPlus,
   GitCommitHorizontal,
   History,
   Loader2,
@@ -25,6 +26,7 @@ import {
   useGitCommit,
   useGitDiff,
   useGitDiscard,
+  useGitInit,
   useGitLog,
   useGitPull,
   useGitPush,
@@ -35,6 +37,7 @@ import {
 import { DataLoading } from '@/features/screens/DataLoading'
 import { DiffView, type DiffMode } from './DiffView'
 import { MaterialFileIcon } from './MaterialFileIcon'
+import { matchesBinding, useCommandChordLabel } from '@/features/keybindings/store'
 
 interface GitPanelProps {
   worktreeId: string
@@ -81,6 +84,7 @@ function dirname(path: string) {
 }
 
 export function GitPanel({ worktreeId, machine, active, shellKey, compact = false, onOpenDiff }: GitPanelProps) {
+  const commitShortcut = useCommandChordLabel('git.commit')
   const [view, setView] = useState<'changes' | 'history'>('changes')
   const [message, setMessage] = useState('')
   const [diffMode, setDiffMode] = useState<DiffMode>('split')
@@ -108,6 +112,7 @@ export function GitPanel({ worktreeId, machine, active, shellKey, compact = fals
   const commit = useGitCommit(machine, worktreeId)
   const push = useGitPush(machine, worktreeId)
   const pull = useGitPull(machine, worktreeId)
+  const init = useGitInit(machine, worktreeId)
 
   const files = status.data?.files ?? []
   const stagedFiles = files.filter((f) => f.index !== '.' && f.index !== '?')
@@ -144,6 +149,10 @@ export function GitPanel({ worktreeId, machine, active, shellKey, compact = fals
     pull.mutate(undefined, { onSuccess: () => toast.success('Pulled'), onError })
   }
 
+  function doInit() {
+    init.mutate(undefined, { onSuccess: () => toast.success('Initialized empty Git repository'), onError })
+  }
+
   /** Compact mode has no diff column of its own, so a selection opens the
    *  target as its own pane tab. The store write stays either way — it drives
    *  the list's own selection highlight. */
@@ -161,6 +170,52 @@ export function GitPanel({ worktreeId, machine, active, shellKey, compact = fals
     if ('commit' in target) return `commit:${target.commit}`
     return `${target.staged ? 'staged' : 'work'}:${target.path}`
   }, [target])
+
+  // A worktree with no `.git` is not an error — the backend reports it as
+  // `repo: false` rather than letting git's "fatal: not a git repository"
+  // stand in for the whole panel. Branch, changes, history, commit and the
+  // diff column all have nothing to show until a repository exists, so the
+  // empty state replaces the panel wholesale (VS Code's Source Control view).
+  if (status.data && !status.data.repo) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-devdeck-pane">
+        <div className="flex h-9 min-w-0 flex-none items-center gap-2 border-b border-devdeck-border px-3">
+          <GitBranch size={13} className="flex-none text-devdeck-fg-2" />
+          <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg-2">No repository</span>
+          <button
+            type="button"
+            onClick={() => status.refetch()}
+            disabled={status.isFetching}
+            title="Refresh status"
+            className="flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-wait"
+          >
+            <RefreshCw size={12} className={cn(status.isFetching && 'animate-spin')} />
+          </button>
+        </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-3 p-4">
+            <p className="text-[11.5px] leading-relaxed text-devdeck-fg-2">
+              This folder doesn&rsquo;t have a Git repository. You can initialize one to enable source control —
+              staging, commits, history and diffs — for this worktree.
+            </p>
+            <button
+              type="button"
+              onClick={doInit}
+              disabled={init.isPending}
+              className="flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-devdeck-accent text-[11.5px] font-semibold text-devdeck-accent-ink hover:bg-devdeck-accent-hover disabled:cursor-wait disabled:opacity-60"
+            >
+              {init.isPending ? <Loader2 size={12} className="animate-spin" /> : <GitBranchPlus size={12} />}
+              Initialize Repository
+            </button>
+            <p className="text-[10.5px] leading-relaxed text-devdeck-fg-2">
+              Runs <span className="font-mono text-devdeck-fg">git init</span> in the worktree root. Nothing is staged
+              or committed, and no existing files are touched.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={cn('flex min-h-0 min-w-0 flex-1', compact ? 'flex-col' : 'max-md:flex-col md:flex-row')}>
@@ -227,12 +282,12 @@ export function GitPanel({ worktreeId, machine, active, shellKey, compact = fals
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && message.trim() && stagedFiles.length > 0) {
+                  if (matchesBinding(event, 'git.commit') && message.trim() && stagedFiles.length > 0) {
                     event.preventDefault()
                     doCommit()
                   }
                 }}
-                placeholder={`Message (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+'}Enter to commit)`}
+                placeholder={commitShortcut ? `Message (${commitShortcut} to commit)` : 'Message'}
                 rows={2}
                 className="w-full resize-none rounded-md border border-devdeck-border-strong bg-devdeck-card-wash px-2 py-1.5 font-mono text-[11.5px] text-devdeck-fg placeholder:text-devdeck-fg-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               />

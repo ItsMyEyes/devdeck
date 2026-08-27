@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { useWriteFileTarget } from '@/features/data/queries'
 import type { FilesTarget } from './filesTarget'
 import { SaveAsDialog } from './SaveAsDialog'
+import { matchesBinding } from '@/features/keybindings/store'
 
 const PlainCodeEditor = lazy(() =>
   import('./PlainCodeEditor').then((module) => ({ default: module.PlainCodeEditor })),
@@ -62,7 +63,7 @@ export function UntitledFileEditor({ target, contentId, label, active, onDirtyCh
   useEffect(() => {
     if (!active) return
     function handleKeydown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (matchesBinding(event, 'editor.save')) {
         event.preventDefault()
         requestSave()
       }

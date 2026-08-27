@@ -5,7 +5,7 @@
  * part of the event-sourced read model — the reducer's `ChatItem[]` stays
  * the single source of truth, and this is purely a view over it.
  */
-import type { AgentThreadView, ChatItem } from '@/features/agent-chat/types'
+import type { AgentThreadView, ChatItem, SubagentRecord } from '@/features/agent-chat/types'
 
 export interface MessageEntry {
   kind: 'message'
@@ -30,7 +30,25 @@ export interface PlanEntry {
   item: ChatItem
 }
 
-export type TimelineEntry = MessageEntry | ReasoningEntry | ToolGroupEntry | PlanEntry
+/** One subagent, and everything it did, as a SINGLE row in the main flow.
+ *
+ *  This is the quiet-timeline rule: a subagent that reads forty files and
+ *  writes ten must cost the parent's narrative exactly one line, or the
+ *  operator's own conversation is buried under work they delegated precisely
+ *  so they would not have to watch it. The detail is not thrown away — it is
+ *  one click down, inside this entry. */
+export interface SubagentEntry {
+  kind: 'subagent'
+  record: SubagentRecord
+  /** The agent's own transcript, in order: its narration, reasoning and tool
+   *  calls. Empty while it is starting up, or when the provider forwards no
+   *  interior detail at all (pi, and claude on a CLI too old for
+   *  `--forward-subagent-text`) — the row still renders, from the lifecycle
+   *  events alone. */
+  items: ChatItem[]
+}
+
+export type TimelineEntry = MessageEntry | ReasoningEntry | ToolGroupEntry | PlanEntry | SubagentEntry
 
 /**
  * Groups `view.items` in order. Consecutive `tool` items collapse into a
@@ -42,7 +60,59 @@ export type TimelineEntry = MessageEntry | ReasoningEntry | ToolGroupEntry | Pla
 export function buildTimeline(view: AgentThreadView): TimelineEntry[] {
   const entries: TimelineEntry[] = []
 
+  // ── Subagents ──
+  //
+  // Every item a subagent produced is pulled OUT of the main flow and folded
+  // under its agent's own row. The row is placed where the spawning tool call
+  // was, so the agent appears exactly where the parent asked for it rather
+  // than wherever its first output happened to land.
+  const records = view.subagents ?? []
+  const byAgent = new Map<string, ChatItem[]>()
+  for (const record of records) byAgent.set(record.id, [])
   for (const item of view.items) {
+    if (!item.agentId) continue
+    const owned = byAgent.get(item.agentId)
+    // An item whose agent has no record yet (its `task.started` has not
+    // arrived, or fell outside the replay window) still gets a bucket — see
+    // the orphan pass below. Hiding an agent's work because its opening frame
+    // is missing would be the silence this whole feature exists to end.
+    if (owned) owned.push(item)
+    else byAgent.set(item.agentId, [item])
+  }
+  const recordFor = (id: string): SubagentRecord =>
+    records.find((record) => record.id === id) ?? { id, status: 'running', createdAt: 0, updatedAt: 0 }
+  // Which spawning tool call anchors which agent.
+  const anchorToAgent = new Map<string, string>()
+  for (const record of records) {
+    if (record.toolCallId) anchorToAgent.set(record.toolCallId, record.id)
+  }
+  const emitted = new Set<string>()
+  const pushSubagent = (agentId: string) => {
+    if (emitted.has(agentId)) return
+    emitted.add(agentId)
+    entries.push({ kind: 'subagent', record: recordFor(agentId), items: byAgent.get(agentId) ?? [] })
+  }
+
+  for (const item of view.items) {
+    if (item.agentId) {
+      // Absorbed. If nothing anchors this agent — no spawning tool row in the
+      // window, or a provider that reports none — its row lands here, at its
+      // first piece of visible work, which is the closest honest position.
+      const anchored = records.some((record) => record.id === item.agentId && record.toolCallId)
+      if (!anchored) pushSubagent(item.agentId)
+      continue
+    }
+
+    // The tool call that spawned an agent becomes that agent's row: the two
+    // are the same event, and rendering both would show the spawn twice.
+    if (item.kind === 'tool' && item.toolCallId) {
+      const agentId = anchorToAgent.get(item.toolCallId)
+      if (agentId) {
+        pushSubagent(agentId)
+        continue
+      }
+    }
+
     if (item.kind === 'tool') {
       const last = entries[entries.length - 1]
       if (last && last.kind === 'tool-group') {
@@ -65,6 +135,12 @@ export function buildTimeline(view: AgentThreadView): TimelineEntry[] {
 
     entries.push({ kind: 'message', item })
   }
+
+  // An agent that has announced itself but whose anchor row is not in this
+  // window and which has produced nothing yet — the ordinary state for the
+  // second or two between `task.started` and its first output. Appended last,
+  // which is where it belongs: it is the newest thing that has happened.
+  for (const record of records) pushSubagent(record.id)
 
   return entries
 }

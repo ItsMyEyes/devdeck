@@ -26,6 +26,10 @@ export interface LspSession {
   pathFromUri(uri: string): string | null
   getStatus(): LspStatus
   getStatusMessage(): string | undefined
+  /** True when this session's server was answering and then stopped — see
+   *  `DevDeckLspTransport.isLost`. Distinct from `getStatus() === 'error'`,
+   *  which also covers a server that never came up at all. */
+  isLost(): boolean
   subscribeStatus(listener: LspStatusListener): () => void
   dispose(): void
 }
@@ -143,6 +147,7 @@ export async function createLspSession(
     pathFromUri,
     getStatus: () => status,
     getStatusMessage: () => statusMessage,
+    isLost: () => transport.isLost(),
     subscribeStatus(listener) {
       listeners.add(listener)
       return () => {
@@ -193,14 +198,21 @@ export function createLspSessionPool(idleDisposeMs = IDLE_DISPOSE_MS) {
       if (entry) {
         cancelIdleDisposal(entry)
         // A session is only worth reusing while its server still answers. One
-        // whose socket died during the idle window would otherwise be handed
-        // to the next file that opens, leaving that file with no language
-        // support at all until the page is reloaded.
+        // whose socket died would otherwise be handed to the next file that
+        // opens, leaving that file with no language support at all until the
+        // page is reloaded.
         //
-        // Only an idle entry may be replaced: an errored session that still has
-        // holders is *their* session, and disposing it here would close the
-        // transport under editors that are open right now.
-        if (entry.refs === 0 && entry.session?.getStatus() === 'error') {
+        // This deliberately does NOT require the entry to be idle. A session
+        // only reports `'error'` once its transport is unusable (see
+        // lspTransport's `failFromClosedSocket`), so disposing it takes nothing
+        // away from the editors still holding it — there is no live socket left
+        // to close under them. Waiting for `refs === 0` sounded safer but made
+        // the check almost unreachable in practice: `FileEditor` keeps every
+        // open tab mounted, so one open `.go` file pins the refcount above zero
+        // and every *other* Go file opened afterwards was handed the same
+        // corpse. Their `release()` no-ops once this entry leaves the map (it
+        // compares identity), which is correct — it has been disposed here.
+        if (entry.session?.getStatus() === 'error') {
           entries.delete(key)
           entry.session.dispose()
           entry = undefined

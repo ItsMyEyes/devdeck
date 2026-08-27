@@ -11,6 +11,8 @@ import { openExternalUrl } from '@/lib/openExternalUrl'
 import { createTerminalWriter } from '@/features/terminal/terminalWriter'
 import { useResolvedTheme } from '@/features/theme/useTheme'
 import type { Machine } from '@/store/types'
+import { chordMatchesEvent } from '@/features/keybindings/chord'
+import { matchesBinding, terminalEscapeChords } from '@/features/keybindings/store'
 
 /** How long a connection must survive before its backoff counter is cleared.
  *  Resetting on `open` is wrong: the handshake is tiny and succeeds even on a
@@ -142,11 +144,14 @@ function isTerminalExitedFrame(data: string) {
  *  Cmd/Ctrl+K joins it for the command palette (WorkspaceTileArea.tsx), which
  *  must open from anywhere — including a focused terminal. Nothing is lost:
  *  neither this file nor sshTerminalRegistry.ts ever bound Cmd+K to
- *  clear-screen. */
+ *  clear-screen.
+ *
+ *  The list is derived from the shortcut catalog's `escapesTerminal` flag
+ *  rather than hard-coded, so rebinding "Quick open file" or "Open command
+ *  palette" in Settings › Keybindings moves the passthrough with it — otherwise
+ *  a rebound palette chord would still be eaten by the shell. */
 export function isAppShortcut(event: KeyboardEvent) {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false
-  const key = event.key.toLowerCase()
-  return key === 'p' || key === 'k'
+  return terminalEscapeChords().some((chord) => chordMatchesEvent(chord, event))
 }
 
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
@@ -419,7 +424,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Browsers reserve Cmd/Ctrl+F for their own find bar; intercept it while
     // the terminal is focused so it opens the addon-search bar instead.
     const onFindShortcut = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && host.contains(e.target as Node)) {
+      if (matchesBinding(e, 'terminal.find') && host.contains(e.target as Node)) {
         e.preventDefault()
         setSearchOpen(true)
       }

@@ -18,7 +18,7 @@ import { machineWsUrl } from '@/lib/machineClient'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { AgentAttachmentRef } from '@/features/agent-chat/ComposerAttachments'
 import { EMPTY_THREAD_VIEW } from '@/features/agent-chat/eventReducer'
-import type { AgentEvent, AgentThreadView } from '@/features/agent-chat/types'
+import type { AgentEvent, AgentThreadView, InteractionMode, RuntimeMode } from '@/features/agent-chat/types'
 import type { Machine } from '@/store/types'
 
 /** Connection status of the socket itself — distinct from
@@ -71,12 +71,10 @@ type AgentCommandType =
   | 'thread.user-input.respond'
   | 'thread.approval.respond'
 
-/** Mirrors `provider.RuntimeMode` (`backend/internal/agentcore/provider/provider.go`)
- *  — string values match exactly, one enum on both sides of the wire. */
-export type RuntimeMode = 'approval-required' | 'auto-accept-edits' | 'auto' | 'full-access'
-
-/** Mirrors `provider.InteractionMode`. */
-export type InteractionMode = 'default' | 'plan'
+// The two mode enums now live in `types.ts` beside `AgentThreadView`, which
+// carries them as thread state (`runtimeMode` / `interactionMode`). Re-exported
+// here so every existing importer of this module keeps compiling unchanged.
+export type { InteractionMode, RuntimeMode } from '@/features/agent-chat/types'
 
 interface AgentCommand {
   commandId: string

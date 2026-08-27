@@ -1,0 +1,15 @@
+# frontend/src-tauri/permissions/updater-prepare.toml
+#
+# Grants the app's own UI permission to kill the sidecar immediately before
+# tauri-plugin-updater replaces the bundle. Required for the same reason as
+# browser-tiles.toml/diagnostics.toml/hub-mode.toml: once an ACL manifest
+# (capabilities/default.json) exists, Tauri enforces ACL checks on every
+# command, not just `core:*`/plugin ones.
+#
+# Why a command at all, rather than RunEvent::Exit — see prepare_for_update in
+# src/lib.rs: the Windows updater calls std::process::exit(0) directly and
+# never runs the event loop's exit arm.
+[[permission]]
+identifier = "allow-prepare-for-update"
+description = "Allows the update flow to stop the bundled sidecar before the app bundle is replaced (prepare_for_update)."
+commands.allow = ["prepare_for_update"]

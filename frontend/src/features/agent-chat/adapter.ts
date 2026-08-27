@@ -55,10 +55,55 @@ const SUMMARY_KEYS = [
   'prompt',
 ] as const
 
+/** The two keys whose value is a FILE PATH, and therefore the two that get
+ *  shortened from the left (see `shortenPath`). `command`, `pattern` and the
+ *  rest are prose or code — their information is at the front, and cutting
+ *  their head off would be a lie about what ran. */
+const PATH_KEYS: ReadonlySet<string> = new Set(['file_path', 'path'])
+
 /** How much of a summary survives before the row would stop being one line.
  *  Generous, because CSS truncation does the real work — this only stops a
  *  10,000-character heredoc from reaching the DOM at all. */
 const SUMMARY_MAX = 160
+
+/** How much of a path is worth showing. Chosen so the tail still fits beside
+ *  the tool name in a pane roughly half the window wide — the width these rows
+ *  are actually read at — rather than at the transcript's full measure. */
+const PATH_MAX = 46
+
+/**
+ * A long absolute path, shortened from the LEFT: `…/usecase/kyc/usecase.go`.
+ *
+ * The row truncates with CSS, which cuts the END of the string — and for a path
+ * the end is the only part that identifies anything. So a turn reading six files
+ * under one deep tree rendered six rows of
+ * `C:\Users\andsy\Documents\Mabes\presisi\code\superapps_mabes\internal\ap…`:
+ * seventy characters of identical prefix, and the filename — the entire reason
+ * to read the row — always the part that fell off.
+ *
+ * Keeps whole segments only, as many as fit, and never fewer than the last one:
+ * a single 200-character filename still gets cut by `SUMMARY_MAX` below, but it
+ * is cut having shown what it is.
+ *
+ * The full path is never lost — it is in the call's arguments, one click away in
+ * the row's own disclosure.
+ */
+function shortenPath(value: string): string {
+  if (value.length <= PATH_MAX) return value
+  const separator = value.includes('\\') && !value.includes('/') ? '\\' : '/'
+  const segments = value.split(separator).filter((segment) => segment.length > 0)
+  if (segments.length <= 1) return value
+
+  const kept: string[] = []
+  let length = 1 // the leading ellipsis
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const next = length + segments[i].length + 1
+    if (kept.length > 0 && next > PATH_MAX) break
+    kept.unshift(segments[i])
+    length = next
+  }
+  return `…${separator}${kept.join(separator)}`
+}
 
 /**
  * The one-line gist of what a tool call is doing — the file it reads, the
@@ -83,8 +128,9 @@ export function toolSummary(input: unknown): string | undefined {
   for (const key of SUMMARY_KEYS) {
     const value = record[key]
     if (typeof value !== 'string') continue
-    const line = value.replace(/\s+/g, ' ').trim()
-    if (line.length === 0) continue
+    const flattened = value.replace(/\s+/g, ' ').trim()
+    if (flattened.length === 0) continue
+    const line = PATH_KEYS.has(key) ? shortenPath(flattened) : flattened
     return line.length > SUMMARY_MAX ? `${line.slice(0, SUMMARY_MAX)}…` : line
   }
   return undefined
@@ -171,6 +217,10 @@ export function promptChatStatus(view: AgentThreadView): ChatStatus {
  *  call, matching how the group reads on screen: one block, started once. */
 export function entryCreatedAt(entry: TimelineEntry): number | undefined {
   if (entry.kind === 'tool-group') return entry.items[0]?.createdAt
+  // A subagent is stamped by when it was ANNOUNCED, not by its first output:
+  // the row appears the moment it is spawned, and the gap before it says
+  // anything is part of how long it took.
+  if (entry.kind === 'subagent') return entry.record.createdAt || entry.items[0]?.createdAt
   return entry.item.createdAt
 }
 
@@ -184,6 +234,12 @@ export function entryCreatedAt(entry: TimelineEntry): number | undefined {
  * earliest one started.
  */
 export function entryCompletedAt(entry: TimelineEntry): number | undefined {
+  if (entry.kind === 'subagent') {
+    // The agent's own last movement — its lifecycle rows keep ticking while
+    // it works, so this is live even when it is producing no visible items.
+    const stamps = entry.items.map(itemCompletedAt).filter((at): at is number => at !== undefined)
+    return Math.max(entry.record.updatedAt || 0, ...stamps) || undefined
+  }
   if (entry.kind !== 'tool-group') return itemCompletedAt(entry.item)
   const stamps = entry.items.map(itemCompletedAt).filter((at): at is number => at !== undefined)
   return stamps.length === 0 ? undefined : Math.max(...stamps)
@@ -191,6 +247,21 @@ export function entryCompletedAt(entry: TimelineEntry): number | undefined {
 
 function itemCompletedAt(item: ChatItem): number | undefined {
   return item.updatedAt ?? item.createdAt
+}
+
+/** A stable React/span key for any entry. Each variant has its own identity:
+ *  a message its item's id, a group its first call's, a subagent its agent
+ *  id — which is stable for the agent's whole life, so its row keeps its
+ *  identity as work streams into it. */
+export function entryKey(entry: TimelineEntry, index: number): string {
+  switch (entry.kind) {
+    case 'tool-group':
+      return entry.items[0]?.id ?? `tool-group-${index}`
+    case 'subagent':
+      return `subagent:${entry.record.id}`
+    default:
+      return entry.item.id
+  }
 }
 
 /**
@@ -253,7 +324,7 @@ export function turnSpans(entries: TimelineEntry[]): TurnSpan[] {
   entries.forEach((entry, index) => {
     const startsTurn = entry.kind === 'message' && entry.item.kind === 'user'
     if (startsTurn || spans.length === 0) {
-      const key = entry.kind === 'tool-group' ? (entry.items[0]?.id ?? `turn-${index}`) : entry.item.id
+      const key = entryKey(entry, index)
       spans.push({ key, firstEntryIndex: index, lastEntryIndex: index })
       return
     }

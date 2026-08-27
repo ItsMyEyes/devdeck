@@ -186,16 +186,50 @@ describe('createLspSessionPool', () => {
     }
   })
 
-  it('leaves an errored session alone while editors still hold it', async () => {
-    const create = vi.fn(async () => fakeSession('error'))
+  // The refcount is no reason to keep a dead session: `FileEditor` keeps every
+  // open tab mounted, so a single open `.go` file holds `refs` above zero for
+  // as long as it is on screen. Requiring an idle entry meant the replacement
+  // above almost never ran — the second, third and fourth Go file opened after
+  // a server died all got the same dead session. An errored session's transport
+  // is already unusable, so there is nothing live to pull out from under the
+  // holders.
+  it('replaces an errored session even while editors still hold it', async () => {
+    const create = vi
+      .fn<() => Promise<import('./lspSession').LspSession>>()
+      .mockImplementationOnce(async () => fakeSession('error'))
+      .mockImplementation(async () => fakeSession())
     const pool = createLspSessionPool(30_000)
 
     const held = await pool.acquire('m1:w1:go', create)
     const second = await pool.acquire('m1:w1:go', create)
 
-    expect(create).toHaveBeenCalledTimes(1)
-    expect(second.session).toBe(held.session)
-    expect(held.session.dispose).not.toHaveBeenCalled()
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(second.session).not.toBe(held.session)
+    expect(held.session.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  // The stale holder's release must not reach into the entry that replaced it —
+  // decrementing a live session's refcount on someone else's behalf would set it
+  // up to be disposed while its own editors are still using it.
+  it('ignores a release from a holder whose session was already replaced', async () => {
+    vi.useFakeTimers()
+    try {
+      const create = vi
+        .fn<() => Promise<import('./lspSession').LspSession>>()
+        .mockImplementationOnce(async () => fakeSession('error'))
+        .mockImplementation(async () => fakeSession())
+      const pool = createLspSessionPool(30_000)
+
+      const held = await pool.acquire('m1:w1:go', create)
+      const fresh = await pool.acquire('m1:w1:go', create)
+
+      held.release()
+      vi.advanceTimersByTime(60_000)
+
+      expect(fresh.session.dispose).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not cache a failed session', async () => {

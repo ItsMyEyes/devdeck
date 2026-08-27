@@ -62,8 +62,14 @@ type adapter struct {
 	mu       sync.Mutex
 	sessions map[string]*session // DevDeck threadID -> session
 	byCodex  map[string]*session // Codex thread id -> session
-	nextID   int64
-	pending  map[int64]chan rpcResult
+	// childThreads maps a SUBAGENT's codex thread id onto the session that
+	// spawned it. A subagent thread is never opened through StartSession, so
+	// it has no entry in byCodex and its notifications would otherwise be
+	// dropped for belonging to no session — losing the child agent's entire
+	// transcript. Populated by the parser as it learns of spawns.
+	childThreads map[string]*session
+	nextID       int64
+	pending      map[int64]chan rpcResult
 
 	readers sync.WaitGroup
 }
@@ -75,14 +81,15 @@ type rpcResult struct {
 
 func newAdapter(ctx context.Context, id provider.InstanceID, cfg Config, env map[string]string) *adapter {
 	a := &adapter{
-		instanceID: id,
-		cfg:        cfg,
-		env:        env,
-		ctx:        ctx,
-		events:     make(chan event.Event, eventBufferSize),
-		sessions:   map[string]*session{},
-		byCodex:    map[string]*session{},
-		pending:    map[int64]chan rpcResult{},
+		instanceID:   id,
+		cfg:          cfg,
+		env:          env,
+		ctx:          ctx,
+		events:       make(chan event.Event, eventBufferSize),
+		sessions:     map[string]*session{},
+		byCodex:      map[string]*session{},
+		childThreads: map[string]*session{},
+		pending:      map[int64]chan rpcResult{},
 	}
 	go func() {
 		<-ctx.Done()
@@ -311,6 +318,18 @@ func (a *adapter) dispatchNotification(line []byte, method string) {
 
 	a.mu.Lock()
 	s := a.byCodex[codexID]
+	// A SUBAGENT runs as a real codex thread of its own, with an id that was
+	// never opened through StartSession — so it is not in byCodex and used to
+	// fall into the drop below, taking the child agent's entire transcript
+	// with it. The parser registers each spawned thread against its parent as
+	// it learns of them (parseState.onChildThread), which is what lets its
+	// work be re-homed here instead.
+	agentID := ""
+	if s == nil {
+		if parent := a.childThreads[codexID]; parent != nil {
+			s, agentID = parent, codexID
+		}
+	}
 	a.mu.Unlock()
 	if s == nil {
 		// Server-wide chatter (configWarning, remoteControl status) arrives
@@ -319,11 +338,26 @@ func (a *adapter) dispatchNotification(line []byte, method string) {
 		return
 	}
 
-	for _, e := range parseNotification(wrapper.Params, s.state) {
+	// The WHOLE line, not wrapper.Params. parseNotification switches on the
+	// envelope's own `method`, so handing it the params alone left every
+	// notification with an empty method: each one fell to the parser's
+	// `default:` and became `unrecognized codex notification ""`. The codex
+	// transcript was, in production, nothing but warnings — no messages, no
+	// tool calls, no turn lifecycle. The parser's own tests never caught it
+	// because they reconstruct `{method, params}` before calling it, which is
+	// the shape it has always expected.
+	for _, e := range parseNotification(line, s.state) {
 		// parseNotification decodes params; re-stamp the method so a warning's
 		// Raw names what produced it.
 		if e.Raw != nil {
 			e.Raw.Method = method
+		}
+		// Everything a child thread produced belongs to that subagent, not to
+		// the parent's own narrative. Stamped here rather than inside the
+		// parser because only the adapter knows which thread the frame
+		// arrived on.
+		if agentID != "" && e.AgentID == "" {
+			e.AgentID = agentID
 		}
 		a.emit(e)
 	}
@@ -464,6 +498,17 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		startedAt: time.Now().UnixMilli(),
 		model:     in.Model.Model,
 	}
+	// How the parser hands a spawned subagent thread back to the adapter for
+	// routing — see adapter.childThreads and parseState.onChildThread.
+	s.state.onChildThread = func(childID string) {
+		if childID == "" {
+			return
+		}
+		a.mu.Lock()
+		a.childThreads[childID] = s
+		a.mu.Unlock()
+	}
+
 	a.mu.Lock()
 	a.sessions[in.ThreadID] = s
 	a.byCodex[res.Thread.ID] = s

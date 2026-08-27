@@ -26,6 +26,10 @@ type StatusFile struct {
 
 // Status is the uncommitted state of a worktree plus its branch position.
 type Status struct {
+	// Repo is false when the directory exists but is not (and is not inside) a
+	// git repository. Every other field is then zero — the client renders its
+	// "Initialize Repository" empty state instead of a branch and file list.
+	Repo     bool         `json:"repo"`
 	Branch   string       `json:"branch"`
 	Upstream string       `json:"upstream"`
 	Ahead    int          `json:"ahead"`
@@ -70,14 +74,37 @@ func runDir(dir string, timeout time.Duration, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// IsRepo reports whether dir is inside a git repository. Used on the failure
+// path of status/init rather than before every call — it costs a git process,
+// and status already answers the question when it succeeds.
+func IsRepo(dir string) bool {
+	_, err := runDir(dir, localOpTimeout, "rev-parse", "--git-dir")
+	return err == nil
+}
+
+// InitRepo creates a git repository in dir. The initial branch is left to
+// git's own `init.defaultBranch`, matching what the user gets on the CLI.
+func InitRepo(dir string) error {
+	_, err := runDir(dir, localOpTimeout, "init")
+	return err
+}
+
 // WorktreeStatus reports branch position and all uncommitted files of the
 // repository at dir, parsed from porcelain v2 (stable scripting format).
+//
+// A directory that simply isn't a repository yet is not an error: it returns
+// Status{Repo: false} so the client can offer to initialize one, instead of
+// showing git's raw "fatal: not a git repository" for the life of the pane.
+// Anything else (missing directory, broken git, timeout) still errors.
 func WorktreeStatus(dir string) (Status, error) {
 	out, err := runDir(dir, localOpTimeout, "status", "--porcelain=v2", "--branch", "-z")
 	if err != nil {
+		if info, statErr := os.Stat(dir); statErr == nil && info.IsDir() && !IsRepo(dir) {
+			return Status{Files: []StatusFile{}}, nil
+		}
 		return Status{}, err
 	}
-	status := Status{Files: []StatusFile{}}
+	status := Status{Repo: true, Files: []StatusFile{}}
 	fields := strings.Split(out, "\x00")
 	for i := 0; i < len(fields); i++ {
 		line := fields[i]

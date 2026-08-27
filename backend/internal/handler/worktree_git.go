@@ -24,6 +24,13 @@ func (h *WorktreeGitHandler) Status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (h *WorktreeGitHandler) Init(w http.ResponseWriter, r *http.Request) {
+	if handleStoreErr(w, h.svc.Init(r.PathValue("id"))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *WorktreeGitHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if hash := q.Get("commit"); hash != "" {

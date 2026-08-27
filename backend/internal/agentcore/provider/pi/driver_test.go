@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/detect"
 )
 
 func TestDriverKindAndDefaults(t *testing.T) {
@@ -52,6 +54,41 @@ func TestDecodeConfigRejectsGarbage(t *testing.T) {
 }
 
 var _ provider.Driver = NewDriver()
+
+// pi is a Node script (`#!/usr/bin/env node`), so a spawned pi process must
+// find `node` on PATH. A GUI-launched backend inherits a minimal PATH without
+// the nvm/volta node dir — the exact reason Pi vanished from the model picker
+// in a desktop build while working in a terminal-launched dev build. buildEnv
+// must therefore start from detect.AugmentedEnv (which adds those dirs), not
+// the bare process env: every dir AugmentedEnv contributes has to survive into
+// the spawned process's PATH.
+func TestBuildEnvPATHIncludesAugmentedDirs(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	inPath := func(env []string) map[string]bool {
+		set := map[string]bool{}
+		for _, kv := range env {
+			if k, v, ok := strings.Cut(kv, "="); ok && strings.EqualFold(k, "PATH") {
+				for _, dir := range strings.Split(v, sep) {
+					if dir != "" {
+						set[dir] = true
+					}
+				}
+			}
+		}
+		return set
+	}
+
+	built := inPath(buildEnv(nil, Config{}))
+	for _, kv := range detect.AugmentedEnv() {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.EqualFold(k, "PATH") {
+			for _, dir := range strings.Split(v, sep) {
+				if dir != "" && !built[dir] {
+					t.Errorf("buildEnv PATH is missing augmented dir %q — a Node-based pi process would fail to find node under a GUI-launched minimal PATH", dir)
+				}
+			}
+		}
+	}
+}
 
 func TestBuildArgsUsesRPCMode(t *testing.T) {
 	args := buildArgs(Config{}, provider.SessionStartInput{})

@@ -312,6 +312,9 @@ export interface GitStatusFile {
 }
 
 export interface GitStatus {
+  /** False when the worktree directory exists but holds no git repository —
+   *  every other field is then empty and the panel offers to initialize one. */
+  repo: boolean
   branch: string
   upstream: string
   ahead: number
@@ -335,6 +338,11 @@ export interface GitDiff {
 
 export function fetchGitStatus(machine: Machine, worktreeId: string): Promise<GitStatus> {
   return machineRequest<GitStatus>(machine, 'GET', `/worktrees/${worktreeId}/git/status`)
+}
+
+/** `git init` at the worktree root. Fails with 400 if it is already a repo. */
+export function gitInit(machine: Machine, worktreeId: string): Promise<void> {
+  return machineRequest<void>(machine, 'POST', `/worktrees/${worktreeId}/git/init`)
 }
 
 export function fetchGitDiff(

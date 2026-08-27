@@ -1303,3 +1303,49 @@ func TestWorktreeFileServiceDownloadRejectsReservedPaths(t *testing.T) {
 		}
 	}
 }
+
+// sshmgr.WithSFTPClient's evict-and-redial is the only thing that recovers a
+// pooled SSH connection that died underneath the file browser, and it decides
+// whether to try by running errors.Is over what the operation returned
+// (sshmgr.isConnectionError). fileOperationError is the last hand EVERY remote
+// file operation's error passes through — so a version that flattens the cause
+// makes that recovery unreachable: the pool keeps handing back the same dead
+// *sftp.Client, every Retry fails identically, and the tree never comes back
+// while the terminal, which holds its own separate connection, keeps working.
+// That is exactly the "SSH dropped, folders gone, but my shell still works"
+// report this exists to prevent regressing.
+func TestFileOperationErrorKeepsTheCauseReachable(t *testing.T) {
+	for _, cause := range []error{io.EOF, io.ErrClosedPipe, context.DeadlineExceeded} {
+		err := fileOperationError("read folder", "Documents", cause)
+		if !errors.Is(err, cause) {
+			t.Fatalf("errors.Is(%v, %v) = false; the pool can no longer tell a dead connection from an ordinary SFTP failure", err, cause)
+		}
+	}
+
+	// The message is user-facing (handleStoreErr writes err.Error() straight
+	// into the API envelope), so preserving the cause must not start leaking
+	// transport internals into the UI.
+	msg := fileOperationError("read folder", "Documents", io.EOF).Error()
+	if msg != `read folder "Documents" failed` {
+		t.Fatalf("message = %q, want the unchanged user-facing text", msg)
+	}
+
+	// The root of an SSH connection is the empty relative path, which used to
+	// render as the literal `read folder "" failed` — a message naming no
+	// folder at all, on the one listing whose failure blanks the whole tree.
+	if msg := fileOperationError("read folder", "", io.EOF).Error(); msg != "read folder failed" {
+		t.Fatalf("root message = %q, want no empty quotes", msg)
+	}
+
+	// The two classified branches keep their sentinels AND must now also keep
+	// the cause, so a not-found that arrived over a half-dead connection is
+	// still recognisable as both.
+	notFound := fileOperationError("read folder", "Documents", os.ErrNotExist)
+	if !errors.Is(notFound, store.ErrNotFound) {
+		t.Fatal("a missing path must still map to store.ErrNotFound")
+	}
+	denied := fileOperationError("read folder", "Documents", os.ErrPermission)
+	if !errors.Is(denied, ErrValidation) {
+		t.Fatal("a permission failure must still map to ErrValidation")
+	}
+}

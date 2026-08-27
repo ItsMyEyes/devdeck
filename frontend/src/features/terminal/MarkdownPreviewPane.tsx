@@ -12,9 +12,14 @@ import type { FilesTarget } from './filesTarget'
  * the same path instead of only living in-line. Reuses the same
  * `useFileTarget` query the editor buffers do (`staleTime: 0`), so saving in
  * the editor tab refetches and updates this one too.
+ *
+ * `active` drives the same on-screen polling a file tab gets — a preview of a
+ * document an agent is currently writing is precisely a surface that should
+ * follow it. Read-only, so there is no draft to protect and no reconciliation
+ * to do: whatever the query holds is what renders.
  */
-export function MarkdownPreviewPane({ target, path }: { target: FilesTarget; path: string }) {
-  const file = useFileTarget(target, path)
+export function MarkdownPreviewPane({ target, path, active = true }: { target: FilesTarget; path: string; active?: boolean }) {
+  const file = useFileTarget(target, path, { live: active })
 
   if (file.isLoading) {
     return (

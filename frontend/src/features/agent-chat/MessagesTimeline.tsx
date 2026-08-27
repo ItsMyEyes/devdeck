@@ -10,11 +10,12 @@
  *
  * ── Layout ──
  * A transcript is a reading surface, so it is a single centred measure
- * (`max-w-3xl`) rather than the full pane width, and it is set in the UI
- * sans (Arial) at 14px — not in mono. Mono is for code, and it is still what
- * code blocks, tool arguments and the terminal use; running an agent's prose
- * through it was costing ~15% of the reading width in advance and made a
- * markdown reply indistinguishable from command output.
+ * (`max-w-3xl`) rather than the full pane width, and it is set in the UI sans
+ * (`--font-sans`, the platform's own interface face) at 14px — not in mono.
+ * Mono is for code, and it is still what code blocks, tool arguments and the
+ * terminal use; running an agent's prose through it was costing ~15% of the
+ * reading width in advance and made a markdown reply indistinguishable from
+ * command output.
  *
  * Only two shapes carry a bubble: the user's own turn (a right-aligned pill)
  * and an error (an alert). The agent's reply is plain text on the pane, which
@@ -29,24 +30,25 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle, ChevronRight, Copy, History, ImageOff, Info, Sparkles } from 'lucide-react'
+import { AlertTriangle, CheckIcon, ChevronRight, CircleQuestionMark, Copy, History, ImageOff, Info, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from '@/components/ai-elements/message'
 import { Reasoning, ReasoningContent, ReasoningTrigger, useReasoning } from '@/components/ai-elements/reasoning'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { CODE_FENCE_COMPONENTS } from '@/features/agent-chat/CollapsibleCodeBlock'
+import { InlineCodeText } from '@/features/agent-chat/InlineCodeText'
 import { Task, TaskCompactContent, TaskContent, TaskTrigger } from '@/components/ai-elements/task'
 import { CodeBlock } from '@/components/ai-elements/code-block'
 import { Tool, ToolCompactHeader, ToolContent } from '@/components/ai-elements/tool'
-import { entryCompletedAt, entryCreatedAt, messageRole, toolDisplayName, toolResultText, toolSummary, toolUIState, turnSpans, withHardBreaks } from '@/features/agent-chat/adapter'
+import { entryCompletedAt, entryCreatedAt, entryKey, messageRole, toolDisplayName, toolResultText, toolSummary, toolUIState, turnSpans, withHardBreaks } from '@/features/agent-chat/adapter'
 import { ProposedPlanCard } from '@/features/agent-chat/ProposedPlanCard'
 import { ChangedFilesCard } from '@/features/agent-chat/ChangedFilesCard'
 import { changedFilesOf } from '@/features/agent-chat/changedFiles'
-import { buildTimeline, collapseWorkLog, formatTurnEngine, formatTurnStamp, formatTurnTokens } from '@/features/agent-chat/timeline'
-import type { ReasoningEntry, TimelineEntry, ToolGroupEntry } from '@/features/agent-chat/timeline'
+import { buildTimeline, collapseWorkLog, formatTokens, formatTurnEngine, formatTurnStamp, formatTurnTokens } from '@/features/agent-chat/timeline'
+import type { ReasoningEntry, SubagentEntry, TimelineEntry, ToolGroupEntry } from '@/features/agent-chat/timeline'
 import { extractTrailingTerminalContexts } from '@/features/agent-chat/terminalContext'
 import type { TerminalContextEntry } from '@/features/agent-chat/terminalContext'
-import type { AgentThreadView, ChatItem } from '@/features/agent-chat/types'
+import type { AgentThreadView, ChatItem, SubagentRecord } from '@/features/agent-chat/types'
 import { fetchAgentAttachmentBlob } from '@/lib/machineApi'
 import type { Machine } from '@/store/types'
 
@@ -192,7 +194,9 @@ function ActivityGlyph({ children, className }: { children: ReactNode; className
  *  prose (which gets a paragraph break). See the gap comment in
  *  `MessagesTimeline` for why the transcript needs both. */
 function isWorkEntry(entry: TimelineEntry | undefined): boolean {
-  return entry?.kind === 'reasoning' || entry?.kind === 'tool-group'
+  // A subagent row is work, not prose: it belongs in the same activity column
+  // as reasoning and tool calls, and reads as part of the same block.
+  return entry?.kind === 'reasoning' || entry?.kind === 'tool-group' || entry?.kind === 'subagent'
 }
 
 /** Every `ChatItem` inside one turn's entry range, flattened back out of the
@@ -205,14 +209,13 @@ function turnItems(entries: TimelineEntry[], span: { firstEntryIndex: number; la
     const entry = entries[i]
     if (entry === undefined) continue
     if (entry.kind === 'tool-group') items.push(...entry.items)
+    // A subagent's tool calls count as the turn's work: it is the agent's
+    // EDITS the changed-files card is looking for, and delegating them does
+    // not make them somebody else's.
+    else if (entry.kind === 'subagent') items.push(...entry.items)
     else items.push(entry.item)
   }
   return items
-}
-
-function entryKey(entry: TimelineEntry, index: number): string {
-  if (entry.kind === 'tool-group') return entry.items[0]?.id ?? `tool-group-${index}`
-  return entry.item.id
 }
 
 /** An agent-reported failure. Deliberately not a `Message`: it is not part of
@@ -251,6 +254,81 @@ function NoticeRow({ item }: { item: ChatItem }) {
     >
       <Info size={14} className="mt-0.5 flex-none text-devdeck-wait" aria-hidden="true" />
       <span className="min-w-0 whitespace-pre-wrap">{item.text}</span>
+    </div>
+  )
+}
+
+/**
+ * An `AskUserQuestion` the operator answered — the question the agent asked and
+ * the option that was picked, kept in the thread.
+ *
+ * ── Why it is in the transcript at all ──
+ * The card that asks the question lives in the COMPOSER
+ * (`ComposerPendingUserInputPanel`) and closes the moment it is answered. So
+ * for as long as this row did not exist, the entire exchange left no trace:
+ * neither the question nor the choice appeared anywhere in the thread, the
+ * agent's next turn simply started acting on an answer nobody could see, and
+ * after a reload there was nothing at all. "I don't know what I picked" was a
+ * correct reading of the transcript.
+ *
+ * Styled as the composer card's quieter twin on purpose — same eyebrow, same
+ * accent check against the chosen option — so the record is recognisably the
+ * same object as the prompt it came from. The question itself is `--fg-2`
+ * (it is context now, not a decision) and only the ANSWER is `--fg`, which is
+ * the one thing a reader scanning back through the thread is looking for.
+ */
+function AnsweredQuestionRow({ item }: { item: ChatItem }) {
+  const questions = item.answeredQuestions ?? []
+  if (questions.length === 0) return null
+  const multi = questions.length > 1
+
+  return (
+    <div className="self-stretch rounded-container border border-devdeck-hairline bg-devdeck-raised px-3.5 py-3">
+      <div className="flex items-center gap-2">
+        <CircleQuestionMark className="size-3.5 flex-none text-devdeck-accent" aria-hidden="true" />
+        <span className="text-[10.5px] font-semibold tracking-[0.13em] text-devdeck-fg-2 uppercase">You answered</span>
+        {multi ? (
+          <span className="rounded-micro bg-devdeck-card px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-devdeck-fg-2">
+            {questions.length} questions
+          </span>
+        ) : null}
+      </div>
+      {questions.map((question, index) => (
+        <div
+          key={`${question.question}-${index}`}
+          className={cn('flex flex-col gap-1', index === 0 ? 'mt-2' : 'mt-2.5 border-t border-devdeck-hairline pt-2.5')}
+        >
+          {/* The agent's own short label for the question. Only when there is
+              more than one, where it is what tells two answers apart at a
+              glance; on a single question it would restate the sentence under
+              it. */}
+          {multi && question.header ? (
+            <span className="text-[10.5px] font-semibold tracking-[0.13em] text-devdeck-dim-pane uppercase">
+              {question.header}
+            </span>
+          ) : null}
+          <p className="text-[13px] leading-snug text-devdeck-fg-2">
+            <InlineCodeText text={question.question} />
+          </p>
+          <div className="mt-0.5 flex flex-col gap-1.5">
+            {question.chosen.map((label) => (
+              <div key={label} className="flex items-start gap-2">
+                <CheckIcon className="mt-[3px] size-3.5 flex-none text-devdeck-accent" aria-hidden="true" />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="text-[13px] leading-snug font-medium text-devdeck-fg">
+                    <InlineCodeText text={label} />
+                  </span>
+                  {question.descriptions?.[label] ? (
+                    <span className="text-[12px] leading-snug text-devdeck-fg-2">
+                      <InlineCodeText text={question.descriptions[label]} />
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -731,6 +809,130 @@ function ToolGroupRow({ entry, expanded, onToggle }: { entry: ToolGroupEntry; ex
   )
 }
 
+/** The dot colour for a subagent's state. In-flight states all present the
+ *  same way on purpose: a subagent that is queued, thinking or waiting is
+ *  still the fleet doing its job, and three shades of "not finished" is
+ *  detail the operator cannot act on. Only settled states differentiate. */
+const SUBAGENT_STATUS: Record<SubagentRecord['status'], { dot: string; label: string }> = {
+  running: { dot: 'bg-devdeck-wait', label: 'Working' },
+  completed: { dot: 'bg-devdeck-run', label: 'Completed' },
+  failed: { dot: 'bg-devdeck-err', label: 'Failed' },
+  stopped: { dot: 'bg-devdeck-dim-pane', label: 'Stopped' },
+}
+
+/** The dim trailing summary: `Working · 21.2k tokens · 3 tools`. */
+function subagentMeta(record: SubagentRecord): string {
+  const parts = [SUBAGENT_STATUS[record.status].label]
+  const tokens = record.usage?.totalTokens
+  if (tokens) parts.push(`${formatTokens(tokens)} tokens`)
+  const tools = record.usage?.toolUses
+  if (tools) parts.push(`${tools} ${tools === 1 ? 'tool' : 'tools'}`)
+  return parts.join(' · ')
+}
+
+/**
+ * One subagent: a single row in the parent's narrative, its whole transcript
+ * one click below.
+ *
+ * This row is the entire visible cost of a delegated job, however much work it
+ * does — the "quiet timeline" rule (see `SubagentEntry`). What it shows at rest
+ * is what the operator actually needs to decide whether to look: who is
+ * running, on what, how far along, and how much it has spent.
+ *
+ * The activity line under the title is deliberately the LAST progress
+ * description rather than a spinner: "Running Print CHARLIE" says the agent is
+ * alive AND what it is doing, where a spinner only says the first.
+ */
+function SubagentRow({
+  entry,
+  expanded,
+  onToggle,
+}: {
+  entry: SubagentEntry
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const { record, items } = entry
+  const status = SUBAGENT_STATUS[record.status]
+  const title = record.title || record.role || 'Subagent'
+  // The summary is the agent's report back to its parent and is the most
+  // useful line it ever produces, so once it lands it replaces the
+  // now-finished progress tick.
+  const activity = record.status === 'running' ? record.progress : record.summary
+  // Nothing to disclose while it is starting up and has produced neither
+  // interior work nor a report — the row says so rather than offering a
+  // chevron that expands to nothing.
+  const disclosable = items.length > 0 || !!record.summary
+
+  return (
+    <div className="flex w-full flex-col">
+      <Task open={expanded && disclosable} onOpenChange={onToggle} className="w-full">
+        <TaskTrigger title={`${title} — ${subagentMeta(record)}`}>
+          <button
+            type="button"
+            disabled={!disclosable}
+            className={cn(
+              ACTIVITY_ROW,
+              disclosable && ACTIVITY_ROW_INTERACTIVE,
+              'text-devdeck-fg-2',
+              disclosable && 'hover:text-devdeck-fg',
+              !disclosable && 'cursor-default',
+            )}
+          >
+            <ActivityGlyph>
+              {/* A steady dot, never a spinner: several of these can be live
+                  at once, and a row of animations is noise in a column meant
+                  to be glanced at. */}
+              <span aria-hidden="true" className={cn('size-1.5 rounded-full', status.dot)} />
+            </ActivityGlyph>
+            <span className="min-w-0 truncate">
+              <span className="text-devdeck-fg">{title}</span>
+              {record.role ? <span className="text-devdeck-dim-pane"> · {record.role}</span> : null}
+            </span>
+            {disclosable ? (
+              <ChevronRight
+                aria-hidden="true"
+                className={cn('size-3.5 flex-none transition-transform', expanded && 'rotate-90')}
+              />
+            ) : null}
+            <span className="flex-1" />
+            <span className="flex-none font-mono text-[11px] text-devdeck-dim-pane tabular-nums">
+              {subagentMeta(record)}
+            </span>
+          </button>
+        </TaskTrigger>
+        <TaskCompactContent>
+          {/* Indented and ruled, so a subagent's transcript reads as nested
+              inside the parent's rather than as more of it. */}
+          <div className={cn('flex flex-col border-l border-devdeck-hairline pl-2', ACTIVITY_GUTTER)}>
+            {items.map((item) =>
+              item.kind === 'tool' ? (
+                <ToolRow key={item.id} item={item} />
+              ) : (
+                <div key={item.id} className="chat-md px-1.5 py-1 text-[12.5px] text-devdeck-fg-2">
+                  {withHardBreaks(item.text)}
+                </div>
+              ),
+            )}
+            {record.summary ? (
+              <div className="mt-1 px-1.5 py-1 text-[12.5px] text-devdeck-fg-2">
+                <div className="mb-0.5 text-[10.5px] tracking-wide text-devdeck-dim-pane uppercase">Reported back</div>
+                {withHardBreaks(record.summary)}
+              </div>
+            ) : null}
+          </div>
+        </TaskCompactContent>
+      </Task>
+      {/* The activity line sits OUTSIDE the collapsible: it is the one thing
+          worth reading while the agent is still working, and hiding it behind
+          the fold would put the only sign of life where nobody is looking. */}
+      {activity && !expanded ? (
+        <div className={cn('truncate px-1.5 pb-1 text-[11.5px] text-devdeck-dim-pane', ACTIVITY_GUTTER)}>{activity}</div>
+      ) : null}
+    </div>
+  )
+}
+
 /**
  * `21:50:28 • 8s · 12.4k tokens · 38 tok/s`.
  *
@@ -1017,7 +1219,14 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
         // message's footer, so the copy button and the timings share one row.
         // A turn ending on a tool group or reasoning block has no footer to
         // join and keeps the stamp as a row of its own.
-        const inlineStamp = showStamp && entry.kind === 'message' && entry.item.kind !== 'error'
+        //
+        // Gated on the two kinds that actually render a `MessageRow` — not on
+        // "anything but an error", which silently DROPPED the stamp for every
+        // other bubble-less kind: it suppressed the standalone stamp row and
+        // then handed the stamp to a footer that was never rendered (notices,
+        // and now answered questions).
+        const inlineStamp =
+          showStamp && entry.kind === 'message' && (entry.item.kind === 'user' || entry.item.kind === 'assistant')
         const stampNode = showStamp ? (
           <TurnStamp
             startedAt={startedAt}
@@ -1042,6 +1251,8 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
               <ErrorRow item={entry.item} />
             ) : entry.item.kind === 'notice' ? (
               <NoticeRow item={entry.item} />
+            ) : entry.item.kind === 'question' ? (
+              <AnsweredQuestionRow item={entry.item} />
             ) : (
               <MessageRow
                 item={entry.item}
@@ -1055,6 +1266,9 @@ export function MessagesTimeline({ view, machine = NO_MACHINE }: MessagesTimelin
           node = <ReasoningRow entry={entry} streaming={view.status === 'running' && index === lastIndex} />
         } else if (entry.kind === 'plan') {
           node = <ProposedPlanCard markdown={entry.item.text} />
+        } else if (entry.kind === 'subagent') {
+          const agentKey = `subagent:${entry.record.id}`
+          node = <SubagentRow entry={entry} expanded={expanded.has(agentKey)} onToggle={() => toggle(agentKey)} />
         } else {
           const groupKey = `tool-group:${key}`
           node = <ToolGroupRow entry={entry} expanded={expanded.has(groupKey)} onToggle={() => toggle(groupKey)} />

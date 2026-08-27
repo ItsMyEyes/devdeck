@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"devdeck/backend/internal/agentcore/event"
@@ -50,6 +51,16 @@ type session struct {
 	// one json.Encoder without it — a corrupt NDJSON line the CLI can't
 	// parse, which takes the whole session down.
 	stdinMu sync.Mutex
+
+	// stopped is set by StopSession before it kills the process, so readLoop
+	// can tell a stop DevDeck asked for from the process dying on its own.
+	// Only the latter is reported as SessionExited: orchestration settles a
+	// deliberate stop itself (Reactor's EvtThreadSessionStopRequested case),
+	// and — the reason this exists — it also restarts a session in place to
+	// apply new start-time flags, where the old process's exit landing a
+	// moment after the new one's first turn would flip the thread to
+	// "stopped" under a turn that is running fine.
+	stopped atomic.Bool
 }
 
 // writeControlResponse is the one place this package writes a
@@ -189,6 +200,11 @@ func (a *adapter) Capabilities() provider.Capabilities {
 	}
 }
 
+// allowBypassPermissionsFlag is what makes provider.ModeFullAccess reachable
+// on a session that did not start in it. See its use in buildArgs for the
+// captured refusal it prevents.
+const allowBypassPermissionsFlag = "--allow-dangerously-skip-permissions"
+
 // buildArgs is the ONLY place RuntimeMode and InteractionMode are translated
 // into claude CLI flags — see gg/HANDOFF.md section 6, "RuntimeMode vs
 // InteractionMode". Every other function in this package stays mode-
@@ -219,6 +235,49 @@ func buildArgs(cfg Config, in provider.SessionStartInput) []string {
 		// tool call (system/permission_denied, dropped entirely pre-parser).
 		// This flag is what turns that into a real ask.
 		"--permission-prompt-tool", "stdio",
+	}
+
+	// Without this, a subagent is a black box: the CLI forwards its spawn and
+	// its final result and NOTHING in between, so a Task/Agent call that runs
+	// for ten minutes is ten minutes of a chat pane showing one motionless
+	// tool row. The flag's own help text is exact about what it buys —
+	// "Forward subagent text and thinking blocks as assistant/user messages
+	// with parent_tool_use_id set (only works with --print and
+	// --output-format=stream-json)" — and both of those conditions are
+	// already true above. Probed, never assumed: see
+	// supportsForwardSubagentText for why an unknown flag here would be an
+	// outage rather than a missing feature.
+	if supportsForwardSubagentText(cfg.BinaryName) {
+		args = append(args, forwardSubagentTextFlag)
+	}
+
+	// Unconditional, in every mode — including the modes that do not want
+	// bypass right now. The Permission pill is a LIVE control: whatever mode a
+	// session is spawned in, the operator can switch it to Full access a minute
+	// later, and the CLI decides whether that switch is even permitted from how
+	// the PROCESS was launched, not from what is asked at the time. Without this
+	// flag SetRuntimeMode's set_permission_mode comes back refused —
+	//
+	//	{"type":"control_response","response":{"subtype":"error","error":
+	//	 "Cannot set permission mode to bypassPermissions because the session
+	//	  was not launched with --dangerously-skip-permissions"}}
+	//
+	// — the process keeps enforcing the mode it started with, and the operator
+	// sits in front of a pill that reads "Full access" while every single Bash
+	// call still raises an approval card. That refusal was invisible on top of
+	// it: nothing here read control_response until parseControlResponse.
+	//
+	// It is the ALLOW flag, deliberately, not --dangerously-skip-permissions:
+	// this one "enable[s] bypassing all permission checks as an option, without
+	// it being enabled by default" (its own --help text). Live-verified against
+	// 2.1.247 — with it present and no --permission-mode, `system/init` still
+	// reports permissionMode "default", so a thread in approval-required is
+	// gated exactly as before and nothing is widened until the operator says so.
+	// Probed for the same reason --forward-subagent-text is (see
+	// supportsFlag): an older CLI exits 1 on an unknown option, which would
+	// trade one broken mode for every session on that machine.
+	if supportsFlag(cfg.BinaryName, allowBypassPermissionsFlag) {
+		args = append(args, allowBypassPermissionsFlag)
 	}
 
 	switch {
@@ -439,6 +498,20 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 		}
 	}
 
+	a.mu.Lock()
+	// Only if this is still the thread's session: after StopSession (or a
+	// restart, which is StopSession then StartSession) the map may already
+	// hold the replacement, and deleting that would orphan a live process.
+	if a.sessions[sess.threadID] == sess {
+		delete(a.sessions, sess.threadID)
+	}
+	a.mu.Unlock()
+
+	// A stop DevDeck asked for is not a death — see session.stopped.
+	if sess.stopped.Load() {
+		return
+	}
+
 	a.emit(event.Event{
 		Type:       event.SessionExited,
 		Provider:   string(Kind),
@@ -451,10 +524,6 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 			Detail:   detail,
 		},
 	})
-
-	a.mu.Lock()
-	delete(a.sessions, sess.threadID)
-	a.mu.Unlock()
 }
 
 // drainAutoDenies writes back a "deny" control_response for every
@@ -555,6 +624,28 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 // InterruptTurn asks the running process to stop the current turn via the
 // stream-json control channel. It is a best-effort request, not a kill —
 // StopSession is the hard stop.
+// Interrupting the TURN is not the whole of stopping the AGENT, and that gap
+// was a real bug: the CLI keeps a queue of user messages behind the running
+// turn, and `interrupt` alone aborts only the turn in flight. Live capture
+// against 2.1.241 (a second message sent while the first was streaming, then
+// an interrupt) shows the abort land — `aborted:true`, `[Request interrupted by
+// user]`, a `result` with `terminal_reason:"aborted_streaming"` — and then, 200
+// milliseconds later and with no further input, a fresh `system/init` and the
+// queued message running to completion. From the operator's seat the thread
+// genuinely stopped and then started again by itself.
+//
+// `cancel_queued` is the CLI's own answer, gated behind the
+// `interrupt_cancel_queued_v1` capability it announces on system/init. The same
+// capture with the flag set returns `{"still_queued":[],"cancelled":[]}` and
+// the session stays silent — no second turn. Sent only when the capability is
+// present so an older build keeps receiving the exact frame it has always
+// understood; a Stop that a strict schema rejected outright would be a far
+// worse failure than the one this fixes.
+//
+// The request_id is new too. It was always absent here (the CLI answers a
+// bare interrupt fine), but the control envelope documents request_id as the
+// key its control_response echoes, and without one the receipt cannot be
+// correlated to this request at all.
 func (a *adapter) InterruptTurn(ctx context.Context, threadID, turnID string) error {
 	a.mu.Lock()
 	sess, ok := a.sessions[threadID]
@@ -562,11 +653,16 @@ func (a *adapter) InterruptTurn(ctx context.Context, threadID, turnID string) er
 	if !ok {
 		return nil
 	}
+	request := map[string]any{"subtype": "interrupt"}
+	if sess.state.hasCapability(capInterruptCancelQueued) {
+		request["cancel_queued"] = true
+	}
 	sess.stdinMu.Lock()
 	defer sess.stdinMu.Unlock()
 	return sess.stdinEnc.Encode(map[string]any{
-		"type":    "control_request",
-		"request": map[string]any{"subtype": "interrupt"},
+		"type":       "control_request",
+		"request_id": newControlRequestID("interrupt-"),
+		"request":    request,
 	})
 }
 
@@ -744,6 +840,8 @@ func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	if !ok {
 		return nil
 	}
+	// Before cancel, so readLoop can never observe the exit first.
+	sess.stopped.Store(true)
 	sess.cancel()
 	return nil
 }

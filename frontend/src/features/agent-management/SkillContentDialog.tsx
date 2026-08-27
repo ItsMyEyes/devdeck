@@ -10,6 +10,7 @@ import {
 import { MonacoEditor } from '@/features/editor/MonacoEditor'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
+import { matchesBinding, useCommandChordLabel } from '@/features/keybindings/store'
 
 export function SkillContentDialog({
   open,
@@ -29,6 +30,7 @@ export function SkillContentDialog({
   const contentQuery = useAgentSkillContent(machine, agentId, skillName, open)
   const updateContent = useUpdateAgentSkillContent()
   const skillPath = `${skillName}/SKILL.md`
+  const saveShortcut = useCommandChordLabel('editor.save')
   const [draft, setDraft] = useState('')
   const [baseline, setBaseline] = useState('')
   const [initialized, setInitialized] = useState(false)
@@ -57,7 +59,7 @@ export function SkillContentDialog({
   useEffect(() => {
     if (!open) return
     function handleKeydown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (matchesBinding(event, 'editor.save')) {
         event.preventDefault()
         void handleSave()
       }
@@ -167,7 +169,7 @@ export function SkillContentDialog({
           size="sm"
           disabled={!dirty || readOnly || updateContent.isPending}
           onClick={() => void handleSave()}
-          title="Save SKILL.md (Ctrl+S)"
+          title={saveShortcut ? `Save SKILL.md (${saveShortcut})` : 'Save SKILL.md'}
         >
           {updateContent.isPending ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           {updateContent.isPending ? 'Saving…' : 'Save'}

@@ -427,3 +427,129 @@ func TestCloneGivesEachSnapshotAnIndependentProposedPlanField(t *testing.T) {
 		t.Fatalf("ProposedPlan = %+v, want nil on the snapshot after the turn starts", afterThread.ProposedPlan)
 	}
 }
+
+// Both mode commands come straight off a client socket. Before the decider
+// validated them, an unknown mode string was committed to the durable log and
+// replayed to every client as the thread's mode, while AllowsUnprompted
+// treated it as "ask for everything" — and the pill that sent it kept showing
+// what it sent. A rejection is an error frame, which is the signal the
+// composer's pills revert on.
+func TestModeSetRejectsUnknownModesAndMissingThreads(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+
+	cases := []struct {
+		name    string
+		typ     CommandType
+		thread  string
+		payload any
+		wantErr string
+	}{
+		{"unknown runtime mode", CmdThreadRuntimeModeSet, "w-abc", map[string]any{"mode": "yolo"}, "invalid runtime mode"},
+		{"empty runtime mode", CmdThreadRuntimeModeSet, "w-abc", map[string]any{}, "invalid runtime mode"},
+		{"unknown interaction mode", CmdThreadInteractionModeSet, "w-abc", map[string]any{"mode": "architect"}, "invalid interaction mode"},
+		{"runtime mode on a missing thread", CmdThreadRuntimeModeSet, "w-nope", map[string]any{"mode": "auto"}, "does not exist"},
+		{"interaction mode on a missing thread", CmdThreadInteractionModeSet, "w-nope", map[string]any{"mode": "plan"}, "does not exist"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decide(s, Command{
+				CommandID: "ac-x", Type: tc.typ, ThreadID: tc.thread, Payload: mustRaw(t, tc.payload),
+			}, 1000, seqIDs())
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	// Every real mode is still accepted.
+	for _, mode := range []provider.RuntimeMode{provider.ModeApprovalRequired, provider.ModeAutoAcceptEdits, provider.ModeAuto, provider.ModeFullAccess} {
+		if _, err := Decide(s, Command{
+			CommandID: "ac-ok", Type: CmdThreadRuntimeModeSet, ThreadID: "w-abc",
+			Payload: mustRaw(t, RuntimeModeSetPayload{Mode: mode}),
+		}, 1000, seqIDs()); err != nil {
+			t.Fatalf("mode %s rejected: %v", mode, err)
+		}
+	}
+}
+
+// Thread.Turns and Thread.Steered are what ensureSession's option-restart
+// rule reads: Turns says whether the provider has a conversation to resume,
+// Steered whether the latest turn joined one already in flight. Both must
+// come out of the projector identically on replay.
+func TestTurnStartCountsTurnsAndRecordsSteering(t *testing.T) {
+	s := createThread(t, NewState(), "w-abc")
+	turn := func(id string, at int64) {
+		t.Helper()
+		evts, err := Decide(s, Command{
+			CommandID: id, Type: CmdThreadTurnStart, ThreadID: "w-abc",
+			Payload: mustRaw(t, TurnStartPayload{Text: "go"}),
+		}, at, seqIDs())
+		if err != nil {
+			t.Fatalf("turn %s: %v", id, err)
+		}
+		s = Apply(s, evts)
+	}
+	settle := func(status ThreadStatus, at int64) {
+		t.Helper()
+		evts, err := Decide(s, Command{
+			CommandID: "ac-set-" + string(status), Type: CmdThreadSessionSet, ThreadID: "w-abc",
+			Payload: mustRaw(t, map[string]any{"status": string(status)}),
+		}, at, seqIDs())
+		if err != nil {
+			t.Fatalf("session set: %v", err)
+		}
+		s = Apply(s, evts)
+	}
+
+	// A fresh session announces itself as `running` (Ingestion's
+	// SessionStarted case) before any turn exists. That is not a turn in
+	// flight, and the first real turn after it must not read as steering —
+	// live, it did: the composer's first effort pick on a new thread was
+	// deferred with "options changed under a running turn".
+	settle(ThreadRunning, 1500)
+	th, _ := s.Thread("w-abc")
+	if th.TurnInFlight {
+		t.Fatalf("a session start must not count as a turn in flight")
+	}
+
+	turn("ac-t1", 2000)
+	th, _ = s.Thread("w-abc")
+	if th.Turns != 1 || th.Steered || !th.TurnInFlight {
+		t.Fatalf("after first turn: Turns=%d Steered=%v InFlight=%v, want 1/false/true", th.Turns, th.Steered, th.TurnInFlight)
+	}
+
+	// A second message while the first is still running is steering.
+	turn("ac-t2", 3000)
+	th, _ = s.Thread("w-abc")
+	if th.Turns != 2 || !th.Steered {
+		t.Fatalf("after steered turn: Turns=%d Steered=%v, want 2/true", th.Turns, th.Steered)
+	}
+
+	// Waiting on an approval still counts as in flight.
+	settle(ThreadWaiting, 3500)
+	turn("ac-t3", 4000)
+	th, _ = s.Thread("w-abc")
+	if !th.Steered {
+		t.Fatalf("a turn sent while waiting must be Steered")
+	}
+
+	// Once the thread settles, the next turn is a fresh one.
+	settle(ThreadIdle, 5000)
+	th, _ = s.Thread("w-abc")
+	if th.TurnInFlight {
+		t.Fatalf("idle must clear TurnInFlight")
+	}
+	turn("ac-t4", 6000)
+	th, _ = s.Thread("w-abc")
+	if th.Turns != 4 || th.Steered {
+		t.Fatalf("after idle: Turns=%d Steered=%v, want 4/false", th.Turns, th.Steered)
+	}
+
+	// A stop settles it too.
+	settle(ThreadStopped, 7000)
+	turn("ac-t5", 8000)
+	th, _ = s.Thread("w-abc")
+	if th.Steered {
+		t.Fatalf("a turn after a stop must not be Steered")
+	}
+}

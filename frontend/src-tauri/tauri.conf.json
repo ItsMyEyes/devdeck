@@ -26,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "externalBin": ["binaries/devdeck-server"],
     "icon": [
       "icons/32x32.png",
@@ -34,5 +35,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY5OUYxM0MyQUFCNzlCRjMKUldUem03ZXF3aE9mYVNFTVJJT1MxRUx0dEZEck1MMUdHOE1DRU01L1VmWlhkRnB6VFlVbU5zbXYK",
+      "endpoints": [
+        "https://github.com/ItsMyEyes/devdeck/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

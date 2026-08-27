@@ -168,3 +168,65 @@ func TestSubscribeReceivesCommittedEvents(t *testing.T) {
 		t.Fatal("published events must carry the committed Seq")
 	}
 }
+
+// A process restart destroys every in-flight agent turn along with the PTYs,
+// so "is it safe to restart?" has to count turns too — see decision D3 of
+// docs/superpowers/specs/2026-08-24-desktop-auto-update-design.md. Running (a
+// turn is in flight) and waiting (a turn is blocked on the operator) both lose
+// work; idle and stopped do not.
+func TestBusyThreadCountCountsRunningAndWaitingOnly(t *testing.T) {
+	initial := NewState()
+	initial.Threads = map[string]*Thread{
+		"w-run":     {ID: "w-run", Status: ThreadRunning},
+		"w-wait":    {ID: "w-wait", Status: ThreadWaiting},
+		"w-idle":    {ID: "w-idle", Status: ThreadIdle},
+		"w-stopped": {ID: "w-stopped", Status: ThreadStopped},
+		// Skipped even though its last status still reads running: a deleted
+		// thread has nothing left for a restart to lose.
+		"w-deleted": {ID: "w-deleted", Status: ThreadRunning, Deleted: true},
+	}
+	e := NewEngine(EngineOptions{Store: NewMemStore(), Initial: initial})
+
+	if got := e.BusyThreadCount(); got != 2 {
+		t.Errorf("BusyThreadCount() = %d, want 2 (one running + one waiting)", got)
+	}
+}
+
+func TestBusyThreadCountIsZeroForAnEmptyState(t *testing.T) {
+	e := NewEngine(EngineOptions{Store: NewMemStore(), Initial: NewState()})
+	if got := e.BusyThreadCount(); got != 0 {
+		t.Errorf("BusyThreadCount() = %d, want 0 for a state with no threads", got)
+	}
+}
+
+// The busy endpoint is constructed with whatever engine main.go has at that
+// point — possibly none. A nil engine reports zero instead of panicking,
+// mirroring terminal.ActiveSessionCount()'s nil-registry guard.
+func TestBusyThreadCountIsZeroForANilEngine(t *testing.T) {
+	var e *Engine
+	if got := e.BusyThreadCount(); got != 0 {
+		t.Errorf("BusyThreadCount() = %d, want 0 for a nil engine", got)
+	}
+}
+
+// The table-driven cases above pin the rule; this one pins it to the statuses
+// real commands actually produce, so a rename in the projector can't leave the
+// count silently reading a status nothing sets any more.
+func TestBusyThreadCountSeesALiveTurn(t *testing.T) {
+	e, _, cancel := newTestEngine(t)
+	defer cancel()
+
+	dispatchCreate(t, e, "w-abc")
+	if got := e.BusyThreadCount(); got != 0 {
+		t.Fatalf("BusyThreadCount() after create = %d, want 0 (idle)", got)
+	}
+	if _, err := e.Dispatch(context.Background(), Command{
+		CommandID: "ac-turn", Type: CmdThreadTurnStart, ThreadID: "w-abc",
+		Payload: mustRaw(t, TurnStartPayload{Text: "hello"}),
+	}); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if got := e.BusyThreadCount(); got != 1 {
+		t.Errorf("BusyThreadCount() during a turn = %d, want 1", got)
+	}
+}

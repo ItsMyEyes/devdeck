@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DevDeckLspTransport } from './lspTransport'
+import { DevDeckLspTransport, type LspStatus } from './lspTransport'
 
 /** Minimal WebSocket stand-in: records what was sent and lets a test push
  *  frames back. Mirrors the fake in lspTransport.test.ts. */
@@ -95,6 +95,48 @@ describe('DevDeckLspTransport after the socket is gone', () => {
     transport.close()
 
     await expect(transport.request('textDocument/definition', {})).resolves.toBeNull()
+  })
+
+  // Answering `null` keeps monaco unblocked, but it is indistinguishable from
+  // "the server looked and found nothing" — so a dead transport that still
+  // *reports* itself ready is a language server that has silently stopped
+  // working. Two things depend on the status being truthful here:
+  //
+  //  - `createLspSessionPool` retires a cached session by asking
+  //    `getStatus() === 'error'`. A dead-but-'ready' session is never retired,
+  //    so every file opened afterwards is handed the same corpse and the
+  //    worktree has no language support until the page is reloaded.
+  //  - `CodeFileEditor`'s status effect raises the "Language server
+  //    unavailable" toast off the same signal, so the operator is never told.
+  //
+  // Sockets die after `ready` routinely: gopls crashes on a large module, the
+  // hub restarts (every `tauri dev` rebuild), the laptop sleeps, a tunnel to a
+  // remote machine blips.
+  it('reports error once a socket that had reached ready dies', () => {
+    const socket = fakeSocket()
+    const transport = new DevDeckLspTransport(socket as unknown as WebSocket)
+    const seen: LspStatus[] = []
+    transport.onStatus((status) => seen.push(status))
+    ready(socket)
+    expect(transport.getStatus()).toBe('ready')
+
+    socket.close()
+
+    expect(transport.getStatus()).toBe('error')
+    expect(seen).toContain('error')
+  })
+
+  // DevDeck closing the transport itself is an orderly teardown (the pool's
+  // idle disposal, or the last editor releasing it), not a failure. Reporting
+  // 'error' there would fire a toast at an operator who simply closed a file.
+  it('stays ready when DevDeck closes the transport deliberately', () => {
+    const socket = fakeSocket()
+    const transport = new DevDeckLspTransport(socket as unknown as WebSocket)
+    ready(socket)
+
+    transport.close()
+
+    expect(transport.getStatus()).toBe('ready')
   })
 
   it('still sends normally while the socket is open', async () => {

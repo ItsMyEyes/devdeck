@@ -1,7 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Maximize2, MoreHorizontal, Pause, Play, Trash2 } from 'lucide-react'
-import { KIND, STATE } from '@/lib/constants'
-import { fmtCost } from '@/lib/format'
+import { STATE } from '@/lib/constants'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Worktree } from '@/store/types'
 import { Pill } from '@/components/ui/pill'
@@ -45,11 +44,10 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
   }
   const st = STATE[w.state]
   const label = worktreeLabel(project, w)
-  const tail = w.lines.slice(-2)
   const paused = w.state === 'stopped' || w.state === 'idle'
-  const baseLabel = w.root ? 'project root' : w.base || 'no base'
-  const changeSummary = `+${w.added} −${w.removed}`
-  const lastLine = tail[tail.length - 1]
+  /** Which tree the session runs in: the project's root tree for a root shell,
+   *  the branch worktree otherwise. */
+  const treeLabel = w.root ? project?.name || 'project root' : w.branch || 'worktree'
 
   function expand() {
     if (isTauri) openWorktreeTab(wsId, projectId, w.id)
@@ -81,11 +79,6 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10.5px] text-devdeck-fg-2">
               <span>{w.agent || 'shell'}</span>
               <span>{w.model || 'terminal'}</span>
-              <span>{baseLabel}</span>
-              <span>{changeSummary}</span>
-              <span>{w.files}f</span>
-              <span className="text-devdeck-run">{fmtCost(w.tokens)}</span>
-              {lastLine ? <span className="min-w-[120px] flex-1 truncate" style={{ color: KIND[lastLine.k] }}>{lastLine.t}</span> : null}
             </div>
           </div>
         </div>
@@ -122,7 +115,7 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
   }
 
   return (
-    <article className="group flex min-h-[150px] flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-accent">
+    <article className="group flex flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-accent">
       <div className="flex items-start gap-3 px-3 pb-2 pt-3">
         <div className="flex h-11 w-11 flex-none items-center justify-center rounded-control bg-devdeck-card-wash">
           <WorktreeGlyph root={w.root} size={15} />
@@ -140,8 +133,11 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
               {label}
             </button>
           </div>
-          <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-fg-2">
-            {w.agent || 'shell'} · {w.model || 'terminal'}
+          <div
+            className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-fg-2"
+            title={`${w.agent || 'shell'} · ${treeLabel}`}
+          >
+            {w.agent || 'shell'} · {w.model || 'terminal'} ·{' '}
           </div>
         </div>
 
@@ -157,20 +153,7 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 px-3">
-        <Pill color={st.color}>{st.label}</Pill>
-        <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
-          {baseLabel}
-        </span>
-        <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
-          {changeSummary}
-        </span>
-        <span className="rounded-md bg-devdeck-card-wash px-2 py-1 font-mono text-[10px] text-devdeck-fg-2">
-          {w.files} files
-        </span>
-      </div>
-
-      <div className="mx-3 my-2 h-px bg-devdeck-border" />
+      <div className="mx-3 mb-2 h-px bg-devdeck-border" />
 
       <div className="grid grid-cols-2 gap-2 px-3 pb-3">
         <button

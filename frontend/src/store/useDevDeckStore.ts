@@ -5,6 +5,8 @@ import { toast as sonnerToast } from 'sonner'
 import type { BrowserLoadError } from '@/features/browser/browserLoadError'
 import { clearDraft, setDraft } from '@/features/agent-chat/composerDrafts'
 import type { ComposerDraft } from '@/features/agent-chat/composerDrafts'
+import { setTurnOptions } from '@/features/agent-chat/composerTurnOptions'
+import type { ComposerTurnOptions } from '@/features/agent-chat/composerTurnOptions'
 import { emptyThreadView, reduceAgentEvents } from '@/features/agent-chat/eventReducer'
 import { addStashEntry, loadStash, removeStashEntryFrom, saveStash, takeStashEntryFrom } from '@/features/agent-chat/promptStash'
 import type { PromptStashEntry } from '@/features/agent-chat/promptStash'
@@ -388,6 +390,10 @@ interface DevDeckState {
    *  `ChatComposer.tsx`). Persisted through `partialize`; unbounded growth is
    *  guarded by `composerDrafts.ts`'s own `MAX_COMPOSER_DRAFTS` cap. */
   composerDrafts: Record<string, ComposerDraft>
+  /** Per-thread Reasoning / Context Window picks, keyed by `threadKey` —
+   *  only non-default values, see `composerTurnOptions.ts`. Persisted through
+   *  `partialize`, bounded by `MAX_COMPOSER_TURN_OPTIONS`. */
+  composerTurnOptions: Record<string, ComposerTurnOptions>
   /** Global, flat prompt-stash queue — deliberately NOT keyed by thread
    *  (moving a prompt to another thread is the point of the feature). Its own
    *  localStorage key (`promptStash.ts`'s `STASH_STORAGE_KEY`), deliberately
@@ -474,6 +480,9 @@ interface DevDeckState {
   setComposerDraft: (threadKey: string, text: string) => void
   /** Wraps `composerDrafts.ts`'s `clearDraft`. */
   clearComposerDraft: (threadKey: string) => void
+  /** Wraps `composerTurnOptions.ts`'s `setTurnOptions` — a pick back to the
+   *  default drops the field rather than storing it. */
+  setComposerTurnOptions: (threadKey: string, patch: { effort?: string; contextWindow?: string }) => void
   /** Wraps `promptStash.ts`'s `addStashEntry` + `saveStash`. Only commits the
    *  in-memory queue when `saveStash` returns `true` — a rejected write
    *  leaves `promptStash` exactly as it was, and `ok: false` tells the caller
@@ -711,6 +720,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       browserTiles: {},
       agentThreads: {},
       composerDrafts: {},
+      composerTurnOptions: {},
       // Hydrated once at module init from its own localStorage key — not
       // part of the persist middleware's blob (see the field's doc comment).
       promptStash: loadStash(),
@@ -878,6 +888,8 @@ export const useDevDeckStore = create<DevDeckState>()(
         set((s) => void (s.composerDrafts = setDraft(s.composerDrafts, threadKey, text, Date.now()))),
       clearComposerDraft: (threadKey) =>
         set((s) => void (s.composerDrafts = clearDraft(s.composerDrafts, threadKey))),
+      setComposerTurnOptions: (threadKey, patch) =>
+        set((s) => void (s.composerTurnOptions = setTurnOptions(s.composerTurnOptions, threadKey, patch, Date.now()))),
       stashPrompt: (text) => {
         const { entries, evicted } = addStashEntry(get().promptStash, text, () => new Date().toISOString())
         const ok = saveStash(entries)
@@ -1150,6 +1162,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         dbActiveConnectionId: s.dbActiveConnectionId,
         dbTabs: s.dbTabs,
         composerDrafts: s.composerDrafts,
+        composerTurnOptions: s.composerTurnOptions,
       }),
       // v2 -> v3 retires the flat `openTabs` shape for `workspaceTileLayouts`.
       // A bare version bump with no `migrate` discards the *entire*

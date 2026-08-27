@@ -18,7 +18,8 @@
     "tauri": "tauri",
     "tauri:dev": "cd .. && make sidecar-host && cd frontend && tauri dev",
     "tauri:dev-full": "cd .. && make sidecar-host && cd frontend && DEVDECK_TAURI_DEV_FULL=1 tauri dev --config src-tauri/tauri.dev-full.conf.json --no-dev-server",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:unsigned": "tauri build --no-sign"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -40,6 +41,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@tiptap/core": "^3.29.2",
     "@tiptap/extension-code-block": "^3.29.2",
     "@tiptap/extension-image": "^3.29.2",

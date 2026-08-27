@@ -6,6 +6,7 @@ import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { WorkspaceHostsView } from '@/features/agents/WorkspaceHostsView'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
 import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
+import { matchesBinding } from '@/features/keybindings/store'
 import { SSHShellPane } from '@/features/ssh/SSHShellPane'
 import { disposeSSHSession } from '@/features/ssh/sshTerminalRegistry'
 import { collectTerminalSessionKeys, deserializeLayout } from '@/features/terminal/paneTree'
@@ -186,60 +187,57 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     return { label: connection?.name ?? 'SSH' }
   }
 
-  // Cmd/Ctrl+T opens the workspace tab chooser outside a visible worktree
-  // terminal. Inside a worktree terminal, Cmd/Ctrl+T stays reserved for
-  // TerminalWorkspace's own "new terminal" tab, so Cmd/Ctrl+O opens the
-  // workspace tab chooser instead. Cmd/Ctrl+W closes the focused leaf's active
-  // tab, except visible worktree terminals handle their own pane tab strip.
-  // Cmd/Ctrl+1..4 selects the matching tab in the focused leaf (Agents is #1).
-  // Cmd+Shift+[ / Cmd+Shift+] cycle the focused leaf's own tab strip.
+  // The workspace half of the shortcut catalog (`features/keybindings`). The
+  // chords themselves live there and are rebindable from Settings ›
+  // Keybindings; what stays here is the *context* each one is subject to, which
+  // no binding table can express: `workspace.newTab` is ignored inside a
+  // visible worktree terminal because TerminalWorkspace claims that chord for
+  // its own shell tabs, so `workspace.newTabInTerminal` stands in there; and
+  // `workspace.closeTab` defers to the pane tab strip for the same reason.
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
-      const primary = event.metaKey || event.ctrlKey
-      if (!primary) return
       const leaf = findTileLeaf(layout.root, layout.focusedLeafId)
       if (!leaf || leaf.type !== 'leaf') return
 
       const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId)
       const inTerminalWorkspace = showContent && activeTab?.kind === 'worktree'
-      const key = event.key.toLowerCase()
 
-      // Cmd/Ctrl+K is the one chord that always means "open the palette",
-      // with no context rule at all — including inside a worktree terminal,
-      // where xterm is told to let it through via `isAppShortcut`.
-      if (key === 'k' && !event.altKey && !event.shiftKey) {
+      // The one chord with no context rule at all — it opens the palette from
+      // anywhere, including inside a worktree terminal, where xterm is told to
+      // let it through via `isAppShortcut`.
+      if (matchesBinding(event, 'workspace.commandPalette')) {
         event.preventDefault()
         handleNewTab(leaf.id)
         return
       }
 
-      if (!event.altKey && !event.shiftKey && /^[1-4]$/.test(event.key)) {
-        const nextTab = leaf.tabs[Number(event.key) - 1]
+      for (let index = 0; index < 4; index++) {
+        if (!matchesBinding(event, `workspace.selectTab${index + 1}`)) continue
+        const nextTab = leaf.tabs[index]
         if (!nextTab) return
         event.preventDefault()
         handleSelectTab(leaf.id, nextTab.id)
         return
       }
 
-      if ((key === 't' && !inTerminalWorkspace) || (key === 'o' && inTerminalWorkspace)) {
+      if (matchesBinding(event, inTerminalWorkspace ? 'workspace.newTabInTerminal' : 'workspace.newTab')) {
         event.preventDefault()
         handleNewTab(leaf.id)
         return
       }
 
-      if (key === 'w') {
+      if (matchesBinding(event, 'workspace.closeTab')) {
         if (leaf.activeTabId === 'agents') return
         event.preventDefault()
         if (!inTerminalWorkspace) handleCloseTab(leaf.id, leaf.activeTabId)
         return
       }
 
-      if (!event.metaKey) return
-
-      if (event.key === '[' || event.key === ']') {
+      const forward = matchesBinding(event, 'workspace.nextTab')
+      if (forward || matchesBinding(event, 'workspace.prevTab')) {
         event.preventDefault()
         const idx = leaf.tabs.findIndex((t) => t.id === leaf.activeTabId)
-        const delta = event.key === ']' ? 1 : -1
+        const delta = forward ? 1 : -1
         const nextTab = leaf.tabs[(idx + delta + leaf.tabs.length) % leaf.tabs.length]
         if (nextTab) handleSelectTab(leaf.id, nextTab.id)
       }

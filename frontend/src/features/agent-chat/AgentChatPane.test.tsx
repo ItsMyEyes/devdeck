@@ -41,7 +41,7 @@ afterEach(() => {
   // tests, same discipline `ChatComposer.test.tsx` already applies, so a
   // draft left behind by one connect-gate test (several share the same
   // `threadKey="w-abc"`) can't rehydrate into the next.
-  useDevDeckStore.setState({ composerDrafts: {}, promptStash: [] })
+  useDevDeckStore.setState({ composerDrafts: {}, composerTurnOptions: {}, promptStash: [] })
   localStorage.removeItem(STASH_STORAGE_KEY)
 })
 
@@ -450,12 +450,15 @@ describe('AgentChatPane', () => {
   // threads it into the composer, plus a handler that turns a resolved
   // `PlanFollowUpSubmission` (T8) into the two calls the design spec says
   // already exist — `setInteractionMode` then `sendTurn` — end-to-end
-  // through the real composer (not a mock), starting from clicking the
-  // Build pill to Plan the same way `ComposerControls.test.tsx` does.
+  // through the real composer (not a mock). The thread's interaction mode is
+  // THREAD state now (`AgentThreadView.interactionMode`, replayed from the
+  // event log — the Build/Plan pill is gone), so these seed it on the view,
+  // exactly as a `/plan` slash command echoed back by the engine would.
   describe('AgentChatPane — plan follow-up', () => {
-    function planThreadView() {
+    function planThreadView(interactionMode: 'default' | 'plan' = 'plan') {
       return {
         ...emptyThreadView(),
+        interactionMode,
         items: [{ id: 'plan-1', kind: 'plan', text: '# Ship it\n\n- step one', lastSequence: 0, createdAt: 1_700_000_000_000 }],
         status: 'idle',
       }
@@ -477,17 +480,11 @@ describe('AgentChatPane', () => {
       })
       render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
 
-      await userEvent.click(screen.getByRole('button', { name: 'Build' }))
-      await userEvent.click(await screen.findByRole('button', { name: 'Plan' }))
-
       await userEvent.click(await screen.findByRole('button', { name: /implement/i }))
 
       expect(setInteractionMode).toHaveBeenCalledWith('default')
-      expect(sendTurn).toHaveBeenCalledWith(
-        'PLEASE IMPLEMENT THIS PLAN:\n# Ship it\n\n- step one',
-        { options: { effort: 'high', contextWindow: '200k' } },
-        [],
-      )
+      // Defaults ride nothing: an untouched picker sends no ModelSelection.
+      expect(sendTurn).toHaveBeenCalledWith('PLEASE IMPLEMENT THIS PLAN:\n# Ship it\n\n- step one', undefined, [])
     })
 
     it('Refine submits the typed draft and leaves interaction mode at plan', async () => {
@@ -506,26 +503,18 @@ describe('AgentChatPane', () => {
       })
       render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
 
-      await userEvent.click(screen.getByRole('button', { name: 'Build' }))
-      await userEvent.click(await screen.findByRole('button', { name: 'Plan' }))
-      // The toggle above is the one legitimate call — entering plan mode in
-      // the first place. Cleared so the assertion below is only about what
-      // Refine itself does.
-      expect(setInteractionMode).toHaveBeenCalledTimes(1)
-      setInteractionMode.mockClear()
-
       fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { getData: () => 'make it shorter' } })
       await userEvent.click(await screen.findByRole('button', { name: /refine/i }))
 
-      expect(sendTurn).toHaveBeenCalledWith('make it shorter', { options: { effort: 'high', contextWindow: '200k' } }, [])
+      expect(sendTurn).toHaveBeenCalledWith('make it shorter', undefined, [])
       // Mode was already 'plan' — a "leave it alone" follow-up must not
       // dispatch a redundant thread.interaction-mode.set.
       expect(setInteractionMode).not.toHaveBeenCalled()
     })
 
-    it('shows the Plan Ready banner once a plan is on the table and the composer is in plan mode', async () => {
-      mockSocket.mockReturnValue({
-        view: planThreadView(),
+    it('shows the Plan Ready banner once a plan is on the table and the thread is in plan mode', async () => {
+      const socket = {
+        view: planThreadView('default'),
         status: 'open',
         sendTurn: vi.fn(),
         abortTurn: vi.fn(),
@@ -534,15 +523,103 @@ describe('AgentChatPane', () => {
         respondToUserInput: vi.fn(),
         respondToApproval: vi.fn(),
         clearError: vi.fn(),
-      })
-      render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+      }
+      mockSocket.mockReturnValue(socket)
+      const { rerender } = render(
+        <AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />,
+      )
 
       expect(screen.queryByText('Plan Ready')).not.toBeInTheDocument()
 
-      await userEvent.click(screen.getByRole('button', { name: 'Build' }))
-      await userEvent.click(await screen.findByRole('button', { name: 'Plan' }))
+      // The engine echoes a `thread.interaction-mode-set` (from `/plan`,
+      // another pane, wherever) — the view moves and the banner follows.
+      mockSocket.mockReturnValue({ ...socket, view: planThreadView('plan') })
+      rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
 
       expect(await screen.findByText('Plan Ready')).toBeInTheDocument()
+    })
+  })
+
+  // The Permission pill shows the THREAD's mode, not a per-mount default.
+  // Before this it was `useState('approval-required')` in the pane, so every
+  // tab/pane switch showed a full-access thread as "Approval required".
+  describe('AgentChatPane — modes come from the thread', () => {
+    it('renders the permission pill from view.runtimeMode', () => {
+      mockSocket.mockReturnValue({
+        view: { ...emptyThreadView(), runtimeMode: 'full-access' }, status: 'open',
+        sendTurn: vi.fn(), abortTurn: vi.fn(),
+        setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
+      })
+      render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+      expect(screen.getByRole('button', { name: 'Full access' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Approval required' })).not.toBeInTheDocument()
+    })
+
+    it('dispatches the picked mode and keeps showing it until the thread answers', async () => {
+      const setRuntimeMode = vi.fn()
+      mockSocket.mockReturnValue({
+        view: emptyThreadView(), status: 'open',
+        sendTurn: vi.fn(), abortTurn: vi.fn(),
+        setRuntimeMode, setInteractionMode: vi.fn(),
+      })
+      render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Approval required' }))
+      await userEvent.click(await screen.findByRole('button', { name: /^Full access/ }))
+
+      expect(setRuntimeMode).toHaveBeenCalledWith('full-access')
+      expect(screen.getByRole('button', { name: 'Full access' })).toBeInTheDocument()
+    })
+  })
+
+  // Effort and context window are remembered PER THREAD across a remount.
+  // Held as component state they reset to "High · 200k" on every tab or pane
+  // switch while the live session kept running under the old pick.
+  describe('AgentChatPane — effort and context window survive a remount', () => {
+    function socketFor(sendTurn = vi.fn()) {
+      return {
+        view: emptyThreadView(), status: 'open',
+        sendTurn, abortTurn: vi.fn(),
+        setRuntimeMode: vi.fn(), setInteractionMode: vi.fn(),
+      }
+    }
+
+    it('reads the pick back after unmounting and mounting the same thread', async () => {
+      mockSocket.mockReturnValue(socketFor())
+      const first = render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'High · 200k' }))
+      await userEvent.click(await screen.findByRole('button', { name: 'Low' }))
+      expect(screen.getByRole('button', { name: 'Low · 200k' })).toBeInTheDocument()
+
+      first.unmount()
+
+      const sendTurn = vi.fn()
+      mockSocket.mockReturnValue(socketFor(sendTurn))
+      render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+      expect(screen.getByRole('button', { name: 'Low · 200k' })).toBeInTheDocument()
+
+      // And it is what the next turn carries.
+      await userEvent.type(screen.getByRole('textbox'), 'go{Enter}')
+      expect(sendTurn).toHaveBeenCalledWith('go', { options: { effort: 'low' } }, [])
+    })
+
+    it('keeps the pick per thread, not per pane', async () => {
+      mockSocket.mockReturnValue(socketFor())
+      const { rerender } = render(
+        <AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />,
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'High · 200k' }))
+      await userEvent.click(await screen.findByRole('button', { name: '1M' }))
+      expect(screen.getByRole('button', { name: 'High · 1M' })).toBeInTheDocument()
+
+      // Another thread in the same pane: back to the defaults.
+      rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc::chat-2" machine={machine} />)
+      expect(screen.getByRole('button', { name: 'High · 200k' })).toBeInTheDocument()
+
+      // And back again: the first thread's pick is still there.
+      rerender(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+      expect(screen.getByRole('button', { name: 'High · 1M' })).toBeInTheDocument()
     })
   })
 
@@ -583,11 +660,15 @@ describe('AgentChatPane', () => {
   })
 })
 
-// `turnModel` (this file's private helper that builds the turn's
-// ModelSelection) has no export to unit-test directly — these exercise it the
-// way it is actually reached, by sending a turn through the real composer.
+// `turnModel` builds the turn's ModelSelection — these exercise it the way it
+// is actually reached, by sending a turn through the real composer.
 describe('AgentChatPane — turnModel', () => {
-  it("sends the picker's defaults on an untouched composer", async () => {
+  // Defaults ride NOTHING. "Default" on the picker means "let the CLI
+  // decide", and the backend applies options by restarting the thread's
+  // session whenever they differ from the ones it was launched with — an
+  // explicit default would force that restart on every fresh thread's first
+  // turn for no change at all.
+  it('sends no ModelSelection on an untouched composer', async () => {
     const sendTurn = vi.fn()
     mockSocket.mockReturnValue({
       view: emptyThreadView(), status: 'open',
@@ -598,7 +679,7 @@ describe('AgentChatPane — turnModel', () => {
 
     await userEvent.type(screen.getByRole('textbox'), 'hi{Enter}')
 
-    expect(sendTurn).toHaveBeenCalledWith('hi', { options: { effort: 'high', contextWindow: '200k' } }, [])
+    expect(sendTurn).toHaveBeenCalledWith('hi', undefined, [])
   })
 
   // Ultrathink has no --effort value of its own (verified against `claude
@@ -617,7 +698,7 @@ describe('AgentChatPane — turnModel', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Ultrathink' }))
     await userEvent.type(screen.getByRole('textbox'), 'go{Enter}')
 
-    expect(sendTurn).toHaveBeenCalledWith('go', { options: { effort: 'max', contextWindow: '200k' } }, [])
+    expect(sendTurn).toHaveBeenCalledWith('go', { options: { effort: 'max' } }, [])
   })
 
   it('carries a picked context window onto the turn', async () => {
@@ -633,7 +714,7 @@ describe('AgentChatPane — turnModel', () => {
     await userEvent.click(await screen.findByRole('button', { name: '1M' }))
     await userEvent.type(screen.getByRole('textbox'), 'go{Enter}')
 
-    expect(sendTurn).toHaveBeenCalledWith('go', { options: { effort: 'high', contextWindow: '1M' } }, [])
+    expect(sendTurn).toHaveBeenCalledWith('go', { options: { contextWindow: '1M' } }, [])
   })
 })
 
@@ -711,6 +792,29 @@ describe('AgentChatPane — connect gate', () => {
     // Still no matching row in the (unchanged) mocked query result — only the
     // "has sent this session" flag can be keeping the gate open now.
     expect(mockAgentThreads).toHaveBeenCalled()
+    expect(capturedSocketOpts?.connect).toBe(true)
+  })
+
+  // A mode pick is a deliberate act on the thread and must open the gate
+  // the same way a send does. Left in the draft state it only ever reached
+  // the socket's in-memory outbox, so a reload (or a pane switch) before the
+  // first message dropped it — live, "Full access" picked on a fresh thread
+  // was back to "Approval required" after a reload.
+  it('opens the connect gate when a runtime mode is picked on a draft thread', async () => {
+    mockAgentThreads.mockReturnValue({ data: [], isPending: false, isLoading: false, isError: false })
+    const setRuntimeMode = vi.fn()
+    mockSocket.mockReturnValue({
+      view: emptyThreadView(), status: 'draft',
+      sendTurn: vi.fn(), abortTurn: vi.fn(),
+      setRuntimeMode, setInteractionMode: vi.fn(),
+    })
+    render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    expect(capturedSocketOpts?.connect).toBe(false)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Approval required' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Full access/ }))
+
+    expect(setRuntimeMode).toHaveBeenCalledWith('full-access')
     expect(capturedSocketOpts?.connect).toBe(true)
   })
 
@@ -798,11 +902,7 @@ describe('AgentChatPane — attachments', () => {
 
     await userEvent.type(screen.getByRole('textbox'), 'go{Enter}')
 
-    expect(sendTurn).toHaveBeenCalledWith(
-      'go',
-      { options: { effort: 'high', contextWindow: '200k' } },
-      [{ id: 'att-1', kind: 'image', mime: 'image/png', name: 'shot.png' }],
-    )
+    expect(sendTurn).toHaveBeenCalledWith('go', undefined, [{ id: 'att-1', kind: 'image', mime: 'image/png', name: 'shot.png' }])
   })
 })
 
@@ -901,11 +1001,7 @@ describe('AgentChatPane — model pill restore', () => {
 
     await userEvent.type(screen.getByRole('textbox'), 'hi{Enter}')
 
-    expect(sendTurn).toHaveBeenCalledWith(
-      'hi',
-      { instanceId: 'pi:default', model: 'anthropic/claude-sonnet-5', options: { effort: 'high', contextWindow: '200k' } },
-      [],
-    )
+    expect(sendTurn).toHaveBeenCalledWith('hi', { instanceId: 'pi:default', model: 'anthropic/claude-sonnet-5' }, [])
   })
 
   // `threadKey` changes IN PLACE here — neither call site keys this component

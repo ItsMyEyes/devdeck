@@ -14,9 +14,11 @@
     "allow-browser-tiles",
     "allow-hub-mode",
     "allow-diagnostics",
+    "allow-prepare-for-update",
     "process:allow-restart",
     "dialog:allow-save",
     "fs:allow-write-file",
+    "updater:default",
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "$APPLOG/*" }]

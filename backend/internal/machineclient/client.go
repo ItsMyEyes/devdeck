@@ -165,6 +165,13 @@ func Version(ctx context.Context, m domain.Machine) (json.RawMessage, error) {
 	return selfJSON(ctx, m, http.MethodGet, "version", requestTimeout)
 }
 
+// Busy reads a machine's live restart cost — how many terminals and agent
+// runs are open on it — from its /api/self/busy. Network-free on the target
+// (it counts in-memory state), so it shares Version's short timeout.
+func Busy(ctx context.Context, m domain.Machine) (json.RawMessage, error) {
+	return selfJSON(ctx, m, http.MethodGet, "busy", requestTimeout)
+}
+
 // UpdateCheck asks a machine to check GitHub for a newer release. The machine
 // answers 200 with an "error" field when the check itself failed, so a
 // non-error return here does not mean the check succeeded.

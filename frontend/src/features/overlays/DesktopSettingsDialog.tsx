@@ -11,6 +11,7 @@ import {
   EyeOff,
   Info,
   KeyRound,
+  Keyboard,
   Palette,
   Radio,
   ScrollText,
@@ -31,6 +32,8 @@ import { changeHub, openLogFile } from '@/features/desktop/desktopBridge'
 import { useMachines, useTailscaleStatus } from '@/features/data/queries'
 import { useCompletionsConfig, useUpdateCompletionsConfig } from '@/features/editor/useCompletionsConfig'
 import { useVsCodeMode } from '@/features/editor/useVsCodeMode'
+import { useAutoSaveSetting } from '@/features/editor/useAutoSaveSetting'
+import { KeybindingsSection } from '@/features/keybindings/KeybindingsSection'
 import { MemoryLocalPanel } from '@/features/memory/MemoryLocalPanel'
 import { useMemoryConfig, useTestMemoryConnection, useUpdateMemoryConfig } from '@/features/memory/useMemory'
 import { AppearanceSetting } from '@/features/theme/AppearanceSetting'
@@ -50,6 +53,7 @@ type SectionId =
   | 'published'
   | 'appearance'
   | 'editor'
+  | 'keybindings'
   | 'completions'
   | 'memory'
   | 'diagnostics'
@@ -81,6 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'appearance', label: 'Appearance', icon: Palette },
       { id: 'editor', label: 'Editor', icon: Code2 },
+      { id: 'keybindings', label: 'Keybindings', icon: Keyboard },
       { id: 'completions', label: 'Completions', icon: Sparkles },
       { id: 'memory', label: 'Memory', icon: BrainCog },
       { id: 'diagnostics', label: 'Diagnostics', icon: ScrollText },
@@ -113,6 +118,10 @@ const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
   editor: {
     title: 'Editor',
     subtitle: 'Chrome and rendering preferences for the code editor.',
+  },
+  keybindings: {
+    title: 'Keybindings',
+    subtitle: 'Every keyboard shortcut the app claims, and what each one is bound to.',
   },
   completions: {
     title: 'Completions',
@@ -199,6 +208,7 @@ export function DesktopSettingsDialog() {
   const [keyRevealed, setKeyRevealed] = useState(false)
   const [section, setSection] = useState<SectionId>('general')
   const [vscodeMode, setVsCodeModeEnabled] = useVsCodeMode()
+  const [autoSave, setAutoSaveEnabled] = useAutoSaveSetting()
   const { data: completionsConfig } = useCompletionsConfig()
   const updateCompletions = useUpdateCompletionsConfig()
   const [apiKeyDraft, setApiKeyDraft] = useState('')
@@ -455,29 +465,67 @@ export function DesktopSettingsDialog() {
             )}
 
             {section === 'editor' && (
-              <SectionHeadRow
-                label="Editor"
-                title="VS Code mode"
-                description="Full IDE chrome - minimap, breadcrumbs, sticky scroll, folding and bracket guides. When off, the editor stays minimal: line numbers and syntax only."
-                action={
-                  <Switch.Root
-                    checked={vscodeMode}
-                    onCheckedChange={setVsCodeModeEnabled}
-                    aria-label="VS Code mode"
-                    className={cn(
-                      'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
-                    )}
-                  >
-                    <Switch.Thumb
+              <>
+                <SectionHeadRow
+                  label="Editor"
+                  title="VS Code mode"
+                  description="Full IDE chrome - minimap, breadcrumbs, sticky scroll, folding and bracket guides. When off, the editor stays minimal: line numbers and syntax only."
+                  action={
+                    <Switch.Root
+                      checked={vscodeMode}
+                      onCheckedChange={setVsCodeModeEnabled}
+                      aria-label="VS Code mode"
                       className={cn(
-                        'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
-                        'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                        'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
                       )}
-                    />
-                  </Switch.Root>
-                }
-              />
+                    >
+                      <Switch.Thumb
+                        className={cn(
+                          'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                          'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                        )}
+                      />
+                    </Switch.Root>
+                  }
+                />
+                <Divider />
+                <SectionHeadRow
+                  label="Saving"
+                  title="Auto-save"
+                  description="Writes a file tab shortly after you stop typing, and immediately when the tab goes to the back, the app loses focus, or the tab closes. Never writes over a file something else changed while you had unsaved edits - that still waits for you. When off, files only reach disk on Ctrl+S or the close prompt."
+                  action={
+                    <Switch.Root
+                      checked={autoSave}
+                      onCheckedChange={setAutoSaveEnabled}
+                      aria-label="Auto-save"
+                      className={cn(
+                        'relative inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full bg-devdeck-card-wash transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[checked]:bg-devdeck-run',
+                      )}
+                    >
+                      <Switch.Thumb
+                        className={cn(
+                          'pointer-events-none block h-3.5 w-3.5 translate-x-1 rounded-full bg-devdeck-fg-2 transition-transform duration-150',
+                          'data-[checked]:translate-x-[18px] data-[checked]:bg-devdeck-accent-ink',
+                        )}
+                      />
+                    </Switch.Root>
+                  }
+                />
+              </>
+            )}
+
+            {section === 'keybindings' && (
+              <>
+                <SectionHeadRow
+                  label="Shortcuts"
+                  title="Keyboard shortcuts"
+                  description="Rebind any command by pressing the keys you want. A shortcut can hold more than one chord, and clearing them all leaves the command unbound."
+                />
+                <Divider />
+                <KeybindingsSection />
+              </>
             )}
 
             {section === 'completions' && (

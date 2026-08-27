@@ -478,3 +478,65 @@ func TestPostMachineUpdateSurfacesTheRuntimesRefusal(t *testing.T) {
 		t.Errorf("body = %s, want the runtime's own reason", rec.Body.String())
 	}
 }
+
+// Mirrors TestPostMachineRestartCallsTheMachinesSelfRestart: the assertion
+// that matters is the PATH the target receives, since that is the whole
+// contract of a proxy route.
+func TestGetMachineBusyHitsTheRuntimesBusy(t *testing.T) {
+	var gotPath, gotMethod string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.Write([]byte(`{"terminals":3,"agentRuns":1}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("builder", backend.URL, "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/busy", h.GetMachineBusy)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/busy", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/self/busy" {
+		t.Errorf("backend received %s %s, want GET /api/self/busy", gotMethod, gotPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"agentRuns":1`) || !strings.Contains(rec.Body.String(), `"terminals":3`) {
+		t.Errorf("body = %s, want the runtime's JSON forwarded verbatim", rec.Body.String())
+	}
+}
+
+func TestGetMachineBusySurfacesUnreachable(t *testing.T) {
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("dead", "http://127.0.0.1:1", "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/busy", h.GetMachineBusy)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/busy", nil))
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 for an unreachable machine", rec.Code)
+	}
+}
+
+// An unknown id is a 404 from handleStoreErr, not a 502 — the hub knows the
+// machine does not exist without asking anyone.
+func TestGetMachineBusy404sForAnUnknownMachine(t *testing.T) {
+	h := newTestMachineHandler(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/busy", h.GetMachineBusy)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/m-nope/busy", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for an unknown machine", rec.Code)
+	}
+}

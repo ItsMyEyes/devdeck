@@ -48,9 +48,9 @@ export interface BuiltInSlashCommand {
   mode: InteractionMode
 }
 
-// Icon: Hammer for both — the same icon ComposerControls.tsx's own
-// interaction-mode pill already uses (`Pill icon={Hammer}`), no new icon
-// vocabulary introduced for two rows.
+// Icon: Hammer for both — the glyph the (since removed) interaction-mode pill
+// in ComposerControls.tsx used; these two rows are now the only way to switch
+// Build/Plan from the composer, so the vocabulary lives on here.
 export const BUILT_IN_COMMANDS: BuiltInSlashCommand[] = [
   { id: 'plan', label: '/plan', description: 'Switch this thread to Plan mode', keywords: ['plan'], mode: 'plan' },
   {

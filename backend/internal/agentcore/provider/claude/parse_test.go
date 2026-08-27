@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -680,5 +681,45 @@ func TestAGenuinelyUnknownMessageTypeStillWarns(t *testing.T) {
 	evts := parseLine([]byte(`{"type":"some_future_frame"}`), st)
 	if len(evts) != 1 || evts[0].Type != event.RuntimeWarning {
 		t.Fatalf("want one RuntimeWarning, got %+v", evts)
+	}
+}
+
+// A control_response the CLI answers with subtype "error" is a REFUSAL of
+// something DevDeck asked for, and it used to be dropped whole along with the
+// successful acks. That is how the Permission pill and the live process came
+// to disagree in silence: switching a thread to full access on a session that
+// was not launched with the unlock flag is refused right here, and the only
+// evidence anyone ever saw was that the approval cards never stopped.
+func TestControlResponseErrorIsSurfacedAsAWarning(t *testing.T) {
+	st := newParseState("w-abc", "claude:default")
+	const refusal = "Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions"
+	evts := parseLine([]byte(`{"type":"control_response","response":{"subtype":"error","request_id":"setmode-1","error":`+
+		strconv.Quote(refusal)+`}}`), st)
+
+	if len(evts) != 1 || evts[0].Type != event.RuntimeWarning {
+		t.Fatalf("events = %+v, want exactly one runtime.warning", evts)
+	}
+	p, ok := evts[0].Payload.(*event.WarningPayload)
+	if !ok {
+		t.Fatalf("payload = %T, want *event.WarningPayload", evts[0].Payload)
+	}
+	if !strings.Contains(p.Message, refusal) {
+		t.Fatalf("warning = %q, must carry the CLI's own reason", p.Message)
+	}
+}
+
+// The successful ack is the common case (every set_model, set_permission_mode
+// and interrupt receipt answers one) and must stay silent — a notice on each
+// would bury the turn, which is exactly why the whole shape was ignored before.
+func TestControlResponseSuccessStaysSilent(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"control_response","response":{"subtype":"success","request_id":"setmode-1","response":{"mode":"bypassPermissions"}}}`,
+		`{"type":"control_response","response":{"subtype":"success"}}`,
+		`{"type":"control_response"}`,
+	} {
+		st := newParseState("w-abc", "claude:default")
+		if evts := parseLine([]byte(line), st); len(evts) != 0 {
+			t.Fatalf("line %s produced %+v, want no events", line, evts)
+		}
 	}
 }

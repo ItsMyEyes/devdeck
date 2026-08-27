@@ -43,7 +43,7 @@ func (r *LocalRegistry) ListAgents() ([]domain.AgentSummary, error) {
 }
 
 // GetAgent returns the full agent definition enriched with local data.
-// Locally-detected skills fully replace static ones; models are merged.
+// Locally-detected skills and models fully replace the static ones.
 func (r *LocalRegistry) GetAgent(agentID string) (*domain.Agent, error) {
 	agent, err := r.inner.GetAgent(agentID)
 	if err != nil {
@@ -61,14 +61,25 @@ func (r *LocalRegistry) GetAgent(agentID string) (*domain.Agent, error) {
 			markSkillsReadOnly(agent.Skills)
 		}
 		if localModels := detect.ReadModels(agentID); localModels != nil {
-			agent.Models = mergeModels(localModels, agent.Models)
+			agent.Models = localModels
 		}
 	}
 	return agent, nil
 }
 
-// ListModels returns models for an agent, merging locally-detected models
-// with the static registry's catalog.
+// ListModels returns the models an installed agent actually offers, read from
+// that agent's own config or CLI (detect.ReadModels), and falls back to the
+// static catalog only when there is nothing local to read.
+//
+// The local list REPLACES the static one rather than merging with it — the
+// same rule ListSkills has always followed, and it had to change here for the
+// same reason. Merging meant the picker showed the real models next to a
+// hardcoded list that had gone stale without anyone noticing: claude's static
+// entries still topped out at opus 4.8 with no opus 5 anywhere, and opencode's
+// two entries ("claude-sonnet-5", "gpt-5") are not ids opencode can resolve at
+// all, since it addresses models as "provider/model". Picking one of those
+// silently ran the agent's default instead. A model the installed agent does
+// not offer must not be offerable.
 func (r *LocalRegistry) ListModels(agentID string) ([]domain.Model, error) {
 	staticModels, err := r.inner.ListModels(agentID)
 	if err != nil {
@@ -82,7 +93,7 @@ func (r *LocalRegistry) ListModels(agentID string) ([]domain.Model, error) {
 	if localModels == nil {
 		return staticModels, nil
 	}
-	return mergeModels(localModels, staticModels), nil
+	return localModels, nil
 }
 
 // ListSkills returns skills for an agent, preferring locally-detected data.
@@ -220,23 +231,16 @@ func (r *LocalRegistry) SetSettingsFile(agentID string, content string) error {
 	if !r.installed[agentID] {
 		return port.ErrAgentManagementUnsupported
 	}
-	return detect.WriteSettingsFile(agentID, content)
-}
-
-// mergeModels prepends local models not already in the static list.
-func mergeModels(local, static []domain.Model) []domain.Model {
-	staticIDs := make(map[string]bool, len(static))
-	for _, m := range static {
-		staticIDs[m.ID] = true
+	if err := detect.WriteSettingsFile(agentID, content); err != nil {
+		return err
 	}
-	out := make([]domain.Model, 0, len(local)+len(static))
-	for _, m := range local {
-		if !staticIDs[m.ID] {
-			out = append(out, m)
-		}
-	}
-	out = append(out, static...)
-	return out
+	// The settings file the operator just rewrote is one of the inputs
+	// detect.ReadModels reads (codex's config.toml carries the model this
+	// machine runs), and that read is cached for minutes. Without this, an
+	// operator who edits their config and reopens the picker sees the list
+	// from before the edit and has no way to tell it is stale.
+	detect.ResetModelCache()
+	return nil
 }
 
 // Ensure LocalRegistry implements port.AgentRegistry.

@@ -122,6 +122,55 @@ func ToMarkdownV2(src string) string {
 	return strings.Join(out, "\n")
 }
 
+// fenceTracker answers "does the prose buffered so far end INSIDE a fenced
+// code block?" for the pump's progressive flush.
+//
+// It matters because ToMarkdownV2 above tracks fence parity per MESSAGE. Cut a
+// block in half and the second message starts with that parity inverted: its
+// code lines come out prose-escaped ("x \:= a \* b") and the prose after the
+// closing fence comes out wrapped in a code block. A patch or a shell snippet
+// delivered like that cannot even be copied.
+//
+// Incremental — it remembers how much of the buffer it has already counted —
+// because a code block is thousands of one-token delta events, and re-reading a
+// growing buffer once per delta is quadratic in the length of the turn.
+type fenceTracker struct {
+	open    bool
+	scanned int
+}
+
+// endsInsideFence advances over whatever was appended since the last call and
+// reports whether s now ends inside a fence. s must only ever GROW between
+// calls; reset() is what a caller uses when the buffer is emptied.
+func (f *fenceTracker) endsInsideFence(s string) bool {
+	for f.scanned < len(s) {
+		nl := strings.IndexByte(s[f.scanned:], '\n')
+		if nl < 0 {
+			break
+		}
+		if strings.HasPrefix(strings.TrimSpace(s[f.scanned:f.scanned+nl]), "```") {
+			f.open = !f.open
+		}
+		f.scanned += nl + 1
+	}
+	if f.open {
+		return true
+	}
+	// The final line has not ended yet, and a fence marker arrives one token at
+	// a time ("`", then "``", then "```"). Flushing there would cut the opening
+	// fence off the block it opens — ToMarkdownV2 then has nothing to close, and
+	// the whole block renders as prose in the next message.
+	tail := strings.TrimSpace(s[f.scanned:])
+	return tail != "" && (strings.HasPrefix(tail, "```") || strings.HasPrefix("```", tail))
+}
+
+// reset returns the tracker to "empty buffer", for a caller that has just
+// flushed. The flushed message closed any open fence of its own, so the next
+// buffer starts outside one.
+func (f *fenceTracker) reset() {
+	f.open, f.scanned = false, 0
+}
+
 // convertBlockLine maps one line's BLOCK-level markdown onto something
 // Telegram has. Telegram supports none of headings, lists or horizontal
 // rules, so each becomes the nearest thing it does support.

@@ -83,7 +83,16 @@ func (Driver) Probe(ctx context.Context, cfg provider.Config) (provider.Snapshot
 
 	vctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(vctx, bin, "--version").Output()
+	// Run `pi --version` with an augmented PATH. pi ships as a Node script
+	// (`#!/usr/bin/env node`), so the probe exec needs `node` resolvable at run
+	// time — not just the `pi` shim, which ResolveBinary already finds via its
+	// fallback dirs. A GUI-launched backend (the desktop app) inherits a minimal
+	// PATH without the nvm/volta/etc. node dir, so this exec failed there and Pi
+	// silently vanished from the model picker while showing fine in a
+	// terminal-launched dev build. detect.AugmentedEnv adds exactly those dirs.
+	cmd := exec.CommandContext(vctx, bin, "--version")
+	cmd.Env = detect.AugmentedEnv()
+	out, err := cmd.Output()
 	if err != nil {
 		return provider.Snapshot{
 			Kind:       Kind,

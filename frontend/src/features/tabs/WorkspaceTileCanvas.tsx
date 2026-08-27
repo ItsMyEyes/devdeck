@@ -10,6 +10,7 @@ import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
+import { useCommandChordLabel } from '@/features/keybindings/store'
 
 /** A split's children never shrink below this fraction of the split's axis while dragging a divider. */
 const MIN_PANE_SIZE = 0.08
@@ -128,9 +129,11 @@ function TabDot({ active, focused, loading = false }: { active: boolean; focused
   )
 }
 
-function primaryShortcutLabel(index: number): string {
-  const isApple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-  return isApple ? `⌘${index}` : `Ctrl+${index}`
+/** Live label for the `workspace.selectTab<n>` binding behind this strip
+ *  position, so the hint follows a rebind instead of asserting a chord the
+ *  registry no longer holds. Empty when the command is unbound. */
+function usePrimaryShortcutLabel(index: number): string {
+  return useCommandChordLabel(`workspace.selectTab${index}`)
 }
 
 function clamp01(value: number): number {
@@ -334,7 +337,8 @@ export function TileTabButton({
 
   // Numeric shortcuts are scoped to the focused leaf, so only advertise
   // them on the strip they currently control.
-  const shortcut = shortcutNumber && focused ? primaryShortcutLabel(shortcutNumber) : null
+  const shortcutLabel = usePrimaryShortcutLabel(shortcutNumber ?? 0)
+  const shortcut = shortcutNumber && focused && shortcutLabel ? shortcutLabel : null
   const selectButtonClass =
     'flex min-w-0 flex-1 items-center gap-1.5 rounded-control focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60'
 

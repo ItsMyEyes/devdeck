@@ -11,6 +11,7 @@ import { MachineDialog } from '@/features/machines/MachineDialog'
 import { RuntimePinDialog } from '@/features/machines/RuntimePinDialog'
 import { SSHConnectionDialog } from '@/features/ssh/SSHConnectionDialog'
 import { RenameSSHGroupDialog } from '@/features/ssh/RenameSSHGroupDialog'
+import { UpdateBanner } from '@/features/updates/UpdateBanner'
 import { useThemeSync } from '@/features/theme/useTheme'
 
 /** All portal-rendered overlays, driven by the store's UI state. */
@@ -28,6 +29,9 @@ export function GlobalOverlays() {
       <ConfirmDeleteDialog />
       <ConfirmMachineActionDialog />
       <TransferStatusPanel />
+      {/* Renders nothing outside the desktop shell, and nothing inside it
+          until an update has been downloaded and staged. */}
+      <UpdateBanner />
       <DesktopSettingsDialog />
       <MachineDialog />
       <RuntimePinDialog />

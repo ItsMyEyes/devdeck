@@ -3,6 +3,7 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,22 +44,45 @@ import (
 // event may well exist for longer replies. This parser therefore emits the
 // text it is given and does not depend on deltas arriving; if a delta type
 // shows up it will surface as an unknown-event warning, which is the signal to
-// come back and map it. The same live capture that found permission.v2.asked
-// also surfaced `session.next.tool.called` / `tool.input.started` /
-// `tool.input.ended` / `tool.success` on a turn that actually ran a shell
-// command — none of which this file maps yet, so every OpenCode tool call
-// currently renders as an unknown-event warning rather than a transcript tool
-// row. Out of scope for the permission-hang fix; tracked as a known gap, not
-// fixed here.
+// come back and map it.
+//
+// The `session.next.tool.*` family is mapped here as of 2026-08-27 (verified
+// against a live `opencode serve` 1.18.18 plus its own /doc OpenAPI); the
+// subagent half of it — the `task` tool and the child session it spawns —
+// lives in subagent.go.
 
 type parseState struct {
 	threadID   string
 	sessionID  string
 	instanceID provider.InstanceID
 
+	// agentID is the SUBAGENT grouping key stamped onto every event this state
+	// produces; empty for a parent conversation. A child session gets its own
+	// parseState (see subagent.go's newChildParseState) precisely so this can
+	// be a fixed field rather than something each call site has to remember —
+	// a payload that forgot to carry it would leak a subagent's row into the
+	// main transcript.
+	agentID string
+
+	// depth is 0 for the parent conversation and 1 for a subagent of it, so a
+	// spawn from this state reports depth+1. opencode refuses to nest past its
+	// own `subagent_depth` (default 1), but it counts the parentID chain
+	// rather than announcing a depth, so this package has to carry its own.
+	depth int
+
+	// pinTurn freezes turnID. Set on a child session's state: its own
+	// assistant message ids are not the parent's turn, and letting them
+	// through setTurnID would repoint every subsequent parent event at a turn
+	// the orchestrator has never heard of.
+	pinTurn bool
+
 	mu     sync.Mutex
 	turnID string
 	seq    map[event.StreamKind]uint64
+
+	// spawns are the `task` tool calls still waiting to be matched to the
+	// child session opencode creates for them — see subagent.go.
+	spawns []*taskSpawn
 }
 
 func newParseState(threadID, sessionID string, instanceID provider.InstanceID) *parseState {
@@ -73,6 +97,9 @@ func newParseState(threadID, sessionID string, instanceID provider.InstanceID) *
 func (st *parseState) setTurnID(id string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.pinTurn {
+		return
+	}
 	if id != "" && st.turnID != id {
 		st.turnID = id
 		st.seq = map[event.StreamKind]uint64{}
@@ -99,6 +126,7 @@ func (st *parseState) envelope(typ event.Type) event.Event {
 		InstanceID: string(st.instanceID),
 		ThreadID:   st.threadID,
 		TurnID:     st.currentTurn(),
+		AgentID:    st.agentID,
 		CreatedAt:  time.Now().UTC(),
 	}
 }
@@ -154,6 +182,85 @@ type stepEnded struct {
 			Write int64 `json:"write"`
 		} `json:"cache"`
 	} `json:"tokens"`
+}
+
+// toolEvent is the union of the `data` carried by the session.next.tool.*
+// family (field names verified against the running server's own /doc OpenAPI,
+// 1.18.18, and against live frames). No single member carries every field —
+// `tool`+`input` are on tool.called, `content`+`structured` on
+// tool.progress/tool.success, `error` on tool.failed — but `callID` and
+// `assistantMessageID` are on all of them, which is all the correlation this
+// file needs.
+type toolEvent struct {
+	AssistantMessageID string          `json:"assistantMessageID"`
+	CallID             string          `json:"callID"`
+	Tool               string          `json:"tool"`
+	Input              json.RawMessage `json:"input"`
+	Content            []toolContent   `json:"content"`
+	Error              struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type toolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// text flattens the tool's textual output. `content` is a LLMToolContent
+// union of text and FILE parts; only the text ones have anything a transcript
+// can render, and a file part's bytes must never be inlined into an event.
+func (t toolEvent) text() string {
+	var b strings.Builder
+	for _, c := range t.Content {
+		if c.Type == "text" {
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
+}
+
+// toolDetail is this package's ItemStarted/ItemCompleted Detail shape for a
+// tool_call item, deliberately identical to pi's so the client renders an
+// OpenCode tool row with the same code path as every other provider's.
+type toolDetail struct {
+	ToolCallID string          `json:"toolCallId"`
+	Name       string          `json:"name,omitempty"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Result     string          `json:"result,omitempty"`
+	Error      string          `json:"error,omitempty"`
+}
+
+// toolCallStarted opens a transcript row for a tool call. Note this fires on
+// `tool.called`, not on `tool.input.started`: the input arrives whole and
+// already parsed here, whereas the input.* trio streams the raw JSON of the
+// arguments a fragment at a time, and rendering half-written JSON as a tool
+// row's detail is worse than showing the row a few milliseconds later.
+func (st *parseState) toolCallStarted(d toolEvent) []event.Event {
+	e := st.envelope(event.ItemStarted)
+	e.ItemID = d.CallID
+	var args json.RawMessage
+	if json.Valid(d.Input) {
+		args = d.Input
+	}
+	detail, _ := json.Marshal(toolDetail{ToolCallID: d.CallID, Name: d.Tool, Args: args})
+	e.Payload = &event.ItemStartedPayload{ItemType: event.ItemToolCall, Title: d.Tool, Detail: detail}
+	return []event.Event{e}
+}
+
+// toolCallEnded closes the row toolCallStarted opened. `tool` is absent from
+// the success/failed frames, so the name is not repeated here — the client
+// already has it from the ItemStarted sharing this ItemID.
+func (st *parseState) toolCallEnded(d toolEvent, status string) []event.Event {
+	e := st.envelope(event.ItemCompleted)
+	e.ItemID = d.CallID
+	detail, _ := json.Marshal(toolDetail{
+		ToolCallID: d.CallID,
+		Result:     d.text(),
+		Error:      d.Error.Message,
+	})
+	e.Payload = &event.ItemCompletedPayload{ItemType: event.ItemToolCall, Status: status, Detail: detail}
+	return []event.Event{e}
 }
 
 // parseEvent turns one SSE payload into zero or more canonical events.
@@ -246,6 +353,63 @@ func parseEvent(line []byte, st *parseState) []event.Event {
 		completed := st.envelope(event.TurnCompleted)
 		completed.Payload = &event.TurnCompletedPayload{Status: "failed"}
 		return append(out, completed)
+
+	case "session.next.tool.called":
+		var d toolEvent
+		_ = json.Unmarshal(ev.Data, &d)
+		st.setTurnID(d.AssistantMessageID)
+		if d.Tool == taskToolName {
+			return st.taskSpawned(d)
+		}
+		return st.toolCallStarted(d)
+
+	case "session.next.tool.progress":
+		var d toolEvent
+		_ = json.Unmarshal(ev.Data, &d)
+		if sp := st.peekSpawn(d.CallID); sp != nil {
+			return st.taskProgressed(sp)
+		}
+		// A non-task tool's mid-flight output. There is no canonical
+		// "item updated" payload to carry it (event.ToolProgress has no
+		// registered payload, so the client could not decode one), and the
+		// whole output arrives again on tool.success — so this is dropped
+		// rather than half-modelled. Same stance as pi's parser takes for a
+		// non-subagent tool_execution_update.
+		return nil
+
+	case "session.next.tool.success":
+		var d toolEvent
+		_ = json.Unmarshal(ev.Data, &d)
+		st.setTurnID(d.AssistantMessageID)
+		out := st.toolCallEnded(d, "completed")
+		if sp := st.takeSpawn(d.CallID); sp != nil {
+			out = append(out, st.taskFinished(sp, event.TaskStatusCompleted, d.text())...)
+		}
+		return out
+
+	case "session.next.tool.failed":
+		var d toolEvent
+		_ = json.Unmarshal(ev.Data, &d)
+		st.setTurnID(d.AssistantMessageID)
+		out := st.toolCallEnded(d, "failed")
+		if sp := st.takeSpawn(d.CallID); sp != nil {
+			out = append(out, st.taskFinished(sp, taskStatusFrom(true, d.Error.Message), d.Error.Message)...)
+		}
+		return out
+
+	case
+		// The raw JSON of a tool call's arguments, streamed a fragment at a
+		// time before `tool.called` delivers the same arguments whole and
+		// parsed. Deliberately ignored — see toolCallStarted.
+		"session.next.tool.input.started", "session.next.tool.input.delta",
+		"session.next.tool.input.ended",
+		// Which PRIMARY agent the session runs as (build/plan/…), switched by
+		// POST /api/session/{id}/agent. Despite the name it is NOT a subagent
+		// signal — a subagent is a child session (see subagent.go) — and
+		// DevDeck has no canonical event for a mode change, so it is noted and
+		// dropped rather than surfaced as a transcript row.
+		"session.next.agent.switched":
+		return nil
 
 	case "session.error":
 		// Belt and braces: `session.error` was NOT observed in the live
@@ -369,11 +533,31 @@ func parseGlobalEvent(line []byte, st *parseState) []event.Event {
 		// has — see adapter.go's RespondToRequest).
 		return nil
 
+	case "session.created":
+		// Handled upstream by adapter.go's dispatchGlobalEvent, which is the
+		// only layer that can act on it: `info.parentID` names a SUBAGENT's
+		// child session, and registering that link needs the adapter's session
+		// map, not a parser. Silent here so the parent's own creation frame —
+		// which every session produces — does not warn.
+		return nil
+
 	default:
 		// server.connected/server.heartbeat and any global-bus event this
-		// file has not mapped yet — silence for the two known-benign ones,
-		// a warning otherwise so a new global event type doesn't rot unseen.
+		// file has not mapped yet — silence for the known-benign ones, a
+		// warning otherwise so a new global event type doesn't rot unseen.
 		if ev.Type == "server.connected" || ev.Type == "server.heartbeat" {
+			return nil
+		}
+		// The global bus is a superset of the per-session one: every
+		// `session.next.*` frame appears on BOTH (verified live, 2026-08-27).
+		// parseEvent already handles them off the per-session subscription, so
+		// re-parsing here would double every transcript row — and before this
+		// case existed the default below turned each one into a second,
+		// duplicate "unrecognized" warning, which is what made an OpenCode
+		// turn look like a wall of parser errors. A CHILD session's frames are
+		// the exception and never reach this function; dispatchGlobalEvent
+		// re-homes them through parseChildEvent instead.
+		if strings.HasPrefix(ev.Type, "session.next.") {
 			return nil
 		}
 		return warning(st, fmt.Sprintf("unrecognized opencode global event %q", ev.Type), line, ev.Type)

@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"devdeck/backend/internal/agentcore/event"
@@ -37,6 +37,11 @@ type session struct {
 	// whether a switch is needed at all.
 	model  string
 	stderr *boundedBuffer
+	// stopped mirrors claude/adapter.go's session.stopped: set by StopSession
+	// before the kill, so readLoop reports SessionExited only for a process
+	// that died on its own — never for a stop (or an in-place restart for new
+	// start-time flags) that orchestration asked for and settles itself.
+	stopped atomic.Bool
 }
 
 const stderrCaptureBytes = 8 << 10
@@ -189,10 +194,16 @@ func mergedSessionEnv(instance, session map[string]string) map[string]string {
 	return out
 }
 
-// buildEnv mirrors claude/adapter.go's identical function.
+// buildEnv mirrors claude/adapter.go's function, with one deliberate
+// divergence: it starts from detect.AugmentedEnv() rather than os.Environ().
+// pi is a Node script, so a spawned `pi --mode rpc` process must find `node`
+// on PATH — and a GUI-launched backend's inherited PATH does not include the
+// nvm/volta node dir (the same reason Probe augments its --version exec). Using
+// the bare parent env here would let Pi pass its probe yet fail every session
+// spawn with `env: node: No such file or directory`. See detect.AugmentedEnv.
 func buildEnv(overrides map[string]string, cfg Config) []string {
 	merged := make(map[string]string, len(overrides)+1)
-	for _, kv := range os.Environ() {
+	for _, kv := range detect.AugmentedEnv() {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			merged[k] = v
 		}
@@ -306,6 +317,19 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 		}
 	}
 
+	a.mu.Lock()
+	// Only if this is still the thread's session — after a restart the map
+	// already holds the replacement process.
+	if a.sessions[sess.threadID] == sess {
+		delete(a.sessions, sess.threadID)
+	}
+	a.mu.Unlock()
+
+	// A stop DevDeck asked for is not a death — see session.stopped.
+	if sess.stopped.Load() {
+		return
+	}
+
 	a.emit(event.Event{
 		Type:       event.SessionExited,
 		Provider:   string(Kind),
@@ -318,10 +342,6 @@ func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 			Detail:   detail,
 		},
 	})
-
-	a.mu.Lock()
-	delete(a.sessions, sess.threadID)
-	a.mu.Unlock()
 }
 
 // SendTurn writes one user turn as a `prompt` command. Mirrors
@@ -451,6 +471,8 @@ func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	if !ok {
 		return nil
 	}
+	// Before cancel, so readLoop can never observe the exit first.
+	sess.stopped.Store(true)
 	sess.cancel()
 	return nil
 }

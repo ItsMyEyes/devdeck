@@ -65,19 +65,26 @@ type adapter struct {
 	mu         sync.Mutex
 	sessions   map[string]*session // DevDeck threadID -> session
 	byOpencode map[string]*session // OpenCode sessionID -> session
+	// childStates maps a SUBAGENT's child sessionID onto the parse state its
+	// frames are read with — see subagent.go's newChildParseState. A child
+	// session is created by the server, never by StartSession, so it has no
+	// entry in byOpencode and its frames used to be dropped as "another
+	// instance's traffic", losing the subagent's whole transcript.
+	childStates map[string]*parseState
 
 	readers sync.WaitGroup
 }
 
 func newAdapter(ctx context.Context, id provider.InstanceID, cfg Config, env map[string]string) *adapter {
 	a := &adapter{
-		instanceID: id,
-		cfg:        cfg,
-		env:        env,
-		ctx:        ctx,
-		events:     make(chan event.Event, eventBufferSize),
-		sessions:   map[string]*session{},
-		byOpencode: map[string]*session{},
+		instanceID:  id,
+		cfg:         cfg,
+		env:         env,
+		ctx:         ctx,
+		events:      make(chan event.Event, eventBufferSize),
+		sessions:    map[string]*session{},
+		byOpencode:  map[string]*session{},
+		childStates: map[string]*parseState{},
 		// No global timeout: the SSE subscription is a long-lived request and
 		// a client timeout would cut every turn short. Per-request deadlines
 		// come from the caller's context instead.
@@ -408,15 +415,58 @@ func (a *adapter) dispatchGlobalEvent(payload []byte) {
 	}
 	var ids struct {
 		SessionID string `json:"sessionID"`
+		Type      string `json:"type"`
+		Info      struct {
+			ID       string `json:"id"`
+			ParentID string `json:"parentID"`
+		} `json:"info"`
 	}
 	_ = json.Unmarshal(probe.Data, &ids)
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(payload, &envelope)
+
+	// A SUBAGENT announcing itself. `info.parentID` is the only link opencode
+	// ever draws between a child session and the parent that spawned it — the
+	// parent's own stream never names the child — so this is where the two
+	// halves are joined. Without it the child's entire turn arrives under a
+	// sessionID nothing owns and is dropped below.
+	if envelope.Type == "session.created" && ids.Info.ParentID != "" && ids.Info.ID != "" {
+		a.mu.Lock()
+		parent := a.byOpencode[ids.Info.ParentID]
+		a.mu.Unlock()
+		if parent != nil {
+			if sp := parent.state.bindChildSession(ids.Info.ID); sp != nil {
+				child := newChildParseState(parent.state, ids.Info.ID, sp)
+				a.mu.Lock()
+				a.childStates[ids.Info.ID] = child
+				a.mu.Unlock()
+			}
+		}
+		return
+	}
+
 	if ids.SessionID == "" {
 		return
 	}
 
 	a.mu.Lock()
 	s := a.byOpencode[ids.SessionID]
+	child := a.childStates[ids.SessionID]
 	a.mu.Unlock()
+
+	// A child session's frames are the subagent's own work: parsed with its
+	// dedicated state (which stamps AgentID on everything it produces) and
+	// through parseChildEvent, which drops the child's turn lifecycle so a
+	// finishing subagent cannot settle the parent thread to idle underneath a
+	// turn that is still running.
+	if s == nil && child != nil {
+		for _, e := range parseChildEvent(probe.Data, child) {
+			a.emit(e)
+		}
+		return
+	}
 	if s == nil {
 		return
 	}

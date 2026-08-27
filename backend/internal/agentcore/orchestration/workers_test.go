@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -468,5 +469,147 @@ func TestUserInputRequestedForwardsActivityBeforeStatus(t *testing.T) {
 	}
 	if !carried {
 		t.Fatalf("the questions payload did not reach the client; store = %+v", store.All())
+	}
+}
+
+// ── Subagent attribution ────────────────────────────────────────────────────
+
+// ContentDelta is the ONE event Ingestion does not forward whole: it re-packs
+// it into the narrow AssistantDeltaPayload (and may buffer it first). So the
+// subagent attribution has to be copied across by hand at two points, and a
+// miss at either one delivers a subagent's narration as the parent talking.
+func TestIngestionCarriesSubagentAttributionThroughTheDeltaPath(t *testing.T) {
+	deltaAgentIDs := func(t *testing.T, buffered bool) []string {
+		t.Helper()
+		store := NewMemStore()
+		n := 0
+		e := NewEngine(EngineOptions{
+			Store: store, Now: func() int64 { return 1000 }, QueueSize: 16,
+			NewID: func() string { n++; return fmt.Sprintf("ae-%d", n) },
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go e.Run(ctx)
+
+		if _, err := e.Dispatch(ctx, Command{
+			CommandID: "ac-create", Type: CmdThreadCreate, ThreadID: "w-abc",
+			Payload: json.RawMessage(`{"instanceId":"stub:1"}`),
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		a := &stubAdapter{ch: make(chan event.Event, 8)}
+		m := 0
+		in := NewIngestion(e, approval.NoopBroker{}, func() string { m++; return fmt.Sprintf("ac-in-%d", m) })
+		if buffered {
+			// A big budget, so the delta is genuinely HELD and only reaches
+			// the store through flushThread — the path that rebuilds a bare
+			// event from the buffer's own fields.
+			in.Delivery = DeliveryPolicy{Buffered: true, MaxChars: 1 << 20}
+		}
+		go in.Consume(ctx, a)
+
+		a.ch <- event.Event{
+			Type: event.ContentDelta, ThreadID: "w-abc", TurnID: "t1", ItemID: "child-1",
+			AgentID: "toolu_spawn_1",
+			Payload: &event.ContentDeltaPayload{
+				ItemType: event.ItemAssistantMessage, Stream: event.StreamText,
+				Text: "I'll run the three commands.", Sequence: 1,
+			},
+		}
+		if buffered {
+			// Only a turn boundary empties the buffer.
+			a.ch <- event.Event{
+				Type: event.TurnCompleted, ThreadID: "w-abc", TurnID: "t1",
+				Payload: &event.TurnCompletedPayload{Status: "completed"},
+			}
+		}
+
+		var got []string
+		waitFor(t, func() bool {
+			got = nil
+			for _, ev := range store.All() {
+				if ev.Type != EvtThreadActivityAppended {
+					continue
+				}
+				var p AssistantDeltaPayload
+				if err := json.Unmarshal(ev.Payload, &p); err != nil || p.Text == "" {
+					continue
+				}
+				got = append(got, p.AgentID)
+			}
+			return len(got) > 0
+		})
+		return got
+	}
+
+	t.Run("live", func(t *testing.T) {
+		for _, id := range deltaAgentIDs(t, false) {
+			if id != "toolu_spawn_1" {
+				t.Fatalf("delta AgentID = %q, want the spawning call's id", id)
+			}
+		}
+	})
+
+	t.Run("buffered then flushed", func(t *testing.T) {
+		for _, id := range deltaAgentIDs(t, true) {
+			if id != "toolu_spawn_1" {
+				t.Fatalf("flushed delta AgentID = %q — the buffer dropped the attribution", id)
+			}
+		}
+	})
+}
+
+// A turn whose only visible work is a subagent has very much produced
+// something. Without task events counting as output, such a turn closed with
+// "This turn finished without producing any output" appended underneath a
+// transcript full of the agent's work.
+func TestATurnThatOnlySpawnsASubagentIsNotReportedAsSilent(t *testing.T) {
+	store := NewMemStore()
+	n := 0
+	e := NewEngine(EngineOptions{
+		Store: store, Now: func() int64 { return 1000 }, QueueSize: 16,
+		NewID: func() string { n++; return fmt.Sprintf("ae-%d", n) },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.Run(ctx)
+
+	if _, err := e.Dispatch(ctx, Command{
+		CommandID: "ac-create", Type: CmdThreadCreate, ThreadID: "w-abc",
+		Payload: json.RawMessage(`{"instanceId":"stub:1"}`),
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	a := &stubAdapter{ch: make(chan event.Event, 8)}
+	m := 0
+	in := NewIngestion(e, approval.NoopBroker{}, func() string { m++; return fmt.Sprintf("ac-in-%d", m) })
+	go in.Consume(ctx, a)
+
+	a.ch <- event.Event{Type: event.TurnStarted, ThreadID: "w-abc", TurnID: "t1"}
+	a.ch <- event.Event{
+		Type: event.TaskStarted, ThreadID: "w-abc", TurnID: "t1", AgentID: "toolu_spawn_1",
+		Payload: &event.TaskStartedPayload{TaskID: "task-1", Title: "Run three echo commands"},
+	}
+	a.ch <- event.Event{
+		Type: event.TurnCompleted, ThreadID: "w-abc", TurnID: "t1",
+		Payload: &event.TurnCompletedPayload{Status: "completed"},
+	}
+
+	// Settle: wait for the turn's own status write.
+	waitFor(t, func() bool {
+		for _, ev := range store.All() {
+			if ev.Type == EvtThreadSessionSet && strings.Contains(string(ev.Payload), string(ThreadIdle)) {
+				return true
+			}
+		}
+		return false
+	})
+
+	for _, ev := range store.All() {
+		if strings.Contains(string(ev.Payload), "without producing any output") {
+			t.Fatal("a turn whose work was a subagent was reported as silent")
+		}
 	}
 }

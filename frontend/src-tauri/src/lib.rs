@@ -140,6 +140,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .register_uri_scheme_protocol(APP_SCHEME, serve_bundled_asset)
         .manage(BrowserTiles::new())
         .on_page_load(|webview, payload| {
@@ -186,6 +187,7 @@ pub fn run() {
             open_log_file,
             open_external_url,
             get_runtime_warning,
+            prepare_for_update,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) && std::env::var_os("DEVDECK_TAURI_DEV_FULL").is_none() {
@@ -673,6 +675,32 @@ struct RuntimeWarningInfo {
     log_path: String,
     #[serde(rename = "hubUrl")]
     hub_url: String,
+}
+
+/// Kills the sidecar before the updater replaces the app bundle.
+///
+/// The frontend calls this immediately before `update.install()`. It cannot be
+/// left to `RunEvent::Exit`, for the same reason the unix signal handler above
+/// cannot: on Windows, tauri-plugin-updater's `install_inner` runs its
+/// `on_before_exit` hook, `ShellExecuteW`s the NSIS installer, and then calls
+/// `std::process::exit(0)` outright (updater.rs:865 in 2.10.1). A hard
+/// `process::exit` bypasses Tauri's event loop, so the `RunEvent::Exit` arm in
+/// `run()` never executes. The plugin's own `Builder` exposes no
+/// `on_before_exit`, so an explicit command is the only hook available.
+///
+/// Left un-killed, `devdeck-server.exe` outlives the app (tauri-plugin-shell
+/// does not put sidecars in a job object), keeps the SQLite file and the
+/// loopback port open, and blocks the installer from overwriting its own
+/// binary inside the install directory.
+///
+/// It matters on macOS and Linux too: the sidecar executes from inside the
+/// bundle the updater is about to replace wholesale.
+///
+/// Safe to call more than once — `kill_sidecar` `take()`s each child, so a
+/// second call is a no-op, exactly as it already is for signal-then-Exit.
+#[tauri::command]
+fn prepare_for_update(app: AppHandle) {
+    kill_sidecar(&app);
 }
 
 #[tauri::command]

@@ -8,6 +8,8 @@ import (
 
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/store"
 )
 
 // tapKeyboard taps the button at row `row` of the LAST card this bridge sent,
@@ -329,5 +331,80 @@ func TestRePickingTheSameAgentKeepsTheModel(t *testing.T) {
 	}
 	if binding.Model != "claude-opus-5" {
 		t.Fatalf("re-picking claude cleared the model: %+v", binding)
+	}
+}
+
+// repointingStore makes the window between a read-modify-write's two halves
+// EXPLICIT: the first TelegramBindingByThread answers with the row as it was,
+// and the row moves to another destination immediately afterwards — exactly
+// what a concurrent /init re-point or the Settings publish toggle does, on a
+// different goroutine, while a tap is being handled on the poll goroutine.
+// Without a seam like this the race is real but not deterministically
+// observable, so nothing pins the difference between the wide upsert and the
+// narrow setter.
+type repointingStore struct {
+	*store.Store
+	toChatID  int64
+	toTopicID int64
+	moved     bool
+}
+
+func (r *repointingStore) TelegramBindingByThread(threadID string) (domain.TelegramBinding, error) {
+	binding, err := r.Store.TelegramBindingByThread(threadID)
+	if err != nil || r.moved {
+		return binding, err
+	}
+	r.moved = true
+	if werr := r.Store.SetTelegramBinding(domain.TelegramBinding{
+		ThreadID: threadID, ChatID: r.toChatID, TopicID: r.toTopicID,
+	}); werr != nil {
+		return binding, werr
+	}
+	return binding, nil
+}
+
+var _ port.Store = (*repointingStore)(nil)
+
+// /model must move ONE column. It used to read the whole binding, set Model on
+// it and write it back through SetTelegramBinding, whose ON CONFLICT rewrites
+// chat_id and topic_id — so a tap on a card minted before the destination moved
+// (an /init re-point, the Settings toggle, a /new in a project) wrote the stale
+// destination back and the mirror silently resumed in the chat the operator had
+// just left. The narrow setter cannot do that.
+func TestPickingAModelDoesNotRewindARepointedDestination(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	mustAllow(t, st, 42)
+	seedThread(t, engine, "ssh:c-a1b2")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "ssh:c-a1b2", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	b.models = func(string) ([]string, error) { return []string{"claude-sonnet-5", "claude-opus-5"}, nil }
+
+	b.handleUpdate(context.Background(), dm(100, "/model"))
+	card := transport.sent[len(transport.sent)-1]
+	if len(card.Keyboard) < 2 {
+		t.Fatalf("model picker has %d row(s): %q", len(card.Keyboard), card.Text)
+	}
+	token := card.Keyboard[1][0].CallbackData
+
+	// The destination moves DURING the read-modify-write, which is the whole
+	// hazard — see repointingStore.
+	b.store = &repointingStore{Store: st, toChatID: -100555, toTopicID: 7}
+
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cb-tap", From: &User{ID: 42}, Data: token,
+		Message: &Message{MessageID: 9, Chat: Chat{ID: 100}},
+	}})
+
+	binding, err := st.TelegramBindingByThread("ssh:c-a1b2")
+	if err != nil {
+		t.Fatalf("binding: %v", err)
+	}
+	if binding.ChatID != -100555 || binding.TopicID != 7 {
+		t.Fatalf("the model pick moved the destination back to chat %d topic %d", binding.ChatID, binding.TopicID)
+	}
+	if binding.Model != "claude-opus-5" {
+		t.Fatalf("model = %q, want the tapped claude-opus-5", binding.Model)
 	}
 }

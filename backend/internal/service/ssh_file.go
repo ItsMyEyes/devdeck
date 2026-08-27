@@ -186,7 +186,13 @@ func (c *sshListingCache) invalidate(connectionID string) {
 func (svc *SSHFileService) absPath(ctx context.Context, connectionID, clean string) (string, error) {
 	home, err := svc.pool.Home(ctx, connectionID)
 	if err != nil {
-		return "", fmt.Errorf("resolve home directory failed")
+		// Wrapped, not flattened, for the reason opError exists: this runs
+		// inside every WithSFTPClient callback, and on a connection that died
+		// since it was pooled the Getwd behind Home is the FIRST thing to
+		// fail — before the ReadDir/Open the operation was actually about. A
+		// bare error here would hide the dead connection from the evict-and-
+		// redial check just as effectively as flattening it later would.
+		return "", &opError{message: "resolve home directory failed", cause: err}
 	}
 	if clean == "" {
 		return home, nil

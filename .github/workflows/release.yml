@@ -27,6 +27,11 @@ jobs:
       - name: Go test
         run: cd backend && go test ./...
 
+      # This job gates build-desktop and release, so it is the last chance to
+      # catch a broken latest.json before a tag ships one to every client.
+      - name: Updater manifest generator tests
+        run: node --test scripts/gen-latest-json.test.mjs
+
       - name: Frontend install
         run: cd frontend && npm ci
 
@@ -54,8 +59,13 @@ jobs:
       - name: Frontend install
         run: cd frontend && npm ci
 
+      # Explicit for the same reason the desktop job passes it: the version a
+      # release ships must come from the tag, never from whatever `git describe`
+      # infers about the tree it happens to be building in.
       - name: Build portable binaries (hub + runtime)
         run: make portable-all
+        env:
+          VERSION: ${{ github.ref_name }}
 
       # Same binary runs as --role hub, runtime, or both — "-runtime" in the
       # release asset name signals "this is the server binary", distinct
@@ -85,6 +95,19 @@ jobs:
       fail-fast: false
       matrix:
         platform: [macos-latest, ubuntu-latest, windows-latest]
+        # updaterPlatform / updaterAsset feed the latest.json fragment this job
+        # emits (spec D5). updaterAsset must match the renamed release asset
+        # exactly — it becomes the download URL the updater fetches.
+        include:
+          - platform: macos-latest
+            updaterPlatform: darwin-aarch64
+            updaterAsset: devdeck-desktop-macos-aarch64.app.tar.gz
+          - platform: ubuntu-latest
+            updaterPlatform: linux-x86_64
+            updaterAsset: devdeck-desktop-linux-amd64.AppImage
+          - platform: windows-latest
+            updaterPlatform: windows-x86_64
+            updaterAsset: devdeck-desktop-windows-amd64-setup.exe
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -115,17 +138,57 @@ jobs:
       - name: Frontend install
         run: cd frontend && npm ci
 
+      # tauri.conf.json is committed at 0.1.0 and nothing else writes the tag
+      # into it. The updater compares latest.json's `version` against the value
+      # baked into the installed bundle — without this stamp every install
+      # reports 0.1.0 forever and re-offers the update it just applied (D4).
+      - name: Stamp release version into tauri.conf.json
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "frontend/src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(p, "utf8"));
+            conf.version = process.env.RELEASE_TAG.replace(/^v/, "");
+            fs.writeFileSync(p, JSON.stringify(conf, null, 2) + "\n");
+            console.log("tauri.conf.json version = " + conf.version);
+          '
+
       # beforeBuildCommand (tauri.conf.json) runs `make prepare-sidecar`,
       # which cross-compiles the Go sidecar binaries with the host's Go
       # toolchain — no per-platform C toolchain needed for that step.
+      #
+      # TAURI_SIGNING_* make `tauri build` emit a minisign `.sig` beside each
+      # updater artifact. They are consumed by the bundler only; nothing here
+      # ever echoes or logs them.
+      #
+      # VERSION is passed explicitly because the stamp step above edited a
+      # TRACKED file. The Makefile's default is `git describe --tags --dirty`,
+      # which in this now-dirty tree yields `<tag>-dirty` and would bake that
+      # into all three sidecars shipped inside the bundle. `selfupdate.NeedsUpdate`
+      # sorts a prerelease below its release, so those runtimes would report an
+      # update available against their own tag forever — unfixable once tagged.
       - name: Build desktop bundle
         run: cd frontend && npm run tauri:build
+        env:
+          VERSION: ${{ github.ref_name }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       # "-desktop" in the release asset name distinguishes these Tauri app
       # installers from the "-runtime" server binaries built above.
-      - name: Rename macOS bundle
+      #
+      # The .app.tar.gz is the macOS updater artifact (D5) — the only new asset
+      # the updater needs; Linux reuses its .AppImage and Windows its
+      # -setup.exe. Renaming it breaks the `<asset>.sig` name pairing, which is
+      # why the fragment below carries signature content instead of a filename.
+      - name: Rename macOS bundles
         if: matrix.platform == 'macos-latest'
-        run: mv frontend/src-tauri/target/release/bundle/dmg/*.dmg frontend/src-tauri/target/release/bundle/dmg/devdeck-desktop-macos-aarch64.dmg
+        run: |
+          mv frontend/src-tauri/target/release/bundle/dmg/*.dmg frontend/src-tauri/target/release/bundle/dmg/devdeck-desktop-macos-aarch64.dmg
+          mv frontend/src-tauri/target/release/bundle/macos/*.app.tar.gz frontend/src-tauri/target/release/bundle/macos/devdeck-desktop-macos-aarch64.app.tar.gz
 
       - name: Rename Linux bundles
         if: matrix.platform == 'ubuntu-latest'
@@ -141,12 +204,33 @@ jobs:
           mv frontend/src-tauri/target/release/bundle/msi/*.msi frontend/src-tauri/target/release/bundle/msi/devdeck-desktop-windows-amd64.msi
           mv frontend/src-tauri/target/release/bundle/nsis/*.exe frontend/src-tauri/target/release/bundle/nsis/devdeck-desktop-windows-amd64-setup.exe
 
+      # Reads the .sig Tauri wrote next to the bundle and records its CONTENT,
+      # so the merge job never has to glob for a signature whose name no longer
+      # matches its (renamed) asset. Prints no signature material.
+      - name: Write updater fragment
+        shell: bash
+        run: |
+          node scripts/gen-latest-json.mjs fragment \
+            --platform '${{ matrix.updaterPlatform }}' \
+            --bundle-dir frontend/src-tauri/target/release/bundle \
+            --asset-name '${{ matrix.updaterAsset }}' \
+            --out updater-fragment.json
+
+      - name: Upload updater fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-fragment-${{ matrix.updaterPlatform }}
+          path: updater-fragment.json
+          if-no-files-found: error
+
       - name: Upload macOS bundle
         if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
-          path: frontend/src-tauri/target/release/bundle/dmg/*.dmg
+          path: |
+            frontend/src-tauri/target/release/bundle/dmg/*.dmg
+            frontend/src-tauri/target/release/bundle/macos/*.app.tar.gz
           if-no-files-found: error
 
       - name: Upload Linux bundle
@@ -178,6 +262,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -199,6 +287,18 @@ jobs:
           fi
           cat release-notes.md
 
+      # Merges the three per-platform fragments into the manifest the Tauri
+      # updater fetches (D5). A missing fragment fails the release rather than
+      # publishing a latest.json that silently strands one platform's users.
+      # The fragments themselves are not released — only latest.json is.
+      - name: Generate latest.json
+        run: |
+          node scripts/gen-latest-json.mjs merge \
+            --tag "${GITHUB_REF_NAME}" \
+            --notes release-notes.md \
+            --fragments-dir artifacts \
+            --out latest.json
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -207,6 +307,7 @@ jobs:
             artifacts/desktop-macos/**/*
             artifacts/desktop-linux/**/*
             artifacts/desktop-windows/**/*
+            latest.json
           body_path: release-notes.md
           generate_release_notes: true
         env:

@@ -1,4 +1,4 @@
-import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useState } from 'react'
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { FileWarning } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
@@ -11,11 +11,16 @@ import {
   useWriteWorktreeFile,
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
+import { ExternalChangeBar } from './ExternalChangeBar'
+import { editBuffer, hasExternalChange, seedBuffer, syncBuffer } from './fileBuffer'
+import type { FileBuffer } from './fileBuffer'
+import { useFileAutoSave } from './useFileAutoSave'
 import type {
   DefinitionReveal,
   DefinitionTarget,
 } from './CodeFileEditor'
 import type { LineReveal } from './PlainCodeEditor'
+import { matchesBinding } from '@/features/keybindings/store'
 
 const CodeFileEditor = lazy(() =>
   import('./CodeFileEditor').then((module) => ({
@@ -63,6 +68,13 @@ export interface FileEditorHandle {
   /** Deletes this file from disk after a confirm prompt — the pane overflow
    *  menu's "Delete file" action. Optional for the same reason as `revert`. */
   remove?: () => void
+  /** Abandons the draft: cancels any pending auto-save and stops this tab
+   *  writing again. Called by `cleanupFileBookkeeping` on every path that takes
+   *  a tab away, because "Don't Save" and "the file was deleted" both unmount a
+   *  still-dirty editor whose unmount flush would otherwise put the discarded
+   *  draft back. See `useFileAutoSave` for why it has to be imperative.
+   *  Optional: a read-only document tab never auto-saves. */
+  discard?: () => void
 }
 
 function basename(path: string) {
@@ -159,27 +171,59 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
   },
   ref,
 ) {
-  const [draft, setDraft] = useState('')
-  const [initialized, setInitialized] = useState(false)
-  const file = useWorktreeFile(machine, worktreeId, path)
+  // `buffer` replaces the load-once `draft`/`initialized` pair: the file is
+  // re-read while the tab is on screen, and `fileBuffer.ts` owns the rule for
+  // when a fresh read may replace what the editor shows. See that module for
+  // why a one-shot latch was both deliberate and wrong.
+  const [buffer, setBuffer] = useState<FileBuffer | null>(null)
+  const file = useWorktreeFile(machine, worktreeId, path, { live: active })
   const writeFile = useWriteWorktreeFile(machine, worktreeId)
   const deleteFile = useDeleteWorktreeFile(machine, worktreeId)
-  const dirty = initialized && file.data ? draft !== file.data.content : false
+  const content = file.data?.content
+  // Reconciled during render, not only in the effect below. `dirty` is derived
+  // from the buffer, so letting the commit lag a frame behind the query would
+  // report every adopted write as an unsaved change for one render — a tab dot
+  // blinking on and off for as long as an agent keeps writing. `syncBuffer` is
+  // pure and idempotent, so calling it here costs nothing and the effect stays
+  // the thing that actually commits.
+  const synced = content === undefined ? buffer : syncBuffer(buffer, content)
+  const draft = synced?.draft ?? ''
+  const initialized = synced !== null
+  const dirty = initialized && content !== undefined ? draft !== content : false
+  const externallyChanged = hasExternalChange(synced, content)
 
   useEffect(() => {
-    if (!file.data || initialized) return
-    setDraft(file.data.content)
-    setInitialized(true)
-  }, [file.data, initialized])
+    if (content === undefined) return
+    setBuffer((current) => syncBuffer(current, content))
+  }, [content])
+
+  const setDraft = useCallback((next: string) => {
+    setBuffer((current) => editBuffer(current, next))
+  }, [])
+
+  // Bringing a tab to the front is the operator asking to look at this file, so
+  // answer with what is on disk now rather than making them wait out the poll
+  // interval. Only on the false->true edge: the mount fetch already covers a
+  // tab that opens active.
+  const wasActive = useRef(active)
+  const refetch = file.refetch
+  useEffect(() => {
+    const becameActive = active && !wasActive.current
+    wasActive.current = active
+    if (becameActive) void refetch()
+  }, [active, refetch])
 
   useEffect(() => {
     onDirtyChange(path, dirty)
   }, [dirty, onDirtyChange, path])
 
-  async function saveNow() {
+  /** `silent` is the auto-save path: a toast per write turns a background
+   *  convenience into a stream of notifications. Failures still surface — see
+   *  `useFileAutoSave`. */
+  async function saveNow(options?: { silent?: boolean }) {
     if (!initialized || !dirty) return
     await writeFile.mutateAsync({ path, content: draft })
-    toast.success(`Saved ${basename(path)}`)
+    if (!options?.silent) toast.success(`Saved ${basename(path)}`)
   }
 
   function save() {
@@ -187,9 +231,21 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
     void saveNow().catch(() => undefined)
   }
 
+  const discardAutoSave = useFileAutoSave({
+    ready: initialized,
+    active,
+    dirty,
+    draft,
+    conflicted: externallyChanged,
+    save: () => saveNow({ silent: true }),
+  })
+
+  /** Discards local edits — the overflow menu's "Revert file" and, when the
+   *  file moved underneath them, ExternalChangeBar's "Reload from disk". Both
+   *  mean the same thing: take what the server has. */
   function revert() {
-    if (!dirty || writeFile.isPending || !file.data) return
-    setDraft(file.data.content)
+    if (!dirty || writeFile.isPending || content === undefined) return
+    setBuffer(seedBuffer(content))
   }
 
   function remove() {
@@ -203,12 +259,17 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
     })
   }
 
-  useImperativeHandle(ref, () => ({ save: saveNow, revert, remove }))
+  useImperativeHandle(ref, () => ({
+    save: () => saveNow(),
+    revert,
+    remove,
+    discard: discardAutoSave,
+  }))
 
   useEffect(() => {
     if (!active) return
     function handleKeydown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (matchesBinding(event, 'editor.save')) {
         event.preventDefault()
         save()
       }
@@ -244,43 +305,48 @@ const TextFileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function Te
             Retry
           </button>
         </div>
-      ) : isMarkdownPath(path) ? (
-        <Suspense
-          fallback={
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
-              <DataLoading compact label="loading editor…" />
-            </div>
-          }
-        >
-          <MarkdownFileEditor
-            path={path}
-            value={draft}
-            ready={initialized}
-            onChange={setDraft}
-            reveal={toLineReveal(reveal)}
-            onOpenPreviewTab={onOpenPreviewTab}
-          />
-        </Suspense>
       ) : (
-        <Suspense
-          fallback={
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
-              <DataLoading compact label="loading editor…" />
-            </div>
-          }
-        >
-          <CodeFileEditor
-            worktreeId={worktreeId}
-            machine={machine}
-            path={path}
-            value={draft}
-            ready={initialized}
-            onChange={setDraft}
-            onOpenDefinition={onOpenDefinition}
-            isPathDirty={isPathDirty}
-            reveal={reveal}
-          />
-        </Suspense>
+        <>
+          {externallyChanged ? <ExternalChangeBar onReload={revert} /> : null}
+          {isMarkdownPath(path) ? (
+            <Suspense
+              fallback={
+                <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+                  <DataLoading compact label="loading editor…" />
+                </div>
+              }
+            >
+              <MarkdownFileEditor
+                path={path}
+                value={draft}
+                ready={initialized}
+                onChange={setDraft}
+                reveal={toLineReveal(reveal)}
+                onOpenPreviewTab={onOpenPreviewTab}
+              />
+            </Suspense>
+          ) : (
+            <Suspense
+              fallback={
+                <div className="flex min-h-0 flex-1 items-center justify-center bg-[#090a0c]">
+                  <DataLoading compact label="loading editor…" />
+                </div>
+              }
+            >
+              <CodeFileEditor
+                worktreeId={worktreeId}
+                machine={machine}
+                path={path}
+                value={draft}
+                ready={initialized}
+                onChange={setDraft}
+                onOpenDefinition={onOpenDefinition}
+                isPathDirty={isPathDirty}
+                reveal={reveal}
+              />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   )

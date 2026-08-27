@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/orchestration"
@@ -46,6 +47,12 @@ type fakeTransport struct {
 	// reached by an edit on every tick after the first, so its failure mode
 	// needs its own switch.
 	failEdit int
+	// failSendMatching, when non-empty, fails every SendMessage whose Text
+	// contains it. failSend counts from the FIRST call, which cannot express
+	// "an earlier send in this same sweep succeeded and a later one did not" —
+	// the shape the progressive mid-turn flush creates, and the one finding B
+	// (a failed sweep re-sending what it had already delivered) lives in.
+	failSendMatching string
 	// sendErr, when non-nil, fails EVERY SendMessage with that exact error.
 	// A *APIError carrying RetryAfter is how the shutdown test parks the pump
 	// inside callWithRetry's retry sleep.
@@ -62,10 +69,22 @@ type fakeTransport struct {
 	pins    []pinCall
 	unpins  []pinCall
 	actions []actionCall
-	pinErr error
+	pinErr  error
 	// topicErr fails createForumTopic — the realistic case of a bot that is
 	// not an admin with can_manage_topics.
 	topicErr error
+	// deletes records every deleteMessage; deleteErr fails them all, the
+	// realistic case of a card older than Telegram's 48h delete window.
+	deletes   []pinCall
+	deleteErr error
+	// answerErr fails every answerCallbackQuery. A *APIError carrying
+	// RetryAfter is how TestAnsweringATapNeverParksOnARateLimit proves the
+	// spinner path does not sit in a retry sleep.
+	answerErr error
+	// onAnswer, when set, runs at the moment answerCallbackQuery is called —
+	// the seam TestTheTapIsAnsweredBeforeTheEngineIsDispatchedTo uses to
+	// observe what had, and had not, happened by then.
+	onAnswer func()
 }
 
 type pinCall struct {
@@ -122,6 +141,9 @@ func (f *fakeTransport) SendMessage(_ context.Context, o SendOptions) (Message, 
 		f.failSend--
 		return Message{}, fmt.Errorf("fake: send failed")
 	}
+	if f.failSendMatching != "" && strings.Contains(o.Text, f.failSendMatching) {
+		return Message{}, fmt.Errorf("fake: send failed")
+	}
 	f.nextMsgID++
 	f.sent = append(f.sent, o)
 	return Message{MessageID: f.nextMsgID, Chat: Chat{ID: o.ChatID}}, nil
@@ -144,9 +166,31 @@ func (f *fakeTransport) sendAttempts() int {
 	return f.attempts
 }
 
-func (f *fakeTransport) AnswerCallbackQuery(_ context.Context, id, text string) error {
+// DeleteMessage records what the bridge retired. deleteErr fails every call,
+// which is the >48h case a real bot hits and the reason retireCards has an
+// edit fallback at all.
+func (f *fakeTransport) DeleteMessage(_ context.Context, chatID, messageID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deletes = append(f.deletes, pinCall{ChatID: chatID, MessageID: messageID})
+	return nil
+}
+
+func (f *fakeTransport) AnswerCallbackQuery(_ context.Context, id, text string) error {
+	// Run the hook OUTSIDE the lock: it exists so a test can inspect the world
+	// at the exact moment the spinner is cleared, and that inspection must not
+	// deadlock against the fake's own mutex.
+	if f.onAnswer != nil {
+		f.onAnswer()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.answerErr != nil {
+		return f.answerErr
+	}
 	f.answers = append(f.answers, answerCall{ID: id, Text: text})
 	return nil
 }
@@ -211,7 +255,11 @@ var _ telegramClient = (*fakeTransport)(nil)
 // reads exactly what the engine committed. This is the only combination in
 // the codebase that gives a test a real engine AND a real, spec-shaped
 // Deps.Store at once.
-func newTestBridge(t *testing.T, transport *fakeTransport) (*Bridge, *orchestration.Engine, *store.Store) {
+// transport is a telegramClient rather than a *fakeTransport so a test can
+// hand in a wrapper around it — callbackBatchTransport embeds the fake and
+// overrides GetUpdates to feed pollLoop a real batch. Every existing caller
+// passes a *fakeTransport, which satisfies the interface unchanged.
+func newTestBridge(t *testing.T, transport telegramClient) (*Bridge, *orchestration.Engine, *store.Store) {
 	t.Helper()
 	st := store.NewTestStore(t)
 
@@ -310,9 +358,10 @@ type fakeOption struct {
 }
 
 type fakeQuestion struct {
-	ID       string       `json:"id,omitempty"`
-	Question string       `json:"question"`
-	Options  []fakeOption `json:"options"`
+	ID          string       `json:"id,omitempty"`
+	Question    string       `json:"question"`
+	Options     []fakeOption `json:"options"`
+	MultiSelect bool         `json:"multiSelect,omitempty"`
 }
 
 func seedUserInputRequested(t *testing.T, engine *orchestration.Engine, threadID, requestID string, questions []fakeQuestion) {
@@ -766,6 +815,42 @@ func TestCallbackAnswersTheApproval(t *testing.T) {
 	}
 }
 
+// The card is edited with parse_mode MarkdownV2, so whatever replaces its
+// buttons has to be escaped for it. "✅ Terima (sesi ini)" is not: the
+// parentheses are MarkdownV2 specials, editMessageText answers 400 "can't parse
+// entities", and the edit is dropped — leaving a card whose buttons are still
+// there for an approval that has already been decided. Tapping one of them
+// again is a second answer to a request that no longer exists.
+func TestTheApprovalCardEditIsEscapedForMarkdownV2(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	seedThread(t, engine, "w-abc")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "w-abc", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	seedRequestOpened(t, engine, "w-abc", "req-1", []event.Decision{event.DecisionAcceptForSession})
+
+	b.sweep(context.Background())
+	if len(transport.sent) != 1 || len(transport.sent[0].Keyboard) == 0 {
+		t.Fatalf("expected exactly one approval card, got %+v", transport.sent)
+	}
+	token := transport.sent[0].Keyboard[0][0].CallbackData
+
+	mustAllow(t, st, 42)
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cbq-1", From: &User{ID: 42}, Data: token,
+		Message: &Message{MessageID: 55, Chat: Chat{ID: 100}},
+	}})
+
+	if len(transport.edits) != 1 {
+		t.Fatalf("want exactly one card edit, got %+v", transport.edits)
+	}
+	want := EscapeMarkdownV2(decisionLabel(event.DecisionAcceptForSession))
+	if transport.edits[0].Text != want {
+		t.Fatalf("card edited with %q, want the escaped %q", transport.edits[0].Text, want)
+	}
+}
+
 // An unrecognised cb: token — never minted by this process — must answer the
 // callback with an error toast and dispatch NOTHING. Guessing a requestId
 // here would let a stranger approve a command the operator never even saw.
@@ -859,8 +944,13 @@ func TestLastSeqAdvancesOnlyAfterASuccessfulSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("binding: %v", err)
 	}
-	if binding.LastSeq != 0 {
-		t.Fatalf("LastSeq advanced to %d despite a failed send", binding.LastSeq)
+	// Below the event whose send failed, not necessarily 0: the cursor is
+	// allowed to sit at the last boundary that WAS delivered (here the
+	// thread.created bookkeeping, which renders nothing at all). What it must
+	// never do is pass an event whose output did not reach Telegram — see
+	// persistSeq.
+	if binding.LastSeq >= seqOfFirst(t, st, "w-abc", orchestration.EvtThreadMessageSent) {
+		t.Fatalf("LastSeq advanced to %d, past the message whose send failed", binding.LastSeq)
 	}
 	if len(transport.sent) != 0 {
 		t.Fatalf("a failed send must not have recorded a sent message, got %d", len(transport.sent))
@@ -972,9 +1062,171 @@ func TestMultiQuestionInputDispatchesOnlyWhenEveryQuestionIsAnswered(t *testing.
 	}
 }
 
+// answersOfLastUserInputDispatch decodes the Answers map of the last
+// user-input response committed for a thread, as it looks AFTER the JSON round
+// trip the provider adapter reads it back through — which is the only shape
+// that matters here.
+func answersOfLastUserInputDispatch(t *testing.T, st *store.Store, threadID string) map[string]any {
+	t.Helper()
+	evts, err := st.AgentEventsSince(threadID, 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	var out map[string]any
+	found := false
+	for _, e := range evts {
+		if e.Type != orchestration.EvtThreadUserInputResponseRequested {
+			continue
+		}
+		var p struct {
+			Answers map[string]any `json:"answers"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			t.Fatalf("decode user-input payload: %v", err)
+		}
+		out, found = p.Answers, true
+	}
+	if !found {
+		t.Fatalf("no user-input response was dispatched for %s", threadID)
+	}
+	return out
+}
+
+// A multiSelect question expects a LIST. The CLI's AskUserQuestion tool and the
+// browser panel (resolvePendingUserInputAnswer sends string[]) agree on that,
+// and a bare string in its place is a type error at the far end — the same
+// "reaches the agent as no answer at all" outcome a mis-keyed map has.
+//
+// Telegram sends one card per question with one button per option, so a tap
+// picks exactly one; the fix is the SHAPE, not a multi-toggle UI.
+func TestAMultiSelectQuestionIsAnsweredWithAList(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	seedThread(t, engine, "w-abc")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "w-abc", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	mustAllow(t, st, 42)
+
+	seedUserInputRequested(t, engine, "w-abc", "req-ui-1", []fakeQuestion{{
+		Question:    "File mana yang mau dihapus?",
+		Options:     []fakeOption{{Label: "a.go"}, {Label: "b.go"}},
+		MultiSelect: true,
+	}})
+	b.sweep(context.Background())
+	if len(transport.sent) != 1 || len(transport.sent[0].Keyboard) == 0 {
+		t.Fatalf("want one card with buttons, got %+v", transport.sent)
+	}
+
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cbq-1", From: &User{ID: 42}, Data: transport.sent[0].Keyboard[0][0].CallbackData,
+		Message: &Message{MessageID: 1, Chat: Chat{ID: 100}},
+	}})
+
+	answers := answersOfLastUserInputDispatch(t, st, "w-abc")
+	got, ok := answers["File mana yang mau dihapus?"].([]any)
+	if !ok {
+		t.Fatalf("multiSelect answer = %#v, want a list", answers["File mana yang mau dihapus?"])
+	}
+	if len(got) != 1 || got[0] != "a.go" {
+		t.Fatalf("multiSelect answer = %#v, want the one tapped option", got)
+	}
+}
+
+// Two questions in one prompt can carry the SAME text — "Lanjut?" asked about
+// two different files is an ordinary thing for an agent to write. Accumulating
+// the answers under the question TEXT collapses them: the second tap overwrites
+// the first, len(answers) never reaches the number of questions, and the request
+// can never be completed from Telegram at all. The turn then sits waiting
+// forever on a card the operator has already answered.
+func TestTwoQuestionsWithTheSameTextStillComplete(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	seedThread(t, engine, "w-abc")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "w-abc", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	mustAllow(t, st, 42)
+
+	seedUserInputRequested(t, engine, "w-abc", "req-ui-1", []fakeQuestion{
+		{Question: "Lanjut?", Options: []fakeOption{{Label: "Ya"}, {Label: "Tidak"}}},
+		{Question: "Lanjut?", Options: []fakeOption{{Label: "Ya"}, {Label: "Tidak"}}},
+	})
+	b.sweep(context.Background())
+	if len(transport.sent) != 2 {
+		t.Fatalf("want one card per question, got %d: %+v", len(transport.sent), transport.sent)
+	}
+
+	for i, cbq := range []string{"cbq-1", "cbq-2"} {
+		b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+			ID: cbq, From: &User{ID: 42}, Data: transport.sent[i].Keyboard[0][0].CallbackData,
+			Message: &Message{MessageID: int64(i + 1), Chat: Chat{ID: 100}},
+		}})
+	}
+
+	evts, err := st.AgentEventsSince("w-abc", 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	n := 0
+	for _, e := range evts {
+		if e.Type == orchestration.EvtThreadUserInputResponseRequested {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want exactly 1 dispatch once both questions are answered, got %d", n)
+	}
+}
+
+// ...and a single-select question keeps its scalar. Wrapping every answer in a
+// list would break the ordinary case to fix the rare one.
+func TestASingleSelectQuestionKeepsItsScalarAnswer(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	seedThread(t, engine, "w-abc")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "w-abc", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	mustAllow(t, st, 42)
+
+	seedUserInputRequested(t, engine, "w-abc", "req-ui-1", []fakeQuestion{{
+		Question: "Lanjut?", Options: []fakeOption{{Label: "Ya"}, {Label: "Tidak"}},
+	}})
+	b.sweep(context.Background())
+	b.handleUpdate(context.Background(), Update{CallbackQuery: &CallbackQuery{
+		ID: "cbq-1", From: &User{ID: 42}, Data: transport.sent[0].Keyboard[0][0].CallbackData,
+		Message: &Message{MessageID: 1, Chat: Chat{ID: 100}},
+	}})
+
+	if got := answersOfLastUserInputDispatch(t, st, "w-abc")["Lanjut?"]; got != "Ya" {
+		t.Fatalf("single-select answer = %#v, want the scalar \"Ya\"", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Review regression tests
 // ---------------------------------------------------------------------------
+
+// seqOfFirst is the Seq of the first event of this type on the thread. Cursor
+// assertions are written against it rather than against a literal 0: a sweep
+// that fails partway is allowed — required, since the progressive flush — to
+// keep the boundary of whatever it DID deliver, so the property under test is
+// "the cursor never passed the event that failed", not "the cursor never moved".
+func seqOfFirst(t *testing.T, st *store.Store, threadID string, typ orchestration.EventType) uint64 {
+	t.Helper()
+	events, err := st.AgentEventsSince(threadID, 0)
+	if err != nil {
+		t.Fatalf("events for %s: %v", threadID, err)
+	}
+	for _, e := range events {
+		if e.Type == typ {
+			return e.Seq
+		}
+	}
+	t.Fatalf("no %s event on thread %s", typ, threadID)
+	return 0
+}
 
 // seedDelta commits one assistant text delta, the event the live message is
 // built out of.
@@ -1151,7 +1403,10 @@ func TestFailedProseSendIsRebuiltAndRetried(t *testing.T) {
 		t.Fatalf("binding: %v", err)
 	}
 	seqAfterFailure := binding.LastSeq
-	if seqAfterFailure != 0 {
+	// Below the first delta, not necessarily 0 — the cursor keeps whatever
+	// boundary this sweep actually delivered (see persistSeq); it just must not
+	// pass the prose the send lost.
+	if seqAfterFailure >= seqOfFirst(t, st, "w-abc", orchestration.EvtThreadActivityAppended) {
 		t.Fatalf("cursor advanced past a failed send (LastSeq=%d)", seqAfterFailure)
 	}
 
@@ -1170,6 +1425,61 @@ func TestFailedProseSendIsRebuiltAndRetried(t *testing.T) {
 	}
 	if binding.LastSeq <= seqAfterFailure {
 		t.Fatalf("cursor never recovered: %d -> %d", seqAfterFailure, binding.LastSeq)
+	}
+}
+
+// The typing hint is decoration, and it must not be sent at token rate.
+//
+// pumpLoop sweeps on every engine publish — which, since the durable log holds
+// one event per streamed token, is many times a second on a fast model. Every
+// one of those sweeps called keepTyping, so sendChatAction went out per token:
+// hundreds of API calls per turn per published thread, all of them competing
+// with the messages that actually matter for the same rate limit. Telegram
+// clears the hint after ~5s, so once every 4 is all it takes to keep it lit.
+func TestTheTypingHintIsRateLimited(t *testing.T) {
+	transport := &fakeTransport{}
+	b, engine, st := newTestBridge(t, transport)
+	seedThread(t, engine, "w-abc")
+	if err := st.SetTelegramBinding(domain.TelegramBinding{ThreadID: "w-abc", ChatID: 100}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	now := time.Now()
+	b.now = func() time.Time { return now }
+
+	startTurn(t, engine, "w-abc", "turn-1", "deploy")
+
+	for i := 0; i < 50; i++ {
+		b.sweep(context.Background())
+	}
+	if len(transport.actions) != 1 {
+		t.Fatalf("50 sweeps in the same instant sent %d typing hints, want 1", len(transport.actions))
+	}
+
+	now = now.Add(5 * time.Second)
+	b.sweep(context.Background())
+	if len(transport.actions) != 2 {
+		t.Fatalf("the hint was not refreshed after it would have expired: %d", len(transport.actions))
+	}
+}
+
+// The split budget is Telegram's, not Go's. Telegram counts UTF-16 code units,
+// so an astral emoji is two — a "3500 rune" part of pure emoji is 7000 by its
+// arithmetic and comes back 400 "message is too long". The pump cannot retry
+// its way out of that: the cursor never advances past a message that would not
+// send, so one emoji-heavy answer freezes that thread's mirror permanently.
+func TestSplitForTelegramBudgetsInUTF16UnitsNotRunes(t *testing.T) {
+	const emoji = 3600
+	parts := splitForTelegram(strings.Repeat("🙂", emoji))
+	if len(parts) < 2 {
+		t.Fatalf("want the text split, got %d part(s)", len(parts))
+	}
+	for i, part := range parts {
+		if n := len(utf16.Encode([]rune(part))); n > telegramMessageLimit {
+			t.Fatalf("part %d is %d UTF-16 units, Telegram's cap is %d", i, n, telegramMessageLimit)
+		}
+	}
+	if got := strings.Count(strings.Join(parts, ""), "🙂"); got != emoji {
+		t.Fatalf("the split lost content: %d of %d emoji survived", got, emoji)
 	}
 }
 

@@ -11,12 +11,31 @@ import { createGitDiffContent, gitDiffTargetKey } from './paneTree'
 // The panel's data all comes from react-query hooks that hit a live machine —
 // stub them so these tests only exercise GitPanel's own layout and selection
 // behaviour. Only `useGitStatus` needs real-looking data.
-const status = {
+interface StatusFixture {
+  repo: boolean
+  branch: string
+  ahead: number
+  behind: number
+  files: { path: string; index: string; worktree: string }[]
+}
+
+const repoStatus: StatusFixture = {
+  repo: true,
   branch: 'main',
   ahead: 0,
   behind: 0,
   files: [{ path: 'src/root.go', index: '.', worktree: 'M' }],
 }
+
+// What the backend reports for a folder with no `.git` — a real payload, not
+// an error, so the panel can offer to initialize instead of showing git's
+// "fatal: not a git repository".
+const noRepoStatus: StatusFixture = { repo: false, branch: '', ahead: 0, behind: 0, files: [] }
+
+// Reassigned per test and read when the stubbed hook is called during render.
+let status: StatusFixture = repoStatus
+
+const { gitInitMutate } = vi.hoisted(() => ({ gitInitMutate: vi.fn() }))
 
 // A deliberately long subject and ref list — the shapes that used to spill
 // past the sidebar's right edge.
@@ -44,6 +63,7 @@ vi.mock('@/features/data/queries', () => {
     useGitCommit: () => mutation,
     useGitPush: () => mutation,
     useGitPull: () => mutation,
+    useGitInit: () => ({ mutate: gitInitMutate, isPending: false }),
   }
 })
 
@@ -70,6 +90,40 @@ afterEach(() => {
 
 beforeEach(() => {
   useDevDeckStore.setState({ gitDiffs: {} })
+  status = repoStatus
+  gitInitMutate.mockClear()
+})
+
+describe('GitPanel without a repository', () => {
+  // Before this, a worktree with no `.git` showed git's raw fatal error under
+  // a fully-armed commit box — a dead end with no way out of the panel.
+  it('replaces the whole panel with the initialize empty state', () => {
+    status = noRepoStatus
+    render(<GitPanel {...baseProps} />, { wrapper })
+
+    expect(screen.getByRole('button', { name: /Initialize Repository/ })).toBeInTheDocument()
+    // None of the repo-only controls may survive: they all act on a repo.
+    expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Changes/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Push' })).toBeNull()
+    expect(screen.queryByText('Select a file to view its diff')).toBeNull()
+  })
+
+  it('offers the same action in the compact sidebar copy', () => {
+    status = noRepoStatus
+    render(<GitPanel {...baseProps} compact />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: /Initialize Repository/ }))
+
+    expect(gitInitMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the normal panel when the worktree is a repository', () => {
+    render(<GitPanel {...baseProps} />, { wrapper })
+
+    expect(screen.queryByRole('button', { name: /Initialize Repository/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Commit/ })).toBeInTheDocument()
+  })
 })
 
 describe('GitPanel compact mode', () => {

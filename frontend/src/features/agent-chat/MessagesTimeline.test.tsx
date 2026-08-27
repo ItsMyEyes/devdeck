@@ -1134,3 +1134,173 @@ describe('MessagesTimeline / hard mount ceiling', () => {
   })
 })
 
+
+// ── The answered AskUserQuestion ──
+//
+// The card that ASKS lives in the composer and closes the instant it is
+// answered, so before this row existed the exchange left no trace in the thread
+// at all: not the question, not the pick, and nothing after a reload — while the
+// agent's next turn was already acting on the answer.
+describe('MessagesTimeline — answered questions', () => {
+  const answered = item({
+    id: 'q1',
+    kind: 'question',
+    createdAt: 5_000,
+    updatedAt: 5_000,
+    answeredQuestions: [
+      {
+        question: 'Is fixing IsManually() in scope?',
+        header: 'Fix source check?',
+        chosen: ['Yes, fix it'],
+        descriptions: { 'Yes, fix it': 'Switch the condition to IsSemiAutomate().' },
+      },
+    ],
+  })
+
+  it('shows the question, the pick and the picked option description', () => {
+    render(<MessagesTimeline view={view([answered])} />)
+
+    expect(screen.getByText('You answered')).toBeInTheDocument()
+    expect(screen.getByText('Is fixing IsManually() in scope?')).toBeInTheDocument()
+    expect(screen.getByText('Yes, fix it')).toBeInTheDocument()
+    expect(screen.getByText('Switch the condition to IsSemiAutomate().')).toBeInTheDocument()
+  })
+
+  it('labels each question of a multi-question request and lists every pick', () => {
+    const multi = item({
+      id: 'q2',
+      kind: 'question',
+      answeredQuestions: [
+        { question: 'Which files?', header: 'Scope', chosen: ['api', 'usecase'] },
+        { question: 'Run the tests?', header: 'Verify', chosen: ['Yes'] },
+      ],
+    })
+    render(<MessagesTimeline view={view([multi])} />)
+
+    expect(screen.getByText('2 questions')).toBeInTheDocument()
+    expect(screen.getByText('Scope')).toBeInTheDocument()
+    expect(screen.getByText('Verify')).toBeInTheDocument()
+    for (const pick of ['api', 'usecase', 'Yes']) {
+      expect(screen.getByText(pick)).toBeInTheDocument()
+    }
+  })
+
+  // Every other bubble-less row had this bug too: the stamp was handed to a
+  // `MessageRow` footer that is never rendered for these kinds, so a turn
+  // ending on one showed no timings at all.
+  it('keeps the turn stamp on a turn that ends on an answered question', () => {
+    render(
+      <MessagesTimeline
+        view={view(
+          [
+            item({ id: 'u1', kind: 'user', text: 'go', createdAt: 1_000, updatedAt: 1_000 }),
+            { ...answered, turnTokens: 1_200, turnOutputTokens: 400 },
+          ],
+          { status: 'idle' },
+        )}
+      />,
+    )
+
+    expect(screen.getByText(/1\.2k tokens/)).toBeInTheDocument()
+  })
+
+  it('renders nothing for a question row that carries no answers', () => {
+    render(<MessagesTimeline view={view([item({ id: 'q3', kind: 'question' })])} />)
+
+    expect(screen.queryByText('You answered')).not.toBeInTheDocument()
+  })
+})
+
+// ── Subagents ───────────────────────────────────────────────────────────────
+//
+// A delegated job costs the parent's narrative exactly one row, whatever it
+// does inside; the detail is one click below. See
+// `docs/superpowers/specs/2026-08-26-subagent-observability-design.md`.
+describe('MessagesTimeline — subagent row', () => {
+  const AGENT = 'toolu_spawn_1'
+
+  function subagentView(overrides: Partial<AgentThreadView['subagents'][number]> = {}, items: ChatItem[] = []) {
+    return view(
+      [
+        item({ id: 'p1', kind: 'assistant', text: 'I will delegate this.' }),
+        ...items.map((i) => ({ ...i, agentId: AGENT })),
+      ],
+      {
+        subagents: [
+          {
+            id: AGENT,
+            toolCallId: AGENT,
+            title: 'Run three echo commands',
+            role: 'general-purpose',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 2,
+            ...overrides,
+          },
+        ],
+      },
+    )
+  }
+
+  it('names the job, its role and what it has spent', () => {
+    render(
+      <MessagesTimeline
+        view={subagentView({ status: 'completed', usage: { totalTokens: 21449, toolUses: 3 } })}
+      />,
+    )
+
+    expect(screen.getByText('Run three echo commands')).toBeInTheDocument()
+    expect(screen.getByText(/general-purpose/)).toBeInTheDocument()
+    expect(screen.getByText(/Completed · 21k tokens · 3 tools/)).toBeInTheDocument()
+  })
+
+  // The progress line is the only sign of life while an agent works, so it
+  // renders OUTSIDE the fold — hiding it would put the one thing worth
+  // reading where nobody is looking.
+  it('shows the live progress line without expanding anything', () => {
+    render(<MessagesTimeline view={subagentView({ progress: 'Running Print CHARLIE' })} />)
+    expect(screen.getByText('Running Print CHARLIE')).toBeInTheDocument()
+  })
+
+  // Once it is done, the report back replaces the now-finished progress tick.
+  it('shows the report back in place of progress once it settles', () => {
+    render(
+      <MessagesTimeline
+        view={subagentView({ status: 'completed', progress: 'Running Print CHARLIE', summary: 'Ran all three.' })}
+      />,
+    )
+    expect(screen.queryByText('Running Print CHARLIE')).not.toBeInTheDocument()
+    expect(screen.getByText('Ran all three.')).toBeInTheDocument()
+  })
+
+  it('keeps the agent’s own work behind a disclosure, and reveals it on click', async () => {
+    render(
+      <MessagesTimeline
+        view={subagentView({ status: 'completed' }, [
+          item({ id: 'c1', kind: 'tool', toolName: 'Bash', status: 'done', input: { command: 'echo ALPHA' } }),
+          item({ id: 'c2', kind: 'assistant', text: 'I ran all three.' }),
+        ])}
+      />,
+    )
+
+    // Collapsed: the parent's own message is on screen, the agent's is not.
+    expect(screen.getByText('I will delegate this.')).toBeInTheDocument()
+    expect(screen.queryByText('I ran all three.')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Run three echo commands/ }))
+
+    expect(await screen.findByText('I ran all three.')).toBeInTheDocument()
+    // The agent's tool call renders as a real tool row — name and the
+    // argument that identifies it. (`ToolCompactHeader` writes "Bash:" when
+    // it has a summary to put behind the name.)
+    expect(screen.getByText(/^Bash:?$/)).toBeInTheDocument()
+    expect(screen.getByText('echo ALPHA')).toBeInTheDocument()
+  })
+
+  // Nothing to disclose while it is starting up — a chevron that expands to
+  // nothing is worse than no chevron.
+  it('is inert until it has produced something', () => {
+    render(<MessagesTimeline view={subagentView()} />)
+    expect(screen.getByRole('button', { name: /Run three echo commands/ })).toBeDisabled()
+  })
+})

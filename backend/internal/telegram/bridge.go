@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ type telegramClient interface {
 	GetWebhookInfo(ctx context.Context) (WebhookInfo, error)
 	SendMessage(ctx context.Context, o SendOptions) (Message, error)
 	EditMessageText(ctx context.Context, chatID, messageID int64, text string, kb InlineKeyboard) error
+	DeleteMessage(ctx context.Context, chatID, messageID int64) error
 	AnswerCallbackQuery(ctx context.Context, id, text string) error
 	CreateForumTopic(ctx context.Context, chatID int64, name string) (int64, error)
 	PinChatMessage(ctx context.Context, chatID, messageID int64) error
@@ -145,11 +147,20 @@ type callbackTarget struct {
 	Decision  event.Decision
 	Question  string
 	Answer    string
-	Model     string
-	ProjectID string
-	Agent     string
-	Mode      provider.RuntimeMode
-	MintedAt  time.Time
+	// QuestionIndex is the answered question's position in the request. It is
+	// what the accumulator is keyed by, because two questions in one request can
+	// share a text — see pendingUserInput.
+	QuestionIndex int
+	// MultiSelect is the answered question's own multiSelect flag, carried on
+	// the token because the question list is long gone by the time the tap
+	// arrives. It decides the SHAPE of the stored answer, nothing else — see
+	// handleUserInputAnswer.
+	MultiSelect bool
+	Model       string
+	ProjectID   string
+	Agent       string
+	Mode        provider.RuntimeMode
+	MintedAt    time.Time
 }
 
 // chatState is the live-message bookkeeping for one bound thread (§0.4).
@@ -175,20 +186,108 @@ type chatState struct {
 	// stops appearing in Telegram, the cursor never moves, and nothing is
 	// written anywhere to say why.
 	sendFailures int
+	// lastFlush is when this binding last put prose on the wire, zero before
+	// the first one. It is what makes the time half of the progressive flush
+	// work — see streamFlushInterval.
+	lastFlush time.Time
+	// lastTyping is when the "…is typing" hint was last refreshed, same shape
+	// as lastFlush and for the same reason — see keepTyping. Zero means "never",
+	// which is due immediately.
+	lastTyping time.Time
+	// cards maps a requestId to the message ids of every card sent for it, so
+	// those cards can be retired the moment the request is decided ANYWHERE —
+	// the desktop app, another device, a timeout — and not just when the
+	// decision was tapped here. An approval is one request but a multi-question
+	// AskUserQuestion prompt is one card per question, hence a slice.
+	//
+	// In memory only, and deliberately so: it is the same lifetime as the
+	// callback tokens in b.cb, which a restart also drops. A card whose ids
+	// were lost simply stays where it is — its tokens are gone too, so it can
+	// no longer dispatch anything.
+	//
+	// Guarded by cs.mu like every other field here. pumpBinding holds that lock
+	// for its whole run, which is why the helpers it calls (sendApprovalCard,
+	// sendUserInputCards, retireCards) take the chatState and must NOT lock it
+	// again.
+	cards map[string][]int64
 }
 
+// rememberCard records a card's message id against its request. Caller holds
+// cs.mu (see chatState.cards).
+func (cs *chatState) rememberCard(requestID string, messageID int64) {
+	if requestID == "" || messageID == 0 {
+		return
+	}
+	if cs.cards == nil {
+		cs.cards = make(map[string][]int64)
+	}
+	cs.cards[requestID] = append(cs.cards[requestID], messageID)
+}
+
+// typingHintInterval is how often the typing hint is refreshed. Telegram clears
+// it after ~5 seconds, so this only has to be under that; everything faster is
+// pure API traffic. See keepTyping for why that mattered.
+const typingHintInterval = 4 * time.Second
+
+// streamFlushChars is how much buffered prose forces a message out mid-turn.
+//
+// Prose used to be held until the turn ENDED (flushPending ran only behind a
+// notice, a card, or the terminal session-set), which meant a turn that runs
+// for minutes without a tool call showed nothing in Telegram for all of it and
+// then arrived at once. Publishing during a run — the case this whole surface
+// exists for — therefore looked like it had not worked.
+//
+// Sized in characters rather than events because the durable log is one event
+// per TOKEN: an event count would fire every second on a fast model and never
+// on a slow one. ~1200 is a healthy paragraph or two, well under Telegram's
+// 4096 cap, so a flush is one message rather than a split.
+const streamFlushChars = 1200
+
+// sweepMessageBudget is how many messages ONE sweep of one binding may put on
+// the wire before it stops at the current event boundary and lets the next tick
+// continue.
+//
+// Without it the two features above compose into a flood: /init rewinds to the
+// start of a turn that may have been running for minutes, and the char
+// threshold then turns that backlog into one sendMessage per ~1200 characters,
+// sent back to back with nothing between them. Telegram answers a burst like
+// that with 429, and callWithRetry sleeps out the retry_after while holding this
+// binding's lock — so publishing a long run is punished by the mirror stalling.
+//
+// Eight is a couple of screens of chat every 2 seconds: fast enough that a
+// catch-up feels immediate, slow enough to stay inside Telegram's per-chat
+// limits. Nothing is dropped — the cursor stops at the last DELIVERED event, so
+// the next sweep resumes exactly where this one stopped.
+const sweepMessageBudget = 8
+
+// streamFlushInterval is the other half: a turn that trickles a little text
+// over a long time never reaches streamFlushChars, and holding 200 characters
+// for six minutes is the same silence by a different route. Long enough that a
+// fast turn still coalesces into whole paragraphs rather than one message per
+// sweep.
+const streamFlushInterval = 25 * time.Second
+
 // pendingUserInput accumulates answers to one multi-question AskUserQuestion
-// request (§5a) as callback taps arrive, one per question. total is fixed at
-// creation time (the number of questions the prompt actually asked); the
-// request is complete, and dispatchable, exactly when len(answers) == total.
+// request (§5a) as callback taps arrive, one per question. The request is
+// complete, and dispatchable, exactly when every question has an answer.
+//
+// answers is keyed by the question's INDEX in the request, never by its text.
+// One prompt can ask the same question twice — "Lanjut?" about two different
+// files is ordinary — and a text-keyed accumulator silently collapses those:
+// the second tap overwrites the first, the count never reaches the number of
+// questions asked, and the request can never be completed from Telegram at all.
+// The OUTGOING map is still text-keyed, because that is what
+// UserInputRespondPayload requires; it is built from questions at dispatch time.
 //
 // createdAt exists for the same reason callbackTarget.MintedAt does: a prompt
 // answered in the browser instead of Telegram leaves its accumulator behind
 // with nothing to ever collect it, so old ones are pruned.
 type pendingUserInput struct {
-	mu        sync.Mutex
-	answers   map[string]any
-	total     int
+	mu      sync.Mutex
+	answers map[int]any
+	// questions is the answer KEY of each question, in the request's own order.
+	// Its length is how many answers completion needs.
+	questions []string
 	createdAt time.Time
 }
 
@@ -219,10 +318,11 @@ const maxOwnEchoes = 1024
 // the last few is a job for the app, which shows the whole list.
 const resumeListSize = 5
 
-// messageSplitAt is the character budget for one outbound message. Telegram's
-// hard cap is 4096 and it rejects anything longer outright; the headroom
-// absorbs the backslashes MarkdownV2 escaping adds after the split decision
-// has already been made.
+// messageSplitAt is the budget for one outbound message, in the UTF-16 code
+// units Telegram counts (see telegramMessageLimit) — NOT runes. Its hard cap is
+// 4096 and it rejects anything longer outright; the headroom absorbs the
+// backslashes MarkdownV2 escaping adds after the split decision has already
+// been made.
 const messageSplitAt = 3500
 
 // callbackTokenTTL is how long a minted cb: token stays tappable, and
@@ -430,9 +530,55 @@ func (b *Bridge) pollLoop(ctx context.Context) {
 		b.health.Set(HealthOK, "")
 		for _, u := range updates {
 			offset = u.UpdateID + 1
-			b.handleUpdate(ctx, u)
+			if u.CallbackQuery != nil {
+				// Button taps get their own goroutine; messages stay in order
+				// on this one.
+				//
+				// A callback query races a HARD deadline: Telegram shows a
+				// spinner on the tapped button and keeps it there until
+				// answerCallbackQuery arrives, then invalidates the query
+				// ("query is too old and response timeout expired") a few
+				// seconds later. Handled in line, ONE slow tap spends that
+				// budget for every tap behind it — the observed failure was a
+				// single approval parked ~53s inside a Telegram call while
+				// three more taps sat in this loop, all four expiring
+				// unanswered, which reads to the operator as "the buttons do
+				// nothing but spin".
+				//
+				// Concurrency is safe here in a way it would not be for
+				// messages: every mutable thing a callback touches (b.cb,
+				// b.userInput, the store) is already mutex-guarded, each tap
+				// is an independent decision with no ordering relationship to
+				// the next, and the engine serializes the commands they
+				// dispatch anyway. Messages keep the in-order path because
+				// two prompts typed in sequence must start turns in that
+				// sequence.
+				go b.handleUpdateSafely(ctx, u)
+				continue
+			}
+			b.handleUpdateSafely(ctx, u)
 		}
 	}
+}
+
+// handleUpdateSafely is pollLoop's guard rail around one update.
+//
+// Every inbound update is handled on the single poll goroutine, so a panic
+// anywhere below it — a field Telegram legitimately omitted, a payload no
+// renderer expected — does not cost one update: it ends the ONLY thing reading
+// from Telegram, and the bridge goes silent forever with nothing to say why.
+// From the operator's side that is indistinguishable from a dead bot, which is
+// the exact failure mode this whole surface has been fighting.
+//
+// The stack goes to the log because a bug that reaches here is one nobody has
+// seen yet, and the update id is what ties it to what was being processed.
+func (b *Bridge) handleUpdateSafely(ctx context.Context, u Update) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("telegram: panic handling update %d, dropping it: %v\n%s", u.UpdateID, r, debug.Stack())
+		}
+	}()
+	b.handleUpdate(ctx, u)
 }
 
 func (b *Bridge) handleUpdate(ctx context.Context, u Update) {
@@ -859,12 +1005,28 @@ func (b *Bridge) cmdInit(ctx context.Context, m *Message, pc ParsedCommand) {
 	b.replyAndPin(ctx, threadID, m.Chat.ID, m.MessageThreadID, b.initConfirmation(threadID))
 }
 
-// headSeq is the thread's current head sequence — the Seq of the last
-// committed event, 0 when the thread has none yet. There is no dedicated
-// port.Store accessor for this (deliberately not added — see cmdInit's doc
-// comment): AgentEventsSince(threadID, 0) is the existing replay path every
-// pump sweep already uses, so reusing it here is one O(n) scan at bind time
-// only, not a new code path to keep correct.
+// headSeq is where a NEW binding starts mirroring from: the thread's current
+// head sequence, so /init means "mirror from here on" and a long thread's
+// history is not dumped into Telegram at bind time.
+//
+// With ONE exception, which is the whole reason this is not a one-line
+// accessor: a thread that is RUNNING right now starts at the beginning of the
+// turn in flight instead. Publishing mid-run is not a hypothetical — it is the
+// common case, because a turn that is going to take minutes is exactly what an
+// operator wants on their phone. Starting at head there put the cursor in the
+// middle of a turn whose question, tool calls and prose so far were all
+// already behind it, so the chat showed nothing for that turn at all and the
+// first thing to ever arrive was the NEXT one. "From here on" has to mean
+// "including what is happening right now", or publishing during a run answers
+// the one question it was opened to answer with silence.
+//
+// The rewind is bounded by one turn, never the whole log, so the 429-storm
+// this function's head-not-zero rule exists to prevent is still prevented.
+//
+// There is no dedicated port.Store accessor for any of this (deliberately not
+// added — see cmdInit's doc comment): AgentEventsSince(threadID, 0) is the
+// existing replay path every pump sweep already uses, so this is one O(n) scan
+// at bind time only, not a new code path to keep correct.
 func (b *Bridge) headSeq(threadID string) (uint64, error) {
 	events, err := b.store.AgentEventsSince(threadID, 0)
 	if err != nil {
@@ -873,7 +1035,54 @@ func (b *Bridge) headSeq(threadID string) (uint64, error) {
 	if len(events) == 0 {
 		return 0, nil
 	}
-	return events[len(events)-1].Seq, nil
+	head := events[len(events)-1].Seq
+	if start, ok := b.runningTurnStart(threadID, events); ok {
+		return start, nil
+	}
+	return head, nil
+}
+
+// runningTurnStart returns the cursor that replays the in-flight turn from its
+// beginning — the Seq immediately BEFORE the turn's first event — and whether
+// the thread has one at all.
+//
+// Gated on the engine's own status rather than on "the log ends without a
+// terminal session-set", because the log is not conclusive: a thread whose
+// process died mid-turn has exactly the same tail as one still streaming, and
+// replaying a dead turn's whole transcript is the history dump /init must not
+// do. Thread.Status is what the rest of this bridge already trusts for the
+// same question (see keepTyping).
+//
+// WAITING counts as in-flight here, unlike in keepTyping. A turn parked on an
+// approval or an AskUserQuestion is exactly what an operator publishes to
+// their phone for — the tap is the thing they came to make — and the engine
+// records that state as ThreadWaiting (pendingRequestAdd), not
+// ThreadRunning. Gating on "running" alone bound at head, leaving the pending
+// card behind the cursor, so the chat showed nothing whatsoever and the
+// request sat unanswered.
+//
+// The anchor is the turn's `thread.message-sent` when there is one — the
+// operator's own question, without which the replayed answer arrives with
+// nothing to answer — and its `thread.turn-start-requested` otherwise.
+func (b *Bridge) runningTurnStart(threadID string, events []orchestration.Event) (uint64, bool) {
+	thread, ok := b.engine.State().Thread(threadID)
+	if !ok || (thread.Status != orchestration.ThreadRunning && thread.Status != orchestration.ThreadWaiting) {
+		return 0, false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type != orchestration.EvtThreadTurnStartRequested {
+			continue
+		}
+		anchor := i
+		if i > 0 && events[i-1].Type == orchestration.EvtThreadMessageSent {
+			anchor = i - 1
+		}
+		// Seq is globally monotonic, so "everything after Seq-1" is exactly
+		// "this event and everything after it" for this thread — the store
+		// filters by thread_id before the seq comparison.
+		return events[anchor].Seq - 1, true
+	}
+	return 0, false
 }
 
 // cmdNew allocates a fresh thread id (NextChatSuffix, mirroring the
@@ -1340,15 +1549,33 @@ func (b *Bridge) handleApprovalAnswer(ctx context.Context, cq *CallbackQuery, ta
 		log.Printf("telegram: marshal approval thread %s: %v", target.ThreadID, err)
 		return
 	}
+	// Answered BEFORE the dispatch, not after. Engine.Dispatch is a round trip
+	// through a single serialized command queue and waits on ctx, which here is
+	// the bridge's process-lifetime context — so it has no bound of its own on
+	// how long it can take. Telegram's callback query does: a few seconds, then
+	// the query is dead and the button spins forever. Clearing the spinner
+	// first costs nothing (the decision is already captured in `payload`) and
+	// removes the entire class of "the tap did nothing" from this path.
+	//
+	// The outcome is reported by editing the card below rather than by a toast,
+	// which is both more durable (it survives in the scrollback) and the only
+	// option left once the query has been answered — Telegram accepts exactly
+	// one answer per query.
+	b.answerCallback(ctx, cq.ID, "")
+
 	if _, err := b.dispatch(ctx, orchestration.Command{
 		Type: orchestration.CmdThreadApprovalRespond, ThreadID: target.ThreadID, Payload: payload,
 	}); err != nil {
 		log.Printf("telegram: approval respond thread %s: %v", target.ThreadID, err)
-		b.answerCallback(ctx, cq.ID, "gagal mengirim jawaban")
+		b.editCallbackMessage(ctx, cq.Message, EscapeMarkdownV2("⚠️ gagal mengirim jawaban — permintaan ini mungkin sudah dijawab di tempat lain"))
 		return
 	}
-	b.answerCallback(ctx, cq.ID, "")
-	b.editCallbackMessage(ctx, cq.Message, decisionLabel(target.Decision))
+	// Escaped, like every other edit here: the edit carries parse_mode
+	// MarkdownV2, and "✅ Terima (sesi ini)" has parentheses in it — reserved
+	// characters that make editMessageText 400 "can't parse entities". The edit
+	// is then dropped and the card KEEPS its buttons, so a decided request still
+	// looks answerable and a second tap answers a request that no longer exists.
+	b.editCallbackMessage(ctx, cq.Message, EscapeMarkdownV2(decisionLabel(target.Decision)))
 }
 
 // handleUserInputAnswer implements §5a. It NEVER dispatches with a partial
@@ -1373,14 +1600,32 @@ func (b *Bridge) handleUserInputAnswer(ctx context.Context, cq *CallbackQuery, t
 		return
 	}
 
+	// A multiSelect question expects a LIST, not a string: that is what the
+	// CLI's AskUserQuestion tool takes and what the browser panel sends
+	// (resolvePendingUserInputAnswer's string[]). A scalar in its place is a
+	// type error at the far end — the same "reaches the agent as no answer at
+	// all" outcome a mis-keyed map produces.
+	//
+	// One element, because Telegram sends one card per question with one button
+	// per option and a tap picks exactly one. A real multi-toggle card (tap
+	// several, then "selesai") is a UI this bridge does not have; the shape is
+	// what has to be right first.
+	var answer any = target.Answer
+	if target.MultiSelect {
+		answer = []string{target.Answer}
+	}
+
 	pu.mu.Lock()
-	pu.answers[target.Question] = target.Answer
-	complete := len(pu.answers) >= pu.total
+	pu.answers[target.QuestionIndex] = answer
+	complete := len(pu.answers) >= len(pu.questions)
 	var answersCopy map[string]any
 	if complete {
+		// Index-keyed inside, text-keyed on the wire — see pendingUserInput.
 		answersCopy = make(map[string]any, len(pu.answers))
-		for k, v := range pu.answers {
-			answersCopy[k] = v
+		for i, v := range pu.answers {
+			if i < len(pu.questions) {
+				answersCopy[pu.questions[i]] = v
+			}
 		}
 	}
 	pu.mu.Unlock()
@@ -1413,14 +1658,20 @@ func (b *Bridge) handleUserInputAnswer(ctx context.Context, cq *CallbackQuery, t
 
 func (b *Bridge) handleModelSelection(ctx context.Context, cq *CallbackQuery, target callbackTarget) {
 	b.forgetCallback(cq.Data)
-	binding, err := b.store.TelegramBindingByThread(target.ThreadID)
-	if err != nil {
+	// The lookup is only to answer "is this thread still published?" — the
+	// write below is the NARROW setter, never a read-modify-write through
+	// SetTelegramBinding. That upsert rewrites chat_id and topic_id too, so a
+	// destination re-pointed between this read and that write (an /init
+	// elsewhere, the Settings publish toggle, both on other goroutines) would be
+	// silently written back to where it used to be, and the mirror would resume
+	// in the chat the operator had just left. It is the exact hazard
+	// SetTelegramBindingModel's own doc comment exists for.
+	if _, err := b.store.TelegramBindingByThread(target.ThreadID); err != nil {
 		log.Printf("telegram: model selection lookup thread %s: %v", target.ThreadID, err)
 		b.answerCallback(ctx, cq.ID, "binding tidak ditemukan")
 		return
 	}
-	binding.Model = target.Model
-	if err := b.store.SetTelegramBinding(binding); err != nil {
+	if err := b.store.SetTelegramBindingModel(target.ThreadID, target.Model); err != nil {
 		log.Printf("telegram: model selection save thread %s: %v", target.ThreadID, err)
 		b.answerCallback(ctx, cq.ID, "gagal menyimpan model")
 		return
@@ -1575,10 +1826,29 @@ func (b *Bridge) reply(ctx context.Context, chatID, topicID int64, text string) 
 	}
 }
 
+// answerCallbackTimeout bounds the ONE call that clears a tapped button's
+// spinner. Telegram invalidates a callback query within seconds of the tap, so
+// an attempt still in flight after this has already lost — and every second
+// spent waiting is a second the tap keeps spinning.
+const answerCallbackTimeout = 5 * time.Second
+
+// answerCallback clears the spinner on a tapped inline button.
+//
+// Deliberately NOT routed through callWithRetry, unlike every other outbound
+// call here. callWithRetry's contract is "never drop what was about to be
+// sent", which is right for transcript content and exactly wrong for this: a
+// 429's retry_after is tens of seconds, Telegram kills the query long before
+// that, and the retry therefore cannot succeed — it can only park the caller
+// for the whole wait and then fail anyway. That is the shape of the reported
+// bug: a 53-second sleep in here answered a query that had expired 40 seconds
+// earlier, and logged "query is too old and response timeout expired".
+//
+// One attempt, on its own short deadline, so a slow or rate-limited Telegram
+// costs at most answerCallbackTimeout instead of an unbounded stall.
 func (b *Bridge) answerCallback(ctx context.Context, id, text string) {
-	if err := b.callWithRetry(ctx, func() error {
-		return b.client.AnswerCallbackQuery(ctx, id, text)
-	}); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, answerCallbackTimeout)
+	defer cancel()
+	if err := b.client.AnswerCallbackQuery(ctx, id, text); err != nil {
 		log.Printf("telegram: answer callback %s: %v", id, err)
 	}
 }
@@ -1659,6 +1929,27 @@ func (b *Bridge) forgetCallback(token string) {
 	delete(b.cb, token)
 }
 
+// forgetCallbacksForRequest drops every token minted for one request — the
+// whole keyboard at once, rather than the single button that was tapped.
+//
+// forgetCallback alone is not enough once a request is decided: a card offers
+// four buttons and only one of them is ever tapped, so the other three stay
+// live in b.cb for the full 24h TTL. Each is a capability to answer a request
+// that no longer exists, which the decider rejects — but only after the tap
+// has already been dispatched, and only as an error the operator has to read.
+func (b *Bridge) forgetCallbacksForRequest(threadID, requestID string) {
+	if requestID == "" {
+		return
+	}
+	b.cbMu.Lock()
+	defer b.cbMu.Unlock()
+	for token, target := range b.cb {
+		if target.ThreadID == threadID && target.RequestID == requestID {
+			delete(b.cb, token)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // (c) Outbound pump
 // ---------------------------------------------------------------------------
@@ -1717,17 +2008,22 @@ func (b *Bridge) sweep(ctx context.Context) {
 }
 
 // pumpBinding is the replay-and-render step from Task 5 Step 3(c): read
-// everything since the persisted cursor, render and send it, and only THEN
-// persist a new cursor — and only if every send in this sweep succeeded.
+// everything since the persisted cursor, render and send it, and persist a new
+// cursor at the last EVENT BOUNDARY whose output actually reached Telegram.
 //
-// This is deliberately all-or-nothing per tick, matching the plan's own
-// pseudocode (render/send every event, THEN one flush, THEN "on success
-// only" persist the cursor): if anything fails partway through, the whole
-// batch — including whatever already went out successfully earlier in this
-// same tick — is re-read and re-rendered next time, because LastSeq did not
-// move. That can duplicate an already-delivered card on a retry; it can
-// never lose content. TestLastSeqAdvancesOnlyAfterASuccessfulSend pins the
-// "never lose, never advance on failure" half of that contract.
+// That boundary rule is the whole contract, in both directions:
+//   - It never advances past an event whose output is still buffered or whose
+//     send failed, so a failure (or a crash) re-reads that content rather than
+//     losing it. TestLastSeqAdvancesOnlyAfterASuccessfulSend pins that half.
+//   - It DOES advance over everything already delivered, including on a sweep
+//     that then failed. The original rule was all-or-nothing per tick, which
+//     was equivalent back when one sweep sent at most one message; with the
+//     progressive mid-turn flush a sweep sends many, and discarding the earned
+//     boundary re-sent every one of them next tick — forever, if the failure was
+//     permanent. See persistSeq.
+//
+// Retrying can still duplicate the ONE message a failure interrupted; it can
+// never lose content.
 func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding) {
 	events, err := b.store.AgentEventsSince(binding.ThreadID, binding.LastSeq)
 	if err != nil {
@@ -1749,12 +2045,32 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 	// re-read and re-buffered from SQLite on the next sweep — or by the next
 	// process, if this one dies mid-turn. Nothing lives only in memory.
 	var pendingText, pendingReasoning strings.Builder
+	// Fence parity for each buffer, so the size- and time-based flushes below
+	// never cut a code block in half — see fenceTracker.
+	var textFence, reasoningFence fenceTracker
 	// emittedSeq is the cursor this sweep has EARNED: the seq of the last
 	// event after which nothing was left buffered. Deltas that have only been
 	// buffered do not move it.
 	emittedSeq := binding.LastSeq
 	ok := true
 	var sendErr error
+	// sent counts the messages this sweep has actually put on the wire, and
+	// budgetSpent records that it stopped early because of them — see
+	// sweepMessageBudget. budgetSpent is a separate flag rather than a
+	// comparison repeated later because the post-loop flush below advances the
+	// cursor to the LAST event read, which is only sound when the loop
+	// consumed all of them.
+	sent := 0
+	budgetSpent := false
+
+	// send is the one place an outbound transcript message is counted. Every
+	// send inside this sweep goes through it or through the two card helpers,
+	// which return their own count for the same reason.
+	send := func(text string) error {
+		n, err := b.sendChatMessage(ctx, binding, text)
+		sent += n
+		return err
+	}
 
 	// flushPending sends whatever prose has accumulated, reasoning first.
 	// Called before every standalone message so the chat keeps the order
@@ -1763,25 +2079,58 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 		if pendingReasoning.Len() > 0 {
 			text := strings.TrimSpace(pendingReasoning.String())
 			pendingReasoning.Reset()
+			reasoningFence.reset()
 			if text != "" {
-				if err := b.sendChatMessage(ctx, binding, "💭 "+ToMarkdownV2(text)); err != nil {
+				if err := send("💭 " + ToMarkdownV2(text)); err != nil {
 					return err
 				}
+				cs.lastFlush = b.now()
 			}
 		}
 		if pendingText.Len() > 0 {
 			text := strings.TrimSpace(pendingText.String())
 			pendingText.Reset()
+			textFence.reset()
 			if text != "" {
-				if err := b.sendChatMessage(ctx, binding, ToMarkdownV2(text)); err != nil {
+				if err := send(ToMarkdownV2(text)); err != nil {
 					return err
 				}
+				cs.lastFlush = b.now()
 			}
 		}
 		return nil
 	}
 
+	// dueForStreamFlush answers "has this turn gone quiet in Telegram for long
+	// enough that the operator would think it had stopped?" — the time half of
+	// the progressive flush.
+	dueForStreamFlush := func() bool {
+		return b.now().Sub(cs.lastFlush) >= streamFlushInterval
+	}
+
+	// mayFlushMidTurn gates BOTH progressive flushes. A mid-turn cut is only
+	// ever a convenience; splitting a fenced code block is a corruption (see
+	// fenceTracker), so an open fence holds the buffer until the fence closes or
+	// the turn ends — flushPending at the end of a turn splits with
+	// splitForTelegram, which is a different, deliberate cut.
+	mayFlushMidTurn := func() bool {
+		return !textFence.endsInsideFence(pendingText.String()) &&
+			!reasoningFence.endsInsideFence(pendingReasoning.String())
+	}
+
 	for _, ev := range events {
+		// A request that has just been decided retires its card(s), wherever
+		// the decision came from. Handled before Render because Render is pure
+		// and renders none of these event types — the whole effect is the side
+		// effect, and it has to run on the replay path (rather than only when
+		// a tap arrives here) precisely because the common case is the
+		// operator answering in the desktop app instead.
+		if requestID, resolved := resolvedRequestID(ev); resolved {
+			b.retireCards(ctx, cs, binding, requestID)
+			// Not a message, so it does not touch `sent`: the sweep budget
+			// counts what this bridge PUTS in the chat, and this takes
+			// something out of it.
+		}
 		// A multi-question AskUserQuestion prompt needs every question, not
 		// just the first (§5a) — Render() deliberately only renders the
 		// first, since it is a pure function with nowhere to hold the
@@ -1794,11 +2143,17 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 					ok, sendErr = false, err
 					break
 				}
-				if err := b.sendUserInputCards(ctx, binding, inner); err != nil {
+				n, err := b.sendUserInputCards(ctx, cs, binding, inner)
+				sent += n
+				if err != nil {
 					ok, sendErr = false, err
 					break
 				}
 				emittedSeq = ev.Seq
+				if sent >= sweepMessageBudget {
+					budgetSpent = true
+					break
+				}
 				continue
 			}
 		}
@@ -1829,7 +2184,7 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 			}
 		}
 		for _, notice := range r.Notices {
-			if err := b.sendChatMessage(ctx, binding, notice); err != nil {
+			if err := send(notice); err != nil {
 				ok, sendErr = false, err
 				break
 			}
@@ -1838,13 +2193,26 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 			break
 		}
 		if r.Card != nil {
-			if err := b.sendApprovalCard(ctx, binding, *r.Card); err != nil {
+			sent++
+			if err := b.sendApprovalCard(ctx, cs, binding, *r.Card); err != nil {
 				ok, sendErr = false, err
 				break
 			}
 		}
 		pendingText.WriteString(r.Text)
 		pendingReasoning.WriteString(r.Reasoning)
+		// Mid-turn progress. Without this the only things that ever emptied
+		// these buffers were a tool call, an approval card, or the end of the
+		// turn — so a long answer with no tool calls was invisible in Telegram
+		// until it was finished. Flushing at an EVENT boundary (rather than
+		// slicing the buffer) is what keeps the cursor rule below exact:
+		// everything up to and including this event has now been delivered.
+		if pendingText.Len()+pendingReasoning.Len() >= streamFlushChars && mayFlushMidTurn() {
+			if err := flushPending(); err != nil {
+				ok, sendErr = false, err
+				break
+			}
+		}
 		if r.EndTurn {
 			if err := flushPending(); err != nil {
 				ok, sendErr = false, err
@@ -1856,6 +2224,32 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 		// where it was, so a crash re-reads it rather than losing it.
 		if pendingText.Len() == 0 && pendingReasoning.Len() == 0 {
 			emittedSeq = ev.Seq
+			// Stop here once the budget is spent — and ONLY here, at a boundary
+			// the cursor has just moved to. Breaking with prose still buffered
+			// would leave the cursor behind messages this sweep already sent,
+			// and the next sweep would send them a second time. See
+			// sweepMessageBudget.
+			if sent >= sweepMessageBudget {
+				budgetSpent = true
+				break
+			}
+		}
+	}
+	// The time half of the progressive flush, applied once per sweep at the
+	// last event's boundary — so a turn that produces a trickle of text over
+	// several minutes still shows up while it is happening, rather than only
+	// once streamFlushChars has accumulated.
+	//
+	// Skipped when the budget stopped the loop early: the cursor jump below is
+	// to the LAST event READ, which is only "everything is delivered" when every
+	// one of them was actually processed.
+	if ok && !budgetSpent && pendingText.Len()+pendingReasoning.Len() > 0 && dueForStreamFlush() && mayFlushMidTurn() {
+		if err := flushPending(); err != nil {
+			ok, sendErr = false, err
+		} else {
+			// Everything read this sweep is now delivered, so the cursor may
+			// pass all of it — the same rule the per-event branch above uses.
+			emittedSeq = events[len(events)-1].Seq
 		}
 	}
 	if !ok {
@@ -1870,6 +2264,13 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 			log.Printf("telegram: cannot deliver thread %s to chat %d (attempt %d): %v",
 				binding.ThreadID, binding.ChatID, cs.sendFailures, sendErr)
 		}
+		// The cursor stays put for everything this sweep could NOT deliver —
+		// but not for what it already did. emittedSeq means "everything up to
+		// here is on Telegram", and since the progressive mid-turn flush one
+		// sweep can put many messages out before a later one fails; dropping
+		// emittedSeq re-sends every one of them next sweep, forever if the
+		// failure is permanent. Persist what was earned, retry only the rest.
+		b.persistSeq(binding, emittedSeq)
 		return
 	}
 	if cs.sendFailures > 0 {
@@ -1882,10 +2283,19 @@ func (b *Bridge) pumpBinding(ctx context.Context, binding domain.TelegramBinding
 	// those events would drop the answer entirely if this process restarted
 	// before the turn ended. Holding the cursor costs one re-read of the same
 	// deltas next sweep and cannot lose anything.
-	if emittedSeq == binding.LastSeq {
+	b.persistSeq(binding, emittedSeq)
+}
+
+// persistSeq moves a binding's replay cursor to seq, a no-op when this sweep
+// delivered nothing new. Every exit from pumpBinding goes through it — the
+// FAILED one included, which is the whole point: seq is only ever the boundary
+// of something already on Telegram, so re-reading past it is safe and
+// re-sending it is not.
+func (b *Bridge) persistSeq(binding domain.TelegramBinding, seq uint64) {
+	if seq == binding.LastSeq {
 		return
 	}
-	if err := b.store.SetTelegramBindingSeq(binding.ThreadID, emittedSeq); err != nil {
+	if err := b.store.SetTelegramBindingSeq(binding.ThreadID, seq); err != nil {
 		log.Printf("telegram: persist seq thread %s: %v", binding.ThreadID, err)
 	}
 }
@@ -1956,22 +2366,38 @@ const maxToolNames = 512
 // running, so a long tool call is visibly work rather than a chat that went
 // quiet after "memproses…".
 //
-// Re-sent on every sweep because Telegram clears the hint after ~5 seconds;
-// the sweep ticks every 2s, which keeps it lit without a timer of its own.
-// sendChatAction is not rate-limited the way messages are, and it is the ONLY
-// progress primitive the Bot API offers — there is no streaming, and the
-// alternative (rewriting a message with editMessageText as tokens arrive) is
-// the edit-in-place behaviour this bridge deliberately dropped.
+// Re-sent because Telegram clears the hint after ~5 seconds — but on a CLOCK
+// of its own, not once per sweep. pumpLoop sweeps on every engine publish, and
+// the durable log holds one event per streamed token, so "once per sweep" meant
+// a sendChatAction per token: hundreds of calls per turn per published thread,
+// competing with the messages that actually matter for the same rate limit.
 //
-// Failures are ignored entirely, not even logged: this is decoration, it
-// fires every couple of seconds, and a log line per sweep per thread would
-// bury everything that matters.
+// sendChatAction is the ONLY progress primitive the Bot API offers — there is no
+// streaming, and the alternative (rewriting a message with editMessageText as
+// tokens arrive) is the edit-in-place behaviour this bridge deliberately
+// dropped.
+//
+// Failures are ignored entirely, not even logged: this is decoration, and a log
+// line per refresh per thread would bury everything that matters.
 func (b *Bridge) keepTyping(ctx context.Context, binding domain.TelegramBinding) {
 	thread, ok := b.engine.State().Thread(binding.ThreadID)
 	if !ok || thread.Status != orchestration.ThreadRunning {
 		// Only "running". A thread WAITING on an approval is not working —
 		// it is blocked on the operator, and telling them the bot is typing
 		// while it waits for their tap is a lie that hides the ask.
+		return
+	}
+	cs := b.chatStateFor(binding.ThreadID)
+	cs.mu.Lock()
+	now := b.now()
+	due := now.Sub(cs.lastTyping) >= typingHintInterval
+	if due {
+		// Stamped before the call, not after: the send is fire-and-forget, and
+		// a failure that reset the clock would just retry at token rate again.
+		cs.lastTyping = now
+	}
+	cs.mu.Unlock()
+	if !due {
 		return
 	}
 	_ = b.client.SendChatAction(ctx, binding.ChatID, binding.TopicID, "typing")
@@ -1982,7 +2408,12 @@ func (b *Bridge) keepTyping(ctx context.Context, binding domain.TelegramBinding)
 // goes through here — there is no edit path any more: a chat is a sequence of
 // messages, and rewriting one in place destroys the order things happened in
 // (and, on a long turn, showed a wall of text arriving a character at a time).
-func (b *Bridge) sendChatMessage(ctx context.Context, binding domain.TelegramBinding, text string) error {
+//
+// It returns how many messages actually reached Telegram — the split means
+// "one flush" is not "one message", and the sweep's budget has to count what
+// went on the wire, not what it asked for.
+func (b *Bridge) sendChatMessage(ctx context.Context, binding domain.TelegramBinding, text string) (int, error) {
+	n := 0
 	for _, part := range splitForTelegram(text) {
 		if err := b.callWithRetry(ctx, func() error {
 			_, err := b.client.SendMessage(ctx, SendOptions{
@@ -1990,32 +2421,38 @@ func (b *Bridge) sendChatMessage(ctx context.Context, binding domain.TelegramBin
 			})
 			return err
 		}); err != nil {
-			return err
+			return n, err
 		}
+		n++
 	}
-	return nil
+	return n, nil
 }
 
-// splitForTelegram cuts text into messages Telegram will accept. Telegram's
-// hard cap is 4096 characters and it rejects anything longer outright — a
-// rejection the pump cannot retry its way out of, since the cursor never
-// advances past a message that would not send.
+// splitForTelegram cuts text into messages Telegram will accept. Its hard cap
+// is 4096 and it rejects anything longer outright — a rejection the pump cannot
+// retry its way out of, since the cursor never advances past a message that
+// would not send.
 //
-// Splitting prefers a paragraph break, then a line break, then falls back to
-// a hard cut. Rune-based, never byte-based: a byte-offset cut can land inside
-// a multi-byte character, and worse, inside a MarkdownV2 "\x" escape pair —
+// The BUDGET is counted in UTF-16 code units, because that is what Telegram
+// counts (telegramMessageLimit): budgeting in runes let 3500 astral emoji —
+// 7000 units — through as "one message", which comes straight back as "message
+// is too long" and freezes that thread's mirror.
+//
+// The CUT is chosen in runes, never bytes: a byte-offset cut can land inside a
+// multi-byte character, and worse, inside a MarkdownV2 "\x" escape pair —
 // leaving a trailing backslash that makes the whole message unparseable.
+// Splitting prefers a paragraph break, then a line break, then a hard cut.
 func splitForTelegram(text string) []string {
 	r := []rune(text)
-	if len(r) <= messageSplitAt {
+	if utf16Len(r) <= messageSplitAt {
 		return []string{text}
 	}
 	var parts []string
-	for len(r) > messageSplitAt {
-		cut := messageSplitAt
-		if i := lastIndexRunes(r[:cut], "\n\n"); i > messageSplitAt/2 {
+	for utf16Len(r) > messageSplitAt {
+		cut := runesWithinUTF16(r, messageSplitAt)
+		if i := lastIndexRunes(r[:cut], "\n\n"); i > cut/2 {
 			cut = i
-		} else if i := lastIndexRune(r[:cut], '\n'); i > messageSplitAt/2 {
+		} else if i := lastIndexRune(r[:cut], '\n'); i > cut/2 {
 			cut = i
 		}
 		// Never end a part on a lone backslash: it would be read as escaping
@@ -2030,6 +2467,44 @@ func splitForTelegram(text string) []string {
 		parts = append(parts, rest)
 	}
 	return parts
+}
+
+// telegramMessageLimit is the Bot API's hard cap on one message, in the units
+// Telegram actually counts: UTF-16 code units, not runes and not bytes. An
+// emoji outside the BMP (🙂, and every skin-toned or flag sequence) is TWO of
+// them, so a message of 3000 emoji is 6000 by Telegram's arithmetic and is
+// rejected outright while looking half the size from Go.
+const telegramMessageLimit = 4096
+
+// utf16Len counts r the way Telegram does — see telegramMessageLimit.
+func utf16Len(r []rune) int {
+	n := 0
+	for _, c := range r {
+		n++
+		if c > 0xFFFF {
+			n++
+		}
+	}
+	return n
+}
+
+// runesWithinUTF16 is the length, IN RUNES, of the longest prefix of r that
+// fits in budget UTF-16 units. Returned in runes because every cut this package
+// makes has to land on a rune boundary (and never inside a MarkdownV2 escape
+// pair), which a UTF-16 offset cannot express.
+func runesWithinUTF16(r []rune, budget int) int {
+	n := 0
+	for i, c := range r {
+		w := 1
+		if c > 0xFFFF {
+			w = 2
+		}
+		if n+w > budget {
+			return i
+		}
+		n += w
+	}
+	return len(r)
 }
 
 func lastIndexRune(r []rune, want rune) int {
@@ -2063,7 +2538,11 @@ func (b *Bridge) chatStateFor(threadID string) *chatState {
 	defer b.chatsMu.Unlock()
 	cs, ok := b.chats[threadID]
 	if !ok {
-		cs = &chatState{}
+		// lastFlush starts at "now", not zero: the interval means "prose has
+		// been buffered this long with nothing sent", and a zero value would
+		// make the very first sweep due and send one message per sweep — the
+		// per-token dribble the paragraph coalescing exists to avoid.
+		cs = &chatState{lastFlush: b.now()}
 		b.chats[threadID] = cs
 	}
 	return cs
@@ -2072,7 +2551,7 @@ func (b *Bridge) chatStateFor(threadID string) *chatState {
 // sendApprovalCard mints one callback token per decision button and sends
 // the card as its own message — never folded into the live message, which
 // is rewritten too often for an inline keyboard to survive on it (§0.4).
-func (b *Bridge) sendApprovalCard(ctx context.Context, binding domain.TelegramBinding, card Card) error {
+func (b *Bridge) sendApprovalCard(ctx context.Context, cs *chatState, binding domain.TelegramBinding, card Card) error {
 	kb := make(InlineKeyboard, 0, len(card.Buttons))
 	for _, btn := range card.Buttons {
 		token := b.mintCallback(callbackTarget{
@@ -2081,12 +2560,107 @@ func (b *Bridge) sendApprovalCard(ctx context.Context, binding domain.TelegramBi
 		})
 		kb = append(kb, []InlineButton{{Text: btn.Label, CallbackData: token}})
 	}
+	// The returned Message is kept, not discarded: its id is the only handle
+	// on this card, and without it a request decided in the app leaves the
+	// card sitting here forever with live-looking buttons. See retireCards.
 	return b.callWithRetry(ctx, func() error {
-		_, err := b.client.SendMessage(ctx, SendOptions{
+		msg, err := b.client.SendMessage(ctx, SendOptions{
 			ChatID: binding.ChatID, TopicID: binding.TopicID, Text: card.Text, Keyboard: kb,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		cs.rememberCard(card.RequestID, msg.MessageID)
+		return nil
 	})
+}
+
+// resolvedRequestID reports whether ev means "this request can no longer be
+// answered", and for which request.
+//
+// It has to match on TWO unrelated shapes, because the orchestration layer
+// closes a request differently depending on who closed it:
+//
+//   - The DECIDED path — someone chose, in the desktop app, in Telegram, or on
+//     another device — arrives as the engine's own
+//     thread.approval-response-requested / thread.user-input-response-requested.
+//     This is the case the operator actually hits: approve in the app, and the
+//     card here has to go. The reactor's RequestResolved branch explicitly does
+//     NOT cover it ("the clicked path never comes through here"), so matching
+//     only the forwarded provider event would have left the common case broken.
+//
+//   - The UNANSWERED path — a timeout, or an interrupt where the approval gate
+//     declines on the operator's behalf — arrives as a forwarded provider
+//     event.RequestResolved / event.UserInputResolved inside a
+//     thread.activity-appended.
+//
+// Anything else is not a resolution and returns false.
+func resolvedRequestID(ev orchestration.Event) (string, bool) {
+	switch ev.Type {
+	case orchestration.EvtThreadApprovalResponseRequested:
+		var p orchestration.ApprovalRespondPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			return "", false
+		}
+		return p.RequestID, p.RequestID != ""
+
+	case orchestration.EvtThreadUserInputResponseRequested:
+		var p orchestration.UserInputRespondPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			return "", false
+		}
+		return p.RequestID, p.RequestID != ""
+
+	case orchestration.EvtThreadActivityAppended:
+		inner, isForwarded := decodeForwardedEvent(ev.Payload)
+		if !isForwarded {
+			return "", false
+		}
+		switch inner.Type {
+		case event.RequestResolved, event.UserInputResolved:
+			return inner.RequestID, inner.RequestID != ""
+		}
+	}
+	return "", false
+}
+
+// retireCards removes every card sent for requestID — called the moment the
+// request stops being answerable, whichever surface decided it.
+//
+// Deleted rather than edited. The operator's complaint is volume: a busy agent
+// asks for approval constantly, and a chat where every one of them leaves a
+// four-button card behind is unreadable. The transcript still records what
+// happened (the "✓ WebFetch: …" line the tool call itself emits), so nothing
+// is lost by taking the card away once it is spent.
+//
+// The edit is the fallback, not the intent: Telegram only lets a bot delete
+// its own message for 48 hours, and a card older than that can still have its
+// buttons stripped, which is the part that actually matters — a decided
+// request must never keep offering an answer.
+//
+// Caller holds cs.mu (see chatState.cards).
+func (b *Bridge) retireCards(ctx context.Context, cs *chatState, binding domain.TelegramBinding, requestID string) {
+	if requestID == "" {
+		return
+	}
+	messageIDs := cs.cards[requestID]
+	delete(cs.cards, requestID)
+	// Whether or not any card is still on screen, the tokens must go: they are
+	// a live capability to answer a request that is already decided, and a
+	// restart is the only other thing that clears them.
+	b.forgetCallbacksForRequest(binding.ThreadID, requestID)
+	for _, messageID := range messageIDs {
+		if err := b.client.DeleteMessage(ctx, binding.ChatID, messageID); err == nil {
+			continue
+		} else {
+			log.Printf("telegram: delete spent card %d in chat %d: %v — falling back to stripping its buttons",
+				messageID, binding.ChatID, err)
+		}
+		if err := b.client.EditMessageText(ctx, binding.ChatID, messageID,
+			EscapeMarkdownV2("🔐 sudah dijawab"), nil); err != nil {
+			log.Printf("telegram: strip buttons off card %d in chat %d: %v", messageID, binding.ChatID, err)
+		}
+	}
 }
 
 // sendUserInputCards implements §5a's "one card per question": it decodes
@@ -2094,14 +2668,15 @@ func (b *Bridge) sendApprovalCard(ctx context.Context, binding domain.TelegramBi
 // sends a card for every question that does not already have an answer in
 // this request's accumulator — so a card already answered before a restart
 // or a retried batch is not re-sent alongside the ones still open.
-func (b *Bridge) sendUserInputCards(ctx context.Context, binding domain.TelegramBinding, inner event.Event) error {
+// Returns how many cards were sent, for the sweep's message budget.
+func (b *Bridge) sendUserInputCards(ctx context.Context, cs *chatState, binding domain.TelegramBinding, inner event.Event) (int, error) {
 	p, ok := inner.Payload.(*event.UserInputRequestedPayload)
 	if !ok || p == nil {
-		return nil
+		return 0, nil
 	}
 	var questions []userInputQuestion
 	if err := json.Unmarshal(p.Questions, &questions); err != nil || len(questions) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	key := pendingInputKey(binding.ThreadID, inner.RequestID)
@@ -2114,15 +2689,20 @@ func (b *Bridge) sendUserInputCards(ctx context.Context, binding domain.Telegram
 	}
 	pu, exists := b.userInput[key]
 	if !exists {
-		pu = &pendingUserInput{answers: map[string]any{}, total: len(questions), createdAt: now}
+		keys := make([]string, len(questions))
+		for i, q := range questions {
+			keys[i] = answerKeyFor(q)
+		}
+		pu = &pendingUserInput{answers: map[int]any{}, questions: keys, createdAt: now}
 		b.userInput[key] = pu
 	}
 	b.uiMu.Unlock()
 
-	for _, q := range questions {
+	sent := 0
+	for i, q := range questions {
 		answerKey := answerKeyFor(q)
 		pu.mu.Lock()
-		_, answered := pu.answers[answerKey]
+		_, answered := pu.answers[i]
 		pu.mu.Unlock()
 		if answered {
 			continue
@@ -2133,20 +2713,28 @@ func (b *Bridge) sendUserInputCards(ctx context.Context, binding domain.Telegram
 			token := b.mintCallback(callbackTarget{
 				Kind:     cbUserInput,
 				ThreadID: binding.ThreadID, RequestID: inner.RequestID, Question: answerKey, Answer: opt.Label,
+				QuestionIndex: i, MultiSelect: q.MultiSelect,
 			})
 			kb = append(kb, []InlineButton{{Text: opt.Label, CallbackData: token}})
 		}
 		text := "❓ " + EscapeMarkdownV2(truncateForTelegram(q.Question, cardTextLimit))
 		if err := b.callWithRetry(ctx, func() error {
-			_, err := b.client.SendMessage(ctx, SendOptions{
+			msg, err := b.client.SendMessage(ctx, SendOptions{
 				ChatID: binding.ChatID, TopicID: binding.TopicID, Text: text, Keyboard: kb,
 			})
-			return err
+			if err != nil {
+				return err
+			}
+			// One request, many cards — every one of them is retired together
+			// when the prompt is answered. See retireCards.
+			cs.rememberCard(inner.RequestID, msg.MessageID)
+			return nil
 		}); err != nil {
-			return err
+			return sent, err
 		}
+		sent++
 	}
-	return nil
+	return sent, nil
 }
 
 // callWithRetry is the ONE place a 429 is handled: on an *APIError carrying
@@ -2155,7 +2743,19 @@ func (b *Bridge) sendUserInputCards(ctx context.Context, binding domain.Telegram
 // *APIError with no RetryAfter) is returned immediately; the caller's own
 // failure handling (pumpBinding's ok flag) is what keeps that content from
 // being lost, by not advancing LastSeq past it.
+// maxRetryWait caps the TOTAL time one call may spend asleep waiting out 429s
+// before giving up and letting the caller's own failure handling take over.
+//
+// Uncapped, a bot that has tripped Telegram's per-chat flood limit (a busy
+// agent mirroring a whole transcript reaches it easily) can be handed
+// retry_after values indefinitely, and the goroutine sits in here for as long
+// as that lasts. For the pump that only delays the transcript; the cursor
+// refuses to advance, so nothing is lost and the next sweep retries. Giving up
+// and reporting is strictly better than an invisible unbounded park.
+const maxRetryWait = 90 * time.Second
+
 func (b *Bridge) callWithRetry(ctx context.Context, fn func() error) error {
+	var slept time.Duration
 	for {
 		err := fn()
 		if err == nil {
@@ -2163,6 +2763,18 @@ func (b *Bridge) callWithRetry(ctx context.Context, fn func() error) error {
 		}
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+			// Logged, always. A silent sleep in here is what made the original
+			// bug so hard to see: 53 seconds passed with no line in the log at
+			// all, so the stall looked like the bridge had simply stopped
+			// receiving. A rate limit is a real operational fact — the mirror
+			// is producing more traffic than Telegram will accept — and it
+			// belongs in the log whether or not the retry then succeeds.
+			log.Printf("telegram: rate limited, waiting %s before retrying (%s spent so far)", apiErr.RetryAfter, slept)
+			if slept+apiErr.RetryAfter > maxRetryWait {
+				log.Printf("telegram: giving up after %s of rate-limit backoff: %v", slept, err)
+				return err
+			}
+			slept += apiErr.RetryAfter
 			select {
 			case <-time.After(apiErr.RetryAfter):
 				continue

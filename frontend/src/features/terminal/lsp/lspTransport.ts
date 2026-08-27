@@ -299,6 +299,14 @@ export class DevDeckLspTransport implements IMessageTransport {
   private status: LspStatus = 'connecting'
   private statusMessage: string | undefined
   private closed = false
+  /** True once the backend has answered with a `ready` control frame, and it
+   *  stays true afterwards — unlike `status`, which a later failure overwrites.
+   *  It is what separates a session that never started (gopls is not
+   *  installed, the worktree is gone, the language is unsupported) from one
+   *  that worked and then lost its socket. Only the second is worth
+   *  reconnecting: retrying the first just repeats a failure the operator has
+   *  to fix, and would do it in a hot loop. See `CodeFileEditor`. */
+  private everReady = false
   private resolveReady!: (value: { rootUri: string }) => void
   private rejectReady!: (reason: Error) => void
   private rootUri: string | undefined
@@ -550,6 +558,13 @@ export class DevDeckLspTransport implements IMessageTransport {
     return this.statusMessage
   }
 
+  /** True when this transport is in `'error'` *after* having been ready — a
+   *  connection that was lost, rather than one that never came up. See
+   *  `everReady`. */
+  isLost() {
+    return this.everReady && this.status === 'error'
+  }
+
   /** A second JSON-RPC caller on the same socket, alongside MonacoLspClient.
    *  Ids are strings prefixed `devdeck-`, so they cannot collide with the
    *  numeric ids the client allocates; responses carrying one are resolved
@@ -643,6 +658,7 @@ export class DevDeckLspTransport implements IMessageTransport {
     if (frame.type === 'ready' && frame.rootUri) {
       const rootUri = frame.rootUri.replace(/\/+$/, '')
       this.rootUri = rootUri
+      this.everReady = true
       this.setStatus('ready')
       this.resolveReady({ rootUri })
       return
@@ -665,12 +681,34 @@ export class DevDeckLspTransport implements IMessageTransport {
     this.send(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
   }
 
-  private handleClose() {
-    if (this.status !== 'ready') {
-      const message = this.statusMessage ?? CLOSED_MESSAGE
-      this.setStatus('error', message)
-      this.rejectReady(new Error(message))
+  /**
+   * A socket that dies is always a failed session — the difference is only
+   * whether anyone is still waiting on `ready`.
+   *
+   * Before `ready`, the pending promise has to be rejected too. After it, the
+   * status is the *only* way the failure escapes this object: nothing re-opens
+   * the socket, `answerWithoutServer` makes every later request resolve to a
+   * perfectly innocent `null`, and both the session pool (which retires a
+   * cached session by asking for `'error'`) and `CodeFileEditor`'s toast read
+   * that status. Leaving it at `'ready'` is what turned a dropped connection —
+   * a gopls crash, a hub restart, a laptop waking up — into a language server
+   * that was quietly dead for the rest of the page's life.
+   *
+   * DevDeck closing the transport itself is not a failure: `close()` is the
+   * pool's orderly idle disposal, and reporting an error there would fire a
+   * toast at an operator who merely closed a file.
+   */
+  private failFromClosedSocket(message: string) {
+    if (this.status === 'ready') {
+      if (!this.closed) this.setStatus('error', message)
+      return
     }
+    this.setStatus('error', this.statusMessage ?? message)
+    this.rejectReady(new Error(this.statusMessage ?? message))
+  }
+
+  private handleClose() {
+    this.failFromClosedSocket(CLOSED_MESSAGE)
     this.state.set({ state: 'closed', error: undefined })
     this.rejectAllPending(new Error(this.statusMessage ?? CLOSED_MESSAGE))
     for (const listener of this.closeListeners) listener()
@@ -678,10 +716,7 @@ export class DevDeckLspTransport implements IMessageTransport {
 
   private handleError() {
     const error = new Error('Could not connect to the language server')
-    if (this.status !== 'ready') {
-      this.setStatus('error', error.message)
-      this.rejectReady(error)
-    }
+    this.failFromClosedSocket(error.message)
     for (const listener of this.errorListeners) listener(error)
   }
 

@@ -70,6 +70,7 @@ import {
   type ShellTransferHandle,
 } from './shellTransfer'
 import { useFileTransfers } from './useFileTransfers'
+import { matchesBinding, useCommandChordLabel } from '@/features/keybindings/store'
 
 interface TerminalExplorerProps {
   /** `wt:<worktreeId>` | `ssh:<connectionId>` — this tree's own identity in
@@ -252,6 +253,7 @@ export function TerminalExplorer({
   onRequestContentSearch,
   contentSearchShortcut,
 }: TerminalExplorerProps) {
+  const newFileShortcut = useCommandChordLabel('explorer.newFile')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [depsOpen, setDepsOpen] = useState(false)
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
@@ -648,14 +650,13 @@ export function TerminalExplorer({
   function handleKeyDown(event: KeyboardEvent) {
     const eventTarget = event.target as HTMLElement
     if (eventTarget.tagName === 'INPUT' || eventTarget.tagName === 'TEXTAREA') return
-    if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (matchesBinding(event, 'explorer.deleteSelection')) {
       if (selectedPaths.length === 0) return
       event.preventDefault()
       setPendingDelete(selectedEntries)
       return
     }
-    const primary = event.ctrlKey || event.metaKey
-    if (primary && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n') {
+    if (matchesBinding(event, 'explorer.newFile')) {
       event.preventDefault()
       startCreate(uploadTarget, 'file')
     }
@@ -801,7 +802,7 @@ export function TerminalExplorer({
           type="button"
           onClick={() => startCreate(uploadTarget, 'file')}
           disabled={writeFile.isPending}
-          title={`New file in ${uploadTargetLabel} (Ctrl+N)`}
+          title={newFileShortcut ? `New file in ${uploadTargetLabel} (${newFileShortcut})` : `New file in ${uploadTargetLabel}`}
           aria-label="New file"
           className="flex h-8 w-8 flex-none cursor-pointer items-center justify-center text-devdeck-fg-2 hover:text-devdeck-fg disabled:cursor-wait"
         >
@@ -962,7 +963,7 @@ export function TerminalExplorer({
                 'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
               )}
             >
-              <ContextMenuAction label="New File..." shortcut="⌘N" onClick={() => startCreate(menuTargetFolder(), 'file')} />
+              <ContextMenuAction label="New File..." shortcut={newFileShortcut} onClick={() => startCreate(menuTargetFolder(), 'file')} />
               <ContextMenuAction label="New Folder..." onClick={() => startCreate(menuTargetFolder(), 'folder')} />
               <ContextMenuSeparator />
               <ContextMenuAction label="Cut" shortcut="⌘X" disabled={!menuEntry} onClick={() => putOnClipboard('cut')} />
@@ -1114,7 +1115,7 @@ function CreateRow({
 }
 
 function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
-  const { data, error, isLoading, refetch } = useFilesList(target, path)
+  const { data, error, isLoading, isFetching, refetch } = useFilesList(target, path)
   const indent = 8 + depth * 14
   const entries = data ?? []
 
@@ -1130,7 +1131,16 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
     )
   }
 
-  if (error) {
+  // `data` is what this level last listed SUCCESSFULLY — React Query keeps it
+  // alongside a later failure, and it is the difference between "this folder
+  // never loaded" and "this folder loaded, and the refresh after it didn't".
+  // Only the first has nothing to show. Treating both as the second is what
+  // made one dropped SFTP connection wipe every expanded folder in the tree
+  // and replace it with an error, while the terminal beside it — a separate
+  // SSH connection — carried on working. Note the check is `data`, not
+  // `entries.length`: a folder that is genuinely empty has a listing too, and
+  // it must not be downgraded to the error screen either.
+  if (error && !data) {
     const message = error instanceof ApiError ? error.message : 'Could not read this folder'
     return depth === 0 ? (
       <div className="flex h-32 flex-col items-center justify-center gap-3 px-4 text-center">
@@ -1158,20 +1168,46 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
 
   const creatingHere = rest.creating?.parentPath === path ? rest.creating : null
 
+  // A refresh that failed over a listing we still have. Shown as one thin row
+  // ABOVE the entries it belongs to, so the tree stays usable while the link
+  // is flaky: everything below is the last good listing, and this says so and
+  // offers another attempt. It carries the backend's own sentence because on a
+  // bad connection the distinction the operator needs — dropped link vs
+  // permission vs missing path — is in that sentence.
+  const staleNotice = error ? (
+    <button
+      type="button"
+      onClick={() => refetch()}
+      title="Try this folder again"
+      className="flex h-[29px] w-full cursor-pointer items-center gap-1.5 truncate font-mono text-[10.5px] text-devdeck-err hover:bg-devdeck-hover-wash"
+      style={{ paddingLeft: indent + 18 }}
+    >
+      <RefreshCw size={11} className={cn('flex-none', isFetching && 'animate-spin')} />
+      <span className="truncate">{errorMessage(error, 'Could not refresh this folder')} · retry</span>
+    </button>
+  ) : null
+
   if (entries.length === 0 && !creatingHere) {
     return depth === 0 ? (
-      <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-devdeck-fg-2">
-        Empty folder
-      </div>
+      <>
+        {staleNotice}
+        <div className="flex h-28 items-center justify-center font-mono text-[10.5px] text-devdeck-fg-2">
+          Empty folder
+        </div>
+      </>
     ) : (
-      <div className="flex h-[29px] items-center font-mono text-[10.5px] text-devdeck-fg-2" style={{ paddingLeft: indent + 18 }}>
-        empty
-      </div>
+      <>
+        {staleNotice}
+        <div className="flex h-[29px] items-center font-mono text-[10.5px] text-devdeck-fg-2" style={{ paddingLeft: indent + 18 }}>
+          empty
+        </div>
+      </>
     )
   }
 
   return (
     <>
+      {staleNotice}
       {creatingHere ? (
         <CreateRow indent={indent} kind={creatingHere.kind} onCommit={rest.onCommitCreate} onCancel={rest.onCancelCreate} />
       ) : null}

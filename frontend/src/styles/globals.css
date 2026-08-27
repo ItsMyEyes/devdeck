@@ -183,12 +183,11 @@
   --nt-shadow:
     0 14px 28px -6px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(255, 255, 255, 0.06);
-  /* Notion's stack. --font-sans (Arial) is the UI family and stays that for
-     every control in the app; a document body is the one place where the
-     platform UI face is what makes the page read as Notion, and it falls
-     back to Arial where there is no system face. */
-  --nt-font:
-    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', var(--font-sans);
+  /* Notion's stack — now the same platform face --font-sans resolves to (see
+     its own note): a document body reading as Notion and the app chrome
+     reading as the OS are the same requirement, so this is kept as an alias
+     rather than a second, competing stack. */
+  --nt-font: var(--font-sans);
 
   /* ── semantic (shadcn-style) ─────────────────────────────────────────── */
   --background: var(--devdeck-pane);
@@ -471,12 +470,28 @@
   --color-notion-text-dim: var(--nt-text-dim);
   --color-notion-blue: var(--nt-blue);
 
-  /* Arial everywhere for UI text — one family, no webfont fetch, identical
-     metrics on every machine the app runs on. Helvetica/Liberation Sans are
-     the metric-compatible fallbacks for macOS-without-Arial and Linux.
+  /* ── UI text: the PLATFORM's own interface face ────────────────────────
+     Was Arial, on the reasoning that one family with no webfont fetch gives
+     identical metrics on every machine. The metrics argument held; the
+     typography did not. Arial is a 1982 print face with no optical sizing and
+     no small-size design: at the 11-13px this app spends most of its text
+     budget on (pane chrome, pills, tool rows, the status line) its round bowls
+     and tight apertures blur, and next to Geist Mono — which IS a screen face —
+     the UI read a decade older than the code it was framing.
+     Every OS this ships on now has an interface face designed for exactly this
+     job: SF Pro on macOS (which is where the Tauri build lives), Segoe UI
+     Variable on Windows 11, the desktop's own choice through system-ui on
+     Linux. Nothing is fetched — these are all installed — so the "no webfont"
+     property is unchanged, and Arial stays in the stack as the floor.
+     Metrics differ slightly per platform, which is fine: every truncation in
+     the app is CSS (`truncate` / `min-w-0`), never a measured character count.
      --font-mono stays a real monospace: code, diffs, line numbers and the
-     xterm grid are column-aligned by definition and Arial would break them. */
-  --font-sans: Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', sans-serif;
+     xterm grid are column-aligned by definition and a UI face would break
+     them. */
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text',
+    'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Liberation Sans', sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
 
   /* Tailwind's named radius scale is COLLAPSED onto the three design steps
