@@ -13,16 +13,27 @@ import (
 // skills and models are read from the agent's config files. When not found,
 // the inner registry's static data is returned unchanged (installed: false).
 type LocalRegistry struct {
-	inner     port.AgentRegistry
-	installed map[string]bool
+	inner port.AgentRegistry
 }
 
 // NewLocalRegistry creates a LocalRegistry that wraps the given registry.
-// It probes for installed agent CLIs at construction time.
 func NewLocalRegistry(inner port.AgentRegistry) *LocalRegistry {
-	installed := detect.ProbeAll()
-	log.Printf("local registry: probed %d agents, installed: %v", len(installed), installed)
-	return &LocalRegistry{inner: inner, installed: installed}
+	log.Printf("local registry: probed %d agents, installed: %v", len(detect.AgentBinary), detect.ProbeAll())
+	return &LocalRegistry{inner: inner}
+}
+
+// installed reports whether agentID's CLI is currently resolvable. Checked
+// live on every call rather than once at process start: detect.Installed is
+// a cheap PATH/fallback-dir lookup (the expensive login-shell PATH scan it
+// depends on is memoized on its own), so there is no reason to freeze the
+// answer. Freezing it here — the previous behavior — meant a CLI installed,
+// upgraded, or PATH-fixed after the backend started stayed invisible for the
+// rest of that process's life: ListSkills kept serving the hardcoded static
+// catalog instead of ever reading the real ~/.claude, ~/.codex, or
+// ~/.agents/skills directories, so the chat skill picker silently diverged
+// from what was actually installed until the backend was restarted.
+func (r *LocalRegistry) installed(agentID string) bool {
+	return detect.Installed(agentID)
 }
 
 // ListAgents returns agent summaries enriched with local installation status.
@@ -32,7 +43,7 @@ func (r *LocalRegistry) ListAgents() ([]domain.AgentSummary, error) {
 		return nil, err
 	}
 	for i := range agents {
-		agents[i].Installed = r.installed[agents[i].ID]
+		agents[i].Installed = r.installed(agents[i].ID)
 		if agents[i].Installed {
 			if skills := detect.ReadSkills(agents[i].ID); skills != nil {
 				agents[i].SkillCount = len(skills)
@@ -52,7 +63,7 @@ func (r *LocalRegistry) GetAgent(agentID string) (*domain.Agent, error) {
 	if agent == nil {
 		return nil, nil
 	}
-	agent.Installed = r.installed[agentID]
+	agent.Installed = r.installed(agentID)
 
 	if agent.Installed {
 		if skills := detect.ReadSkills(agentID); skills != nil {
@@ -85,7 +96,7 @@ func (r *LocalRegistry) ListModels(agentID string) ([]domain.Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return staticModels, nil
 	}
 
@@ -98,7 +109,7 @@ func (r *LocalRegistry) ListModels(agentID string) ([]domain.Model, error) {
 
 // ListSkills returns skills for an agent, preferring locally-detected data.
 func (r *LocalRegistry) ListSkills(agentID string) ([]domain.Skill, error) {
-	if r.installed[agentID] {
+	if r.installed(agentID) {
 		if skills := detect.ReadSkills(agentID); skills != nil {
 			return skills, nil
 		}
@@ -118,7 +129,7 @@ func markSkillsReadOnly(skills []domain.Skill) {
 
 // InstallSkill links an existing local skill into another installed agent.
 func (r *LocalRegistry) InstallSkill(agentID, skillName string) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	return detect.InstallSkill(agentID, skillName)
@@ -126,7 +137,7 @@ func (r *LocalRegistry) InstallSkill(agentID, skillName string) error {
 
 // RemoveSkill removes a skill from one installed agent's writable skill root.
 func (r *LocalRegistry) RemoveSkill(agentID, skillName string) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	return detect.RemoveSkill(agentID, skillName)
@@ -134,7 +145,7 @@ func (r *LocalRegistry) RemoveSkill(agentID, skillName string) error {
 
 // ReadSkillContent reads an installed skill's fixed SKILL.md file.
 func (r *LocalRegistry) ReadSkillContent(agentID, skillName string) (string, bool, bool, error) {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return "", false, false, port.ErrAgentManagementUnsupported
 	}
 	return detect.ReadSkillContent(agentID, skillName)
@@ -142,7 +153,7 @@ func (r *LocalRegistry) ReadSkillContent(agentID, skillName string) (string, boo
 
 // WriteSkillContent atomically updates an installed skill's SKILL.md file.
 func (r *LocalRegistry) WriteSkillContent(agentID, skillName, content string) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	return detect.WriteSkillContent(agentID, skillName, content)
@@ -150,7 +161,7 @@ func (r *LocalRegistry) WriteSkillContent(agentID, skillName, content string) er
 
 // ListMCPServers reads redacted MCP configuration through the agent's CLI.
 func (r *LocalRegistry) ListMCPServers(agentID string) ([]domain.MCPServer, error) {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return nil, port.ErrAgentManagementUnsupported
 	}
 	return detect.ReadMCPServers(agentID)
@@ -158,7 +169,7 @@ func (r *LocalRegistry) ListMCPServers(agentID string) ([]domain.MCPServer, erro
 
 // AddMCPServer writes MCP configuration through the agent's native CLI.
 func (r *LocalRegistry) AddMCPServer(agentID string, input port.MCPServerInput) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	return detect.AddMCPServer(agentID, input)
@@ -166,7 +177,7 @@ func (r *LocalRegistry) AddMCPServer(agentID string, input port.MCPServerInput) 
 
 // RemoveMCPServer removes MCP configuration through the agent's native CLI.
 func (r *LocalRegistry) RemoveMCPServer(agentID, serverName string) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	return detect.RemoveMCPServer(agentID, serverName)
@@ -174,8 +185,8 @@ func (r *LocalRegistry) RemoveMCPServer(agentID, serverName string) error {
 
 // ---- Env profiles (Claude-only: ANTHROPIC_* env schema + ~/.claude/settings.json) ----
 
-func envProfileSupported(agentID string, installed map[string]bool) bool {
-	return (agentID == "claude" || agentID == "codex") && installed[agentID]
+func envProfileSupported(agentID string, isInstalled func(string) bool) bool {
+	return (agentID == "claude" || agentID == "codex") && isInstalled(agentID)
 }
 
 func (r *LocalRegistry) ListEnvProfiles(agentID string) ([]domain.EnvProfile, error) {
@@ -220,15 +231,15 @@ func (r *LocalRegistry) FetchEnvProfileModels(agentID, baseURL, authToken string
 	return detect.FetchEnvModels(baseURL, authToken)
 }
 
-func (r *LocalRegistry) GetSettingsFile(agentID string) (string, error) {
-	if !r.installed[agentID] {
-		return "", port.ErrAgentManagementUnsupported
+func (r *LocalRegistry) GetSettingsFile(agentID string) (domain.AgentSettingsFile, error) {
+	if !r.installed(agentID) {
+		return domain.AgentSettingsFile{}, port.ErrAgentManagementUnsupported
 	}
 	return detect.ReadSettingsFile(agentID)
 }
 
 func (r *LocalRegistry) SetSettingsFile(agentID string, content string) error {
-	if !r.installed[agentID] {
+	if !r.installed(agentID) {
 		return port.ErrAgentManagementUnsupported
 	}
 	if err := detect.WriteSettingsFile(agentID, content); err != nil {

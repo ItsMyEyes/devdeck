@@ -66,9 +66,6 @@ type resolved struct {
 	onlyFrom           string
 	trustedProxies     string
 	clientIPHeader     string
-	pythonBin          string
-	pandocBin          string
-	mmdcBin            string
 	socks5Addr         string
 	httpProxyAddr      string
 	proxyKey           string
@@ -101,9 +98,6 @@ func resolveFlags(t *testing.T, cfg *Config, args []string) resolved {
 	onlyFrom := fs.String("only-from", envOr("DEVDECK_ONLY_FROM", Pick(JoinList(cfg.Network.OnlyFrom), "")), "")
 	trustedProxies := fs.String("trusted-proxies", envOr("DEVDECK_TRUSTED_PROXIES", Pick(JoinList(cfg.Network.TrustedProxies), "")), "")
 	clientIPHeader := fs.String("client-ip-header", envOr("DEVDECK_CLIENT_IP_HEADER", Pick(cfg.Network.ClientIPHeader, "")), "")
-	pythonBin := fs.String("python-bin", envOr("DEVDECK_PYTHON_BIN", Pick(cfg.Tools.PythonBin, "python3")), "")
-	pandocBin := fs.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", Pick(cfg.Tools.PandocBin, "pandoc")), "")
-	mmdcBin := fs.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", Pick(cfg.Tools.MmdcBin, "mmdc")), "")
 	socks5Addr := fs.String("socks5-addr", envOr("DEVDECK_SOCKS5_ADDR", Pick(cfg.Proxy.Socks5Addr, "")), "")
 	httpProxyAddr := fs.String("http-proxy-addr", envOr("DEVDECK_HTTP_PROXY_ADDR", Pick(cfg.Proxy.HTTPAddr, "")), "")
 	proxyKey := fs.String("proxy-key", envOr("DEVDECK_PROXY_KEY", Pick(cfg.Proxy.Key, "")), "")
@@ -120,7 +114,6 @@ func resolveFlags(t *testing.T, cfg *Config, args []string) resolved {
 		twoFA:          *twoFA, secureCookies: *secureCookies,
 		turnstileSiteKey: *turnstileSiteKey, turnstileSecretKey: *turnstileSecretKey,
 		onlyFrom: *onlyFrom, trustedProxies: *trustedProxies, clientIPHeader: *clientIPHeader,
-		pythonBin: *pythonBin, pandocBin: *pandocBin, mmdcBin: *mmdcBin,
 		socks5Addr: *socks5Addr, httpProxyAddr: *httpProxyAddr, proxyKey: *proxyKey,
 		githubToken: *githubToken,
 	}
@@ -370,7 +363,6 @@ func TestPrecedenceEveryFieldIsWired(t *testing.T) {
 		"DEVDECK_TAILSCALE_SERVE", "DEVDECK_2FA", "DEVDECK_SECURE_COOKIES",
 		"DEVDECK_TURNSTILE_SITE_KEY", "DEVDECK_TURNSTILE_SECRET_KEY",
 		"DEVDECK_ONLY_FROM", "DEVDECK_TRUSTED_PROXIES", "DEVDECK_CLIENT_IP_HEADER",
-		"DEVDECK_PYTHON_BIN", "DEVDECK_PANDOC_BIN", "DEVDECK_MMDC_BIN",
 		"DEVDECK_SOCKS5_ADDR", "DEVDECK_HTTP_PROXY_ADDR", "DEVDECK_PROXY_KEY",
 		"DEVDECK_GITHUB_TOKEN",
 	} {
@@ -390,8 +382,7 @@ func TestPrecedenceEveryFieldIsWired(t *testing.T) {
 		turnstileSiteKey: "site", turnstileSecretKey: "secret",
 		onlyFrom: "10.0.0.0/8,127.0.0.1", trustedProxies: "192.168.0.1",
 		clientIPHeader: "CF-Connecting-IP",
-		pythonBin:      "/usr/bin/python3", pandocBin: "/usr/local/bin/pandoc", mmdcBin: "/usr/local/bin/mmdc",
-		socks5Addr: "127.0.0.1:1080", httpProxyAddr: "127.0.0.1:8080", proxyKey: "proxysecret",
+		socks5Addr:     "127.0.0.1:1080", httpProxyAddr: "127.0.0.1:8080", proxyKey: "proxysecret",
 		githubToken: "ghp_x",
 	}
 	if got != want {
@@ -403,7 +394,7 @@ func TestPrecedenceEveryFieldIsWired(t *testing.T) {
 // not regress" guard: a zero Config must resolve to exactly the built-in
 // defaults main.go uses today.
 func TestPrecedenceNoConfigFileKeepsTodaysDefaults(t *testing.T) {
-	for _, key := range []string{"DEVDECK_ROLE", "DEVDECK_ADDR", "DEVDECK_DB", "DEVDECK_2FA", "DEVDECK_SECURE_COOKIES", "DEVDECK_OPEN", "DEVDECK_TAILSCALE_SERVE", "DEVDECK_PANDOC_BIN"} {
+	for _, key := range []string{"DEVDECK_ROLE", "DEVDECK_ADDR", "DEVDECK_DB", "DEVDECK_2FA", "DEVDECK_SECURE_COOKIES", "DEVDECK_OPEN", "DEVDECK_TAILSCALE_SERVE"} {
 		t.Setenv(key, "")
 	}
 	got := resolveFlags(t, &Config{}, nil)
@@ -412,9 +403,6 @@ func TestPrecedenceNoConfigFileKeepsTodaysDefaults(t *testing.T) {
 	}
 	if !got.open || !got.twoFA || !got.secureCookies || got.tailscaleServe {
 		t.Fatalf("bool defaults changed: open=%v 2fa=%v secure=%v serve=%v", got.open, got.twoFA, got.secureCookies, got.tailscaleServe)
-	}
-	if got.pandocBin != "pandoc" || got.mmdcBin != "mmdc" {
-		t.Fatalf("tool defaults changed: pandoc=%q mmdc=%q", got.pandocBin, got.mmdcBin)
 	}
 }
 
@@ -454,11 +442,6 @@ network:
     - 192.168.0.1
   client_ip_header: CF-Connecting-IP
 
-tools:
-  python_bin: /usr/bin/python3
-  pandoc_bin: /usr/local/bin/pandoc
-  mmdc_bin: /usr/local/bin/mmdc
-
 proxy:
   socks5_addr: 127.0.0.1:1080
   http_addr: 127.0.0.1:8080
@@ -488,7 +471,6 @@ func TestParseFullSchema(t *testing.T) {
 			TrustedProxies: []string{"192.168.0.1"},
 			ClientIPHeader: "CF-Connecting-IP",
 		},
-		Tools:   ToolsConfig{PythonBin: "/usr/bin/python3", PandocBin: "/usr/local/bin/pandoc", MmdcBin: "/usr/local/bin/mmdc"},
 		Proxy:   ProxyConfig{Socks5Addr: "127.0.0.1:1080", HTTPAddr: "127.0.0.1:8080", Key: "proxysecret"},
 		Updates: UpdatesConfig{GitHubToken: "ghp_x"},
 	}
@@ -870,7 +852,6 @@ func TestWriteReadRoundTripPreservesEveryField(t *testing.T) {
 					Turnstile: TurnstileConfig{SiteKey: "s", SecretKey: "k"},
 				},
 				Network: NetworkConfig{OnlyFrom: []string{"10.0.0.0/8"}, TrustedProxies: []string{"1.1.1.1", "2.2.2.2"}, ClientIPHeader: "CF-Connecting-IP"},
-				Tools:   ToolsConfig{PythonBin: "python3", PandocBin: "pandoc", MmdcBin: "mmdc"},
 				Proxy:   ProxyConfig{Socks5Addr: "127.0.0.1:1080", HTTPAddr: "127.0.0.1:8080", Key: "pk"},
 				Updates: UpdatesConfig{GitHubToken: "ghp_x"},
 			},
@@ -979,7 +960,7 @@ func TestDefaultsYAMLParsesBackCleanly(t *testing.T) {
 // how the server behaves. Every value in it has to resolve to the same thing a
 // server with no config file at all resolves to.
 func TestDefaultsResolveToTodaysBuiltins(t *testing.T) {
-	for _, key := range []string{"DEVDECK_ROLE", "DEVDECK_ADDR", "DEVDECK_DB", "DEVDECK_KEY", "DEVDECK_OPEN", "DEVDECK_2FA", "DEVDECK_SECURE_COOKIES", "DEVDECK_TAILSCALE_SERVE", "DEVDECK_PYTHON_BIN", "DEVDECK_PANDOC_BIN", "DEVDECK_MMDC_BIN", "DEVDECK_ONLY_FROM", "DEVDECK_TRUSTED_PROXIES"} {
+	for _, key := range []string{"DEVDECK_ROLE", "DEVDECK_ADDR", "DEVDECK_DB", "DEVDECK_KEY", "DEVDECK_OPEN", "DEVDECK_2FA", "DEVDECK_SECURE_COOKIES", "DEVDECK_TAILSCALE_SERVE", "DEVDECK_ONLY_FROM", "DEVDECK_TRUSTED_PROXIES"} {
 		t.Setenv(key, "")
 	}
 	cfg, err := Parse(DefaultsYAML())

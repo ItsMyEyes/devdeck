@@ -8,6 +8,7 @@ import {
   logout,
   register,
   setupTotp,
+  updateAccount,
   verifyTotp,
   verifyTotpSetup,
 } from '@/lib/api'
@@ -49,6 +50,18 @@ export function useVerifyTotp() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: verifyTotp,
+    onSuccess: (user) => queryClient.setQueryData(qk.me, user),
+  })
+}
+
+/** Changes the operator's own sign-in email and/or password. The response is
+ *  the updated account, so it seeds the cache directly rather than re-fetching
+ *  — a password change has just revoked every *other* session, and this one
+ *  stays valid. */
+export function useUpdateAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: updateAccount,
     onSuccess: (user) => queryClient.setQueryData(qk.me, user),
   })
 }

@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { inputFrame, resizeFrame } from '@/lib/terminalClient'
 import { openExternalUrl } from '@/lib/openExternalUrl'
 import { sshShellWsUrl } from '@/lib/sshClient'
-import { isAppShortcut, terminalTheme } from '@/features/terminal/Terminal'
+import { terminalKeyEventHandler, terminalTheme } from '@/features/terminal/Terminal'
 import { currentResolvedTheme, subscribeResolvedTheme } from '@/features/theme/theme'
 import { createTerminalWriter, type TerminalWriter } from '@/features/terminal/terminalWriter'
 
@@ -73,12 +73,13 @@ function createSession(connectionId: string): SSHSession {
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.loadAddon(new WebLinksAddon((_event, url) => openExternalUrl(url)))
-  // See Terminal.tsx's isAppShortcut doc comment: without this, Ctrl/Cmd+P
-  // never reaches SSHShellPane's window-level quick-open shortcut while the
-  // terminal has focus — xterm swallows it as its own "send DLE" binding.
-  // Ctrl/Cmd+K rides the same escape hatch so the command palette opens from
-  // inside an SSH shell too.
-  term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
+  // See Terminal.tsx's terminalKeyEventHandler doc comment: without this,
+  // Ctrl/Cmd+P never reaches SSHShellPane's window-level quick-open shortcut
+  // while the terminal has focus — xterm swallows it as its own "send DLE"
+  // binding. Ctrl/Cmd+K rides the same escape hatch so the command palette
+  // opens from inside an SSH shell too, and the handler also supplies the
+  // select-all binding xterm itself doesn't have.
+  term.attachCustomKeyEventHandler(terminalKeyEventHandler(term))
 
   const session: SSHSession = { term, fit, ws: null, writer: createTerminalWriter(term) }
 

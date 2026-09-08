@@ -67,6 +67,31 @@ func TestFsListDirReturnsVisibleFoldersThenFiles(t *testing.T) {
 	}
 }
 
+func TestFsRootsReturnsHomeAndAtLeastOneRoot(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/fs/roots", nil)
+	rec := httptest.NewRecorder()
+	NewFsHandler().Roots(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var response domain.FsRootsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Home != home {
+		t.Fatalf("home = %q, want %q", response.Home, home)
+	}
+	if len(response.Roots) == 0 {
+		t.Fatal("roots = [], want at least one root")
+	}
+}
+
 func TestFsMkdirCreatesChildFolder(t *testing.T) {
 	root := t.TempDir()
 	body, err := json.Marshal(map[string]string{"path": root, "name": "child"})

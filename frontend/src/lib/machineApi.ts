@@ -9,6 +9,7 @@ import type {
   Agent,
   AgentAttachment,
   AgentModel,
+  AgentSettingsFile,
   AgentSkill,
   AgentSummary,
   EnvModelOption,
@@ -462,6 +463,19 @@ export function fetchFsList(machine: Machine, path: string): Promise<FsListRespo
   return machineRequest<FsListResponse>(machine, 'GET', `/fs/list?path=${encodeURIComponent(path)}`)
 }
 
+/** The places the folder browser can jump straight to on `machine`: its home
+ *  directory, plus the top-level roots below it (drive letters on Windows,
+ *  "/" elsewhere) — lets a multi-disk machine (e.g. Windows D:) be reached
+ *  instead of being stuck under ~. */
+export interface FsRootsResponse {
+  home: string
+  roots: string[]
+}
+
+export function fetchFsRoots(machine: Machine): Promise<FsRootsResponse> {
+  return machineRequest<FsRootsResponse>(machine, 'GET', '/fs/roots')
+}
+
 export interface CreateFsFolderBody {
   path: string
   name: string
@@ -744,10 +758,10 @@ export function fetchAgentEnvModels(
   )
 }
 
-// ---- Settings file (raw JSON editor) ----
+// ---- Settings file (raw config editor, every installed agent) ----
 
-export function fetchAgentSettingsFile(machine: Machine, agentId: string): Promise<{ content: string }> {
-  return machineRequest<{ content: string }>(
+export function fetchAgentSettingsFile(machine: Machine, agentId: string): Promise<AgentSettingsFile> {
+  return machineRequest<AgentSettingsFile>(
     machine,
     'GET',
     `/agents/${encodeURIComponent(agentId)}/settings-file`,

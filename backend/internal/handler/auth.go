@@ -265,6 +265,40 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
+// PutAccount handles PUT /api/auth/account — the operator changing their own
+// sign-in email and/or password from Settings -> Account. Omitted fields are
+// left unchanged, so the client can send either one alone.
+func (h *AuthHandler) PutAccount(w http.ResponseWriter, r *http.Request) {
+	sessionToken := cookieValue(r, sessionCookieName)
+	user, err := h.svc.CurrentUser(sessionToken)
+	if handleStoreErr(w, err) {
+		return
+	}
+	var body struct {
+		Email           *string `json:"email"`
+		Password        *string `json:"password"`
+		CurrentPassword string  `json:"currentPassword"`
+	}
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	updated, err := h.svc.UpdateAccount(user.ID, service.AccountUpdate{
+		Email:           body.Email,
+		Password:        body.Password,
+		CurrentPassword: body.CurrentPassword,
+	})
+	if handleStoreErr(w, err) {
+		return
+	}
+	if body.Password != nil {
+		// Best-effort: the credentials already changed, so a failure to sweep
+		// stale sessions must not report the change itself as failed.
+		_ = h.svc.RevokeOtherSessions(user.ID, sessionToken)
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // SetDesktopKey enables POST /api/auth/key-session, which exchanges the
 // hub's static --key for a normal operator session (desktop app bootstrap;
 // see docs/superpowers/specs/2026-07-13-tauri-desktop-sidecar-design.md).

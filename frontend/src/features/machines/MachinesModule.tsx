@@ -20,7 +20,14 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { DataLoading } from '@/features/screens/DataLoading'
 import type { Machine } from '@/store/types'
 import { qk } from '@/features/data/keys'
-import { useMachineHealth, useMachineUpdateCheck, useMachineVersion, useMachines } from '@/features/data/queries'
+import {
+  useMachineBindingStatus,
+  useMachineHealth,
+  useMachineUpdateCheck,
+  useMachineVersion,
+  useMachines,
+} from '@/features/data/queries'
+import { describeBindingIssue } from '@/features/machines/bindingIssue'
 import { TerminalSessionsDialog } from '@/features/machines/TerminalSessionsDialog'
 import { fetchMachineUpdateCheck } from '@/lib/api'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
@@ -60,6 +67,8 @@ function MachineRow({ machine }: { machine: Machine }) {
   const check = useMachineUpdateCheck(machine.id)
   const canUpdate = check.data?.updateAvailable === true && check.data.managed === false
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  const bindingStatus = useMachineBindingStatus(machine)
+  const bindingIssue = describeBindingIssue(bindingStatus.data)
   return (
     <article className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
       <div className="flex h-9 w-9 items-center justify-center rounded-control bg-devdeck-card-wash text-devdeck-fg-2">
@@ -76,6 +85,15 @@ function MachineRow({ machine }: { machine: Machine }) {
           ) : null}
         </div>
         <div className="mt-0.5 truncate font-mono text-[10.5px] text-devdeck-fg-2">{machine.url}</div>
+        {bindingIssue ? (
+          <div
+            className="mt-1 flex items-center gap-1.5 text-[10.5px] text-devdeck-err"
+            title={bindingIssue}
+          >
+            <TriangleAlert size={11} className="flex-none" />
+            <span className="truncate">{bindingIssue}</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="col-span-2 flex items-center gap-2 pl-12 lg:col-span-1 lg:pl-0">

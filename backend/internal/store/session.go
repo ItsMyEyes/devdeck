@@ -32,6 +32,15 @@ func (s *Store) SessionUserID(tokenHash string, now time.Time) (string, error) {
 	return userID, nil
 }
 
+// DeleteUserSessionsExcept revokes every session belonging to a user apart
+// from keepTokenHash. A credential change calls it so the browser that made
+// the change stays signed in while any other session — including one an
+// attacker holds — is invalidated on the spot.
+func (s *Store) DeleteUserSessionsExcept(userID, keepTokenHash string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, keepTokenHash)
+	return err
+}
+
 // DeleteSession removes a session row (logout, or lazy expiry cleanup).
 func (s *Store) DeleteSession(tokenHash string) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE id = ?`, tokenHash)

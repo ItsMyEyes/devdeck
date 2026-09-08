@@ -63,8 +63,10 @@ type AgentManager interface {
 	ActivateEnvProfile(agentID, profileID string) error
 	DeactivateEnvProfile(agentID string) error
 	FetchEnvProfileModels(agentID, baseURL, authToken string) ([]string, error)
-	// GetSettingsFile returns the raw JSON of the agent's settings.json.
-	GetSettingsFile(agentID string) (string, error)
-	// SetSettingsFile atomically writes raw JSON to the agent's settings.json.
+	// GetSettingsFile returns the agent's own config file — content plus the
+	// path and syntax the editor needs. Unlike env profiles above, every
+	// installed agent has one.
+	GetSettingsFile(agentID string) (domain.AgentSettingsFile, error)
+	// SetSettingsFile atomically writes raw text to the agent's config file.
 	SetSettingsFile(agentID string, content string) error
 }

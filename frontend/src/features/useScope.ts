@@ -1,5 +1,6 @@
 import { useLocation, useParams } from '@tanstack/react-router'
 import { findTileLeaf } from '@/features/tabs/tileTree'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { ModuleView } from '@/store/types'
 
@@ -23,7 +24,19 @@ export function useScope(): Scope {
   // tabs anywhere else without hiding the tiling canvas behind the SSH
   // connections page) — the focused tile tab's kind is the only way to
   // tell them apart, so it breaks the tie below.
+  //
+  // Only inside Tauri, though: `w.$wsId.tsx` mounts WorkspaceTileArea on
+  // `isTauri` alone, so on the web `/w/$wsId` always renders the agents list
+  // through `<Outlet/>` no matter what the tile tree says. The layout is
+  // persisted (`workspaceTileLayouts` in the `devdeck-ui-v2` partialize), and
+  // the palette's "open SSH host" action writes an ssh-shell tab into it
+  // before navigating here — so on the web an unconditional tie-break pinned
+  // the sidebar to SSHGroupTree ("GROUPS"/"New SSH host") while the agents
+  // list was on screen, permanently: the only control that re-selects the
+  // Agents tab lives inside ProjectTree, the panel it had just replaced.
+  const isTauri = useIsTauri()
   const focusedTabKind = useDevDeckStore((s) => {
+    if (!isTauri) return undefined
     const layout = params.wsId ? s.workspaceTileLayouts[params.wsId] : undefined
     if (!layout) return undefined
     const leaf = findTileLeaf(layout.root, layout.focusedLeafId)

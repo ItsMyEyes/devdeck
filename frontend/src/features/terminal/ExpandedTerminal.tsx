@@ -31,10 +31,11 @@ import {
   useUpdateWorktree,
   useWorkspace,
 } from '@/features/data/queries'
-import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { shellSidebarOpen, useDevDeckStore } from '@/store/useDevDeckStore'
 import { AgentChatPane } from '@/features/agent-chat/AgentChatPane'
 import { insertTerminalContext } from '@/features/agent-chat/ChatComposer'
 import { nextFreeThreadKey } from '@/features/agent-chat/SessionsPanel'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import type { DefinitionReveal, DefinitionTarget } from './CodeFileEditor'
 import { ContentSearchPanel } from './ContentSearchPanel'
 import { FileEditor } from './FileEditor'
@@ -178,13 +179,18 @@ export function useIsDesktop() {
  *  sidebar it drives. Shared by `ExpandedTerminal` (worktree shells) and
  *  `SSHShellPane`, the same way `OverflowItem`/`useIsDesktop` above are. */
 export function ShellSidebarToggle({ shellKey }: { shellKey: string }) {
-  const open = useDevDeckStore((s) => shellSidebarState(s.shellSidebars, shellKey).open)
+  // Must resolve the unseen-key default the same way ShellSidebar does, or on
+  // a phone this shows "close" over an already-closed sidebar and the first
+  // tap is a no-op — see `shellSidebarOpen`'s doc comment.
+  const inline = useIsDesktop()
+  const open = useDevDeckStore((s) => shellSidebarOpen(s.shellSidebars, shellKey, inline))
   const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
   const shortcut = useCommandChordLabel('terminal.toggleSidebar')
   return (
     <div className="flex flex-none items-center gap-1 px-1.5">
       <button
         type="button"
+        {...tourAnchor('shell-sidebar-toggle')}
         onClick={() => setShellSidebarOpen(shellKey, !open)}
         title={shortcut ? `Toggle sidebar (${shortcut})` : 'Toggle sidebar'}
         aria-label="Toggle sidebar"
@@ -960,14 +966,16 @@ function TerminalWorkspace({
       }
       if (matchesBinding(event, 'terminal.toggleSidebar')) {
         event.preventDefault()
-        const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
+        // Same per-viewport default the pane and its toggle use, so the
+        // chord can't disagree with them — see `shellSidebarOpen`.
+        const isOpen = shellSidebarOpen(useDevDeckStore.getState().shellSidebars, shellKey, isDesktop)
         setShellSidebarOpen(shellKey, !isOpen)
         return
       }
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
+  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen, isDesktop])
 
   const focusedPane = findPane(layout.root, layout.focusedPaneId)
   const focusedActiveContent =
@@ -976,6 +984,12 @@ function TerminalWorkspace({
       : undefined
   const focusedTerminalSessionKey =
     focusedActiveContent && focusedActiveContent.kind === 'terminal' ? focusedActiveContent.sessionKey : undefined
+  /** The focused pane's open file, for reveal-active-file in the Explorer
+   *  sidebar (spec: "when a file is open, the sidebar auto-expands down to
+   *  it"). Deliberately just `focusedPaneId`'s active tab, not `dirtyFiles`
+   *  or `definitionReveals` — those track *other* per-file bookkeeping, not
+   *  which pane is currently in front. */
+  const activeFilePath = focusedActiveContent?.kind === 'file' ? focusedActiveContent.path : undefined
 
   function sendKey(data: string) {
     if (!focusedTerminalSessionKey) return
@@ -1179,6 +1193,7 @@ function TerminalWorkspace({
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
         contentSearchShortcut={contentSearchShortcut}
+        activePath={activeFilePath}
       />
     ),
     untitled: ({ content, isActive }) => {
@@ -1218,8 +1233,9 @@ function TerminalWorkspace({
   const firstPaneId = firstLeafId(layout.root)
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-pane">
+    <div ref={containerRef} className="relative flex min-h-0 flex-1 bg-devdeck-pane">
       <ShellSidebar
+        inline={isDesktop}
         shellKey={shellKey}
         target={{ kind: 'worktree', machine, worktreeId: worktree.id }}
         rootLabel={projectName ?? label}
@@ -1232,6 +1248,7 @@ function TerminalWorkspace({
         contentSearchShortcut={contentSearchShortcut}
         activeThreadKey={activeThreadKey}
         onOpenThread={openAgentChatThread}
+        activeFilePath={activeFilePath}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

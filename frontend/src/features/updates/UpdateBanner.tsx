@@ -66,10 +66,12 @@ export function UpdateBanner() {
   }
 
   return (
-    // `bottom-24`, not `bottom-4`: TransferStatusPanel owns `bottom-4 right-4
-    // z-50` and its cards grow upward from there, so the pill is parked one
-    // card-height clear of that band instead of landing on top of it.
-    <div className="fixed bottom-24 right-4 z-50 w-80">
+    // Third in the bottom-right stack, and parked clear of both surfaces below
+    // it: the help "?" button (features/tour/HelpFab) is a permanent h-10
+    // fixture at `bottom-4 right-4`, and TransferStatusPanel's cards start at
+    // `bottom-16` and grow upward from there. One card-height above that band
+    // puts the pill at `bottom-36`.
+    <div className="fixed bottom-36 right-4 z-50 w-80">
       <div className="rounded-lg border border-devdeck-border-accent bg-devdeck-glass-solid p-3 text-devdeck-fg shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
         <div className="flex items-center gap-2">
           <CircleArrowUp size={13} className="flex-none text-devdeck-accent" />

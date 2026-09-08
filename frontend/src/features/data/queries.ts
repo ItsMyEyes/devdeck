@@ -72,6 +72,7 @@ import {
   fetchHubKey,
   fetchIssueEvents,
   fetchLocalPublishedSocks,
+  fetchMachineBindingStatus,
   fetchMachineBusy,
   fetchMachineHealth,
   fetchMachineUpdateCheck,
@@ -84,6 +85,7 @@ import {
   fetchSSHForwardStates,
   fetchSSHStats,
   fetchTailscaleStatus,
+  setTailscaleServe,
   fetchWhoami,
   fetchWorkspaces,
   installMachineUpdate,
@@ -175,6 +177,7 @@ import {
   fetchAgentSkills,
   fetchAgents,
   fetchFsList,
+  fetchFsRoots,
   fetchTerminalSessions,
   fetchGitDiff,
   fetchGitLog,
@@ -268,6 +271,26 @@ export function useWorkspace(wsId: string | null | undefined) {
     queryFn: fetchWorkspaces,
     select: (workspaces: Workspace[]) => workspaces.find((w) => w.id === wsId),
   })
+}
+
+/** Manual refresh for the agents view: the project/worktree tree plus the
+ *  machine list and per-machine health that decide the offline badges.
+ *  Deliberately narrow — `qk.machines` is a prefix of every machine-scoped
+ *  key (agents, files, git, …), so an inexact invalidate here would refetch
+ *  unrelated data in every open tab. */
+export function useRefreshAgents() {
+  const queryClient = useQueryClient()
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: qk.workspaces }),
+      queryClient.invalidateQueries({ queryKey: qk.machines, exact: true }),
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey
+          return key.length === 3 && key[0] === 'machines' && key[2] === 'health'
+        },
+      }),
+    ])
 }
 
 export function useSettings() {
@@ -455,6 +478,28 @@ export function useMachineCapabilities(machine: Machine | undefined) {
   })
 }
 
+/** The hub's own record of trying to push its URL to a remote machine's
+ *  runtime, so a runtime that hasn't synced yet can be explained instead of
+ *  looking identical to one with nothing wrong — see
+ *  `backend/internal/service/bindingpush.go`. Unlike `useMachineCapabilities`
+ *  this asks the HUB, not the machine: the hub already knows the outcome of
+ *  its own last push, no probe of the machine is needed.
+ *
+ *  Polled at the same cadence as `useMachineHealth`: like health, this can
+ *  change on its own between renders (the push loop runs every 30s
+ *  independent of anything the operator does here). `enabled` is false for a
+ *  local machine — `machine.isLocal` is never pushed to, so the answer would
+ *  always be the same uninformative `known: false`. */
+export function useMachineBindingStatus(machine: Machine | undefined) {
+  return useQuery({
+    queryKey: qk.machineBindingStatus(machine?.id ?? ''),
+    queryFn: () => fetchMachineBindingStatus(machine!.id),
+    enabled: !!machine && !machine.isLocal,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  })
+}
+
 /** An update check against GitHub. Deliberately never automatic: the
  *  unauthenticated GitHub API allows 60 requests/hour, which polling per
  *  machine would exhaust in minutes. Call `refetch()` from a button. */
@@ -519,6 +564,24 @@ export function useTailscaleStatus(enabled: boolean) {
     queryFn: fetchTailscaleStatus,
     enabled,
     staleTime: 5_000,
+  })
+}
+
+/** Starts or stops `tailscale serve` on the hub serving this page.
+ *
+ *  Always resyncs, success or failure: the reported state comes from the
+ *  serve child actually running, and a start that the tailscale CLI rejected
+ *  (a stale 443 listener, a logged-out node) must not leave the toggle
+ *  showing "on". */
+export function useSetTailscaleServe() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => setTailscaleServe(enabled),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.tailscaleStatus }),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to change Tailscale exposure')
+      void queryClient.invalidateQueries({ queryKey: qk.tailscaleStatus })
+    },
   })
 }
 
@@ -1020,13 +1083,16 @@ export function useUpdateSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (patch: SettingsPatch) => updateSettings(patch),
-    // Returning the promise lets the mutate-level onSuccess (navigation) await
-    // cache invalidation, so it runs against the fresh tree, not a stale one.
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: qk.settings }),
-        queryClient.invalidateQueries({ queryKey: qk.workspaces }),
-      ]),
+    // Settings only, deliberately — `SettingsPatch` is `activeWorkspaceId` and
+    // `defaultModel`, and neither can change the workspace/project/worktree
+    // tree. This used to also invalidate `qk.workspaces` so a mutate-level
+    // `onSuccess` that navigated would see a fresh tree; no caller passes one
+    // any more, and the only live caller is the workspace-switch effect in
+    // `routes/w.$wsId.tsx`, which fires on EVERY switch. That made each switch
+    // refetch every workspace and re-render every consumer of the tree at the
+    // exact moment the new workspace's tiles were mounting. If a future patch
+    // field really can move the tree, invalidate it from that caller.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.settings }),
   })
 }
 
@@ -1497,7 +1563,12 @@ export function useAgentSkills(machine: Machine | undefined, agentId: string | u
     queryKey: qk.agentSkills(machine?.id ?? '', agentId ?? ''),
     queryFn: () => fetchAgentSkills(machine!, agentId!),
     enabled: !!machine && !!agentId,
-    staleTime: 300_000,
+    // Skills can be installed/removed out-of-band through the agent's own
+    // CLI at any time, not just through DevDeck's own mutations (which
+    // invalidate this key on settle). 300s let the chat's $-picker show a
+    // list up to 5 minutes stale; matches the 30s the management tab's own
+    // per-agent skills query already uses for the same data.
+    staleTime: 30_000,
   })
 }
 
@@ -1721,6 +1792,19 @@ export function useFsList(machine: Machine | undefined, path: string) {
     queryFn: () => fetchFsList(machine!, path),
     enabled: !!machine && path.length > 0,
     staleTime: 30_000,
+  })
+}
+
+/** The folder browser's root/drive picker — home dir plus every top-level
+ *  root (drive letters on Windows, "/" elsewhere) that `machine`'s own
+ *  runtime OS exposes. Roots don't change while a runtime is up, so this is
+ *  cached generously. */
+export function useFsRoots(machine: Machine | undefined) {
+  return useQuery({
+    queryKey: qk.fsRoots(machine?.id ?? ''),
+    queryFn: () => fetchFsRoots(machine!),
+    enabled: !!machine,
+    staleTime: 5 * 60_000,
   })
 }
 

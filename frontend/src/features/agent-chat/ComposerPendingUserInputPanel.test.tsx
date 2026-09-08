@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ComposerPendingUserInputPanel } from '@/features/agent-chat/ComposerPendingUserInputPanel'
@@ -15,9 +16,16 @@ const twoQuestionPrompt: PendingUserInput = {
   ],
 }
 
+/** The one-question prompt: the only shape that still advances on click. */
+const singleQuestionPrompt: PendingUserInput = {
+  requestId: 'req-solo', createdAt: 1,
+  questions: [twoQuestionPrompt.questions[0]],
+}
+
 function renderPanel(overrides: Partial<Parameters<typeof ComposerPendingUserInputPanel>[0]> = {}) {
   const onToggleOption = vi.fn()
   const onAdvance = vi.fn()
+  const onBack = vi.fn()
   render(
     <ComposerPendingUserInputPanel
       pendingUserInputs={[twoQuestionPrompt]}
@@ -25,16 +33,17 @@ function renderPanel(overrides: Partial<Parameters<typeof ComposerPendingUserInp
       questionIndex={0}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
+      onBack={onBack}
       {...overrides}
     />,
   )
-  return { onToggleOption, onAdvance }
+  return { onToggleOption, onAdvance, onBack }
 }
 
 describe('ComposerPendingUserInputPanel', () => {
   it('renders nothing when there is no pending request', () => {
     const { container } = render(
-      <ComposerPendingUserInputPanel pendingUserInputs={[]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={vi.fn()} />,
+      <ComposerPendingUserInputPanel pendingUserInputs={[]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={vi.fn()} onBack={vi.fn()} />,
     )
     expect(container).toBeEmptyDOMElement()
   })
@@ -51,7 +60,7 @@ describe('ComposerPendingUserInputPanel', () => {
     render(
       <div>
         <input data-testid="editor" />
-        <ComposerPendingUserInputPanel pendingUserInputs={[twoQuestionPrompt]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={vi.fn()} />
+        <ComposerPendingUserInputPanel pendingUserInputs={[twoQuestionPrompt]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={vi.fn()} onBack={vi.fn()} />
       </div>,
     )
     const onToggleOption = vi.fn()
@@ -60,9 +69,9 @@ describe('ComposerPendingUserInputPanel', () => {
     expect(onToggleOption).not.toHaveBeenCalled()
   })
 
-  it('single-select auto-advances 200ms after a click', async () => {
+  it('a lone single-select question auto-advances 200ms after a click', async () => {
     vi.useFakeTimers()
-    const { onAdvance } = renderPanel()
+    const { onAdvance } = renderPanel({ pendingUserInputs: [singleQuestionPrompt] })
     fireEvent.click(screen.getByText('Tabs'))
     vi.advanceTimersByTime(200)
     expect(onAdvance).toHaveBeenCalledTimes(1)
@@ -73,7 +82,7 @@ describe('ComposerPendingUserInputPanel', () => {
     vi.useFakeTimers()
     const multi: PendingUserInput = { ...twoQuestionPrompt, questions: [{ ...twoQuestionPrompt.questions[0], multiSelect: true }] }
     const onAdvance = vi.fn()
-    render(<ComposerPendingUserInputPanel pendingUserInputs={[multi]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={onAdvance} />)
+    render(<ComposerPendingUserInputPanel pendingUserInputs={[multi]} answers={{}} questionIndex={0} onToggleOption={vi.fn()} onAdvance={onAdvance} onBack={vi.fn()} />)
     fireEvent.click(screen.getByText('Tabs'))
     vi.advanceTimersByTime(500)
     expect(onAdvance).not.toHaveBeenCalled()
@@ -113,6 +122,7 @@ describe('ComposerPendingUserInputPanel', () => {
           questionIndex={0}
           onToggleOption={vi.fn()}
           onAdvance={onAdvance}
+          onBack={vi.fn()}
         />,
       )
       return { onAdvance }
@@ -136,11 +146,108 @@ describe('ComposerPendingUserInputPanel', () => {
       expect(screen.getByText('2 selected · press 1–2 to toggle')).toBeInTheDocument()
     })
 
-    // Single-select advances on click, so a confirm there would be a second way
-    // to do what has already happened.
-    it('is absent on a single-select question', () => {
-      renderPanel()
+    // A LONE single-select question advances on click, so a confirm there would
+    // be a second way to do what has already happened. (A stacked one does need
+    // it — see the stepper suite below.)
+    it('is absent on a lone single-select question', () => {
+      renderPanel({ pendingUserInputs: [singleQuestionPrompt] })
       expect(screen.queryByRole('button', { name: /Send answer|Next question/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    })
+  })
+
+  // ── The stacked stepper ──
+  //
+  // A multi-question prompt used to be one-way and partly automatic: a
+  // single-select pick advanced itself after 200ms and a pick on the LAST
+  // question submitted the turn outright, with no control anywhere that went
+  // back. Every question in a stack is now stepped by hand.
+  describe('stacked prompt stepper', () => {
+    it('does not auto-advance a single-select question', () => {
+      vi.useFakeTimers()
+      const { onAdvance } = renderPanel()
+      fireEvent.click(screen.getByText('Tabs'))
+      vi.advanceTimersByTime(1000)
+      expect(onAdvance).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('offers Next on a single-select question, disabled until one is picked', () => {
+      renderPanel()
+      expect(screen.getByRole('button', { name: /Next question/ })).toBeDisabled()
+      cleanup()
+      const { onAdvance } = renderPanel({ answers: { q1: { selectedOptionLabels: ['Tabs'] } } })
+      const next = screen.getByRole('button', { name: /Next question/ })
+      expect(next).toBeEnabled()
+      fireEvent.click(next)
+      expect(onAdvance).toHaveBeenCalledTimes(1)
+    })
+
+    it('commits through Send answer on the last question rather than on the pick', () => {
+      const { onAdvance } = renderPanel({ questionIndex: 1, answers: { q1: { selectedOptionLabels: ['Tabs'] } } })
+      expect(screen.queryByRole('button', { name: /Next question/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Send answer' })).toBeDisabled()
+      fireEvent.click(screen.getByText('Yes'))
+      expect(onAdvance).not.toHaveBeenCalled()
+    })
+
+    it('has no Back on the first question and one on every question after it', () => {
+      renderPanel()
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+      cleanup()
+      const { onBack } = renderPanel({ questionIndex: 1 })
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+      expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('steps with ←/→, under the same guards as the buttons', () => {
+      const { onAdvance, onBack } = renderPanel({ questionIndex: 1, answers: { q1: { selectedOptionLabels: ['Tabs'] } } })
+      // q2 is unanswered, so → is refused exactly as Send answer is disabled.
+      fireEvent.keyDown(document, { key: 'ArrowRight' })
+      expect(onAdvance).not.toHaveBeenCalled()
+      fireEvent.keyDown(document, { key: 'ArrowLeft' })
+      expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    // ── The stale-closure regression ──
+    //
+    // Every test above renders the panel ONCE at a fixed `questionIndex`, which
+    // is exactly the case a stale keydown listener still gets right. Driving
+    // the index through real state is what caught it: ← consulted the index it
+    // had captured on the first render — always 0 — so after stepping forward
+    // it refused to step back, while the Back button beside it worked.
+    it('still steps back after the index has moved through state', () => {
+      function Host() {
+        const [index, setIndex] = useState(0)
+        return (
+          <ComposerPendingUserInputPanel
+            pendingUserInputs={[twoQuestionPrompt]}
+            answers={{ q1: { selectedOptionLabels: ['Tabs'] } }}
+            questionIndex={index}
+            onToggleOption={vi.fn()}
+            onAdvance={() => setIndex((i) => i + 1)}
+            onBack={() => setIndex((i) => Math.max(0, i - 1))}
+          />
+        )
+      }
+      render(<Host />)
+      fireEvent.click(screen.getByRole('button', { name: /Next question/ }))
+      expect(screen.getByText('2/2')).toBeInTheDocument()
+      fireEvent.keyDown(document, { key: 'ArrowLeft' })
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+      fireEvent.keyDown(document, { key: 'ArrowRight' })
+      expect(screen.getByText('2/2')).toBeInTheDocument()
+    })
+
+    it('ignores ←/→ on a lone question, which has nowhere to step', () => {
+      const { onAdvance, onBack } = renderPanel({
+        pendingUserInputs: [singleQuestionPrompt],
+        answers: { q1: { selectedOptionLabels: ['Tabs'] } },
+      })
+      fireEvent.keyDown(document, { key: 'ArrowRight' })
+      fireEvent.keyDown(document, { key: 'ArrowLeft' })
+      expect(onAdvance).not.toHaveBeenCalled()
+      expect(onBack).not.toHaveBeenCalled()
     })
   })
 

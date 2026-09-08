@@ -331,14 +331,13 @@ backend/
     domain/models.go          — shared domain types (mirrors frontend types.ts)
     handler/                  — HTTP handlers (one file per resource + middleware)
     service/                  — business logic (one file per resource)
-    service/tools.go          — Tools module: shells out to markitdown/pandoc/mmdc
+    service/tools*.go         — Tools module: pure-Go document<->markdown/docx/pdf, no external processes
     store/                    — SQLite persistence (implements port.Store)
     port/store.go             — Store interface + patch types
     port/registry.go          — Agent registry interface
     terminal/                 — WebSocket PTY gateway (server, pty, mock)
     registry/                 — Agent registry implementations (static, jadi)
     config/dotenv.go          — optional --env/.env loader (LLM creds for Tools)
-  tools/venv/                 — gitignored Python venv for markitdown (see COMMANDS.md)
 frontend/
   src/
     main.tsx                  — app entry (QueryClient + RouterProvider)

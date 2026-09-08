@@ -28,8 +28,22 @@
 // selected wash, the accent for the check (its "selection" job), one tone step
 // per layer (composer `raised` → card `card` → option `raised`), and radii off
 // the three-step scale.
+//
+// ── The stepper ──
+// One `AskUserQuestion` call can stack several questions of mixed kinds, and
+// the card shows them one at a time. That stack used to be one-way and partly
+// automatic: single-select advanced itself 200ms after a click, so an earlier
+// question was gone before it could be re-read, and a click on the LAST one
+// submitted the whole turn with no confirmation step at all. There was no
+// control anywhere that went back.
+//
+// A stacked prompt is now stepped by hand — explicit Back/Next on every
+// question, `Send answer` to commit, ←/→ as their keyboard twin — so each pick
+// can be checked and any of them revisited. A prompt of ONE single-select
+// question keeps the one-click fast path: it has nothing to step back to, and
+// a Next button there would be a second way to do what the click already did.
 import { memo, useEffect, useEffectEvent, useRef, useState } from 'react'
-import { CheckIcon, CircleQuestionMark } from 'lucide-react'
+import { CheckIcon, ChevronLeft, ChevronRight, CircleQuestionMark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { InlineCodeText } from '@/features/agent-chat/InlineCodeText'
 import {
@@ -45,6 +59,9 @@ export interface ComposerPendingUserInputPanelProps {
   questionIndex: number
   onToggleOption: (questionId: string, optionLabel: string) => void
   onAdvance: () => void
+  /** Step back one question. Only reachable on a stacked (multi-question)
+   *  prompt — see `isStacked` in the card below. */
+  onBack: () => void
 }
 
 /** How long the selected row stays on screen before a single-select prompt
@@ -60,6 +77,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
+  onBack,
 }: ComposerPendingUserInputPanelProps) {
   const activePrompt = pendingUserInputs[0]
   if (!activePrompt) return null
@@ -72,6 +90,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
+      onBack={onBack}
     />
   )
 })
@@ -127,17 +146,34 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
+  onBack,
 }: {
   prompt: PendingUserInput
   answers: Record<string, PendingUserInputDraftAnswer>
   questionIndex: number
   onToggleOption: (questionId: string, optionLabel: string) => void
   onAdvance: () => void
+  onBack: () => void
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex)
   const activeQuestion = progress.activeQuestion
+  // ── Stacked prompts step by hand ──
+  //
+  // One `AskUserQuestion` call can carry several questions, and the card shows
+  // them one at a time. Single-select used to fire `onAdvance` itself 200ms
+  // after a click, which on a stack meant question 1 was gone before it could
+  // be re-read and the LAST question's click submitted the whole turn with no
+  // confirmation — and nothing anywhere could return to an earlier answer.
+  //
+  // So a stack never navigates itself: every question gets an explicit
+  // Back/Next pair, and the last one commits through `Send answer`. A lone
+  // question keeps the one-click fast path (auto-advance below) — it has no
+  // earlier question to step back to, and a Next button there would be a
+  // second way to do what the click already did.
+  const isStacked = prompt.questions.length > 1
   const autoAdvanceTimerRef = useRef<number | null>(null)
   const onAdvanceRef = useRef(onAdvance)
+  const onBackRef = useRef(onBack)
   const firstOptionRef = useRef<HTMLButtonElement | null>(null)
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
     questionId: string
@@ -146,7 +182,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   useEffect(() => {
     onAdvanceRef.current = onAdvance
-  }, [onAdvance])
+    onBackRef.current = onBack
+  }, [onAdvance, onBack])
 
   useEffect(() => {
     if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
@@ -164,6 +201,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
   }, [activeQuestion, optimisticSingleSelect, progress.customAnswer, progress.selectedOptionLabels])
 
+  function clearAutoAdvance() {
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current)
+      autoAdvanceTimerRef.current = null
+    }
+  }
+
   // Clear auto-advance timer on unmount.
   useEffect(() => {
     return () => {
@@ -174,30 +218,57 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, [])
 
   // Focus-on-open (spec §1.7): a fresh prompt takes focus so the operator's
-  // next keystroke belongs to the panel.
+  // next keystroke belongs to the panel. Stepping to another question is the
+  // same event — the card's whole body swapped, and the digit shortcuts have
+  // to keep working without a trip back to the mouse.
   useEffect(() => {
     if (activeQuestion) firstOptionRef.current?.focus()
-  }, [prompt.requestId])
+  }, [prompt.requestId, progress.questionIndex])
 
   const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
-    if (activeQuestion?.multiSelect) {
+    // A stack is stepped by hand (see `isStacked`), so a pick here only
+    // records the answer — Next is what moves the card.
+    if (isStacked || activeQuestion?.multiSelect) {
       onToggleOption(questionId, optionLabel)
       return
     }
     setOptimisticSingleSelect({ questionId, optionLabel })
     onToggleOption(questionId, optionLabel)
-    if (autoAdvanceTimerRef.current !== null) {
-      window.clearTimeout(autoAdvanceTimerRef.current)
-    }
+    clearAutoAdvance()
     autoAdvanceTimerRef.current = window.setTimeout(() => {
       autoAdvanceTimerRef.current = null
       onAdvanceRef.current()
     }, AUTO_ADVANCE_MS)
   })
 
+  // Both nav buttons cancel a pending auto-advance first: a lone question can
+  // never reach them, but the timer must not be able to outlive the question
+  // that armed it if that ever changes.
+  const handleBack = useEffectEvent(() => {
+    clearAutoAdvance()
+    setOptimisticSingleSelect(null)
+    onBackRef.current()
+  })
+
+  const handleAdvance = useEffectEvent(() => {
+    clearAutoAdvance()
+    setOptimisticSingleSelect(null)
+    onAdvanceRef.current()
+  })
+
   // Keyboard shortcut: number keys 1-9 select corresponding options when
   // focus is outside editable fields. Multi-select prompts toggle options in
-  // place; single-select prompts keep the auto-advance behavior above.
+  // place; single-select prompts keep the auto-advance behavior above. ←/→
+  // mirror the Back/Next buttons under the same guards, so an arrow can never
+  // step somewhere the button is disabled from stepping.
+  //
+  // The two step guards are read straight from `progress` and are therefore in
+  // the dependency list, unlike the digit path's `handleOptionSelection`. An
+  // Effect Event is what SHOULD have carried them, but the one this listener
+  // would call reads its captured `progress` — not the current one — so a
+  // stacked prompt's ← saw `questionIndex: 0` forever and refused to step,
+  // while the button beside it worked. Rebuilding the listener is the version
+  // that is actually correct; the two scalars only change on a pick or a step.
   useEffect(() => {
     if (!activeQuestion) return
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -212,6 +283,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       ) {
         return
       }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (!isStacked) return
+        const goingBack = event.key === 'ArrowLeft'
+        if (goingBack ? progress.questionIndex === 0 : !progress.canAdvance) return
+        event.preventDefault()
+        if (goingBack) handleBack()
+        else handleAdvance()
+        return
+      }
       const digit = Number.parseInt(event.key, 10)
       if (Number.isNaN(digit) || digit < 1 || digit > 9) return
       const optionIndex = digit - 1
@@ -223,7 +303,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [activeQuestion])
+  }, [activeQuestion, isStacked, progress.questionIndex, progress.canAdvance])
 
   if (!activeQuestion) {
     return null
@@ -238,12 +318,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     if (answer === null) return []
     return [{ id: question.id, header: question.header, answer: Array.isArray(answer) ? answer.join(', ') : answer }]
   })
-  // The multi-select confirm. Single-select advances itself on click, so a
-  // button there would be a second way to do what already happened; a
-  // multi-select prompt had NO way to advance at all before this — the panel
-  // only ever toggled options and `onAdvance` was unreachable, so a prompt with
-  // `multiSelect: true` parked the thread on a card that could not be answered.
-  const showConfirm = activeQuestion.multiSelect
+  // The confirm. A multi-select prompt had NO way to advance at all before it
+  // existed — the panel only ever toggled options and `onAdvance` was
+  // unreachable, so a prompt with `multiSelect: true` parked the thread on a
+  // card that could not be answered. A stacked prompt now needs one for the
+  // same reason: it no longer advances itself (see `isStacked`). A lone
+  // single-select question is the one case that still advances on click, so a
+  // button there would be a second way to do what already happened.
+  const showConfirm = isStacked || activeQuestion.multiSelect
+  const showBack = isStacked && progress.questionIndex > 0
   const selectedCount = customAnswerActive ? 0 : progress.selectedOptionLabels.length
 
   return (
@@ -330,29 +413,61 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         })}
       </div>
 
-      {/* One footer line: what the keyboard does on the left, the confirm on
-          the right. Both are 11.5px `--fg-2` chrome — the decision is the
-          options, and the hint must not compete with them. */}
-      <div className="mt-2.5 flex items-center gap-3">
+      {/* One footer line: what the keyboard does on the left, the stepper on
+          the right. The hint is 11.5px `--fg-2` chrome — the decision is the
+          options, and it must not compete with them. Back is the quiet half of
+          the pair (it undoes; it is never the thing to do next), so it borrows
+          the unselected option row's own treatment rather than the accent. */}
+      <div className="mt-2.5 flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-devdeck-dim-pane">
           {activeQuestion.multiSelect
             ? selectedCount > 0
               ? `${selectedCount} selected · press 1–${Math.min(activeQuestion.options.length, 9)} to toggle`
               : `Select one or more · press 1–${Math.min(activeQuestion.options.length, 9)} to toggle`
             : `Press 1–${Math.min(activeQuestion.options.length, 9)} to choose`}
+          {/* The arrows are the buttons' keyboard twin and nothing else on the
+              card announces them. Appended rather than substituted so the
+              option hint stays the sentence that gets read first, and the
+              truncate above drops this half — not that one — when the composer
+              is narrow. */}
+          {isStacked ? ' · ←/→ to step' : ''}
         </span>
+        {showBack ? (
+          <button
+            type="button"
+            onClick={handleBack}
+            className={cn(
+              'flex flex-none cursor-pointer items-center gap-1 rounded-control border border-devdeck-hairline',
+              'bg-devdeck-raised py-1 pr-2.5 pl-1.5 text-[12px] font-medium text-devdeck-fg-2',
+              'outline-none transition-colors hover:border-devdeck-line/50 hover:bg-devdeck-card hover:text-devdeck-fg',
+              'focus-visible:border-devdeck-border-accent focus-visible:ring-1 focus-visible:ring-devdeck-ring',
+            )}
+          >
+            <ChevronLeft className="size-3.5 flex-none" aria-hidden="true" />
+            Back
+          </button>
+        ) : null}
         {showConfirm ? (
           <button
             type="button"
             disabled={!progress.canAdvance}
-            onClick={onAdvance}
+            onClick={handleAdvance}
             className={cn(
-              'flex-none cursor-pointer rounded-control bg-devdeck-accent px-2.5 py-1 text-[12px] font-medium text-devdeck-accent-ink',
-              'transition-colors hover:bg-devdeck-accent-hover',
+              'flex flex-none cursor-pointer items-center gap-1 rounded-control bg-devdeck-accent py-1 text-[12px] font-medium text-devdeck-accent-ink',
+              progress.isLastQuestion ? 'px-2.5' : 'pr-1.5 pl-2.5',
+              'outline-none transition-colors hover:bg-devdeck-accent-hover',
+              'focus-visible:ring-1 focus-visible:ring-devdeck-ring',
               'disabled:cursor-default disabled:bg-devdeck-accent/30 disabled:text-devdeck-fg-2',
             )}
           >
-            {progress.isLastQuestion ? 'Send answer' : 'Next question'}
+            {progress.isLastQuestion ? (
+              'Send answer'
+            ) : (
+              <>
+                Next question
+                <ChevronRight className="size-3.5 flex-none" aria-hidden="true" />
+              </>
+            )}
           </button>
         ) : null}
       </div>

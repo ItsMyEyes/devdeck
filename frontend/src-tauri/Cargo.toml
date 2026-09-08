@@ -46,6 +46,10 @@ tauri-plugin-updater = "2"
 getrandom = "0.4"
 tokio = { version = "1", features = ["time", "signal", "macros", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# Enumerates this device's network interfaces for the Settings › Network bind
+# picker. std::net has no interface enumeration at all, and the alternatives
+# (parsing `ifconfig`/`ip`/`ipconfig`) differ per platform and per locale.
+if-addrs = "0.15"
 
 # `Window::add_child` (unstable) and `WebviewBuilder::proxy_url` (macos-proxy)
 # back the machine-proxied Browser tab's native child webviews. macos-proxy

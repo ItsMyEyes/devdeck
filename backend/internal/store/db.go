@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	_ "modernc.org/sqlite"
+
+	"devdeck/backend/internal/domain"
 )
 
 // schema is executed idempotently on startup. Worktree terminal lines are
@@ -355,6 +357,16 @@ CREATE TABLE IF NOT EXISTS users (
   lockout_level      INTEGER NOT NULL DEFAULT 0,
   locked_until       TEXT,
   last_failed_at     TEXT,
+  -- 0 while the row still carries the throwaway password AuthService.KeySession
+  -- mints for the desktop operator account, which nobody has ever seen. The
+  -- account-settings endpoint skips its current-password check in that state,
+  -- because there is no current password to know.
+  password_set       INTEGER NOT NULL DEFAULT 1,
+  -- 1 on the account KeySession auto-created for the desktop shell. It is what
+  -- identifies that account once the operator renames it away from
+  -- domain.DesktopOperatorEmail; an account someone registered by hand keeps
+  -- the 0 default, so a --key holder still cannot mint a session as them.
+  desktop_operator   INTEGER NOT NULL DEFAULT 0,
   created_at         TEXT NOT NULL
 );
 
@@ -559,7 +571,42 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateUserAccountColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// migrateUserAccountColumns adds users.password_set and users.desktop_operator
+// (introduced with the Settings -> Account editor) to pre-existing databases.
+// Both defaults describe a hand-registered account, which is what every row in
+// an older hub DB is — except the desktop operator account, whose password is
+// a random throwaway AuthService.KeySession generated and discarded. Matching
+// that one row on its bootstrap email is the only chance to identify it: after
+// this migration the flag carries the identity, so a rename cannot lose it.
+func migrateUserAccountColumns(db *sql.DB) error {
+	added := false
+	for _, col := range []string{
+		"password_set INTEGER NOT NULL DEFAULT 1",
+		"desktop_operator INTEGER NOT NULL DEFAULT 0",
+	} {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN " + col); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+			continue
+		}
+		added = true
+	}
+	if !added {
+		return nil // already migrated; the backfill below already ran
+	}
+	_, err := db.Exec(
+		"UPDATE users SET password_set = 0, desktop_operator = 1 WHERE email = ?",
+		domain.DesktopOperatorEmail,
+	)
+	return err
 }
 
 // migrateSettingsSignInPIN adds signin_pin_hash (introduced when the runtime

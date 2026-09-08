@@ -95,10 +95,10 @@ func (h *ToolsHandler) PostMarkdownExport(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write(out)
 }
 
-// writeToolErr maps a Tools service error to an HTTP response. Missing
-// external dependencies (markitdown/pandoc/mermaid-cli) surface as 503 with
-// an actionable install command; everything else is a generic 500 — never
-// leak raw stderr from the shelled-out process beyond its first line.
+// writeToolErr maps a Tools service error to an HTTP response. A feature
+// that's simply not configured (e.g. no LLM key set for image captioning)
+// surfaces as 503 with an actionable message; an unsupported input/output
+// format is a 400; everything else is a generic 500.
 func writeToolErr(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
@@ -106,6 +106,11 @@ func writeToolErr(w http.ResponseWriter, err error) bool {
 	var unavailable *service.ToolUnavailableError
 	if errors.As(err, &unavailable) {
 		writeErr(w, http.StatusServiceUnavailable, unavailable.Error())
+		return true
+	}
+	var unsupported *service.UnsupportedFormatError
+	if errors.As(err, &unsupported) {
+		writeErr(w, http.StatusBadRequest, unsupported.Error())
 		return true
 	}
 	writeErr(w, http.StatusInternalServerError, err.Error())

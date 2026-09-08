@@ -248,15 +248,45 @@ func TailscaleSelfURLWith(resolve func() (string, error)) (url string, reason st
 	return "https://" + dns, ""
 }
 
+// serveWeb is the per-host "/" handler proxy target inside a serve config.
+type serveWeb map[string]struct {
+	Handlers map[string]struct {
+		Proxy string `json:"Proxy"`
+	} `json:"Handlers"`
+}
+
 // tailscaleServeStatus is the subset of `tailscale serve status --json` that
-// TailscaleServeTargetPort reads: each served host's "/" handler proxy
-// target.
+// TailscaleServeTargetPort reads.
+//
+// Two shapes, because the CLI reports them in different places. A background
+// mapping (`tailscale serve --bg`) lands in the top-level Web. A FOREGROUND
+// one — which is how devdeck runs serve, so that tailscaled is left clean when
+// the process exits — is nested under Foreground, keyed by an opaque session
+// id. Reading only the top level meant this function could never see devdeck's
+// own mapping and returned "unknown" for it every time.
 type tailscaleServeStatus struct {
-	Web map[string]struct {
-		Handlers map[string]struct {
-			Proxy string `json:"Proxy"`
-		} `json:"Handlers"`
-	} `json:"Web"`
+	Web        serveWeb `json:"Web"`
+	Foreground map[string]struct {
+		Web serveWeb `json:"Web"`
+	} `json:"Foreground"`
+}
+
+// proxyPort returns the port the "/" handler of any host in w proxies to.
+func (w serveWeb) proxyPort() (string, bool) {
+	for _, host := range w {
+		h, ok := host.Handlers["/"]
+		if !ok {
+			continue
+		}
+		u, err := url.Parse(h.Proxy)
+		if err != nil {
+			continue
+		}
+		if p := u.Port(); p != "" {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // TailscaleServeTargetPort runs `tailscale serve status --json` and returns
@@ -279,16 +309,11 @@ func TailscaleServeTargetPort(resolve func() (string, error)) (port string, ok b
 	if err := json.Unmarshal(out, &status); err != nil {
 		return "", false
 	}
-	for _, host := range status.Web {
-		h, ok := host.Handlers["/"]
-		if !ok {
-			continue
-		}
-		u, err := url.Parse(h.Proxy)
-		if err != nil {
-			continue
-		}
-		if p := u.Port(); p != "" {
+	if p, ok := status.Web.proxyPort(); ok {
+		return p, true
+	}
+	for _, session := range status.Foreground {
+		if p, ok := session.Web.proxyPort(); ok {
 			return p, true
 		}
 	}

@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, MessageSquarePlus, X } from 'lucide-react'
 import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
 import { openExternalUrl } from '@/lib/openExternalUrl'
 import { createTerminalWriter } from '@/features/terminal/terminalWriter'
+import { DataLoading } from '@/features/screens/DataLoading'
 import { useResolvedTheme } from '@/features/theme/useTheme'
 import type { Machine } from '@/store/types'
 import { chordMatchesEvent } from '@/features/keybindings/chord'
@@ -25,6 +26,15 @@ const CONNECTION_HEALTHY_MS = 10_000
  *  so a flapping network or rapid tab switching can't bypass the backoff by
  *  kicking a new attempt on every event. */
 const MIN_KICK_INTERVAL_MS = 2_000
+
+/** How long a session may take to attach before the pane admits it is waiting.
+ *
+ *  Deliberately not zero. A PTY on this machine has usually replayed inside a
+ *  frame or two, and an indicator that appears and vanishes in 40ms is a flash
+ *  of noise, not information — worse than the brief blank it replaced. Past
+ *  this, though, the wait is long enough to read as "nothing happened", which
+ *  is what attaching to a runtime across a tunnel actually looks like. */
+const ATTACH_HINT_DELAY_MS = 220
 
 /** A captured xterm selection, addressed for the composer's terminal-context
  *  chip (`docs/superpowers/specs/2026-08-15-composer-context-attachments-design.md`,
@@ -154,6 +164,33 @@ export function isAppShortcut(event: KeyboardEvent) {
   return terminalEscapeChords().some((chord) => chordMatchesEvent(chord, event))
 }
 
+/**
+ * The `attachCustomKeyEventHandler` every DevDeck terminal installs — this
+ * file's and the SSH registry's alike.
+ *
+ * Two jobs. The `isAppShortcut` passthrough is the original one (see above).
+ * The select-all branch is here rather than in a `window` listener because
+ * xterm.js ships no binding for it at all: the chord reaches xterm's hidden
+ * one-character helper textarea, WebKit runs its own Select All against
+ * *that*, and the visible buffer never moves — so Cmd+A in a terminal looks
+ * dead. `term.selectAll()` is xterm's API for it, and the existing copy
+ * handler on the textarea reads `getSelection()`, so Cmd+C after it works.
+ *
+ * Returning `false` is xterm's documented "do not process this event"; the
+ * `preventDefault` alongside it is what stops WebKit's native Select All from
+ * running on the textarea afterwards.
+ */
+export function terminalKeyEventHandler(term: XTerm) {
+  return (event: KeyboardEvent) => {
+    if (event.type === 'keydown' && matchesBinding(event, 'terminal.selectAll')) {
+      event.preventDefault()
+      term.selectAll()
+      return false
+    }
+    return !isAppShortcut(event)
+  }
+}
+
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   { session, machine, ctrlArmed = false, onCtrlConsumed, onExit, onSendToChat },
@@ -175,6 +212,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // at render time — a selection is a fact about xterm's internal buffer,
   // and this is the only way to know it changed without polling.
   const [hasSelection, setHasSelection] = useState(false)
+  // "Attaching…" over an xterm that has not received its first byte yet. A
+  // fresh terminal paints an empty black rectangle until the socket opens and
+  // the server replays the session's scrollback, which is indistinguishable
+  // from a session that came up empty — and the wait is real whenever the PTY
+  // lives on a remote runtime rather than this machine.
+  const [attaching, setAttaching] = useState(false)
 
   // Held in a ref as well as read as state: the terminal is constructed once
   // per session and must not be torn down and rebuilt (losing the socket and
@@ -267,7 +310,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     term.loadAddon(serialize)
     searchAddonRef.current = search
     serializeAddonRef.current = serialize
-    term.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
+    term.attachCustomKeyEventHandler(terminalKeyEventHandler(term))
     // WebGL addon loads AFTER `open()`, not before: xterm only activates a
     // renderer addon once the terminal is attached to the DOM, so loading it
     // first (the previous order here) deferred activation to xterm's own
@@ -311,6 +354,32 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let resolvedUrl: string | null = null
     let exited = false
 
+    // Everything this terminal can put on screen — replayed scrollback, the
+    // "[connection error]" line, the "[connection lost - reconnecting…]" line
+    // — has to be readable, and the hint covers the whole pane. So ANY of
+    // them retires it, not just a successful attach: an unreachable runtime
+    // must show its error, not sit under a skeleton claiming to be busy.
+    let attachHintTimer: number | undefined = window.setTimeout(() => {
+      attachHintTimer = undefined
+      if (!disposed) setAttaching(true)
+    }, ATTACH_HINT_DELAY_MS)
+    // Latched, because `onmessage` is the hot path: without this, every frame
+    // of a busy shell's output would schedule another state update just to
+    // re-clear a flag that was already false. It also means the hint belongs
+    // to the FIRST attach only — a later reconnect announces itself in the
+    // buffer instead ("[connection lost - reconnecting…]"), which is the right
+    // place for it once there is scrollback worth keeping on screen.
+    let attachHintDone = false
+    const stopAttachHint = () => {
+      if (attachHintDone) return
+      attachHintDone = true
+      if (attachHintTimer !== undefined) {
+        window.clearTimeout(attachHintTimer)
+        attachHintTimer = undefined
+      }
+      setAttaching(false)
+    }
+
     const handleExit = () => {
       if (exited || disposed) return
       exited = true
@@ -346,6 +415,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         outbox.current = []
       }
       ws.onmessage = (ev) => {
+        stopAttachHint()
         if (typeof ev.data === 'string' && isTerminalExitedFrame(ev.data)) {
           handleExit()
           return
@@ -361,10 +431,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       ws.onclose = (event) => {
         clearHealthyTimer()
+        stopAttachHint()
         if (event.reason === 'terminal exited') handleExit()
         else if (!exited) scheduleReconnect()
       }
       ws.onerror = () => {
+        stopAttachHint()
         if (!everOpened) {
           term.write('\r\n\x1b[38;5;210m[connection error - is the terminal server running?]\x1b[0m\r\n')
         }
@@ -481,6 +553,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return () => {
       disposed = true
       writer.dispose()
+      if (attachHintTimer !== undefined) window.clearTimeout(attachHintTimer)
       if (retryTimer !== undefined) window.clearTimeout(retryTimer)
       if (healthyTimer !== undefined) window.clearTimeout(healthyTimer)
       if (fitTimer !== undefined) window.clearTimeout(fitTimer)
@@ -509,12 +582,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // one (see the effect's dep array) — the old selection doesn't carry
       // over, so the affordance shouldn't either.
       setHasSelection(false)
+      // Same reason: the next session starts its own attach from scratch.
+      setAttaching(false)
     }
   }, [session, machine])
 
   return (
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
+      {/* Opaque, because it stands in for the terminal rather than annotating
+          it — a translucent layer over an empty black rectangle reads as a
+          rendering glitch. `pointer-events-none` so the click that focuses the
+          terminal still lands while it is coming up. */}
+      {attaching ? (
+        <div data-terminal-attaching className="pointer-events-none absolute inset-0 z-10 bg-devdeck-pane">
+          <DataLoading compact label="attaching to session…" />
+        </div>
+      ) : null}
       {searchOpen ? (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-devdeck-border bg-devdeck-pane px-2 py-1 shadow-lg">
           <input

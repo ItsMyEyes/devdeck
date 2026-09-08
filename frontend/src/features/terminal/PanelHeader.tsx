@@ -4,6 +4,7 @@ import { MoreHorizontal, PanelBottom, PanelRight, Plus, X } from 'lucide-react'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { cn } from '@/lib/utils'
 import { useCommandChordLabel } from '@/features/keybindings/store'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 
 /**
  * One tab rendered in a pane's header. Deliberately a local, minimal mirror
@@ -78,7 +79,7 @@ export function PanelHeader({
       )}
     >
       {leadingContent}
-      <div className="flex flex-1 items-stretch overflow-x-auto">
+      <div {...tourAnchor('pane-tabs')} className="flex flex-1 items-stretch overflow-x-auto">
         {tabs.map((tab) => (
           <PanelHeaderTabButton
             key={tab.id}
@@ -92,6 +93,7 @@ export function PanelHeader({
         {newTabActions ? (
           <TabStripPopoverMenu
             trigger={<Plus size={13} />}
+            triggerAnchor={tourAnchor('pane-new-tab')}
             triggerClassName={cn(iconButtonClass, 'my-1 ml-1 flex-none self-center')}
             triggerTitle={newTabShortcut ? `New tab (${newTabShortcut})` : 'New tab'}
             triggerAriaLabel="New tab"
@@ -106,6 +108,7 @@ export function PanelHeader({
       <div className="ml-auto flex flex-none items-center gap-1 px-1.5">
         <button
           type="button"
+          {...tourAnchor('pane-split-right')}
           onClick={onSplitRight}
           title="Split right"
           aria-label="Split right"
@@ -115,6 +118,7 @@ export function PanelHeader({
         </button>
         <button
           type="button"
+          {...tourAnchor('pane-split-down')}
           onClick={onSplitDown}
           title="Split down"
           aria-label="Split down"
@@ -126,6 +130,7 @@ export function PanelHeader({
         {isFocused && overflowActions ? (
           <TabStripPopoverMenu
             trigger={<MoreHorizontal size={13} />}
+            triggerAnchor={tourAnchor('pane-more-actions')}
             triggerClassName={iconButtonClass}
             triggerTitle="More actions"
             triggerAriaLabel="More actions"
@@ -137,6 +142,7 @@ export function PanelHeader({
 
         <button
           type="button"
+          {...tourAnchor('pane-close')}
           onClick={onClose}
           title="Close pane"
           aria-label="Close pane"

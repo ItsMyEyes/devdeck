@@ -212,16 +212,16 @@ func (h *AgentHandler) DeactivateEnvProfile(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetSettingsFile returns the raw JSON content of settings.json.
+// GetSettingsFile returns an agent's config file: content, path and syntax.
 func (h *AgentHandler) GetSettingsFile(w http.ResponseWriter, r *http.Request) {
-	content, err := h.svc.GetSettingsFile(r.PathValue("agentId"))
+	file, err := h.svc.GetSettingsFile(r.PathValue("agentId"))
 	if handleStoreErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"content": content})
+	writeJSON(w, http.StatusOK, file)
 }
 
-// UpdateSettingsFile writes raw JSON to settings.json.
+// UpdateSettingsFile writes raw text to an agent's config file.
 func (h *AgentHandler) UpdateSettingsFile(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Content string `json:"content"`

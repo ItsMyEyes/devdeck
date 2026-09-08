@@ -116,7 +116,13 @@ export function ToastHost() {
     <Toaster
       theme={resolvedTheme}
       position="bottom-right"
-      offset={16}
+      // 72, not 16: the help "?" button (features/tour/HelpFab) is a permanent
+      // h-10 fixture at `bottom-4 right-4`, so toasts clear it — 16px inset +
+      // 40px button + 16px gap. `mobileOffset` below is deliberately left
+      // alone: those toasts are a full-width sheet whose bottom is driven by
+      // the on-screen keyboard, and they only ever cover the button for the
+      // few seconds one is up.
+      offset={72}
       // Lifted above the on-screen keyboard. A toast is `position: fixed`
       // against the LAYOUT viewport, which mobile browsers don't shrink when the
       // keyboard opens — so a bottom-anchored toast would hide behind it, and

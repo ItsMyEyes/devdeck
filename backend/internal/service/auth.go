@@ -355,10 +355,6 @@ func (a *AuthService) CompleteLogin(pendingToken string) (string, domain.User, e
 	return a.completeVerification(pendingToken, userID, user)
 }
 
-// desktopOperatorEmail identifies the auto-created single-operator account
-// used by the desktop app's key-session bootstrap (POST /api/auth/key-session).
-const desktopOperatorEmail = "operator@devdeck.desktop"
-
 // KeySession issues a session for the desktop operator account, creating it
 // on first run. The caller must already have proven possession of the hub's
 // static --key, so this deliberately bypasses password and TOTP.
@@ -373,7 +369,16 @@ func (a *AuthService) KeySession() (string, domain.User, error) {
 			return "", domain.User{}, err
 		}
 		// Throwaway password: desktop logins always come through KeySession.
-		user, _, err := a.Register(desktopOperatorEmail, hex.EncodeToString(buf))
+		user, _, err := a.Register(domain.DesktopOperatorEmail, hex.EncodeToString(buf))
+		if err != nil {
+			return "", domain.User{}, err
+		}
+		// Nobody has ever seen that password, so UpdateAccount must not ask
+		// for it before the operator picks credentials of their own; and the
+		// flag, not the placeholder email, is what identifies this account to
+		// later KeySession calls once the operator renames it.
+		notSet, isOperator := false, true
+		user, err = a.store.UpdateUser(user.ID, port.UserPatch{PasswordSet: &notSet, DesktopOperator: &isOperator})
 		if err != nil {
 			return "", domain.User{}, err
 		}
@@ -383,7 +388,12 @@ func (a *AuthService) KeySession() (string, domain.User, error) {
 		}
 		return token, user, nil
 	}
-	user, err := a.store.UserByEmail(desktopOperatorEmail)
+	// Matched on the desktop_operator flag rather than the bootstrap email, so
+	// an operator who renamed the account from Settings -> Account does not
+	// lock the desktop shell out of its own hub. An account someone registered
+	// by hand never carries the flag, so a --key holder still cannot mint a
+	// session as them.
+	user, err := a.store.DesktopOperatorUser()
 	if err != nil {
 		return "", domain.User{}, fmt.Errorf("key session requires the desktop operator account: %w", ErrConflict)
 	}
@@ -392,6 +402,94 @@ func (a *AuthService) KeySession() (string, domain.User, error) {
 		return "", domain.User{}, err
 	}
 	return token, user, nil
+}
+
+// AccountUpdate is a partial change to the operator's sign-in credentials. A
+// nil field is left alone.
+type AccountUpdate struct {
+	Email    *string
+	Password *string
+	// CurrentPassword confirms the change. It is required whenever the account
+	// has a password the operator chose (User.PasswordSet), and ignored on the
+	// desktop bootstrap account, whose password is a random string that was
+	// never shown to anyone.
+	CurrentPassword string
+}
+
+// UpdateAccount changes the operator's email and/or password. On success it
+// returns the updated user and, when the password changed, the caller should
+// revoke the account's other sessions (see AuthHandler.PutAccount).
+func (a *AuthService) UpdateAccount(userID string, up AccountUpdate) (domain.User, error) {
+	user, err := a.store.UserByID(userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	patch := port.UserPatch{}
+
+	if up.Email != nil {
+		email := strings.TrimSpace(*up.Email)
+		if err := validateEmail(email); err != nil {
+			return domain.User{}, err
+		}
+		if email != user.Email {
+			// Single-operator, so this can only collide with the caller's own
+			// row; check anyway rather than leak a raw UNIQUE constraint error.
+			if existing, err := a.store.UserByEmail(email); err == nil && existing.ID != user.ID {
+				return domain.User{}, fmt.Errorf("email already in use: %w", ErrConflict)
+			}
+			patch.Email = &email
+		}
+	}
+
+	if up.Password != nil {
+		if err := validatePassword(*up.Password); err != nil {
+			return domain.User{}, err
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(*up.Password), bcryptCost)
+		if err != nil {
+			return domain.User{}, err
+		}
+		hashStr := string(hash)
+		set := true
+		patch.PasswordHash = &hashStr
+		patch.PasswordSet = &set
+	}
+
+	if patch.Email == nil && patch.PasswordHash == nil {
+		return domain.User{}, fmt.Errorf("nothing to update: %w", ErrValidation)
+	}
+
+	// Confirm with the current password, unless there is no current password
+	// to know. Deliberately checked after validation so a typo in the new
+	// values is reported before the confirmation is demanded again.
+	if user.PasswordSet {
+		if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(up.CurrentPassword)) != nil {
+			return domain.User{}, fmt.Errorf("current password is incorrect: %w", ErrUnauthorized)
+		}
+	}
+
+	return a.store.UpdateUser(userID, patch)
+}
+
+// RevokeOtherSessions invalidates every session for a user except the one the
+// caller is holding, identified by its raw token.
+func (a *AuthService) RevokeOtherSessions(userID, keepSessionToken string) error {
+	return a.store.DeleteUserSessionsExcept(userID, hashToken(keepSessionToken))
+}
+
+// validateEmail applies the same shape check the login form does: an address
+// is a routing hint here, not an identity the hub verifies, so this only
+// rejects values that could never be typed into a sign-in field.
+func validateEmail(email string) error {
+	if email == "" {
+		return fmt.Errorf("email is required: %w", ErrValidation)
+	}
+	at := strings.IndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 || strings.ContainsAny(email, " \t\r\n") {
+		return fmt.Errorf("email is not a valid address: %w", ErrValidation)
+	}
+	return nil
 }
 
 func (a *AuthService) completeVerification(pendingToken, userID string, user domain.User) (string, domain.User, error) {

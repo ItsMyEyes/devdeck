@@ -75,9 +75,9 @@ type WhoamiHandler struct {
 	role        string
 	machineName string
 	store       port.Store // nil on the hub; only runtimes report sync state
-	hubURL      string     // configured --hub-url; empty on the hub and on a runtime that never set it
-	machineIDMu sync.RWMutex
-	machineID   string // this runtime's own hub-assigned id, once self-registration succeeds; empty until then
+	mu          sync.RWMutex
+	hubURL      string // configured --hub-url, or one adopted later via SetHubURL; empty until either happens
+	machineID   string // this runtime's own hub-assigned id, once self-registration (or binding adoption) succeeds; empty until then
 
 	// capabilities is what this process can actually do, as opposed to what
 	// its version number implies. Set by SetCapabilities at wiring time
@@ -106,15 +106,27 @@ func NewWhoamiHandler(role, machineName string, s port.Store, hubURL, machineID 
 // self-registration succeeds. Safe to call from a different goroutine than
 // the one serving requests.
 func (h *WhoamiHandler) SetMachineID(id string) {
-	h.machineIDMu.Lock()
+	h.mu.Lock()
 	h.machineID = id
-	h.machineIDMu.Unlock()
+	h.mu.Unlock()
+}
+
+// SetHubURL updates the hub URL this handler reports, once a runtime adopts
+// one pushed by service.RuntimeBinder (see handler.RuntimeBindingHandler).
+// Never called when the process was launched with its own --hub-url — that
+// value is passed to NewWhoamiHandler directly and RuntimeBinder refuses a
+// push in that case, so the two writers never race.
+func (h *WhoamiHandler) SetHubURL(url string) {
+	h.mu.Lock()
+	h.hubURL = url
+	h.mu.Unlock()
 }
 
 func (h *WhoamiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.machineIDMu.RLock()
+	h.mu.RLock()
 	machineID := h.machineID
-	h.machineIDMu.RUnlock()
+	hubURL := h.hubURL
+	h.mu.RUnlock()
 
 	// Always an array, never null: the client treats a missing/!Array value as
 	// "this build predates capability reporting", which is a DIFFERENT answer
@@ -128,7 +140,7 @@ func (h *WhoamiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"role":         h.role,
 		"machineName":  h.machineName,
 		"lastSyncedAt": nil,
-		"hubUrl":       h.hubURL,
+		"hubUrl":       hubURL,
 		"machineId":    machineID,
 		"capabilities": caps,
 	}

@@ -488,6 +488,21 @@ export interface EnvModelOption {
   id: string
 }
 
+/**
+ * An agent CLI's own configuration file, returned for direct editing. Unlike
+ * EnvProfileSummary — a Claude/Codex-only feature — every installed agent has
+ * one, and each keeps it somewhere different, so the path and syntax come from
+ * the machine rather than being guessed from the agent id.
+ */
+export interface AgentSettingsFile {
+  /** ~-shortened path, e.g. `~/.pi/agent/settings.json`. Display only. */
+  path: string
+  /** Editor language for the file's format. */
+  syntax: 'json' | 'jsonc' | 'toml'
+  /** Raw text, or the empty default for the format if the file doesn't exist. */
+  content: string
+}
+
 export interface Settings {
   activeWorkspaceId: string | null
   defaultModel: string
@@ -505,6 +520,10 @@ export interface User {
   id: string
   email: string
   totpEnabled: boolean
+  /** False while the account still carries the throwaway password the desktop
+   *  shell's key-session bootstrap generated — nobody has ever seen it, so
+   *  changing credentials skips the current-password confirmation. */
+  passwordSet: boolean
   createdAt: string
 }
 

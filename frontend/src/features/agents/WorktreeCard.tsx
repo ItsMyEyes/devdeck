@@ -7,6 +7,7 @@ import { Pill } from '@/components/ui/pill'
 import { StatusDot } from '@/components/ui/status-dot'
 import { WorktreeGlyph } from './WorktreeGlyph'
 import { useMachines, useUpdateWorktree, useWorkspace } from '@/features/data/queries'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { useIsTauri } from '@/features/tabs/useIsTauri'
 
@@ -56,7 +57,10 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
 
   if (variant === 'list') {
     return (
-      <article className="flex min-w-0 flex-col gap-2 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:flex-row lg:items-center">
+      <article
+        {...tourAnchor('worktree-card')}
+        className="flex min-w-0 flex-col gap-2 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-accent lg:flex-row lg:items-center"
+      >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex h-9 w-9 flex-none items-center justify-center rounded-control bg-devdeck-card-wash">
             <WorktreeGlyph root={w.root} size={13} />
@@ -115,7 +119,10 @@ export function WorktreeCard({ worktree: w, wsId, projectId, variant = 'card' }:
   }
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-accent">
+    <article
+      {...tourAnchor('worktree-card')}
+      className="group flex flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-accent"
+    >
       <div className="flex items-start gap-3 px-3 pb-2 pt-3">
         <div className="flex h-11 w-11 flex-none items-center justify-center rounded-control bg-devdeck-card-wash">
           <WorktreeGlyph root={w.root} size={15} />

@@ -1,3 +1,4 @@
+mod bindconfig;
 mod browser_tiles;
 mod hubapi;
 mod hubmode;
@@ -32,6 +33,11 @@ struct RuntimeWarning(Mutex<Option<(String, String)>>);
 struct StartupError(Mutex<Option<String>>);
 /// Set on ExitRequested so the monitor loop stops respawning during shutdown.
 struct ShuttingDown(AtomicBool);
+/// Port the local hub sidecar ACTUALLY bound, recorded once its listen line is
+/// parsed. `sidecar::HUB_PORT` is only what the shell asks for — it falls back
+/// to an OS-assigned port whenever something already holds 8989 — so anything
+/// reporting a reachable URL has to read this, not the preferred port.
+struct BoundPort(Mutex<Option<u16>>);
 
 const MAX_RESPAWNS: u32 = 3;
 const CHANGE_HUB_MENU_ID: &str = "change-hub";
@@ -182,6 +188,8 @@ pub fn run() {
             browser_tiles::browser_tile_find_clear,
             choose_hub_mode,
             change_hub,
+            get_bind_config,
+            set_bind_config,
             get_startup_error,
             read_sidecar_log,
             open_log_file,
@@ -202,15 +210,29 @@ pub fn run() {
             app.manage(RuntimeWarning(Mutex::new(None)));
             app.manage(StartupError(Mutex::new(None)));
             app.manage(ShuttingDown(AtomicBool::new(false)));
-            let menu = build_menu(app.handle(), &[(CHANGE_HUB_MENU_ID, "Change Hub…")])?;
-            app.set_menu(menu)?;
-            app.on_menu_event(move |app_handle, event| {
-                if event.id() == CHANGE_HUB_MENU_ID {
-                    let _ = change_hub(app_handle.clone());
-                } else if event.id() == RUNTIME_WARNING_MENU_ID {
-                    show_runtime_warning(app_handle);
-                }
-            });
+            app.manage(BoundPort(Mutex::new(None)));
+            // Native menu bar is a macOS-only workaround (see `build_menu`'s
+            // doc comment: WKWebView loses Cmd+C/Cmd+V without a native Edit
+            // submenu). Windows/Linux windows now run `decorations: false`
+            // (tauri.windows.conf.json / tauri.linux.conf.json) to match
+            // macOS's chrome-free look, and GTK/Win32 render a `set_menu`
+            // bar as a real in-window row regardless of decorations — so
+            // setting it there would just recreate a shorter version of the
+            // native-titlebar-plus-menu double bar this change removes.
+            // Ctrl+C/Ctrl+V need no such menu on Windows/Linux; "Change Hub…"
+            // stays reachable from Settings (`changeHub()` in
+            // desktopBridge.ts) either way.
+            if cfg!(target_os = "macos") {
+                let menu = build_menu(app.handle(), &[(CHANGE_HUB_MENU_ID, "Change Hub…")])?;
+                app.set_menu(menu)?;
+                app.on_menu_event(move |app_handle, event| {
+                    if event.id() == CHANGE_HUB_MENU_ID {
+                        let _ = change_hub(app_handle.clone());
+                    } else if event.id() == RUNTIME_WARNING_MENU_ID {
+                        show_runtime_warning(app_handle);
+                    }
+                });
+            }
             let handle = app.handle().clone();
             // A raw SIGTERM (killall, forced logout, `pkill`) bypasses AppKit's
             // quit sequence entirely, so RunEvent::ExitRequested/Exit below never
@@ -287,6 +309,60 @@ fn change_hub(app: AppHandle) -> Result<(), String> {
     app.restart();
 }
 
+/// What Settings › Network renders: the saved bind host, this device's
+/// dialable interfaces, and the address to actually show for the current
+/// choice (None while bound to loopback, since there is nothing to hand out).
+#[derive(serde::Serialize)]
+struct BindConfigInfo {
+    host: String,
+    interfaces: Vec<bindconfig::Interface>,
+    #[serde(rename = "displayHost")]
+    display_host: Option<String>,
+    /// The port the hub is listening on RIGHT NOW, not the one the shell
+    /// prefers — those differ whenever 8989 was already taken.
+    #[serde(rename = "hubPort")]
+    hub_port: u16,
+    /// False when the hub had to take an OS-assigned port, so the UI can say
+    /// the address is not stable across restarts.
+    #[serde(rename = "portIsPreferred")]
+    port_is_preferred: bool,
+}
+
+#[tauri::command]
+fn get_bind_config(app: AppHandle) -> Result<BindConfigInfo, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let host = bindconfig::load(&data_dir);
+    // Falls back to the preferred port only before the first listen line has
+    // been parsed, which the settings UI cannot reach — it is served by the
+    // very hub whose port this is.
+    let bound = (*app.state::<BoundPort>().0.lock().unwrap()).unwrap_or(sidecar::HUB_PORT);
+    Ok(BindConfigInfo {
+        display_host: bindconfig::display_host(&host),
+        host,
+        interfaces: bindconfig::interfaces(),
+        hub_port: bound,
+        port_is_preferred: bound == sidecar::HUB_PORT,
+    })
+}
+
+/// Persists a new bind host and restarts the app so the sidecars are respawned
+/// against it.
+///
+/// A full app restart rather than hand-rolled cancellation of the running
+/// respawn loop, for the same reason `change_hub` does it: the normal
+/// RunEvent::Exit handler already kills both sidecar children exactly as a
+/// real quit would, so there is no second teardown path to keep correct. The
+/// host is validated before anything is written — an unbindable `--addr` is
+/// fatal on the Go side and would take the respawn loop down with it, which
+/// from the operator's seat looks like the app simply failing to come back.
+#[tauri::command]
+fn set_bind_config(app: AppHandle, host: String) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    bindconfig::save(&data_dir, host.trim())?;
+    app.restart();
+}
+
 async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     match mode {
         hubmode::HubMode::Remote { url, key } => {
@@ -298,18 +374,26 @@ async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     }
 }
 
-/// Records a runtime-registration failure, logs it, and swaps the menu bar
-/// to surface a "⚠ Runtime not registered" item the operator can click for
-/// details — without ever blocking or interrupting whatever they're doing
-/// in the remote hub's UI.
+/// Records a runtime-registration failure and logs it. On macOS, swaps the
+/// menu bar to surface a "⚠ Runtime not registered" item the operator can
+/// click for details — without ever blocking or interrupting whatever
+/// they're doing in the remote hub's UI. Windows/Linux never have a native
+/// menu to click (see the `cfg!(target_os = "macos")` guard in `setup`
+/// above), so there is no non-interrupting affordance to offer there; this
+/// navigates straight to the same warning page instead of leaving the
+/// failure undiscoverable.
 fn set_runtime_warning_menu(handle: &AppHandle, reason: &str, hub_url: &str) {
     log_runtime_line(handle, reason);
     *handle.state::<RuntimeWarning>().0.lock().unwrap() = Some((reason.to_string(), hub_url.to_string()));
-    if let Ok(menu) = build_menu(
-        handle,
-        &[(CHANGE_HUB_MENU_ID, "Change Hub…"), (RUNTIME_WARNING_MENU_ID, "⚠ Runtime not registered")],
-    ) {
-        let _ = handle.set_menu(menu);
+    if cfg!(target_os = "macos") {
+        if let Ok(menu) = build_menu(
+            handle,
+            &[(CHANGE_HUB_MENU_ID, "Change Hub…"), (RUNTIME_WARNING_MENU_ID, "⚠ Runtime not registered")],
+        ) {
+            let _ = handle.set_menu(menu);
+        }
+    } else {
+        show_runtime_warning(handle);
     }
 }
 
@@ -340,17 +424,36 @@ enum RuntimeLaunchEnd {
 /// fully in the background — the main window has already navigated to the
 /// remote hub via `navigate_remote` and is never blocked by this.
 async fn run_remote_runtime_loop(handle: &AppHandle, hub_url: &str, hub_key: &str) {
+    let bind_host = match handle.path().app_data_dir() {
+        Ok(dir) => bindconfig::load(&dir),
+        Err(_) => bindconfig::LOOPBACK.to_string(),
+    };
+    // Tailnet when Tailscale can front this runtime, LAN when it can't but the
+    // operator has bound something reachable anyway. Only a loopback bind with
+    // no tailnet leaves the hub genuinely no route to this runtime, and that is
+    // the one case still worth warning about — this used to be the ONLY
+    // outcome of a failed Tailscale lookup, which made a perfectly reachable
+    // LAN runtime refuse to start.
     let public_url = match tailscale::public_url().await {
-        Ok(u) => u,
-        Err(e) => {
-            let msg = format!("Tailscale lookup failed: {e}");
+        Ok(u) => Some(u),
+        Err(e) if bindconfig::is_loopback(&bind_host) => {
+            let msg = format!(
+                "Tailscale lookup failed: {e}. This runtime is bound to {bind_host}, so the hub has no way to reach it — set a bind address in Settings › Network, or sign in to Tailscale."
+            );
             set_runtime_warning_menu(handle, &msg, hub_url);
             return;
+        }
+        Err(e) => {
+            log_runtime_line(
+                handle,
+                &format!("tailscale unavailable ({e}); registering over the local network from {bind_host}"),
+            );
+            None
         }
     };
     let mut respawns = 0;
     loop {
-        match launch_runtime_once(handle, hub_url, hub_key, &public_url).await {
+        match launch_runtime_once(handle, hub_url, hub_key, public_url.as_deref(), &bind_host).await {
             RuntimeLaunchEnd::Failed(msg) => {
                 set_runtime_warning_menu(handle, &msg, hub_url);
                 break;
@@ -387,7 +490,8 @@ async fn launch_runtime_once(
     handle: &AppHandle,
     hub_url: &str,
     hub_key: &str,
-    public_url: &str,
+    public_url: Option<&str>,
+    bind_host: &str,
 ) -> RuntimeLaunchEnd {
     let data_dir = match handle.path().app_data_dir() {
         Ok(d) => d,
@@ -411,7 +515,9 @@ async fn launch_runtime_once(
     };
     let name = hubapi::device_name();
     let cmd = match handle.shell().sidecar("devdeck-server") {
-        Ok(c) => c.args(sidecar::runtime_args(&data_dir, &key, hub_url, hub_key, public_url, &name)),
+        Ok(c) => c.args(sidecar::runtime_args(
+            &data_dir, &key, hub_url, hub_key, public_url, &name, bind_host,
+        )),
         Err(e) => return RuntimeLaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
     };
     let (mut rx, child) = match cmd.spawn() {
@@ -447,7 +553,15 @@ async fn launch_runtime_once(
 
     // Phase 2: readiness. No navigation here — the window is already
     // showing the remote hub via navigate_remote.
-    if let Err(msg) = hubapi::wait_healthy(port, Duration::from_secs(sidecar::READY_TIMEOUT_SECS)).await {
+    // Same reasoning as launch_once: a runtime pinned to one interface has
+    // nothing listening on loopback, so the readiness poll has to follow it.
+    if let Err(msg) = hubapi::wait_healthy(
+        &reachable_host(bind_host),
+        port,
+        Duration::from_secs(sidecar::READY_TIMEOUT_SECS),
+    )
+    .await
+    {
         return RuntimeLaunchEnd::Failed(msg);
     }
 
@@ -550,6 +664,53 @@ fn install_signal_handlers(handle: AppHandle) {
     });
 }
 
+/// The address this app uses to reach its OWN hub, given the operator's bind
+/// choice.
+///
+/// Loopback for a loopback bind (obviously) and for an all-interfaces bind,
+/// where 0.0.0.0 covers 127.0.0.1 too — keeping the desktop on loopback there
+/// preserves the origin the static capability is written against. A bind
+/// pinned to one specific interface is the only case that has to change: it
+/// leaves nothing listening on loopback at all.
+fn reachable_host(bind_host: &str) -> String {
+    if bindconfig::is_loopback(bind_host) || bind_host == bindconfig::ALL_INTERFACES {
+        return sidecar::LOOPBACK.to_string();
+    }
+    bind_host.to_string()
+}
+
+/// Grants the main window the same command set at `http://<host>:*` that
+/// capabilities/default.json grants at loopback.
+///
+/// Built as JSON at runtime because the static manifest cannot name an
+/// address the operator has not chosen yet. Kept deliberately in lockstep
+/// with capabilities/default.json — a permission added there and missed here
+/// silently stops working the moment a hub is pinned to one interface.
+fn grant_origin_capability(handle: &AppHandle, host: &str) -> tauri::Result<()> {
+    let capability = serde_json::json!({
+        "identifier": format!("bound-origin-{host}"),
+        "description": "Same commands as the default capability, for a hub pinned to a specific interface.",
+        "windows": ["main"],
+        "remote": { "urls": [format!("http://{host}:*")] },
+        "permissions": [
+            "core:default",
+            "core:window:allow-start-dragging",
+            "allow-browser-tiles",
+            "allow-hub-mode",
+            "allow-bind-config",
+            "allow-diagnostics",
+            "allow-prepare-for-update",
+            "process:allow-restart",
+            "dialog:allow-save",
+            "fs:allow-write-file",
+            "updater:default",
+            { "identifier": "opener:allow-open-path", "allow": [{ "path": "$APPLOG/*" }] }
+        ]
+    })
+    .to_string();
+    handle.add_capability(capability)
+}
+
 /// One full sidecar lifetime: spawn, wait ready, register machine, navigate,
 /// then pump events until the process terminates.
 async fn launch_once(handle: &AppHandle) -> LaunchEnd {
@@ -573,9 +734,19 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     // Non-blocking preflight: if Tailscale isn't installed/logged in, the
     // local hub still starts (local-only) — see
     // docs/superpowers/specs/2026-07-17-local-hub-tailscale-reachability-design.md.
-    let enable_tailscale_serve = tailscale::public_url().await.is_ok();
+    let tailscale_probe = tailscale::public_url().await;
+    let enable_tailscale_serve = tailscale_probe.is_ok();
+    // Logged either way: when this comes back Err the hub is started without
+    // --enable-tailscale-serve, and /api/tailscale-status can only report
+    // that fact, not the reason behind it. Without this line the operator saw
+    // an exposure failure with no record anywhere of what the preflight hit.
+    if let Err(e) = &tailscale_probe {
+        let _ = writeln!(log, "devdeck: tailscale preflight failed, hub will not be exposed on the tailnet: {e}");
+    }
+    let bind_host = bindconfig::load(&data_dir);
+    let _ = writeln!(log, "devdeck: binding hub to {bind_host}");
     let cmd = match handle.shell().sidecar("devdeck-server") {
-        Ok(c) => c.args(sidecar::sidecar_args(&data_dir, &key, enable_tailscale_serve)),
+        Ok(c) => c.args(sidecar::sidecar_args(&data_dir, &key, enable_tailscale_serve, &bind_host)),
         Err(e) => return LaunchEnd::Failed(format!("resolve sidecar binary: {e}")),
     };
     let (mut rx, child) = match cmd.spawn() {
@@ -604,17 +775,44 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
         }
     }
     let port = port.unwrap();
+    *handle.state::<BoundPort>().0.lock().unwrap() = Some(port);
 
     // Phase 2: readiness + local machine registration + navigation.
-    if let Err(msg) = hubapi::wait_healthy(port, Duration::from_secs(sidecar::READY_TIMEOUT_SECS)).await {
+    let host = reachable_host(&bind_host);
+    if host != sidecar::LOOPBACK {
+        // A hub pinned to one interface has NOTHING listening on loopback, so
+        // this window's origin stops being the loopback URL the static
+        // capability (capabilities/default.json `remote.urls`) grants command
+        // access to — and Settings › Network is itself a Tauri command, so
+        // without this the operator would be locked out of the one panel that
+        // could undo the change. Granted to exactly the bound origin rather
+        // than a LAN wildcard: a remote-mode hub on someone else's LAN must
+        // not inherit command access it does not have today.
+        if let Err(e) = grant_origin_capability(handle, &host) {
+            let _ = writeln!(log, "devdeck: could not grant ACL for {host}: {e}");
+        }
+    }
+    if let Err(msg) =
+        hubapi::wait_healthy(&host, port, Duration::from_secs(sidecar::READY_TIMEOUT_SECS)).await
+    {
         return LaunchEnd::Failed(msg);
     }
-    if let Err(msg) = hubapi::upsert_local_machine(port, &key, &data_dir).await {
+    // Between health and registration: prove this is OUR child. Two hubs can
+    // legitimately hold one port (see sidecar::port_has_a_server), and without
+    // this the collision surfaced as an opaque 401 from the line below.
+    if let Err(msg) = hubapi::verify_own_hub(&host, port, &key).await {
+        let _ = writeln!(log, "devdeck: {msg}");
+        return LaunchEnd::Failed(msg);
+    }
+    if let Err(msg) = hubapi::upsert_local_machine(&host, port, &key, &data_dir).await {
         return LaunchEnd::Failed(msg);
     }
     if let Some(win) = handle.get_webview_window("main") {
-        let url = format!("http://127.0.0.1:{port}/?key={key}");
-        if let Err(e) = win.navigate(url.parse().expect("static loopback url")) {
+        let url = format!("http://{host}:{port}/?key={key}");
+        let Ok(parsed) = url.parse() else {
+            return LaunchEnd::Failed(format!("build devdeck ui url from bind host {host:?}"));
+        };
+        if let Err(e) = win.navigate(parsed) {
             return LaunchEnd::Failed(format!("navigate to devdeck ui: {e}"));
         }
         let _ = win.show();
@@ -769,7 +967,26 @@ fn external_url(value: &str) -> Result<reqwest::Url, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::external_url;
+    use super::{external_url, reachable_host};
+
+    /// An all-interfaces bind covers loopback, so the desktop keeps the
+    /// origin the STATIC capability is written against — no runtime ACL grant
+    /// needed, and none should be triggered.
+    #[test]
+    fn reachable_host_stays_on_loopback_for_loopback_and_all_interfaces() {
+        assert_eq!(reachable_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(reachable_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(reachable_host("::1"), "127.0.0.1");
+    }
+
+    /// A pinned bind is the one case with nothing on loopback — the shell has
+    /// to follow it or its own health poll, machine row and navigation all
+    /// hit a closed port.
+    #[test]
+    fn reachable_host_follows_a_pinned_interface() {
+        assert_eq!(reachable_host("192.168.1.24"), "192.168.1.24");
+        assert_eq!(reachable_host("10.0.0.5"), "10.0.0.5");
+    }
 
     #[test]
     fn external_url_allows_only_web_urls() {

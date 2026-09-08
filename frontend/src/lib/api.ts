@@ -973,6 +973,20 @@ export function fetchMe(): Promise<User> {
   return request<User>('GET', '/auth/me')
 }
 
+/** Partial change to the operator's own sign-in credentials. An omitted field
+ *  is left alone, so either half can be sent on its own. */
+export interface UpdateAccountBody {
+  email?: string
+  password?: string
+  /** Required once the account has a password the operator chose
+   *  (User.passwordSet); ignored on the desktop bootstrap account. */
+  currentPassword?: string
+}
+
+export function updateAccount(body: UpdateAccountBody): Promise<User> {
+  return request<User>('PUT', '/auth/account', body)
+}
+
 /** GET /api/whoami — reports this process's role (hub vs. runtime). */
 export function fetchWhoami(): Promise<Whoami> {
   return request<Whoami>('GET', '/whoami')
@@ -1146,6 +1160,24 @@ export function fetchMachineHealth(id: string): Promise<MachineHealth> {
   return request<MachineHealth>('GET', `/machines/${id}/health`)
 }
 
+/** The hub's own attempt to push its URL to a machine's runtime (see
+ *  `RunBindingPushLoop` on the backend), so the Machines page can explain a
+ *  runtime that hasn't synced instead of it looking identical to an empty
+ *  one. `known` is false before the push loop has reached this machine yet,
+ *  or for a local machine (never pushed to) — every other field is only
+ *  meaningful when it's true. */
+export interface MachineBindingStatus {
+  known: boolean
+  hubReachable?: boolean
+  adopted?: boolean
+  reason?: string
+  pushedAt?: string
+}
+
+export function fetchMachineBindingStatus(id: string): Promise<MachineBindingStatus> {
+  return request<MachineBindingStatus>('GET', `/machines/${id}/binding-status`)
+}
+
 export function fetchMachineVersion(id: string): Promise<MachineVersion> {
   return request<MachineVersion>('GET', `/machines/${id}/version`)
 }
@@ -1206,10 +1238,26 @@ export interface TailscaleHubStatus {
   ready: boolean
   reason?: 'not_installed' | 'not_ready' | 'serve_disabled' | 'serve_target_mismatch'
   url?: string
+  /** True while a `tailscale serve` child is running. */
+  serving: boolean
+  /** The port that child fronts; absent when not serving. */
+  servePort?: string
+  /** The port this hub actually bound — not the one it asked for, which is
+   *  wrong whenever something else already held it. */
+  hubPort?: string
+  /** True when Tailscale itself is usable, so offering start/stop makes
+   *  sense. False means the reason is not something the toggle can fix. */
+  canServe: boolean
 }
 
 export function fetchTailscaleStatus(): Promise<TailscaleHubStatus> {
   return request<TailscaleHubStatus>('GET', '/tailscale-status')
+}
+
+/** Starts or stops this hub's `tailscale serve` child. The port is always the
+ *  hub's own bound port, chosen server-side — never supplied by the caller. */
+export function setTailscaleServe(enabled: boolean): Promise<{ serving: boolean; servePort?: string }> {
+  return request('POST', '/tailscale-serve', { enabled })
 }
 
 export interface HubKeyStatus {

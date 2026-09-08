@@ -1,210 +1,106 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 )
 
-//go:embed markitdown_convert.py
-var markitdownScript []byte
+// ToolsConfig previously named the external binaries the Tools module
+// shelled out to. Nothing is shelled out anymore -- every conversion is
+// pure Go, compiled straight into the server binary -- so this is now an
+// empty placeholder kept only so NewToolsService's call sites don't need to
+// change again if a future knob shows up.
+type ToolsConfig struct{}
 
-// ToolsConfig names the external binaries the Tools module shells out to.
-// pandoc and mermaid-cli (mmdc) have no pure-Go equivalent; markitdown is a
-// Python library, invoked through the embedded markitdown_convert.py script.
-type ToolsConfig struct {
-	PythonBin string
-	PandocBin string
-	MmdcBin   string
-}
-
-// ToolUnavailableError reports a missing external dependency. The Install
-// field is surfaced to API clients so the error is actionable.
+// ToolUnavailableError reports a Tools-module feature that isn't usable in
+// the current configuration (e.g. no LLM key set for image captioning). The
+// Install field is surfaced to API clients so the error is actionable.
 type ToolUnavailableError struct {
 	Tool    string
 	Install string
 }
 
 func (e *ToolUnavailableError) Error() string {
-	return fmt.Sprintf("%s is not installed — install it with: %s", e.Tool, e.Install)
+	return fmt.Sprintf("%s is not available: %s", e.Tool, e.Install)
+}
+
+// UnsupportedFormatError reports an input/output format the Tools module
+// does not (and, for some formats such as audio, cannot reasonably) support.
+type UnsupportedFormatError struct {
+	Format string
+	Reason string
+}
+
+func (e *UnsupportedFormatError) Error() string {
+	return fmt.Sprintf("unsupported format %q: %s", e.Format, e.Reason)
 }
 
 // ToolsService implements the Tools module: document -> markdown conversion
-// (markitdown) and markdown -> docx/pdf export with mermaid diagram
-// rendering (mermaid-cli + pandoc).
-type ToolsService struct {
-	cfg        ToolsConfig
-	scriptPath string
+// and markdown -> docx/pdf export with mermaid diagram rendering. Everything
+// runs in-process -- no Python/markitdown, no pandoc, no mermaid-cli -- so
+// there is nothing to install for the module to work.
+type ToolsService struct{}
+
+// NewToolsService constructs the Tools service. It no longer does any I/O
+// (no embedded script to stage to a temp file), so it cannot fail, but keeps
+// returning an error to avoid another signature change if that ever changes.
+func NewToolsService(_ ToolsConfig) (*ToolsService, error) {
+	return &ToolsService{}, nil
 }
 
-// NewToolsService writes the embedded markitdown conversion script to a temp
-// file once, so the server binary stays self-contained (mirrors the webui
-// package embedding the built frontend).
-func NewToolsService(cfg ToolsConfig) (*ToolsService, error) {
-	dir, err := os.MkdirTemp("", "devdeck-tools-")
-	if err != nil {
-		return nil, fmt.Errorf("create tools temp dir: %w", err)
-	}
-	scriptPath := filepath.Join(dir, "markitdown_convert.py")
-	if err := os.WriteFile(scriptPath, markitdownScript, 0o500); err != nil {
-		return nil, fmt.Errorf("write markitdown script: %w", err)
-	}
-	return &ToolsService{cfg: cfg, scriptPath: scriptPath}, nil
+var audioExts = map[string]bool{
+	".mp3": true, ".wav": true, ".m4a": true, ".ogg": true, ".flac": true, ".aac": true,
 }
 
-func lookPath(bin, install string) error {
-	if _, err := exec.LookPath(bin); err != nil {
-		return &ToolUnavailableError{Tool: bin, Install: install}
-	}
-	return nil
+var imageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true,
 }
 
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	return s
-}
-
-// ToMarkdown converts an uploaded document to markdown via markitdown.
-// LLM-assisted image description activates automatically when
-// OPENAI_API_KEY and MARKITDOWN_LLM_MODEL are present in the process
-// environment (typically loaded from --env at startup).
+// ToMarkdown converts an uploaded document to markdown. The converter is
+// chosen by file extension; LLM-assisted image description activates
+// automatically when OPENAI_API_KEY and MARKITDOWN_LLM_MODEL are present in
+// the process environment (typically loaded from --env at startup).
 func (s *ToolsService) ToMarkdown(ctx context.Context, filename string, data []byte) (string, error) {
-	if err := lookPath(s.cfg.PythonBin, `install Python 3, then: pip install "markitdown[all]" openai pymupdf4llm`); err != nil {
-		return "", err
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch {
+	case ext == ".docx":
+		return docxToMarkdown(data)
+	case ext == ".pptx":
+		return pptxToMarkdown(data)
+	case ext == ".xlsx" || ext == ".xlsm":
+		return xlsxToMarkdown(data)
+	case ext == ".html" || ext == ".htm":
+		return htmlToMarkdown(data)
+	case ext == ".pdf":
+		return pdfToMarkdown(data)
+	case ext == ".md" || ext == ".markdown" || ext == ".txt":
+		return string(data), nil
+	case ext == ".csv":
+		return csvToMarkdown(data)
+	case ext == ".json":
+		return jsonToMarkdown(data)
+	case imageExts[ext]:
+		return imageToMarkdown(ctx, ext, data)
+	case audioExts[ext]:
+		return "", &UnsupportedFormatError{Format: ext, Reason: "audio transcription is not supported"}
+	default:
+		return "", &UnsupportedFormatError{Format: ext, Reason: "no converter for this file type"}
 	}
-
-	dir, err := os.MkdirTemp("", "devdeck-markitdown-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(dir)
-
-	ext := filepath.Ext(filename)
-	if ext == "" {
-		ext = ".bin"
-	}
-	src := filepath.Join(dir, "input"+ext)
-	if err := os.WriteFile(src, data, 0o600); err != nil {
-		return "", fmt.Errorf("write temp file: %w", err)
-	}
-
-	cmd := exec.CommandContext(ctx, s.cfg.PythonBin, s.scriptPath, src)
-	cmd.Env = os.Environ()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := firstLine(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		if strings.Contains(msg, "ModuleNotFoundError") || strings.Contains(stderr.String(), "No module named 'markitdown'") {
-			return "", &ToolUnavailableError{Tool: "markitdown (python package)", Install: `pip install "markitdown[all]" openai pymupdf4llm`}
-		}
-		return "", fmt.Errorf("markitdown: %s", msg)
-	}
-	return stdout.String(), nil
 }
 
-var mermaidBlockRe = regexp.MustCompile("(?s)```mermaid\\s*\\n(.*?)\\n```")
-
-// MarkdownToDocument exports markdown to docx or pdf via pandoc, rendering
-// any ```mermaid fenced blocks to PNG images (via mermaid-cli) first, since
-// pandoc has no native mermaid support.
+// MarkdownToDocument exports markdown to docx or pdf, rendering any
+// ```mermaid fenced blocks to images inline via the pure-Go mermaid
+// renderer (any diagram type it doesn't understand degrades to a labeled
+// code block showing the raw source instead of failing the export).
 func (s *ToolsService) MarkdownToDocument(ctx context.Context, markdown, format string) ([]byte, error) {
 	if format != "docx" && format != "pdf" {
 		return nil, fmt.Errorf("unsupported format %q", format)
 	}
-	if err := lookPath(s.cfg.PandocBin, "brew install pandoc (see https://pandoc.org/installing.html)"); err != nil {
-		return nil, err
+	blocks := parseMarkdownToBlocks(markdown)
+	if format == "docx" {
+		return renderDocx(blocks)
 	}
-
-	dir, err := os.MkdirTemp("", "devdeck-export-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(dir)
-
-	rendered, err := s.renderMermaidBlocks(ctx, dir, markdown)
-	if err != nil {
-		return nil, err
-	}
-
-	srcPath := filepath.Join(dir, "input.md")
-	if err := os.WriteFile(srcPath, []byte(rendered), 0o600); err != nil {
-		return nil, fmt.Errorf("write markdown: %w", err)
-	}
-	outPath := filepath.Join(dir, "output."+format)
-
-	args := []string{srcPath, "-o", outPath, "--resource-path", dir, "--standalone"}
-	cmd := exec.CommandContext(ctx, s.cfg.PandocBin, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := firstLine(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("pandoc: %s", msg)
-	}
-
-	out, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("read pandoc output: %w", err)
-	}
-	return out, nil
-}
-
-// renderMermaidBlocks replaces every ```mermaid fenced block with a markdown
-// image reference to a PNG rendered via mermaid-cli (mmdc). Returns the
-// markdown unchanged (and without invoking mmdc) if no mermaid block exists.
-func (s *ToolsService) renderMermaidBlocks(ctx context.Context, dir, markdown string) (string, error) {
-	matches := mermaidBlockRe.FindAllStringSubmatchIndex(markdown, -1)
-	if len(matches) == 0 {
-		return markdown, nil
-	}
-	if err := lookPath(s.cfg.MmdcBin, "npm install -g @mermaid-js/mermaid-cli"); err != nil {
-		return "", err
-	}
-
-	var out strings.Builder
-	last := 0
-	for i, m := range matches {
-		start, end := m[0], m[1]
-		diagStart, diagEnd := m[2], m[3]
-		diagram := markdown[diagStart:diagEnd]
-
-		inPath := filepath.Join(dir, fmt.Sprintf("mermaid-%d.mmd", i))
-		outPath := filepath.Join(dir, fmt.Sprintf("mermaid-%d.png", i))
-		if err := os.WriteFile(inPath, []byte(diagram), 0o600); err != nil {
-			return "", fmt.Errorf("write mermaid source: %w", err)
-		}
-
-		cmd := exec.CommandContext(ctx, s.cfg.MmdcBin, "-i", inPath, "-o", outPath, "-b", "white")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			msg := firstLine(stderr.String())
-			if msg == "" {
-				msg = err.Error()
-			}
-			return "", fmt.Errorf("mermaid-cli: diagram %d: %s", i+1, msg)
-		}
-
-		out.WriteString(markdown[last:start])
-		out.WriteString("![diagram " + strconv.Itoa(i+1) + "](" + outPath + ")")
-		last = end
-	}
-	out.WriteString(markdown[last:])
-	return out.String(), nil
+	return renderPDF(blocks)
 }

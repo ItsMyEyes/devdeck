@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Activity, Eye, FolderTree, RotateCcw, Save, TerminalSquare, Trash2 } from 'lucide-react'
 import { useSSHConnections } from '@/features/data/queries'
-import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { shellSidebarOpen, useDevDeckStore } from '@/store/useDevDeckStore'
 import { OverflowItem, ShellSidebarToggle, useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
 import { MarkdownPreviewPane } from '@/features/terminal/MarkdownPreviewPane'
@@ -477,7 +477,9 @@ export function SSHShellPane({
       }
       if (matchesBinding(event, 'terminal.toggleSidebar')) {
         event.preventDefault()
-        const isOpen = shellSidebarState(useDevDeckStore.getState().shellSidebars, shellKey).open
+        // Same per-viewport default the pane and its toggle use, so the
+        // chord can't disagree with them — see `shellSidebarOpen`.
+        const isOpen = shellSidebarOpen(useDevDeckStore.getState().shellSidebars, shellKey, isDesktop)
         setShellSidebarOpen(shellKey, !isOpen)
         return
       }
@@ -485,7 +487,7 @@ export function SSHShellPane({
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen])
+  }, [layout, dirtyFiles, isFocused, shellKey, setShellSidebarOpen, isDesktop])
 
   function tabIcon(content: PaneContent): ReactNode {
     if (content.kind === 'terminal') return <TerminalSquare size={13} className="text-devdeck-fg-2" />
@@ -504,6 +506,9 @@ export function SSHShellPane({
     focusedPane && focusedPane.type === 'leaf'
       ? focusedPane.tabs.find((t) => t.id === focusedPane.activeTabId)
       : undefined
+  /** The focused pane's open file, for reveal-active-file in the Explorer
+   *  sidebar — see ExpandedTerminal.tsx's copy of this for the full doc. */
+  const activeFilePath = focusedActiveContent?.kind === 'file' ? focusedActiveContent.path : undefined
 
   /** The active file tab's imperative handle, when the focused pane's active
    *  tab is an editable file — powers the overflow menu's Save/Revert/Delete
@@ -620,6 +625,7 @@ export function SSHShellPane({
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
+        activePath={activeFilePath}
       />
     ),
   }
@@ -629,15 +635,17 @@ export function SSHShellPane({
   const firstPaneId = firstLeafId(layout.root)
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 bg-devdeck-pane">
+    <div ref={containerRef} className="relative flex min-h-0 flex-1 bg-devdeck-pane">
       <ShellSidebar
         shellKey={shellKey}
+        inline={isDesktop}
         target={{ kind: 'ssh', connectionId }}
         rootLabel={connection?.name ?? 'SSH'}
         onOpenFile={openFile}
         onFileDeleted={handleFilesDeleted}
         onRequestQuickOpen={() => setQuickOpen(true)}
         onRequestContentSearch={() => setContentSearch(true)}
+        activeFilePath={activeFilePath}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

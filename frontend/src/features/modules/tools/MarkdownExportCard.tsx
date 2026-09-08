@@ -13,7 +13,7 @@ const FORMAT_OPTIONS = [
   { value: 'pdf', label: 'PDF (.pdf)' },
 ]
 
-/** Exports markdown to docx/pdf via pandoc, rendering \`\`\`mermaid fenced blocks to images first. */
+/** Exports markdown to docx/pdf, rendering \`\`\`mermaid fenced blocks to images first - fully self-contained, no external tools required. */
 export function MarkdownExportCard() {
   const [markdown, setMarkdown] = useState('')
   const [filename, setFilename] = useState('document')
@@ -48,7 +48,7 @@ export function MarkdownExportCard() {
         <div>
           <div className="text-[12.5px] font-medium text-devdeck-fg">Markdown → Document</div>
           <div className="mt-0.5 text-[11px] text-devdeck-fg-2">
-            Renders mermaid diagrams to images, then exports via pandoc.
+            Renders mermaid diagrams to images, then exports to Word or PDF. Nothing to install.
           </div>
         </div>
       </div>

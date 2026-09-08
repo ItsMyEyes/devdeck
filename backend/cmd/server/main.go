@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -41,11 +40,11 @@ import (
 	"devdeck/backend/internal/handler"
 	"devdeck/backend/internal/hoststats"
 	"devdeck/backend/internal/issuemcp"
-	"devdeck/backend/internal/memorycli"
 	"devdeck/backend/internal/lsp"
 	"devdeck/backend/internal/machineclient"
 	"devdeck/backend/internal/memory"
 	"devdeck/backend/internal/memorybackfill"
+	"devdeck/backend/internal/memorycli"
 	"devdeck/backend/internal/netproxy"
 	"devdeck/backend/internal/port"
 	"devdeck/backend/internal/registry"
@@ -59,6 +58,7 @@ import (
 	"devdeck/backend/internal/store"
 	"devdeck/backend/internal/telegram"
 	"devdeck/backend/internal/terminal"
+	"devdeck/backend/internal/tsserve"
 	"devdeck/backend/internal/version"
 	"devdeck/backend/internal/webui"
 
@@ -157,9 +157,6 @@ func main() {
 	secureCookiesFlag := flag.Bool("secure-cookies", envBool("DEVDECK_SECURE_COOKIES", config.PickBool(cfg.Auth.SecureCookies, true)), "set the Secure attribute on auth cookies; disable only for loopback desktop deployments (--secure-cookies=false) (devdeck.yaml: auth.secure_cookies)")
 	turnstileSiteKey := flag.String("turnstile-site-key", envOr("DEVDECK_TURNSTILE_SITE_KEY", config.Pick(cfg.Auth.Turnstile.SiteKey, "")), "Cloudflare Turnstile site key; with --turnstile-secret-key, login requires passing a Turnstile challenge (devdeck.yaml: auth.turnstile.site_key)")
 	turnstileSecretKey := flag.String("turnstile-secret-key", envOr("DEVDECK_TURNSTILE_SECRET_KEY", config.Pick(cfg.Auth.Turnstile.SecretKey, "")), "Cloudflare Turnstile secret key used to verify login challenges server-side (devdeck.yaml: auth.turnstile.secret_key)")
-	pythonBin := flag.String("python-bin", envOr("DEVDECK_PYTHON_BIN", config.Pick(cfg.Tools.PythonBin, defaultPythonBin())), "python interpreter used to run the markitdown conversion script (devdeck.yaml: tools.python_bin)")
-	pandocBin := flag.String("pandoc-bin", envOr("DEVDECK_PANDOC_BIN", config.Pick(cfg.Tools.PandocBin, "pandoc")), "pandoc binary used for markdown -> docx/pdf export (devdeck.yaml: tools.pandoc_bin)")
-	mmdcBin := flag.String("mmdc-bin", envOr("DEVDECK_MMDC_BIN", config.Pick(cfg.Tools.MmdcBin, "mmdc")), "mermaid-cli binary used to render mermaid diagrams for markdown export (devdeck.yaml: tools.mmdc_bin)")
 	tailscaleServe := flag.Bool("enable-tailscale-serve", envBool("DEVDECK_TAILSCALE_SERVE", config.PickBool(cfg.Tailscale.Serve, false)), "expose the server on your tailnet by running `tailscale serve <port>` alongside it (requires the tailscale CLI) (devdeck.yaml: tailscale.serve)")
 	managedFlag := flag.Bool("managed", managed, "mark this process as supervised by an external respawn loop (set by the Tauri desktop sidecar) — /api/self/restart won't spawn its own replacement, and /api/self/stop will refuse, since the supervisor already owns this process's respawn lifecycle")
 	role := flag.String("role", envOr("DEVDECK_ROLE", config.Pick(cfg.Role, "hub")), "server role: hub (organizational data + machine registry + proxy + web UI), runtime (headless execution daemon, key auth only), or both (hub that also self-registers as its own execution machine, for solo self-hosting on a fixed address) (devdeck.yaml: role)")
@@ -352,6 +349,11 @@ func main() {
 	if !isRuntime {
 		go healthCache.RunPoller(context.Background(), st, 15*time.Second)
 	}
+	// bindingCache is filled by RunBindingPushLoop, started further down once
+	// the listener has bound (it needs tailscaleStatusH.ReachableURL, which
+	// needs SetPort). Declared here so machineH can be wired to it right
+	// alongside every other handler below.
+	bindingCache := service.NewBindingStatusCache()
 
 	var baseReg port.AgentRegistry
 	if *jadiURL != "" {
@@ -394,7 +396,12 @@ func main() {
 	// process actually registers below rather than drifting into a constant
 	// nobody re-checks.
 	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapTelegram)
-	tailscaleStatusH := handler.NewTailscaleStatusHandler(*tailscaleServe)
+	// Exposure is runtime state, not a launch-time decision: the controller
+	// owns the serve child so it can be started and stopped while the hub
+	// runs. --enable-tailscale-serve only chooses the STARTING state below.
+	tsServeCtl := tsserve.New(detect.ResolveTailscale)
+	tailscaleStatusH := handler.NewTailscaleStatusHandler(tsServeCtl)
+	tailscaleServeH := handler.NewTailscaleServeHandler(tsServeCtl, tailscaleStatusH.HubPort)
 	lspDepsH := handler.NewLspDepsHandler(lspSrv.Installer())
 	updater := &selfupdate.Updater{Client: &selfupdate.Client{
 		Owner: selfupdate.Owner,
@@ -424,6 +431,7 @@ func main() {
 	completionsHandler := handler.NewCompletionsHandler(service.NewCompletionsService(st))
 	seedH := handler.NewSeedHandler(seedSvc)
 	machineH := handler.NewMachineHandler(st, healthCache, authSvc, signingKey)
+	machineH.SetBindingCache(bindingCache)
 	bookmarkH := handler.NewBookmarkHandler(st, service.NewFaviconService(st))
 
 	sshSecrets := service.NewSSHSecretService(st, authKey)
@@ -444,9 +452,15 @@ func main() {
 	// from the hub over a machine-key-gated route, scoped by the hub to
 	// exactly the connections this machine executes. See
 	// machineclient.HubSecretSource and handler.RuntimeSSHHandler.
+	// hubSecretSource keeps the concrete type alongside the interface value
+	// below: RuntimeBinder needs to call SetHubURL on it once a hub-pushed
+	// binding arrives, which the sshmgr.SecretSource interface doesn't
+	// expose. Nil on the hub, where sshSecretSource never becomes one.
+	var hubSecretSource *machineclient.HubSecretSource
 	var sshSecretSource sshmgr.SecretSource = sshSecrets
 	if isRuntime {
-		sshSecretSource = machineclient.NewHubSecretSource(*hubURL, *apiKey)
+		hubSecretSource = machineclient.NewHubSecretSource(*hubURL, *apiKey)
+		sshSecretSource = hubSecretSource
 	}
 	// One dialer backs the interactive shell, the SFTP file API and the agent
 	// tool calls, so the choice above applies to all of them: every file
@@ -454,6 +468,29 @@ func main() {
 	sshDialer := sshmgr.NewDialer(st, sshSecretSource)
 	if !isRuntime {
 		sshDialer = sshDialer.WithExecutorRouting(st, machineclient.SOCKSProxyStarter{})
+	}
+
+	// runtimeBinder lets this process adopt a hub's pushed identity (PUT
+	// /api/runtime/binding) instead of requiring --hub-url/--hub-key to be
+	// hand-configured here — see service.RuntimeBinder's doc comment. Built
+	// only on a pure runtime: a --role both process is its own hub and must
+	// never point its own sync loop at itself (RunSyncLoop's doc comment).
+	// An explicit --hub-url wins outright, so this exists even when one was
+	// set — Bind just refuses every push in that case — to keep the wiring
+	// uniform rather than conditionally registering the route.
+	var runtimeBindingH *handler.RuntimeBindingHandler
+	if isRuntime {
+		runtimeBinder := service.NewRuntimeBinder(*hubURL,
+			func(hubURL, machineID string) {
+				whoamiH.SetHubURL(hubURL)
+				whoamiH.SetMachineID(machineID)
+				hubSecretSource.SetHubURL(hubURL)
+			},
+			func(hubURL string) {
+				go service.RunSyncLoop(context.Background(), st, service.SyncConfig{HubURL: hubURL, MachineKey: *apiKey}, 30*time.Second)
+			},
+		)
+		runtimeBindingH = handler.NewRuntimeBindingHandler(runtimeBinder)
 	}
 	sshSrv := sshmgr.NewServer(sshDialer)
 	// One FilePool backs both SFTP file ops and stats polling, so a saved
@@ -856,11 +893,7 @@ func main() {
 	agentWS := handler.NewAgentWSHandler(agentEngine, st, agentChatSvc)
 	agentThreadH := handler.NewAgentThreadHandler(st, agentEngine)
 
-	toolsSvc, err := service.NewToolsService(service.ToolsConfig{
-		PythonBin: *pythonBin,
-		PandocBin: *pandocBin,
-		MmdcBin:   *mmdcBin,
-	})
+	toolsSvc, err := service.NewToolsService(service.ToolsConfig{})
 	if err != nil {
 		log.Fatalf("tools service: %v", err)
 	}
@@ -1055,6 +1088,7 @@ func main() {
 		mux.HandleFunc("POST /api/auth/totp/verify", authH.PostTotpVerify)
 		mux.HandleFunc("POST /api/auth/logout", authH.PostLogout)
 		mux.HandleFunc("GET /api/auth/me", authH.GetMe)
+		mux.HandleFunc("PUT /api/auth/account", authH.PutAccount)
 		if *apiKey != "" {
 			authH.SetDesktopKey(*apiKey)
 			mux.HandleFunc("POST /api/auth/key-session", authH.PostKeySession)
@@ -1087,7 +1121,16 @@ func main() {
 
 	mux.HandleFunc("GET /api/health", healthH.ServeHTTP)
 	mux.HandleFunc("GET /api/whoami", whoamiH.ServeHTTP)
+	if isRuntime {
+		// Never registered on --role both: see runtimeBindingH's construction
+		// above for why a self-hub process must not accept a pushed binding.
+		mux.HandleFunc("PUT /api/runtime/binding", runtimeBindingH.PutBinding)
+	}
 	mux.HandleFunc("GET /api/tailscale-status", tailscaleStatusH.ServeHTTP)
+	// Alongside the status route, and shared rather than hub-only for the same
+	// reason: a runtime is exposed on the tailnet exactly like a hub is, and
+	// its operator needs the same switch.
+	mux.HandleFunc("POST /api/tailscale-serve", tailscaleServeH.ServeHTTP)
 	// Deliberately in the shared block, not the hub-only one: each machine
 	// must report its own toolchain, and the hub reaches a runtime's copy
 	// through /api/machines/{id}/proxy/.
@@ -1104,6 +1147,7 @@ func main() {
 	mux.HandleFunc("GET /api/self/update-check", selfH.GetUpdateCheck)
 	mux.HandleFunc("POST /api/self/update", selfH.PostUpdate)
 	mux.HandleFunc("GET /api/fs/list", fsH.ListDir)
+	mux.HandleFunc("GET /api/fs/roots", fsH.Roots)
 	mux.HandleFunc("POST /api/fs/mkdir", fsH.Mkdir)
 	mux.HandleFunc("POST /api/fs/clone", fsH.Clone)
 
@@ -1236,6 +1280,7 @@ func main() {
 		mux.HandleFunc("PATCH /api/machines/{id}", machineH.PatchMachine)
 		mux.HandleFunc("DELETE /api/machines/{id}", machineH.DeleteMachine)
 		mux.HandleFunc("GET /api/machines/{id}/health", machineH.GetMachineHealth)
+		mux.HandleFunc("GET /api/machines/{id}/binding-status", machineH.GetMachineBindingStatus)
 		mux.HandleFunc("POST /api/machines/{id}/token", machineH.PostToken)
 		mux.HandleFunc("POST /api/machines/{id}/restart", machineH.PostMachineRestart)
 		mux.HandleFunc("POST /api/machines/{id}/stop", machineH.PostMachineStop)
@@ -1540,6 +1585,12 @@ func main() {
 	// loopback rather than *publicURL.
 	if _, port, err := net.SplitHostPort(listener.Addr().String()); err == nil {
 		loopbackHubURL = "http://127.0.0.1:" + port
+		// Publishing the bound port is what makes two things work at all, and
+		// both were inert without it: the stale-`tailscale serve` detection in
+		// TailscaleStatusHandler (its check is skipped while the port is
+		// unknown, so it silently never fired) and POST /api/tailscale-serve,
+		// which refuses to expose a port it cannot confirm this process owns.
+		tailscaleStatusH.SetPort(port)
 	}
 	if publicURLWasDefaulted {
 		// *addr may have used port 0 (OS-assigned); the flag-parse-time
@@ -1547,7 +1598,12 @@ func main() {
 		// OS has bound a real port. advertiseURL (used only for its
 		// hostname, above) is unaffected by this — hostnames don't change
 		// when a port is reassigned.
-		*publicURL = "http://" + listener.Addr().String()
+		//
+		// advertiseURLFor also swaps an unspecified bind host for a routable
+		// one: a listener on --addr 0.0.0.0:9199 reports "0.0.0.0:9199" back
+		// from Addr(), and self-registering at "http://0.0.0.0:9199" gives
+		// the hub an address it can never dial.
+		*publicURL = advertiseURLFor(listener.Addr().String())
 	}
 	uiURL, err := browserURL(listener.Addr())
 	if err != nil {
@@ -1558,8 +1614,16 @@ func main() {
 	// back to --addr 127.0.0.1:0 when that port is taken, so it never assumes.
 	log.Printf("devdeck listening on %s (db: %s)", uiURL, *dbPath)
 	if *tailscaleServe {
-		if err := startTailscaleServe(listener.Addr()); err != nil {
-			log.Fatalf("--enable-tailscale-serve: %v", err)
+		_, servePort, _ := net.SplitHostPort(listener.Addr().String())
+		if err := tsServeCtl.Start(servePort); err != nil {
+			// Not fatal any more. Refusing to boot meant a transient Tailscale
+			// problem — most often the daemon still coming up at login, which
+			// the desktop shell races — took the whole hub down with it, even
+			// though serving locally was still perfectly possible. The
+			// operator can now start serve from Settings › Network once
+			// Tailscale is up, with no restart.
+			log.Printf("tailscale: could not expose this hub on your tailnet: %v", err)
+			log.Printf("tailscale: devdeck is still serving locally; start it from Settings > Network once Tailscale is ready")
 		}
 	}
 	if (isRuntime || isBoth) && *hubURL != "" {
@@ -1600,6 +1664,17 @@ func main() {
 			}, 30*time.Second)
 		}()
 		log.Printf("self-register: will register with hub %s as %q (%s)", *hubURL, *machineName, *publicURL)
+	}
+	// Automatic binding: for every OTHER machine this hub already has
+	// registered, push this hub's own tailnet URL and that machine's id to
+	// it, so it can adopt the same way self-registration above adopts an
+	// identity — without the operator hand-configuring --hub-url/--hub-key
+	// on the machine itself. See service.RuntimeBinder (the receiving side)
+	// and service.RunBindingPushLoop's doc comment for what's skipped
+	// (IsLocal machines) and why. Started only after SetPort above, since
+	// tailscaleStatusH.ReachableURL depends on it.
+	if !isRuntime {
+		go service.RunBindingPushLoop(context.Background(), st, bindingCache, tailscaleStatusH.ReachableURL, 30*time.Second)
 	}
 	if !isRuntime && *openUI && webui.Available() {
 		openBrowserSoon(uiURL)
@@ -1704,71 +1779,6 @@ func startForwardProxies(socks5Addr, httpProxyAddr, proxyKey string) {
 		}()
 		log.Printf("http proxy listening on %s", ln.Addr())
 	}
-}
-
-// tailscaleServeClearArgs removes any existing HTTPS listener on 443 before
-// this process claims it.
-//
-// It exists because `tailscale serve <port>` REFUSES to replace a listener
-// rather than overwriting it — it exits 1 with "sending serve config:
-// updating config: listener already exists for port 443". A single leftover
-// mapping (an older build's `--bg`, or a run that was killed before its
-// foreground child could clean up) therefore breaks the flag permanently: not
-// just once, but on every launch from then on.
-//
-// The failure mode that causes is genuinely misleading, because this hub may
-// bind an OS-ASSIGNED port (the desktop shell asks for 8989 but falls back to
-// --addr 127.0.0.1:0 when something already holds it — see
-// frontend/src-tauri/src/sidecar.rs's listen_addr). The stale mapping keeps
-// pointing at whatever port a previous run happened to get, so the
-// tailnet URL answers 502 while the process itself is perfectly healthy and
-// still serving on loopback — and anything that reaches this hub only over
-// the tailnet (a remote runtime's self-registration and catalog sync) fails
-// with no symptom on this side at all.
-//
-// Scoped to `--https=443 off`, never `serve reset`: reset drops the whole
-// machine's serve configuration — other ports, TCP forwarders, funnel — none
-// of which belongs to devdeck. 443's `/` is the one mapping this function
-// owns, and it owns it exclusively.
-func tailscaleServeClearArgs() []string { return []string{"serve", "--https=443", "off"} }
-
-// startTailscaleServe runs `tailscale serve <port>` as a foreground child
-// process: the serve config exists only while the child runs, so tailscaled
-// is left clean when devdeck exits, and ctrl-c reaches both through the shared
-// process group. The port comes from the bound listener, not --addr, so it
-// is correct even for ":0".
-func startTailscaleServe(addr net.Addr) error {
-	_, port, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		return fmt.Errorf("resolve listen port from %s: %w", addr, err)
-	}
-	bin, err := detect.ResolveTailscale()
-	if err != nil {
-		return fmt.Errorf("tailscale CLI not found in PATH or common install locations; install it or drop the flag")
-	}
-	// Best-effort and deliberately not fatal: "there was nothing to remove" is
-	// the normal, healthy case and reports itself as a non-zero exit here, so
-	// treating this as an error would fail the common path to fix the rare one.
-	// If it genuinely could not clear the listener, the serve below fails with
-	// tailscale's own message, which is the one worth showing.
-	if err := exec.Command(bin, tailscaleServeClearArgs()...).Run(); err != nil {
-		log.Printf("tailscale: no existing 443 listener to clear (%v)", err)
-	}
-	cmd := exec.Command(bin, "serve", port)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start tailscale serve: %w", err)
-	}
-	log.Printf("tailscale: serving port %s on your tailnet (pid %d)", port, cmd.Process.Pid)
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("tailscale serve exited: %v (devdeck keeps serving locally)", err)
-			return
-		}
-		log.Printf("tailscale serve exited")
-	}()
-	return nil
 }
 
 func defaultDBPath() string {
@@ -1967,22 +1977,6 @@ func envBool(key string, fallback bool) bool {
 		log.Fatalf("%s: invalid boolean %q", key, v)
 	}
 	return parsed
-}
-
-// defaultPythonBin prefers a local venv at ./tools/venv (see COMMANDS.md —
-// `python3 -m venv tools/venv && tools/venv/bin/pip install "markitdown[all]" openai pymupdf4llm`),
-// since markitdown can't be pip-installed into a system Python on most
-// platforms. Falls back to whatever "python3" resolves to on PATH.
-func defaultPythonBin() string {
-	for _, candidate := range []string{
-		filepath.Join("tools", "venv", "bin", "python3"),
-		filepath.Join("tools", "venv", "Scripts", "python.exe"),
-	} {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return "python3"
 }
 
 // randomHex returns n bytes of crypto/rand as a lowercase hex string, e.g.

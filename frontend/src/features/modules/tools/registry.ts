@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
-import { Binary, Braces, Clock, FileInput, FileOutput, Hash, KeyRound, Link2, type LucideIcon, Fingerprint } from 'lucide-react'
+import { Archive, Binary, Braces, Clock, FileInput, FileOutput, Hash, KeyRound, Link2, type LucideIcon, Fingerprint } from 'lucide-react'
 import { Base64Tool } from './Base64Tool'
+import { CompressTool } from './CompressTool'
 import { FormatterTool } from './FormatterTool'
 import { HashTool } from './HashTool'
 import { JwtTool } from './JwtTool'
@@ -78,9 +79,17 @@ export const TOOL_REGISTRY: ToolDef[] = [
     Component: TimestampTool,
   },
   {
+    id: 'compress',
+    label: 'Data Compression',
+    description: 'gzip (DEFLATE + CRC32) - checksum-verified lossless compress/decompress',
+    category: 'Data',
+    icon: Archive,
+    Component: CompressTool,
+  },
+  {
     id: 'doc-to-markdown',
     label: 'Document → Markdown',
-    description: 'PDF, Word, PPT, Excel, images, audio, HTML → markdown',
+    description: 'PDF, Word, PPT, Excel, images, HTML → markdown',
     category: 'Documents',
     icon: FileInput,
     Component: MarkitdownCard,

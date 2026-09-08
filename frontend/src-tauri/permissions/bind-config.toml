@@ -1,0 +1,20 @@
+# frontend/src-tauri/permissions/bind-config.toml
+#
+# Grants the hub's own SPA (Settings › Network) permission to read and change
+# which address this device's sidecars bind. Required for the same reason as
+# hub-mode.toml/diagnostics.toml: once an ACL manifest
+# (capabilities/default.json) exists, Tauri enforces ACL checks on every
+# custom command, not just `core:*`/plugin ones.
+#
+# Reachable only from the main window, whose origin is always the loopback
+# hub (`launch_once` navigates to http://127.0.0.1:<port>) and so is matched
+# by the capability's `remote.urls`. A browser on another device pointed at
+# an exposed hub is not a Tauri context at all — it has no `invoke`, and the
+# UI gates these calls on `useIsTauri()`.
+[[permission]]
+identifier = "allow-bind-config"
+description = "Allows the bind-address commands (get_bind_config/set_bind_config)."
+commands.allow = [
+    "get_bind_config",
+    "set_bind_config",
+]

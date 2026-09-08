@@ -54,8 +54,12 @@ func envProfilesDir() (string, error) {
 	return dir, nil
 }
 
-// agentSettingsPath returns the settings file path for a recognized agent.
-// Codex uses config.toml; Claude uses settings.json.
+// agentSettingsPath returns the settings file an env profile is written into.
+// Codex uses config.toml; Claude uses settings.json. Only these two implement
+// env profiles — the raw settings-file editor covers every agent through
+// settingsFileSpecFor in settingsfile.go, which must not be conflated with
+// this: writing a profile's env block into an agent that never reads it would
+// look like it worked and change nothing.
 func agentSettingsPath(agentID string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -82,36 +86,6 @@ func codexAuthPath() (string, error) {
 
 func claudeSettingsPath() (string, error) {
 	return agentSettingsPath("claude")
-}
-
-// ReadSettingsFile returns the raw text of an agent's settings file.
-// Claude → settings.json (default "{}"), Codex → config.toml (default "").
-func ReadSettingsFile(agentID string) (string, error) {
-	path, err := agentSettingsPath(agentID)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if agentID == "codex" {
-				return "", nil
-			}
-			return "{}", nil
-		}
-		return "", err
-	}
-	return string(data), nil
-}
-
-// WriteSettingsFile atomically writes raw JSON to an agent's settings.json.
-// No validation is performed — the caller takes responsibility for valid JSON.
-func WriteSettingsFile(agentID, content string) error {
-	path, err := agentSettingsPath(agentID)
-	if err != nil {
-		return err
-	}
-	return atomicWrite(path, []byte(content), 0o600)
 }
 
 func activeMarkerPath() (string, error) {

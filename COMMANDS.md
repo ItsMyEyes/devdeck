@@ -109,10 +109,6 @@ The Go backend accepts flags:
 - `--env` — path to a `.env` file loaded into the process environment before
   startup (default `.env`, env `DEVDECK_ENV_FILE`); a missing file is not an
   error. Used for LLM credentials consumed by the Tools module (see below).
-- `--python-bin` / `--pandoc-bin` / `--mmdc-bin` — external binaries the Tools
-  module shells out to (env `DEVDECK_PYTHON_BIN` / `DEVDECK_PANDOC_BIN` /
-  `DEVDECK_MMDC_BIN`). `--python-bin` defaults to `./tools/venv/bin/python3` if
-  that venv exists (see Tools module setup below), else `python3` on PATH.
 - `--version` — print the running build's version (embedded at build time
   from the git tag, see Versioning below) and exit.
 - `--updates` — check the latest GitHub release against the running version
@@ -298,37 +294,29 @@ service on whichever machine the process is running on. An empty
 reachable beyond your own machine (e.g. `127.0.0.1` bound but exposed over a
 tailnet-forwarded port, or a non-loopback `--socks5-addr`).
 
-## Tools module setup (markitdown, pandoc, mermaid)
+## Tools module (document ↔ markdown, mermaid)
 
-The Tools sidebar page (`/w/:wsId/tools`) shells out to three external CLIs —
-none have a pure-Go equivalent, so they aren't bundled in the binary:
+The Tools sidebar page (`/w/:wsId/tools`) is fully self-contained: document →
+markdown conversion, markdown → docx/pdf export, and mermaid diagram
+rendering are all pure Go, compiled straight into the `devdeck` binary. There
+is nothing to install — no Python/markitdown venv, no `pandoc`, no
+`mermaid-cli`/Node/Chromium.
 
-- **markitdown** (any document → markdown, https://github.com/microsoft/markitdown):
-  install into a dedicated venv, since most system Pythons are externally
-  managed and block a plain `pip install`:
-  ```bash
-  cd backend && python3 -m venv tools/venv
-  tools/venv/bin/pip install "markitdown[all]" openai pymupdf4llm
-  ```
-  `openai` is optional — it's only imported if `OPENAI_API_KEY` and
-  `MARKITDOWN_LLM_MODEL` are set (see below), enabling LLM-generated image
-  descriptions during conversion. `pymupdf4llm` handles the PDF path:
-  markitdown's own PDF converter is plain-text extraction (headings, tables,
-  and emphasis are lost — its LLM hook never applies to PDFs), so PDFs go
-  through pymupdf4llm's layout-aware extraction instead; without it, PDF
-  conversion falls back to plain text. `tools/venv/` is gitignored; each
-  checkout/deploy needs its own.
-- **pandoc** (markdown → docx/pdf): `brew install pandoc` (or see
-  https://pandoc.org/installing.html). PDF export uses pandoc's default PDF
-  engine — install a LaTeX distribution (e.g. `brew install --cask basictex`)
-  if PDF export fails with a missing-engine error.
-- **mermaid-cli** (`mmdc`, renders ` ```mermaid ` fenced blocks to PNG before
-  the pandoc pass): `npm install -g @mermaid-js/mermaid-cli`.
+- **Document → markdown** (`.docx`, `.pptx`, `.xlsx`, `.html`, `.pdf`, `.csv`,
+  `.json`, `.txt`/`.md`, images): read directly from each format's own
+  structure (`.docx`/`.pptx` OOXML via stdlib `archive/zip`+`encoding/xml`,
+  `.xlsx` via `excelize`, `.html` via `html-to-markdown`, `.pdf` text +
+  font-size heading heuristic via `ledongthuc/pdf`). Audio files are not
+  supported (transcription needs an external ASR service, which was never a
+  Go-vs-install problem to begin with).
+- **Markdown → docx/pdf**: parsed via `goldmark` and rendered with a
+  hand-written OOXML writer (docx) and `go-pdf/fpdf` (pdf).
+- **Mermaid**: `graph`/`flowchart` and `sequenceDiagram` are laid out and
+  rasterized to PNG by a small pure-Go renderer; any other diagram type (or
+  anything that fails to parse) degrades to a labeled code block showing the
+  raw mermaid source instead of failing the export.
 
-If a binary is missing, the Tools API responds `503` with an actionable
-install command rather than failing silently.
-
-**LLM integration for markitdown** — put credentials in a `.env` file beside
+**LLM integration for image captioning** — put credentials in a `.env` file beside
 the database (or wherever `--env` points) and they load automatically at
 startup via `config.LoadDotEnv` (real environment variables always win over
 the file):
@@ -493,9 +481,8 @@ git config core.hooksPath .githooks
 ## Testing
 
 - Backend: `go test ./...` (stdlib testing). The Tools module tests
-  (`internal/service/tools_test.go`, `internal/handler/tools_test.go`) shell
-  out to the real markitdown/pandoc/mmdc binaries and skip themselves if a
-  binary isn't on `PATH`.
+  (`internal/service/tools_test.go`, `internal/handler/tools_test.go`) run
+  unconditionally — there's no external binary to skip for.
 - Frontend: `cd frontend && npm test` (Vitest, jsdom). Watch mode: `npm run test:watch`.
   `make test` runs both the Go and frontend suites.
 

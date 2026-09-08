@@ -59,6 +59,10 @@ type adapter struct {
 	stdinMu sync.Mutex
 	stdinEn *json.Encoder
 
+	// stderr is the app-server's own last words, kept so a startup failure can
+	// be reported with the CLI's reason rather than only this adapter's timer.
+	stderr stderrTail
+
 	mu       sync.Mutex
 	sessions map[string]*session // DevDeck threadID -> session
 	byCodex  map[string]*session // Codex thread id -> session
@@ -70,6 +74,11 @@ type adapter struct {
 	childThreads map[string]*session
 	nextID       int64
 	pending      map[int64]chan rpcResult
+	// exitErr is set once the app-server process is gone. It makes the death
+	// sticky: every later RPC fails immediately with the real reason instead
+	// of registering a pending entry nobody will ever answer and then waiting
+	// out rpcTimeout for a process that no longer exists.
+	exitErr error
 
 	readers sync.WaitGroup
 }
@@ -186,7 +195,27 @@ func (a *adapter) ensureProcess(mcpEndpoints []provider.MCPEndpoint) error {
 
 		a.readers.Add(2)
 		go func() { defer a.readers.Done(); a.readLoop(stdout) }()
-		go func() { defer a.readers.Done(); drain(stderr) }()
+		go func() { defer a.readers.Done(); a.stderr.read(stderr) }()
+
+		// Reap the process and turn its death into an answer for anyone
+		// waiting on it. Without this nothing ever called Wait(), so the exit
+		// status was never read and — worse — a process that died before
+		// answering left its RPC pending until rpcTimeout fired. An
+		// app-server that exits at startup (a build with no `app-server`
+		// subcommand treats it as a PROMPT, fails with "stdin is not a
+		// terminal" and exits 1) was therefore reported as
+		// "initialize timed out after 30s": the adapter's own timer, not the
+		// CLI's reason, and a 30s wait for a process that was gone in
+		// milliseconds.
+		//
+		// readers.Wait() first is required, not tidiness: Wait() closes the
+		// pipes, so calling it before the readers finish would truncate the
+		// very stderr this reports.
+		go func() {
+			a.readers.Wait()
+			werr := cmd.Wait()
+			a.failPending(fmt.Errorf("codex: app-server (%s) exited: %w%s", bin, werr, a.stderr.suffix()))
+		}()
 
 		if _, err := a.call(a.ctx, "initialize", map[string]any{
 			"clientInfo": map[string]any{"name": "devdeck", "title": "DevDeck", "version": "0.1.0"},
@@ -197,14 +226,59 @@ func (a *adapter) ensureProcess(mcpEndpoints []provider.MCPEndpoint) error {
 	return a.startErr
 }
 
-func drain(r io.Reader) {
+// stderrTailLines bounds how much of the app-server's stderr is kept. The
+// interesting lines are always the last ones — whatever it said on the way
+// out — and a startup failure is one or two lines long.
+const stderrTailLines = 10
+
+// stderrTail keeps the last few lines the app-server wrote to stderr.
+//
+// This is a ring, not a log, for the reason the old `drain` discarded stderr
+// outright: the app-server prints config warnings on every healthy start, so
+// echoing all of it as errors trains people to ignore it. But discarding it
+// meant that when the process died at startup, the single line explaining WHY
+// went in the bin, and the only thing the operator ever saw was this adapter's
+// own 30s timer expiring. Keeping a bounded tail costs nothing on a healthy
+// start and is the entire diagnosis on a failed one.
+type stderrTail struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (t *stderrTail) add(line string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = append(t.lines, line)
+	if len(t.lines) > stderrTailLines {
+		t.lines = t.lines[len(t.lines)-stderrTailLines:]
+	}
+}
+
+func (t *stderrTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.Join(t.lines, "; ")
+}
+
+// suffix renders the tail for appending to an error message, or "" when the
+// process said nothing — so a silent exit reads as "exited: exit status 1"
+// rather than "exited: exit status 1: ".
+func (t *stderrTail) suffix() string {
+	if s := t.String(); s != "" {
+		return ": " + s
+	}
+	return ""
+}
+
+// read consumes r to EOF, keeping the tail. Reading to EOF is not optional:
+// an unread pipe eventually blocks the process writing into it.
+func (t *stderrTail) read(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		// Kept at debug volume on purpose: the app-server logs a config warning
-		// on every start, and echoing those as errors trains people to ignore
-		// the log.
-		_ = sc.Text()
+		if line := strings.TrimSpace(sc.Text()); line != "" {
+			t.add(line)
+		}
 	}
 }
 
@@ -426,9 +500,31 @@ func (a *adapter) replyResult(rpcID json.RawMessage, result any) error {
 	})
 }
 
+// failPending answers every in-flight RPC with err and makes the failure
+// sticky for later ones. Called when the app-server process is gone: its
+// answers are never coming, and each waiter would otherwise sit out the full
+// rpcTimeout before reporting a timeout that describes the timer rather than
+// the death. Sends never block — every pending channel has capacity 1 and
+// exactly one writer reaches it, because the entry is removed here under the
+// same lock `resolve` and `call` take.
+func (a *adapter) failPending(err error) {
+	a.mu.Lock()
+	a.exitErr = err
+	pending := a.pending
+	a.pending = map[int64]chan rpcResult{}
+	a.mu.Unlock()
+	for _, ch := range pending {
+		ch <- rpcResult{err: err}
+	}
+}
+
 // call sends a JSON-RPC request and waits for its response.
 func (a *adapter) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	a.mu.Lock()
+	if a.exitErr != nil {
+		a.mu.Unlock()
+		return nil, a.exitErr
+	}
 	a.nextID++
 	id := a.nextID
 	ch := make(chan rpcResult, 1)

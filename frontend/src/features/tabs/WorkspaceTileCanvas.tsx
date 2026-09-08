@@ -9,14 +9,21 @@ import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
+import { useIsMacTauri } from './useIsTauri'
+import { useMountedTabIds } from './useMountedTabIds'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
 import { useCommandChordLabel } from '@/features/keybindings/store'
+import { WindowControls } from './WindowControls'
 
 /** A split's children never shrink below this fraction of the split's axis while dragging a divider. */
 const MIN_PANE_SIZE = 0.08
 /** Reserved on the left for macOS's overlaid traffic-light buttons
  *  (tauri.macos.conf.json's titleBarStyle: "Overlay") — fused into
- *  whichever leaf renders in the tiling grid's actual top-left corner. */
+ *  whichever leaf renders in the tiling grid's actual top-left corner.
+ *  Windows/Linux have no such native overlay (`decorations: false` there
+ *  makes the window fully chrome-free instead, see tauri.windows.conf.json
+ *  / tauri.linux.conf.json) — they get `<WindowControls/>` fused into the
+ *  top-right corner instead, sized by its own content. */
 const TRAFFIC_LIGHT_GUTTER = 76
 
 export type WorktreeTileTab = Extract<TileTab, { kind: 'worktree' }>
@@ -74,6 +81,11 @@ interface ChromeRect {
 
 interface TileRenderContext {
   topLeftLeafId: string
+  /** The top-chrome leaf occupying the window's actual top-right corner —
+   *  last entry of `collectTopChromeLeafIds` (which walks a row split
+   *  left-to-right). Windows/Linux's `<WindowControls/>` render there,
+   *  mirroring how `topLeftLeafId` places macOS's traffic-light gutter. */
+  topRightLeafId: string
   focusedLeafId: string
   topChromeLeafIds: Set<string>
   chromeRects: Record<string, ChromeRect>
@@ -715,6 +727,7 @@ function TileLeafHeader({
   chromeRect?: ChromeRect
   ctx: TileRenderContext
 }) {
+  const isMac = useIsMacTauri()
   const { setNodeRef: setHeaderDropRef } = useDroppable({
     id: `${leaf.id}::header`,
     data: { leafId: leaf.id, forceCenter: true },
@@ -744,7 +757,7 @@ function TileLeafHeader({
             'h-8 flex-none bg-transparent',
       )}
     >
-      {topChrome && isTopLeft ? (
+      {topChrome && isTopLeft && isMac ? (
         <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
       ) : null}
       <ScrollableTabStrip activeTabId={leaf.activeTabId} itemsKey={leaf.tabs.map((tab) => tab.id).join('|')}>
@@ -786,12 +799,27 @@ function TileLeafHeader({
       >
         <Plus size={topChrome ? 13 : 11} />
       </button>
+      {topChrome && !isMac && leaf.id === ctx.topRightLeafId ? (
+        <>
+          {/* Fills whatever header width the tabs/new-tab button don't use,
+              so the window stays draggable from an empty strip on
+              Windows/Linux — decorations: false there means, unlike macOS's
+              native title-bar hit-testing, nothing drags the window unless
+              something in the DOM explicitly opts in. */}
+          <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
+          <WindowControls />
+        </>
+      ) : null}
     </div>
   )
 }
 
 function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext }) {
   const { setNodeRef } = useDroppable({ id: leaf.id, data: { leafId: leaf.id } })
+  // Only tabs that have actually been opened get a body — see
+  // `useMountedTabIds`. This is what keeps a workspace switch from rebuilding
+  // every open agent transcript and terminal in one blocking commit.
+  const mountedTabIds = useMountedTabIds(leaf.id, leaf.activeTabId)
   const hoverZone = ctx.hoverZone && ctx.hoverZone.leafId === leaf.id ? ctx.hoverZone.zone : null
   const isTopLeft = leaf.id === ctx.topLeftLeafId
   const topChrome = ctx.topChromeLeafIds.has(leaf.id)
@@ -823,17 +851,19 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
         ctx={ctx}
       />
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {leaf.tabs.map((tab) => (
-          <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
-            {tab.kind === 'agents'
-              ? ctx.renderers.agents({ leafId: leaf.id })
-              : tab.kind === 'worktree'
-                ? ctx.renderers.worktree({ leafId: leaf.id, tab })
-                : tab.kind === 'ssh-shell'
-                  ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
-                  : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
-          </div>
-        ))}
+        {leaf.tabs
+          .filter((tab) => mountedTabIds.has(tab.id))
+          .map((tab) => (
+            <div key={tab.id} className={cn('absolute inset-0', tab.id === leaf.activeTabId ? 'flex' : 'hidden')}>
+              {tab.kind === 'agents'
+                ? ctx.renderers.agents({ leafId: leaf.id })
+                : tab.kind === 'worktree'
+                  ? ctx.renderers.worktree({ leafId: leaf.id, tab })
+                  : tab.kind === 'ssh-shell'
+                    ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
+                    : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
+            </div>
+          ))}
         {hoverZone ? (
           <div
             className="pointer-events-none absolute z-10 border-2 border-devdeck-line bg-devdeck-on"
@@ -888,6 +918,10 @@ export function WorkspaceTileCanvas({
   const topLeftLeafId = useMemo(() => firstLeafId(root) ?? root.id, [root])
   const topChromeLeafIdList = useMemo(() => collectTopChromeLeafIds(root), [root])
   const topChromeLeafIds = useMemo(() => new Set(topChromeLeafIdList), [topChromeLeafIdList])
+  const topRightLeafId = useMemo(
+    () => topChromeLeafIdList[topChromeLeafIdList.length - 1] ?? topLeftLeafId,
+    [topChromeLeafIdList, topLeftLeafId],
+  )
   const topLeftLeaf = useMemo(() => {
     const found = findTileLeaf(root, topLeftLeafId)
     return found?.type === 'leaf' ? found : null
@@ -977,6 +1011,7 @@ export function WorkspaceTileCanvas({
 
   const ctx: TileRenderContext = {
     topLeftLeafId,
+    topRightLeafId,
     focusedLeafId,
     topChromeLeafIds,
     chromeRects,

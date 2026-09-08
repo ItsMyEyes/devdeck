@@ -19,7 +19,10 @@ export function TransferStatusPanel() {
   if (transfers.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-1.5">
+    // `bottom-16`, not `bottom-4`: the help "?" button (features/tour/HelpFab)
+    // is a permanent h-10 fixture at `bottom-4 right-4`, so the transfer stack
+    // starts one button-height clear of it and grows upward from there.
+    <div className="fixed bottom-16 right-4 z-50 flex w-80 flex-col gap-1.5">
       {transfers.map((t) => {
         const percent =
           t.totalBytes > 0 ? Math.min(100, Math.round((t.loadedBytes / t.totalBytes) * 100)) : t.status === 'done' ? 100 : 0

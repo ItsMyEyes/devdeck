@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "DevDeck",
+        "width": 1400,
+        "height": 900,
+        "visible": true,
+        "dragDropEnabled": false,
+        "decorations": false
+      }
+    ]
+  }
+}

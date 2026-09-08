@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { ChevronLeft, Trash2 } from 'lucide-react'
+import { ChevronLeft, Search, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -10,6 +10,10 @@ import { fmtDate } from '@/lib/format'
 import { ISSUE_STATUS, PRI } from '@/lib/constants'
 import type { Issue, IssueStatus, Priority } from '@/store/types'
 import { useDeleteIssue, useUpdateIssue } from '@/features/data/queries'
+import { FindBar } from '@/features/find/FindBar'
+import { useDomFind } from '@/features/find/useDomFind'
+import { useSelectAllScope } from '@/features/find/selectAllScope'
+import { useCommandChordLabel } from '@/features/keybindings/store'
 import { ActivitySection } from './ActivitySection'
 import { AttachmentList } from './AttachmentList'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -50,6 +54,21 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
   const [title, setTitle] = useState(issue.title)
   const [description, setDescription] = useState(issue.description)
   const [assignee, setAssignee] = useState(issue.assignee ?? '')
+
+  /** One find scope for the whole issue body — the description *and* the
+   *  comment thread under it, which is where a long issue's answer usually is.
+   *  The scroller is the searched root; the pane around it is the chord's
+   *  scope, so the bar floating over it still counts as inside. */
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const paneRef = useRef<HTMLDivElement>(null)
+  // `description` as the revision: it is a live WYSIWYG canvas, so a search
+  // running while the user types has to re-find its ranges.
+  const find = useDomFind(bodyRef, { scopeRef: paneRef, revision: description })
+  // No `onSelectAll`: the description's own ProseMirror keymap already claims
+  // the chord whenever the caret is in it, so this only has to cover the
+  // clicks that land on the page around it.
+  useSelectAllScope(bodyRef)
+  const findChord = useCommandChordLabel('document.find')
 
   useEffect(() => {
     setTitle(issue.title)
@@ -94,72 +113,88 @@ export function IssueDetail({ issue, wsId, projectId }: { issue: Issue; wsId: st
           Issues
         </button>
         <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-devdeck-fg-2">{issue.title}</span>
+        <button
+          type="button"
+          onClick={find.open ? find.close : find.openFind}
+          aria-label="Find in issue"
+          aria-pressed={find.open}
+          title={findChord ? `Find in issue (${findChord})` : 'Find in issue'}
+          className="flex cursor-pointer items-center rounded-md px-1.5 py-1 text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg"
+        >
+          <Search size={13} />
+        </button>
         <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleteIssue.isPending}>
           <Trash2 size={13} />
           Delete
         </Button>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 md:flex-row md:items-start md:gap-10 md:px-10">
-          <div className="flex min-w-0 flex-1 flex-col gap-6">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={saveTitle}
-              placeholder="Issue title…"
-              className="h-auto w-full border-none bg-transparent px-0 py-0 text-2xl font-bold leading-snug tracking-tight text-devdeck-fg focus-visible:ring-0"
-            />
-            <MarkdownEditor
-              value={description}
-              onChange={setDescription}
-              onBlur={saveDescription}
-              placeholder="Describe the issue…"
-              issueId={issue.id}
-            />
-            <AttachmentList issueId={issue.id} />
-            <ActivitySection issueId={issue.id} />
-          </div>
+      <div ref={paneRef} className="relative min-h-0 flex-1">
+        {find.open ? <FindBar controller={find} label="Find in issue" className="absolute right-4 top-3" /> : null}
+        {/* `tabIndex` so a click on the page around the description moves focus
+            here instead of leaving it on <body> — which is what both chords'
+            `contains` scope is tested against. */}
+        <div ref={bodyRef} tabIndex={-1} className="h-full overflow-auto outline-none">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 md:flex-row md:items-start md:gap-10 md:px-10">
+            <div className="flex min-w-0 flex-1 flex-col gap-6">
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={saveTitle}
+                placeholder="Issue title…"
+                className="h-auto w-full border-none bg-transparent px-0 py-0 text-2xl font-bold leading-snug tracking-tight text-devdeck-fg focus-visible:ring-0"
+              />
+              <MarkdownEditor
+                value={description}
+                onChange={setDescription}
+                onBlur={saveDescription}
+                placeholder="Describe the issue…"
+                issueId={issue.id}
+              />
+              <AttachmentList issueId={issue.id} />
+              <ActivitySection issueId={issue.id} />
+            </div>
 
-          <div className="w-full flex-none border-t border-devdeck-border pt-6 md:w-64 md:border-l md:border-t-0 md:pl-8 md:pt-0">
-            <div className="flex flex-col gap-6">
-              <SidebarSection title="Properties">
-                <PropRow label="Status">
-                  <StatusDot color={ISSUE_STATUS[issue.status].color} />
-                  <Select
-                    value={issue.status}
-                    onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { status: v as IssueStatus } })}
-                    options={STATUS_OPTIONS}
-                    aria-label="Status"
-                  />
-                </PropRow>
-                <PropRow label="Priority">
-                  <StatusDot color={PRI[issue.priority].color} />
-                  <Select
-                    value={issue.priority}
-                    onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { priority: v as Priority } })}
-                    options={PRI_OPTIONS}
-                    aria-label="Priority"
-                  />
-                </PropRow>
-                <PropRow label="Assignee">
-                  <Input
-                    value={assignee}
-                    onChange={(e) => setAssignee(e.target.value)}
-                    onBlur={saveAssignee}
-                    placeholder="Unassigned"
-                  />
-                </PropRow>
-              </SidebarSection>
+            <div className="w-full flex-none border-t border-devdeck-border pt-6 md:w-64 md:border-l md:border-t-0 md:pl-8 md:pt-0">
+              <div className="flex flex-col gap-6">
+                <SidebarSection title="Properties">
+                  <PropRow label="Status">
+                    <StatusDot color={ISSUE_STATUS[issue.status].color} />
+                    <Select
+                      value={issue.status}
+                      onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { status: v as IssueStatus } })}
+                      options={STATUS_OPTIONS}
+                      aria-label="Status"
+                    />
+                  </PropRow>
+                  <PropRow label="Priority">
+                    <StatusDot color={PRI[issue.priority].color} />
+                    <Select
+                      value={issue.priority}
+                      onValueChange={(v) => updateIssue.mutate({ id: issue.id, patch: { priority: v as Priority } })}
+                      options={PRI_OPTIONS}
+                      aria-label="Priority"
+                    />
+                  </PropRow>
+                  <PropRow label="Assignee">
+                    <Input
+                      value={assignee}
+                      onChange={(e) => setAssignee(e.target.value)}
+                      onBlur={saveAssignee}
+                      placeholder="Unassigned"
+                    />
+                  </PropRow>
+                </SidebarSection>
 
-              <SidebarSection title="Details">
-                <PropRow label="Created">
-                  <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.createdAt)}</span>
-                </PropRow>
-                <PropRow label="Updated">
-                  <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.updatedAt)}</span>
-                </PropRow>
-              </SidebarSection>
+                <SidebarSection title="Details">
+                  <PropRow label="Created">
+                    <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.createdAt)}</span>
+                  </PropRow>
+                  <PropRow label="Updated">
+                    <span className="text-[12px] text-devdeck-fg-2">{fmtDate(issue.updatedAt)}</span>
+                  </PropRow>
+                </SidebarSection>
+              </div>
             </div>
           </div>
         </div>

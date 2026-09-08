@@ -24,6 +24,7 @@ export const qk = {
   agentSettingsFile: (machineId: string, id: string) =>
     ['machines', machineId, 'agents', id, 'settings-file'] as const,
   fsList: (machineId: string, path: string) => ['machines', machineId, 'fs', 'list', path] as const,
+  fsRoots: (machineId: string) => ['machines', machineId, 'fs', 'roots'] as const,
   worktreeFilesRoot: (machineId: string, id: string) => ['machines', machineId, 'worktrees', id, 'files'] as const,
   worktreeFiles: (machineId: string, id: string, path: string) =>
     ['machines', machineId, 'worktrees', id, 'files', path] as const,
@@ -69,6 +70,11 @@ export const qk = {
    *  know which release shipped what, which is exactly the knowledge that
    *  goes stale. */
   machineCapabilities: (id: string) => ['machines', id, 'capabilities'] as const,
+  /** The hub's most recent attempt to push its own URL to this machine's
+   *  runtime — see `useMachineBindingStatus`. Hub-side (unlike
+   *  `machineCapabilities`, which asks the machine itself), so it needs no
+   *  reachability probe of its own; the hub already knows. */
+  machineBindingStatus: (id: string) => ['machines', id, 'bindingStatus'] as const,
   publishedSocks: (id: string) => ['machines', id, 'publishedSocks'] as const,
   /** This process's own publication (same-origin /api/proxy/publish), which
    *  has no Machine record to key by — a hub never self-registers. */

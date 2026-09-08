@@ -418,6 +418,30 @@ describe('AgentChatPane', () => {
     expect(screen.queryByText(/no messages yet/i)).not.toBeInTheDocument()
   })
 
+  it('scopes Select All to the transcript instead of handing the browser the whole app', async () => {
+    // A rendered, non-editable transcript: without a scope the browser selects
+    // the sidebar, the tab strips and the composer along with the answer.
+    mockSocket.mockReturnValue({
+      view: {
+        ...emptyThreadView(),
+        items: [{ id: 'a1', kind: 'assistant', text: 'the limiter is in place', lastSequence: 0, createdAt: 1_700_000_000_000 }],
+      },
+      status: 'open',
+      sendTurn: vi.fn(),
+      abortTurn: vi.fn(),
+      setRuntimeMode: vi.fn(),
+      setInteractionMode: vi.fn(),
+    })
+    render(<AgentChatPane target={{ kind: 'machine', machine }} worktreeId="w-abc" threadKey="w-abc" machine={machine} />)
+    const line = await screen.findByText(/the limiter is in place/)
+
+    const event = new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true })
+    line.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(window.getSelection()?.toString()).toContain('the limiter is in place')
+  })
+
   it('keeps the existing timeline on screen while reconnecting mid-thread', async () => {
     mockSocket.mockReturnValue({
       view: {

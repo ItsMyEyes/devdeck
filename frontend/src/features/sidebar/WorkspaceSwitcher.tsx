@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Check, ChevronDown, Plus, Settings2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScope } from '@/features/useScope'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { useWhoami, useWorkspaces } from '@/features/data/queries'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -39,6 +40,7 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
   const trigger = compact ? (
     <Tooltip label={active ? `Workspace: ${active.name}` : 'Select workspace'} side="right">
       <Popover.Trigger
+        {...tourAnchor('workspace-switcher')}
         aria-label={active ? `Select workspace, current workspace ${active.name}` : 'Select workspace'}
         className={cn(
           'group flex h-10 w-10 cursor-pointer items-center justify-center rounded-control border border-transparent',
@@ -52,6 +54,7 @@ export function WorkspaceSwitcher({ compact }: WorkspaceSwitcherProps = {}) {
     </Tooltip>
   ) : (
     <Popover.Trigger
+      {...tourAnchor('workspace-switcher')}
       className={cn(
         'flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-lg border border-devdeck-border-strong bg-devdeck-card-wash px-2.5 text-left',
         'transition-colors hover:border-devdeck-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',

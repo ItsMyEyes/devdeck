@@ -17,6 +17,42 @@ export function openLogFile(): Promise<void> {
   return invoke('open_log_file')
 }
 
+/** One dialable IPv4 address on this device. */
+export interface BindInterface {
+  name: string
+  ip: string
+}
+
+export interface BindConfig {
+  /** The address this device's sidecars bind, e.g. `127.0.0.1` or `0.0.0.0`. */
+  host: string
+  /** This device's up, non-loopback IPv4 addresses, for the picker. */
+  interfaces: BindInterface[]
+  /** The address to actually show for `host` — `0.0.0.0` resolved to a
+   *  concrete interface. Null while bound to loopback, where there is
+   *  nothing to hand another device. */
+  displayHost: string | null
+  /** The port the hub is listening on right now — not the one it prefers.
+   *  They differ whenever 8989 was already taken and the OS assigned one. */
+  hubPort: number
+  /** False when `hubPort` is an OS-assigned fallback, so the address is not
+   *  stable across restarts. */
+  portIsPreferred: boolean
+}
+
+/** Reads the saved bind address plus this device's interfaces. See Rust's
+ *  `get_bind_config` in `lib.rs`. */
+export function getBindConfig(): Promise<BindConfig> {
+  return invoke('get_bind_config')
+}
+
+/** Saves a new bind address and restarts the app so the sidecars respawn
+ *  against it — the app goes away as this resolves. Rejects without writing
+ *  anything when `host` is not an IP address. See Rust's `set_bind_config`. */
+export function setBindConfig(host: string): Promise<void> {
+  return invoke('set_bind_config', { host })
+}
+
 /**
  * Points the native window at the light or dark system appearance.
  *

@@ -21,12 +21,26 @@ import (
 type MachineHandler struct {
 	st          *store.Store
 	healthCache *service.MachineHealthCache
-	authSvc     *service.AuthService // nil-safe: only PostToken (Task 4) uses it
-	signingPriv ed25519.PrivateKey
+	// bindingCache is nil-safe like authSvc: existing callers (tests, and any
+	// future construction that doesn't care about binding status) keep
+	// working, and GetMachineBindingStatus reports "unknown" rather than
+	// panicking when it's absent.
+	bindingCache *service.BindingStatusCache
+	authSvc      *service.AuthService // nil-safe: only PostToken (Task 4) uses it
+	signingPriv  ed25519.PrivateKey
 }
 
 func NewMachineHandler(st *store.Store, healthCache *service.MachineHealthCache, authSvc *service.AuthService, signingPriv ed25519.PrivateKey) *MachineHandler {
 	return &MachineHandler{st: st, healthCache: healthCache, authSvc: authSvc, signingPriv: signingPriv}
+}
+
+// SetBindingCache wires the cache RunBindingPushLoop fills, so
+// GetMachineBindingStatus can report it. Optional: called once from main.go
+// after construction, the same deferred-wiring shape SetCapabilities uses on
+// WhoamiHandler, so tests that don't care about binding status can keep
+// using the plain constructor above.
+func (h *MachineHandler) SetBindingCache(c *service.BindingStatusCache) {
+	h.bindingCache = c
 }
 
 // withSigningKey stamps every Machine in the slice with this hub's Ed25519
@@ -234,6 +248,40 @@ func (h *MachineHandler) proxySelf(w http.ResponseWriter, r *http.Request, call 
 		return
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// GetMachineBindingStatus handles GET /api/machines/{id}/binding-status: the
+// hub's most recent attempt to push its own URL and this machine's id to
+// that machine's runtime process (service.RunBindingPushLoop), so the
+// Machines page can explain a not-yet-synced runtime — "this hub has no
+// reachable address" or "the runtime rejected the push" — instead of it
+// looking identical to a freshly registered one with nothing wrong.
+//
+// Reports {"known":false} rather than 404 for a machine RunBindingPushLoop
+// has not reached yet (it just started, or bindingCache is nil): this is a
+// transient absence, not a client error, and the frontend's warning should
+// simply stay quiet rather than surface a fetch failure for it.
+func (h *MachineHandler) GetMachineBindingStatus(w http.ResponseWriter, r *http.Request) {
+	m, err := h.st.MachineByID(r.PathValue("id"))
+	if handleStoreErr(w, err) {
+		return
+	}
+	if m.IsLocal || h.bindingCache == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"known": false})
+		return
+	}
+	status, ok := h.bindingCache.Get(m.ID)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"known": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"known":        true,
+		"hubReachable": status.HubReachable,
+		"adopted":      status.Adopted,
+		"reason":       status.Reason,
+		"pushedAt":     status.PushedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func healthResponse(s machineclient.HealthStatus) map[string]any {

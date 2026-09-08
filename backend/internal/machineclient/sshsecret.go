@@ -59,7 +59,9 @@ type cachedSecret struct {
 }
 
 // NewHubSecretSource builds the runtime-side SecretSource. hubURL and
-// machineKey are the process's own --hub-url and --key.
+// machineKey are the process's own --hub-url and --key. hubURL may be empty
+// at construction time and filled in later via SetHubURL, for a runtime that
+// starts with no --hub-url and adopts one pushed by service.RuntimeBinder.
 func NewHubSecretSource(hubURL, machineKey string) *HubSecretSource {
 	return &HubSecretSource{
 		hubURL:     hubURL,
@@ -69,6 +71,15 @@ func NewHubSecretSource(hubURL, machineKey string) *HubSecretSource {
 		nowFn:      time.Now,
 		client:     &http.Client{},
 	}
+}
+
+// SetHubURL updates the hub this source asks for credentials, once a
+// runtime adopts one pushed by service.RuntimeBinder. Guarded by the same
+// mutex as the cache, since Get reads hubURL on every uncached lookup.
+func (s *HubSecretSource) SetHubURL(hubURL string) {
+	s.mu.Lock()
+	s.hubURL = hubURL
+	s.mu.Unlock()
 }
 
 type sshSecretBody struct {
@@ -103,7 +114,10 @@ func (s *HubSecretSource) Get(connectionID, kind string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	url := strings.TrimRight(s.hubURL, "/") + "/api/runtime/ssh/secret"
+	s.mu.Lock()
+	hubURL := s.hubURL
+	s.mu.Unlock()
+	url := strings.TrimRight(hubURL, "/") + "/api/runtime/ssh/secret"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", false, err

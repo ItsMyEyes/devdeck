@@ -8,6 +8,12 @@ export interface TabStripPopoverMenuProps {
   triggerClassName?: string
   triggerTitle: string
   triggerAriaLabel: string
+  /** Spread onto the trigger button. Exists for one caller shape — the guided
+   *  tour's `tourAnchor(...)`, when one of its steps highlights a menu button
+   *  rather than a plain one. Deliberately not a general prop bag: the trigger
+   *  is otherwise wholly owned here, and everything else about it (class,
+   *  title, accessible name) already has a named prop. */
+  triggerAnchor?: { 'data-tour': string }
   align?: 'start' | 'end'
   children: ReactNode
   /** Controlled open state. Omitting this (and `onOpenChange`) keeps today's
@@ -32,6 +38,7 @@ export function TabStripPopoverMenu({
   triggerClassName,
   triggerTitle,
   triggerAriaLabel,
+  triggerAnchor,
   align = 'start',
   children,
   open: controlledOpen,
@@ -51,7 +58,7 @@ export function TabStripPopoverMenu({
         onOpenChange?.(next)
       }}
     >
-      <Popover.Trigger className={triggerClassName} title={triggerTitle} aria-label={triggerAriaLabel}>
+      <Popover.Trigger {...triggerAnchor} className={triggerClassName} title={triggerTitle} aria-label={triggerAriaLabel}>
         {trigger}
       </Popover.Trigger>
       <Popover.Portal>

@@ -17,9 +17,6 @@
 /internal/webui/dist/*
 !/internal/webui/dist/.placeholder
 
-# Local Python venv for the markitdown Tools module (see COMMANDS.md)
-/tools/venv/
-
 # LLM credentials loaded via --env for the Tools module — never commit secrets
 .env
 .env.*

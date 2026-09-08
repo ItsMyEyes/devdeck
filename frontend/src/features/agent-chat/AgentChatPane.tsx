@@ -6,7 +6,7 @@
  * connecting (loading), a thread error, and no-messages-yet (empty) —
  * before falling through to the real timeline.
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlertTriangle, CircleStop, PackageX, ServerCog, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,6 +29,8 @@ import type { AgentChatTarget, InteractionMode, RuntimeMode, TurnModelSelection 
 import { useAgentModels, useAgents, useAgentThreads, useMachineCapabilities } from '@/features/data/queries'
 import { agentChatSupport } from '@/features/agent-chat/agentChatSupport'
 import type { MentionSource } from '@/features/agent-chat/composerMention'
+import { useSelectAllScope } from '@/features/find/selectAllScope'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Machine } from '@/store/types'
 
@@ -441,6 +443,10 @@ export function AgentChatPane({
   // above the composer instead of losing the hero entirely.
   const isEmpty = !showConnecting && view.items.length === 0
 
+  /** The transcript, for Select All — see its wrapper in the JSX below. */
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  useSelectAllScope(transcriptRef, { enabled: !isEmpty })
+
   // F3/F4 dismissals (spec Design §4, "Dismissal bookkeeping") — local,
   // pruned against `activeBannerIds` below so a later recurrence of the same
   // condition (same stable id) shows again instead of staying hidden
@@ -580,18 +586,41 @@ export function AgentChatPane({
         <EmptyThread subject={worktreeLabel} composer={composer} />
       ) : (
         <>
-          <Conversation className="min-h-0 flex-1">
-            <ConversationContent className="p-0">
-              {showConnecting ? (
-                <PaneMessage>Connecting to the agent…</PaneMessage>
-              ) : (
-                <Suspense fallback={<PaneMessage>Loading the transcript…</PaneMessage>}>
-                  <MessagesTimeline view={view} machine={machine} />
-                </Suspense>
-              )}
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+          {/* Wrapper purely so Select All has a container to scope to. The
+              transcript is rendered, non-editable text, so Cmd+A over it went
+              to the browser and selected the whole app — sidebar, tab strips
+              and the composer along with the answer the user wanted to copy.
+              `tabIndex` is what lets a click land focus here at all; see
+              features/find/selectAllScope.ts.
+
+              It wraps rather than sitting on <Conversation> because that is
+              `use-stick-to-bottom`'s own scroller, and its ref belongs to the
+              library. The flex chain is reproduced exactly (`min-h-0 flex-1`
+              in, `min-h-0 flex-1` out) so the auto-scroll geometry is
+              untouched.
+
+              Select All only — no find bar here. The transcript is windowed
+              and re-renders on every streamed token, so ranges into it would
+              be invalidated faster than they could be painted. */}
+          <div
+            ref={transcriptRef}
+            tabIndex={-1}
+            {...tourAnchor('chat-transcript')}
+            className="flex min-h-0 flex-1 flex-col outline-none"
+          >
+            <Conversation className="min-h-0 flex-1">
+              <ConversationContent className="p-0">
+                {showConnecting ? (
+                  <PaneMessage>Connecting to the agent…</PaneMessage>
+                ) : (
+                  <Suspense fallback={<PaneMessage>Loading the transcript…</PaneMessage>}>
+                    <MessagesTimeline view={view} machine={machine} />
+                  </Suspense>
+                )}
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
+          </div>
 
           {composer}
         </>

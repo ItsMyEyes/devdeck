@@ -579,14 +579,36 @@ type FsEntry struct {
 	Git   bool   `json:"git"`
 }
 
+// FsRootsResponse lists the places the filesystem browser can jump straight
+// to on a machine: its home directory, and the top-level roots below it
+// (drive letters on Windows, "/" elsewhere).
+type FsRootsResponse struct {
+	Home  string   `json:"home"`
+	Roots []string `json:"roots"`
+}
+
 // User mirrors the frontend User type. Sensitive fields are tagged json:"-"
 // and never serialize into an API response — same mechanism already used
 // for Worktree.ProjectID / Issue.ProjectID.
+// DesktopOperatorEmail identifies the single-operator account the desktop
+// app's key-session bootstrap auto-creates on first run (POST
+// /api/auth/key-session). It is a placeholder, not an address: the operator
+// renames it from Settings -> Account the moment they want to sign in from a
+// browser instead of through the desktop shell's hub key.
+const DesktopOperatorEmail = "operator@devdeck.desktop"
+
 type User struct {
-	ID               string   `json:"id"`
-	Email            string   `json:"email"`
-	TotpEnabled      bool     `json:"totpEnabled"`
-	CreatedAt        string   `json:"createdAt"`
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	TotpEnabled bool   `json:"totpEnabled"`
+	// PasswordSet is false while the account still carries the throwaway
+	// password KeySession generated for it. The UI reads it to decide whether
+	// changing credentials needs a current-password confirmation.
+	PasswordSet bool   `json:"passwordSet"`
+	CreatedAt   string `json:"createdAt"`
+	// DesktopOperator marks the account KeySession auto-created for the
+	// desktop shell, so renaming it does not cost the shell its way back in.
+	DesktopOperator  bool     `json:"-"`
 	PasswordHash     string   `json:"-"`
 	TotpSecretEnc    string   `json:"-"`
 	BackupCodeHashes []string `json:"-"`

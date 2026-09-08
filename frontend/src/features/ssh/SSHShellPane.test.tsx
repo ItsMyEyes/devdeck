@@ -183,8 +183,13 @@ describe('SSHShellPane — sidebar toggle button (spec §4)', () => {
 
 describe('SSHShellPane — Cmd/Ctrl+B (spec §5)', () => {
   it('toggles this shell sidebar when focused and prevents the key reaching xterm', () => {
+    // Seeded explicitly: the unseen-key default is viewport-dependent now (see
+    // `shellSidebarOpen`), and vitest.setup.ts's matchMedia stub reports
+    // non-desktop, so an unseeded shell starts *closed* here. This test is
+    // about the chord toggling, not about which way the default falls.
+    useDevDeckStore.setState({ shellSidebars: { 'ssh:conn-1': { open: true, panel: 'explorer', width: 280 } } })
     render(<SSHShellPane connectionId="conn-1" isFocused />)
-    expect(useDevDeckStore.getState().shellSidebars['ssh:conn-1']?.open ?? true).toBe(true)
+    expect(useDevDeckStore.getState().shellSidebars['ssh:conn-1']?.open).toBe(true)
 
     let event!: KeyboardEvent
     act(() => {

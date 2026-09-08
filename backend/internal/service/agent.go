@@ -597,21 +597,22 @@ func (svc *AgentService) FetchEnvProfileModels(agentID, profileID, baseURL, auth
 	return out, nil
 }
 
-// GetSettingsFile returns the raw JSON content of an agent's settings.json.
-func (svc *AgentService) GetSettingsFile(agentID string) (string, error) {
+// GetSettingsFile returns an agent's own config file — its content, plus the
+// path and syntax that vary per agent (see detect/settingsfile.go).
+func (svc *AgentService) GetSettingsFile(agentID string) (domain.AgentSettingsFile, error) {
 	if err := svc.validateManagedAgent(agentID); err != nil {
-		return "", err
+		return domain.AgentSettingsFile{}, err
 	}
 	manager, err := svc.manager()
 	if err != nil {
-		return "", err
+		return domain.AgentSettingsFile{}, err
 	}
-	content, err := manager.GetSettingsFile(agentID)
-	return content, mapManagementError(err)
+	file, err := manager.GetSettingsFile(agentID)
+	return file, mapManagementError(err)
 }
 
-// UpdateSettingsFile atomically writes raw JSON to an agent's settings.json.
-// No JSON validation is performed — the caller takes responsibility.
+// UpdateSettingsFile atomically writes raw text to an agent's config file.
+// No syntax validation is performed — the caller takes responsibility.
 func (svc *AgentService) UpdateSettingsFile(agentID, content string) error {
 	if err := svc.validateManagedAgent(agentID); err != nil {
 		return err

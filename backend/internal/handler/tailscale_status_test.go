@@ -35,24 +35,53 @@ func getTailscaleStatus(t *testing.T, h *TailscaleStatusHandler) tailscaleStatus
 	return resp
 }
 
+// stubUnresolvableTailscale makes resolveTailscale fail outright. Stripping
+// PATH is not enough — detect.ResolveTailscale also checks fallback dirs, the
+// login shell's PATH, and (on macOS) the Tailscale.app bundle.
+func stubUnresolvableTailscale(t *testing.T) {
+	t.Helper()
+	orig := resolveTailscale
+	resolveTailscale = func() (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { resolveTailscale = orig })
+}
+
+// serve_disabled is reserved for the one case the operator can actually fix
+// from here: Tailscale is installed and signed in, and serve simply isn't
+// running — so offering to start it (canServe) is the right response.
 func TestTailscaleStatusServeDisabled(t *testing.T) {
-	h := NewTailscaleStatusHandler(false)
+	writeFakeTailscale(t, `echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'`+"\n")
+	h := NewTailscaleStatusHandler(&stubServe{})
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "serve_disabled" {
 		t.Fatalf("got %+v, want reason=serve_disabled", resp)
 	}
 }
 
-func TestTailscaleStatusNotInstalled(t *testing.T) {
-	// detect.ResolveTailscale also checks fallback dirs, the login shell's
-	// PATH, and (on macOS) the Tailscale.app bundle — stripping PATH alone
-	// no longer guarantees "not found" on a machine that has any of those,
-	// so stub the resolver directly instead.
-	orig := resolveTailscale
-	resolveTailscale = func() (string, error) { return "", errors.New("not found") }
-	t.Cleanup(func() { resolveTailscale = orig })
+// The regression this pair guards: with serve off, the handler used to answer
+// "serve_disabled" without ever probing Tailscale, so a machine whose CLI is
+// unresolvable or whose node is logged out was told to restart — advice that
+// could never work, forever.
+func TestTailscaleStatusServeDisabledReportsMissingCLI(t *testing.T) {
+	stubUnresolvableTailscale(t)
+	h := NewTailscaleStatusHandler(&stubServe{})
+	resp := getTailscaleStatus(t, h)
+	if resp.Ready || resp.Reason != "not_installed" {
+		t.Fatalf("got %+v, want reason=not_installed (not a restart prompt)", resp)
+	}
+}
 
-	h := NewTailscaleStatusHandler(true)
+func TestTailscaleStatusServeDisabledReportsLoggedOut(t *testing.T) {
+	writeFakeTailscale(t, `echo '{"Self":{"DNSName":""}}'`+"\n")
+	h := NewTailscaleStatusHandler(&stubServe{})
+	resp := getTailscaleStatus(t, h)
+	if resp.Ready || resp.Reason != "not_ready" {
+		t.Fatalf("got %+v, want reason=not_ready (not a restart prompt)", resp)
+	}
+}
+
+func TestTailscaleStatusNotInstalled(t *testing.T) {
+	stubUnresolvableTailscale(t)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "not_installed" {
 		t.Fatalf("got %+v, want reason=not_installed", resp)
@@ -61,7 +90,7 @@ func TestTailscaleStatusNotInstalled(t *testing.T) {
 
 func TestTailscaleStatusNotReadyOnNonZeroExit(t *testing.T) {
 	writeFakeTailscale(t, "exit 1\n")
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "not_ready" {
 		t.Fatalf("got %+v, want reason=not_ready", resp)
@@ -70,7 +99,7 @@ func TestTailscaleStatusNotReadyOnNonZeroExit(t *testing.T) {
 
 func TestTailscaleStatusNotReadyOnEmptyDNSName(t *testing.T) {
 	writeFakeTailscale(t, `echo '{"Self":{"DNSName":""}}'`+"\n")
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "not_ready" {
 		t.Fatalf("got %+v, want reason=not_ready", resp)
@@ -79,7 +108,7 @@ func TestTailscaleStatusNotReadyOnEmptyDNSName(t *testing.T) {
 
 func TestTailscaleStatusReady(t *testing.T) {
 	writeFakeTailscale(t, `echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'`+"\n")
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	resp := getTailscaleStatus(t, h)
 	if !resp.Ready || resp.URL != "https://my-mac.tail1234.ts.net" {
 		t.Fatalf("got %+v, want ready with trimmed https URL", resp)
@@ -102,7 +131,7 @@ fi
 
 func TestTailscaleStatusServeTargetMismatch(t *testing.T) {
 	fakeTailscaleWithServe(t, "5173")
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	h.SetPort("60635")
 	resp := getTailscaleStatus(t, h)
 	if resp.Ready || resp.Reason != "serve_target_mismatch" {
@@ -112,7 +141,7 @@ func TestTailscaleStatusServeTargetMismatch(t *testing.T) {
 
 func TestTailscaleStatusServeTargetMatches(t *testing.T) {
 	fakeTailscaleWithServe(t, "60635")
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	h.SetPort("60635")
 	resp := getTailscaleStatus(t, h)
 	if !resp.Ready || resp.URL != "https://my-mac.tail1234.ts.net" {
@@ -130,7 +159,7 @@ if [ "$1" = "serve" ]; then
 fi
 echo '{"Self":{"DNSName":"my-mac.tail1234.ts.net."}}'
 `)
-	h := NewTailscaleStatusHandler(true)
+	h := NewTailscaleStatusHandler(&stubServe{running: true, port: "60635"})
 	h.SetPort("60635")
 	resp := getTailscaleStatus(t, h)
 	if !resp.Ready || resp.URL != "https://my-mac.tail1234.ts.net" {

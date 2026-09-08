@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -399,7 +401,104 @@ func parseOpenCodeModels(out []byte) []domain.Model {
 	return models
 }
 
-// ---- Pi models (~/.pi/agent/models.json + settings.json) ----
+// ---- Pi models (`pi --list-models`, with the custom-provider file as fallback) ----
+
+// readPiModels asks pi for its own catalog.
+//
+// This used to read ~/.pi/agent/models.json alone, on the belief that the file
+// was pi's catalog. It is not: that file holds only the operator's CUSTOM
+// providers. On a machine whose single custom provider was ollama it yielded
+// three models while `pi --list-models` printed 412 — pi's real catalog is its
+// built-in providers merged with the fetched per-provider caches in
+// ~/.pi/agent/models-store.json, gated by whichever providers are
+// authenticated in ~/.pi/agent/auth.json. Only pi can do that merge, and its
+// own flag prints the result in well under a second.
+func readPiModels() []domain.Model {
+	if models := readPiModelsFromCLI(); models != nil {
+		return models
+	}
+	// A pi too old for --list-models still knows its custom providers, and
+	// that beats falling through to this repo's static catalog.
+	return readPiModelsFromFile()
+}
+
+func readPiModelsFromCLI() []domain.Model {
+	bin, err := Resolve("pi")
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), modelReadTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, bin, "--list-models")
+	// pi is a Node script, so without the augmented PATH it cannot find node
+	// when the backend was launched from the desktop shell's minimal
+	// environment.
+	cmd.Env = AugmentedEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parsePiListModels(out)
+}
+
+// piSizeColumn matches the "context"/"max-out" columns pi prints ("1M",
+// "131.1K", "4.1K"). Requiring it is what tells a model row apart from a
+// banner or a warning, since both id columns are otherwise free-form text.
+var piSizeColumn = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KM]?$`)
+
+// parsePiListModels reads the six-column table `pi --list-models` prints:
+//
+//	provider    model               context  max-out  thinking  images
+//	deepseek    deepseek-v4-flash   1M       384K     yes       no
+//
+// The id is "provider/model", the form pi's own --model flag resolves. The
+// model column may itself contain slashes — openrouter addresses models as
+// "aion-labs/aion-2.0", giving "openrouter/aion-labs/aion-2.0" — which was
+// verified against the installed CLI: that exact string matches back to one
+// row. So the model column is never split on "/".
+func parsePiListModels(out []byte) []domain.Model {
+	var models []domain.Model
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(stripANSI(line))
+		// Six columns exactly, and the header row fails the size test.
+		if len(fields) != 6 || !piSizeColumn.MatchString(fields[2]) {
+			continue
+		}
+		id := fields[0] + "/" + fields[1]
+		if containsModel(models, id) {
+			continue
+		}
+		models = append(models, domain.Model{
+			ID:            id,
+			Name:          id,
+			ContextWindow: parsePiSize(fields[2]),
+		})
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
+}
+
+// parsePiSize turns pi's rounded "1M"/"131.1K" column into a number. The
+// figure is approximate by construction — pi prints one decimal place, so a
+// true 131072 comes back as 131100 — which is all domain.Model.ContextWindow
+// is used for here: it is display metadata, not budget arithmetic.
+func parsePiSize(value string) int {
+	multiplier := 1.0
+	switch {
+	case strings.HasSuffix(value, "M"):
+		multiplier, value = 1_000_000, strings.TrimSuffix(value, "M")
+	case strings.HasSuffix(value, "K"):
+		multiplier, value = 1_000, strings.TrimSuffix(value, "K")
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+	return int(number * multiplier)
+}
 
 type piModelsFile struct {
 	Providers map[string]struct {
@@ -415,7 +514,9 @@ type piSettingsFile struct {
 	DefaultModel    string `json:"defaultModel"`
 }
 
-func readPiModels() []domain.Model {
+// readPiModelsFromFile reads only the operator's custom providers — see
+// readPiModels for why that is a fallback and not the catalog.
+func readPiModelsFromFile() []domain.Model {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil

@@ -9,6 +9,7 @@ import {
   useWorkspace,
 } from '@/features/data/queries'
 import { parseSSHCommand } from '@/features/ssh/sshCommand'
+import { useOpenSSHShell } from '@/features/ssh/useOpenSSHShell'
 import {
   applyIdentityFile,
   buildSSHQuickAddPlan,
@@ -19,6 +20,7 @@ import {
   type SSHQuickAddDraft,
 } from '@/features/ssh/sshQuickAdd'
 import { MODULE_ICON } from '@/features/tabs/tabIcons'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { createDefaultTileLayout, findTileTab, focusTileLeaf, selectTileTab } from '@/features/tabs/tileTree'
 import type { TileNode, TileTab } from '@/features/tabs/tileTree'
 import {
@@ -186,14 +188,23 @@ export function useCommandPalette({
   const closePalette = useDevDeckStore((s) => s.closePalette)
   const openSSHQuickAdd = useDevDeckStore((s) => s.openSSHQuickAdd)
   const openWorktreeTab = useDevDeckStore((s) => s.openWorktreeTab)
-  const openSSHShellTab = useDevDeckStore((s) => s.openSSHShellTab)
+  const openSSHShell = useOpenSSHShell(wsId)
   const openBrowserTab = useDevDeckStore((s) => s.openBrowserTab)
   const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const selectAgentsTab = useDevDeckStore((s) => s.selectAgentsTab)
   const setWorkspaceTileLayout = useDevDeckStore((s) => s.setWorkspaceTileLayout)
   const setSSHTileLayout = useDevDeckStore((s) => s.setSSHTileLayout)
   const storedLayout = useDevDeckStore((s) => s.workspaceTileLayouts[wsId])
-  const layout = useMemo(() => storedLayout ?? createDefaultTileLayout(), [storedLayout])
+  // The tile tree renders inside Tauri only (see `useOpenSSHShell`), but the
+  // slice is persisted and readable everywhere. Reading it on the web would
+  // offer "Open tabs" rows for tabs nothing can show — and rank entities as
+  // "already open" when they aren't — so the web starts from the bare default
+  // (its one pinned Agents tab, which `/w/$wsId` really does render).
+  const isTauri = useIsTauri()
+  const layout = useMemo(
+    () => (isTauri ? (storedLayout ?? createDefaultTileLayout()) : createDefaultTileLayout()),
+    [isTauri, storedLayout],
+  )
 
   const workspaceQuery = useWorkspace(wsId)
   const machinesQuery = useMachines()
@@ -306,17 +317,14 @@ export function useCommandPalette({
         selectAgentsTab(wsId)
         navigate({ to: '/w/$wsId/p/$projectId', params: { wsId, projectId } })
       },
-      openSSH: (connectionId) => {
-        openSSHShellTab(wsId, connectionId)
-        navigate({ to: '/w/$wsId', params: { wsId } })
-      },
+      openSSH: (connectionId) => openSSHShell(connectionId),
       openMachine: () => navigate({ to: '/w/$wsId/machines', params: { wsId } }),
       openPage: (path) => {
         const to = PAGE_ROUTES[path as keyof typeof PAGE_ROUTES] ?? PAGE_ROUTES['']
         navigate({ to, params: { wsId } })
       },
     }),
-    [wsId, navigate, openWorktreeTab, openSSHShellTab, selectAgentsTab],
+    [wsId, navigate, openWorktreeTab, openSSHShell, selectAgentsTab],
   )
 
   const resolveTabLabel = useCallback(
@@ -384,8 +392,9 @@ export function useCommandPalette({
         showToast(`Added SSH connection "${draft.name.trim()}"`)
         if (useDevDeckStore.getState().palette.wsId === submittedWsId) {
           closePalette()
-          openSSHShellTab(submittedWsId, connectionId)
-          navigate({ to: '/w/$wsId', params: { wsId: submittedWsId } })
+          // `openSSHShell` is bound to the same `wsId` this closure captured,
+          // so the stale-workspace guard above still holds.
+          openSSHShell(connectionId)
         }
       } catch (err) {
         // Hops created before the failure stay saved on purpose — a retry
@@ -394,7 +403,7 @@ export function useCommandPalette({
         showToast(err instanceof Error ? err.message : 'Failed to add SSH connection')
       }
     },
-    [wsId, runPlan, connections, showToast, closePalette, openSSHShellTab, navigate],
+    [wsId, runPlan, connections, showToast, closePalette, openSSHShell],
   )
 
   const verbMatch = useMemo(() => matchVerb(deferredQuery), [deferredQuery])
@@ -455,10 +464,9 @@ export function useCommandPalette({
             focusedPaneId: sshLayout.focusedPaneId,
           }
       setSSHTileLayout(connectionId, nextLayout)
-      openSSHShellTab(wsId, connectionId)
-      navigate({ to: '/w/$wsId', params: { wsId } })
+      openSSHShell(connectionId)
     },
-    [setSSHTileLayout, openSSHShellTab, wsId, navigate],
+    [setSSHTileLayout, openSSHShell],
   )
 
   // ---- item assembly ----------------------------------------------------
@@ -498,10 +506,7 @@ export function useCommandPalette({
         openBrowserTab(wsId, machineId)
         navigate({ to: '/w/$wsId/browser', params: { wsId } })
       },
-      openSSHConnection: (connectionId) => {
-        openSSHShellTab(wsId, connectionId)
-        navigate({ to: '/w/$wsId', params: { wsId } })
-      },
+      openSSHConnection: (connectionId) => openSSHShell(connectionId),
       openSSHQuickAdd: (prefillRaw) => openQuickAddForm(prefillRaw),
       openSpawn: (projectId) => openSpawn(projectId),
       openSSHStats: (connectionId) => openSSHStats(connectionId),
@@ -513,7 +518,7 @@ export function useCommandPalette({
       paletteConnections,
       offlineMachineIds,
       openBrowserTab,
-      openSSHShellTab,
+      openSSHShell,
       openQuickAddForm,
       openSpawn,
       openSSHStats,

@@ -36,6 +36,7 @@ import {
 } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { DependenciesDialog } from '@/features/overlays/DependenciesDialog'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { archiveDefaultName } from './archiveName'
 import { ArchiveNameDialog } from './ArchiveNameDialog'
 import { DeleteFilesDialog } from './DeleteFilesDialog'
@@ -91,6 +92,13 @@ interface TerminalExplorerProps {
    *  only through the action itself — advertising a chord it doesn't listen
    *  for would just be a dead key hint. */
   contentSearchShortcut?: string
+  /** The path of whichever file tab is currently focused in this shell's pane
+   *  area, if any — mirrors VS Code's "reveal active file in Explorer": every
+   *  ancestor folder auto-expands and the row scrolls into view and gets a
+   *  distinct highlight, independent of click-selection (spec: opening a file
+   *  from quick-open, a definition jump, or just switching tabs should reveal
+   *  it here exactly like clicking it in the tree does). */
+  activePath?: string
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -243,6 +251,19 @@ function HeaderMenuAction({
   )
 }
 
+/** `a/b/c.txt` → `['a', 'a/b']` — every folder between the tree root and
+ *  `path`, root-to-leaf order, so expanding them in order never has to
+ *  backtrack. A top-level path has no ancestors. */
+function ancestorPaths(path: string): string[] {
+  const ancestors: string[] = []
+  let current = parentPath(path)
+  while (current) {
+    ancestors.unshift(current)
+    current = parentPath(current)
+  }
+  return ancestors
+}
+
 export function TerminalExplorer({
   shellKey,
   target,
@@ -252,6 +273,7 @@ export function TerminalExplorer({
   onRequestQuickOpen,
   onRequestContentSearch,
   contentSearchShortcut,
+  activePath,
 }: TerminalExplorerProps) {
   const newFileShortcut = useCommandChordLabel('explorer.newFile')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -326,6 +348,57 @@ export function TerminalExplorer({
   /** Hovering a collapsed folder mid-drag opens it, so a nested destination is
    *  reachable without dropping first (spec §4). */
   const autoExpand = useDragAutoExpand(expandDir)
+
+  /** Reveal-active-file: every ancestor of the active tab's path expands, the
+   *  same way a folder the operator clicks open stays open (this merges into
+   *  `expanded`, it never collapses anything). Runs off `activePath` alone —
+   *  re-opening the same path twice is a no-op via the `changed` guard, so
+   *  this can't fight a user's own manual collapse of an unrelated folder. */
+  useEffect(() => {
+    if (!activePath) return
+    const ancestors = ancestorPaths(activePath)
+    if (ancestors.length === 0) return
+    setExpanded((current) => {
+      let changed = false
+      const next = new Set(current)
+      for (const ancestor of ancestors) {
+        if (!next.has(ancestor)) {
+          next.add(ancestor)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [activePath])
+
+  /** Scrolls the active file's row into view once it exists in the DOM. A
+   *  freshly-expanded ancestor's children load asynchronously (each level is
+   *  its own `useFilesList` query), so the row this targets may not have
+   *  rendered yet on the same tick `expanded` changes — the observer keeps
+   *  watching until it does, rather than a fixed number of retries. */
+  useEffect(() => {
+    if (!activePath) return
+    const container = treeContainerRef.current
+    if (!container) return
+    function findRow(): HTMLElement | undefined {
+      return Array.from(container!.querySelectorAll<HTMLElement>('[data-row-path]')).find(
+        (el) => el.dataset.rowPath === activePath,
+      )
+    }
+    const existing = findRow()
+    if (existing) {
+      existing.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    const observer = new MutationObserver(() => {
+      const row = findRow()
+      if (!row) return
+      row.scrollIntoView({ block: 'nearest' })
+      observer.disconnect()
+    })
+    observer.observe(container, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [activePath, expanded])
 
   function collapseAll() {
     setExpanded(new Set())
@@ -800,6 +873,7 @@ export function TerminalExplorer({
         </div>
         <button
           type="button"
+          {...tourAnchor('explorer-new-file')}
           onClick={() => startCreate(uploadTarget, 'file')}
           disabled={writeFile.isPending}
           title={newFileShortcut ? `New file in ${uploadTargetLabel} (${newFileShortcut})` : `New file in ${uploadTargetLabel}`}
@@ -810,6 +884,7 @@ export function TerminalExplorer({
         </button>
         <button
           type="button"
+          {...tourAnchor('explorer-new-folder')}
           onClick={() => startCreate(uploadTarget, 'folder')}
           disabled={mkdir.isPending}
           title={`New folder in ${uploadTargetLabel}`}
@@ -820,6 +895,7 @@ export function TerminalExplorer({
         </button>
         <button
           type="button"
+          {...tourAnchor('explorer-refresh')}
           onClick={invalidateFiles}
           disabled={isFetching}
           title="Refresh files"
@@ -830,6 +906,7 @@ export function TerminalExplorer({
         </button>
         <button
           type="button"
+          {...tourAnchor('explorer-collapse')}
           onClick={collapseAll}
           disabled={expanded.size === 0}
           title="Collapse all folders"
@@ -840,6 +917,7 @@ export function TerminalExplorer({
         </button>
         <TabStripPopoverMenu
           trigger={<MoreHorizontal size={13} />}
+          triggerAnchor={tourAnchor('explorer-more')}
           triggerTitle="More file actions"
           triggerAriaLabel="More file actions"
           align="end"
@@ -925,6 +1003,7 @@ export function TerminalExplorer({
             depth={0}
             expanded={expanded}
             selected={selection.selected}
+            activePath={activePath}
             entryCache={entryCacheRef}
             dropTargetPath={dropTargetPath}
             draggingPaths={draggingPaths}
@@ -1008,6 +1087,7 @@ export function TerminalExplorer({
       {onRequestQuickOpen ? (
         <button
           type="button"
+          {...tourAnchor('explorer-quick-open')}
           onClick={onRequestQuickOpen}
           className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-card-wash px-3 text-left font-mono text-[10.5px] text-devdeck-fg-2 hover:text-devdeck-fg-2"
         >
@@ -1022,6 +1102,7 @@ export function TerminalExplorer({
       {onRequestContentSearch ? (
         <button
           type="button"
+          {...tourAnchor('explorer-content-search')}
           onClick={onRequestContentSearch}
           className="flex h-9 flex-none cursor-pointer items-center gap-2 border-t border-devdeck-border bg-devdeck-card-wash px-3 text-left font-mono text-[10.5px] text-devdeck-fg-2 hover:text-devdeck-fg-2"
         >
@@ -1061,6 +1142,8 @@ interface TreeLevelProps {
   depth: number
   expanded: ReadonlySet<string>
   selected: Readonly<Record<string, SelectedEntry>>
+  /** The open file to reveal/highlight — see `TerminalExplorerProps.activePath`. */
+  activePath?: string
   entryCache: MutableRefObject<Map<string, SelectedEntry>>
   dropTargetPath: string | null
   draggingPaths: readonly string[] | null
@@ -1214,6 +1297,10 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
       {entries.map((entry) => {
         const isOpen = entry.isDir && rest.expanded.has(entry.path)
         const isSelected = Boolean(rest.selected[entry.path])
+        // Not folded into `isSelected`: a bulk multi-select (⌘-click across
+        // several rows) must not visually claim the active file as part of
+        // that selection when it wasn't clicked into it.
+        const isActiveFile = !entry.isDir && !isSelected && entry.path === rest.activePath
         const isRenaming = rest.renamingPath === entry.path
         const selectedEntry: SelectedEntry = { name: entry.name, path: entry.path, isDir: entry.isDir }
         rest.entryCache.current.set(entry.path, selectedEntry)
@@ -1277,6 +1364,7 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
               className={cn(
                 'group flex h-[29px] items-center pr-1.5 hover:bg-devdeck-hover-wash',
                 isSelected && 'bg-devdeck-on',
+                isActiveFile && 'bg-devdeck-hover-wash ring-1 ring-inset ring-devdeck-border-accent',
                 isDragging && 'opacity-40',
                 rest.dropTargetPath === entry.path && 'bg-devdeck-on ring-1 ring-inset ring-devdeck-line',
               )}
@@ -1319,7 +1407,14 @@ function TreeLevel({ target, path, depth, ...rest }: TreeLevelProps) {
                     )}
                   />
                   <MaterialFileIcon name={entry.name} isDir={entry.isDir} size={16} />
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-devdeck-fg-2">{entry.name}</span>
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate font-mono text-[11.5px]',
+                      isActiveFile ? 'text-devdeck-fg' : 'text-devdeck-fg-2',
+                    )}
+                  >
+                    {entry.name}
+                  </span>
                 </button>
               )}
               <button

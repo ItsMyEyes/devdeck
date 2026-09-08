@@ -1,9 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { GitBranch, Grid2X2, House, List, Plus, Search, Server, Settings2, Trash2, X } from 'lucide-react'
+import { GitBranch, Grid2X2, List, Plus, RefreshCw, Search, Server, Settings, Settings2, Trash2, X } from 'lucide-react'
 import { StatusDot } from '@/components/ui/status-dot'
 import { Tooltip } from '@/components/ui/tooltip'
-import { useMachineHealth, useMachines, useSettings } from '@/features/data/queries'
+import { useMachineHealth, useMachines, useRefreshAgents, useSettings } from '@/features/data/queries'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { cn } from '@/lib/utils'
 import { worktreeLabel } from '@/lib/worktreeLabel'
 import type { Project, Worktree } from '@/store/types'
@@ -26,8 +27,10 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
   const defaultModel = useSettings().data?.defaultModel ?? 'claude-sonnet-5'
   const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const openNewProject = useDevDeckStore((s) => s.openNewProject)
+  const refreshAgents = useRefreshAgents()
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'cards' | 'list'>('cards')
+  const [refreshing, setRefreshing] = useState(false)
 
   const selectedProject = selectedProjectId ? projects.find((project) => project.id === selectedProjectId) : undefined
   const spawnProjectId = selectedProject?.id ?? null
@@ -57,7 +60,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <section className="flex-none border-b border-devdeck-border bg-devdeck-pane px-3 py-3 sm:px-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
+          <div {...tourAnchor('agents-heading')} className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-[15px] font-semibold text-devdeck-fg">Agents</h1>
               <span className="rounded-full bg-devdeck-card-wash px-2 py-0.5 font-mono text-[10px] text-devdeck-fg-2">
@@ -80,7 +83,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
-            <div className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
+            <div {...tourAnchor('agents-search')} className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
               <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-devdeck-fg-2" />
               <input
                 value={query}
@@ -101,7 +104,12 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="grid h-9 grid-cols-2 rounded-control border border-devdeck-border-card bg-devdeck-pane p-1" role="group" aria-label="Agent layout">
+              <div
+                {...tourAnchor('agents-view-toggle')}
+                className="grid h-9 grid-cols-2 rounded-control border border-devdeck-border-card bg-devdeck-pane p-1"
+                role="group"
+                aria-label="Agent layout"
+              >
                 <ViewButton label="Show card view" active={view === 'cards'} onClick={() => setView('cards')}>
                   <Grid2X2 size={14} />
                 </ViewButton>
@@ -111,15 +119,22 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
               </div>
 
               <button
+                {...tourAnchor('agents-refresh')}
                 type="button"
-                disabled={!hasProjects}
-                onClick={() => openSpawn(spawnProjectId, 'root', defaultModel)}
+                disabled={refreshing}
+                aria-label="Refresh agents"
+                title="Refresh agents"
+                onClick={() => {
+                  setRefreshing(true)
+                  void refreshAgents().finally(() => setRefreshing(false))
+                }}
                 className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-control bg-devdeck-card-wash px-3 text-[12px] font-semibold text-devdeck-fg-2 transition-colors hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                <House size={13} />
-                <span className="hidden sm:inline">Root</span>
+                <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
+                <span className="hidden sm:inline">Refresh</span>
               </button>
               <button
+                {...tourAnchor('agents-new')}
                 type="button"
                 disabled={!hasProjects}
                 onClick={() => openSpawn(spawnProjectId, 'branch', defaultModel)}
@@ -129,13 +144,17 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
                 New agent
               </button>
               <button
+                {...tourAnchor('agents-management')}
                 type="button"
                 onClick={() => navigate({ to: '/w/$wsId/management', params: { wsId } })}
                 aria-label="Agent management"
                 title="Agent management"
                 className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-control bg-devdeck-card-wash text-devdeck-fg-2 transition-colors hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                <Settings2 size={14} />
+                {/* Gear, matching the management module's own tab icon
+                    (MODULE_ICON.management) — Settings2's sliders are this
+                    view's project-edit affordance below. */}
+                <Settings size={14} />
               </button>
             </div>
           </div>
@@ -246,36 +265,77 @@ function ProjectHostSection({
       </div>
 
       {worktrees.length === 0 ? (
-        <Tooltip label={unreachable ? unreachableReason : `New agent in ${project.name}`}>
-          <button
-            type="button"
-            aria-disabled={unreachable}
-            onClick={() => !unreachable && openSpawn(project.id, 'branch', defaultModel)}
-            className={cn(
-              'flex min-h-[104px] w-full flex-col items-center justify-center gap-2 rounded-control border border-dashed font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-              unreachable
-                ? 'cursor-not-allowed border-devdeck-border-menu bg-devdeck-glass-solid/15 text-devdeck-fg-2/50'
-                : 'cursor-pointer border-devdeck-border-menu bg-devdeck-glass-solid/35 text-devdeck-fg-2 hover:border-devdeck-border-accent hover:bg-devdeck-glass-solid/60 hover:text-devdeck-fg-2',
-            )}
-          >
-            <Plus size={22} strokeWidth={1.5} />
-            <span>new agent in {project.name}</span>
-          </button>
-        </Tooltip>
+        <NewAgentTile
+          projectName={project.name}
+          unreachable={unreachable}
+          unreachableReason={unreachableReason}
+          onSpawn={() => openSpawn(project.id, 'branch', defaultModel)}
+        />
       ) : view === 'cards' ? (
         <div className="grid content-start gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))' }}>
           {worktrees.map((worktree) => (
             <WorktreeCard key={worktree.id} worktree={worktree} wsId={wsId} projectId={project.id} />
           ))}
+          <NewAgentTile
+            projectName={project.name}
+            unreachable={unreachable}
+            unreachableReason={unreachableReason}
+            onSpawn={() => openSpawn(project.id, 'branch', defaultModel)}
+          />
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           {worktrees.map((worktree) => (
             <WorktreeCard key={worktree.id} worktree={worktree} wsId={wsId} projectId={project.id} variant="list" />
           ))}
+          <NewAgentTile
+            projectName={project.name}
+            unreachable={unreachable}
+            unreachableReason={unreachableReason}
+            onSpawn={() => openSpawn(project.id, 'branch', defaultModel)}
+            variant="row"
+          />
         </div>
       )}
     </section>
+  )
+}
+
+/** Dashed "new agent in <project>" affordance. Rendered in every project group
+ *  — on its own when the group is empty, and as the trailing grid/list item
+ *  when the group already has agents — so starting one never depends on
+ *  reaching for the toolbar. */
+function NewAgentTile({
+  projectName,
+  unreachable,
+  unreachableReason,
+  onSpawn,
+  variant = 'tile',
+}: {
+  projectName: string
+  unreachable: boolean
+  unreachableReason: string
+  onSpawn: () => void
+  variant?: 'tile' | 'row'
+}) {
+  return (
+    <Tooltip label={unreachable ? unreachableReason : `New agent in ${projectName}`}>
+      <button
+        type="button"
+        aria-disabled={unreachable}
+        onClick={() => !unreachable && onSpawn()}
+        className={cn(
+          'flex w-full items-center justify-center gap-2 rounded-control border border-dashed font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          variant === 'row' ? 'min-h-[56px] px-3 py-2.5' : 'h-full min-h-[104px] flex-col',
+          unreachable
+            ? 'cursor-not-allowed border-devdeck-border-menu bg-devdeck-glass-solid/15 text-devdeck-fg-2/50'
+            : 'cursor-pointer border-devdeck-border-menu bg-devdeck-glass-solid/35 text-devdeck-fg-2 hover:border-devdeck-border-accent hover:bg-devdeck-glass-solid/60 hover:text-devdeck-fg-2',
+        )}
+      >
+        <Plus size={variant === 'row' ? 15 : 22} strokeWidth={1.5} />
+        <span className="truncate">new agent in {projectName}</span>
+      </button>
+    </Tooltip>
   )
 }
 

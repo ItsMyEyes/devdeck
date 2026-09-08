@@ -5,6 +5,7 @@ import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { useIsDesktop } from '@/features/terminal/ExpandedTerminal'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 import { useScope } from '@/features/useScope'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
@@ -45,13 +46,22 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
   // useNativeOverlayBlocker's doc comment. At `md` and up it's laid out
   // inline and never needs to block anything.
   useNativeOverlayBlocker(mobileDrawer && sidebarOpen && !isDesktopWidth)
+  // The drawer is the phone's ONLY navigation (there is no rail beside the
+  // content and no tab strip on the web build), so it shows the full menu —
+  // labelled destinations and the workspace switcher — rather than the 56px
+  // icon rail, whose hover tooltips a touch screen can never reveal.
+  const inMobileDrawer = mobileDrawer && !isDesktopWidth
 
   const railControlClass =
     'flex h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-control text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-devdeck-ring'
+  /** Same control, labelled and thumb-sized, for the mobile drawer. */
+  const drawerControlClass =
+    'flex h-11 w-full cursor-pointer items-center gap-3 rounded-control px-3 text-[13px] font-medium text-devdeck-fg-2 transition-colors hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-devdeck-ring'
   const railDivider = <div aria-hidden className="my-1.5 h-px w-6 flex-none bg-devdeck-border" />
 
   const toggleButton = canExpandPanel ? (
     <button
+      {...tourAnchor('sidebar-toggle')}
       onClick={toggleRailExpanded}
       aria-label={railExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
       className={railControlClass}
@@ -72,12 +82,13 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
       <aside
         className={cn(
           'flex flex-none overflow-hidden',
+          inMobileDrawer && 'flex-col',
           // The sidebar is a card on the glass: glass + a light wash. The wash
           // is mechanical, not decorative — without it the card is the same
           // value as the gap around it and its rounded corners have nothing to
           // read against.
           'my-[var(--devdeck-gap)] ml-[var(--devdeck-gap)] rounded-container bg-devdeck-card-wash',
-          hasSidebarPanel ? 'w-[306px]' : 'w-[56px]',
+          inMobileDrawer ? 'w-[290px]' : hasSidebarPanel ? 'w-[306px]' : 'w-[56px]',
           mobileDrawer &&
             cn(
               'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[45] max-md:max-w-[86vw]',
@@ -91,6 +102,38 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
         )}
         style={{ backdropFilter: 'blur(20px)', marginRight: '6px' }}
       >
+        {inMobileDrawer ? (
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            <WorkspaceSwitcher />
+            <SidebarNav compact={false} />
+            {canExpandPanel ? (
+              <>
+                <div aria-hidden className="mx-3 my-1 h-px flex-none bg-devdeck-border" />
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  {view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />}
+                </div>
+              </>
+            ) : (
+              <div className="flex-1" />
+            )}
+            {isRuntimeUI || showDesktopSettings ? (
+              <div className="flex flex-none flex-col gap-1 border-t border-devdeck-border p-2">
+                {isRuntimeUI ? (
+                  <button type="button" onClick={() => openRuntimePin(null, whoami.data?.machineName ?? 'this runtime')} className={drawerControlClass}>
+                    <KeyRound size={16} className="flex-none" />
+                    Sign-in PIN
+                  </button>
+                ) : null}
+                {showDesktopSettings ? (
+                  <button type="button" onClick={openDesktopSettings} className={drawerControlClass}>
+                    <Settings size={16} className="flex-none" />
+                    Desktop settings
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
         <div className={cn('flex flex-none flex-col items-center py-2.5', hasSidebarPanel ? 'w-[56px]' : 'w-full')} style={{ marginRight: '10px' }}>
           {toggleButton ? (
             <div className="mb-1 flex flex-col items-center gap-1">
@@ -121,6 +164,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
           {showDesktopSettings ? (
             <Tooltip label="Desktop settings" side="right">
               <button
+                {...tourAnchor('desktop-settings')}
                 type="button"
                 onClick={openDesktopSettings}
                 aria-label="Desktop settings"
@@ -131,7 +175,8 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
             </Tooltip>
           ) : null}
         </div>
-        {hasSidebarPanel ? (
+        )}
+        {!inMobileDrawer && hasSidebarPanel ? (
           <div className="flex min-w-0 flex-1 flex-col">
             {view === 'ssh' ? <SSHGroupTree /> : <ProjectTree />}
           </div>

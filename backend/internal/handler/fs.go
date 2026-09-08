@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -89,6 +90,40 @@ func (h *FsHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		"entries": result,
 		"git":     currentGit,
 	})
+}
+
+// Roots handles GET /api/fs/roots. The folder browser starts every session
+// under the runtime's home directory and previously had no way to reach
+// anything outside it (see resolveFsPath, which already accepts absolute
+// paths just fine) — this endpoint gives the frontend the list of top-level
+// places to jump to: the home dir plus every drive letter on Windows, or
+// just "/" elsewhere, so a machine with multiple disks (e.g. Windows D:) is
+// actually reachable.
+func (h *FsHandler) Roots(w http.ResponseWriter, r *http.Request) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot resolve home directory")
+		return
+	}
+	writeJSON(w, http.StatusOK, domain.FsRootsResponse{Home: home, Roots: fsRoots()})
+}
+
+// fsRoots lists the top-level filesystem roots this machine's runtime can
+// browse from: every mounted drive letter on Windows, or "/" everywhere
+// else. Gated on runtime.GOOS rather than build tags since a single binary
+// only ever runs as the OS it was compiled for.
+func fsRoots() []string {
+	if runtime.GOOS != "windows" {
+		return []string{"/"}
+	}
+	roots := make([]string, 0, 4)
+	for c := 'A'; c <= 'Z'; c++ {
+		root := string(c) + `:\`
+		if _, err := os.Stat(root); err == nil {
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 // Mkdir handles POST /api/fs/mkdir. It creates one child folder in the selected

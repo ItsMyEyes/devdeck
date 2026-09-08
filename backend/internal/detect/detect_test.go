@@ -371,3 +371,46 @@ func TestProjectLanguagesIgnoresNonexistentRoot(t *testing.T) {
 		t.Errorf("ProjectLanguages() = %v, want empty for a missing directory", got)
 	}
 }
+
+// `tailscale serve status --json` nests a FOREGROUND mapping under
+// "Foreground" keyed by a session id, not at the top level. devdeck runs serve
+// in the foreground, so parsing only the top-level "Web" meant this function
+// could never see devdeck's own mapping — it answered "unknown" every time,
+// silently disabling the stale-target check built on top of it. Captured from
+// a real `tailscale serve status --json` on tailscale 1.98.5.
+func TestTailscaleServeTargetPortReadsForegroundSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tailscale")
+	body := `{"Foreground":{"93511787b61d120d":{"TCP":{"443":{"HTTPS":true}},` +
+		`"Web":{"my-mac.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:18997"}}}}}}}`
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat <<'JSON'\n"+body+"\nJSON\n"), 0o755); err != nil {
+		t.Fatalf("write fake tailscale: %v", err)
+	}
+	got, ok := TailscaleServeTargetPort(func() (string, error) { return path, nil })
+	if !ok || got != "18997" {
+		t.Fatalf("TailscaleServeTargetPort() = %q/%v, want 18997/true", got, ok)
+	}
+}
+
+// A background mapping still lives at the top level; both shapes must work.
+func TestTailscaleServeTargetPortReadsBackgroundConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tailscale")
+	body := `{"Web":{"my-mac.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8989"}}}}}`
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat <<'JSON'\n"+body+"\nJSON\n"), 0o755); err != nil {
+		t.Fatalf("write fake tailscale: %v", err)
+	}
+	got, ok := TailscaleServeTargetPort(func() (string, error) { return path, nil })
+	if !ok || got != "8989" {
+		t.Fatalf("TailscaleServeTargetPort() = %q/%v, want 8989/true", got, ok)
+	}
+}
+
+// "No serve config" must read as unknown, never as a mismatch.
+func TestTailscaleServeTargetPortReportsUnknownWhenUnconfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tailscale")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho '{}'\n"), 0o755); err != nil {
+		t.Fatalf("write fake tailscale: %v", err)
+	}
+	if got, ok := TailscaleServeTargetPort(func() (string, error) { return path, nil }); ok {
+		t.Fatalf("TailscaleServeTargetPort() = %q/%v, want unknown", got, ok)
+	}
+}

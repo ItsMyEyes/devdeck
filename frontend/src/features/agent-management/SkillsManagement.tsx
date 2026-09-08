@@ -122,7 +122,7 @@ export function SkillsManagement({
   }
 
   return (
-    <div className="flex flex-none flex-col md:min-h-0 md:flex-1">
+    <div className="flex flex-none flex-col md:min-h-[24rem] md:flex-1">
       <div className="grid flex-none grid-cols-2 border-b border-devdeck-border bg-devdeck-pane/20 md:grid-cols-[minmax(220px,1.2fr)_minmax(150px,0.7fr)_minmax(150px,0.7fr)]">
         <div className="col-span-2 border-b border-devdeck-border px-3 py-3 sm:px-4 md:col-span-1 md:border-r md:border-b-0">
           <div className="text-[15px] font-semibold tracking-[-0.015em] text-devdeck-fg">

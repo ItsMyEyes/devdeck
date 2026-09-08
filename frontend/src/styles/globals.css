@@ -1,6 +1,11 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@xterm/xterm/css/xterm.css';
+/* The guided tour (features/tour). Its JS is loaded on demand, but the sheet
+   is not: bundling it here is ~2kB and guarantees the DevDeck overrides at the
+   bottom of this file come after upstream's in the cascade, whenever the lazy
+   chunk happens to land. */
+@import 'driver.js/dist/driver.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -178,6 +183,12 @@
   --nt-placeholder: rgba(255, 255, 255, 0.282);
   --nt-blue: #2383e2;
   --nt-select: rgba(35, 131, 226, 0.28);
+  /* Find-bar matches. Amber rather than the blue above so a running search
+     stays legible on top of a real selection, and so the two never read as
+     the same thing. */
+  --nt-find: rgba(245, 196, 81, 0.26);
+  --nt-find-active: rgba(245, 196, 81, 0.62);
+  --nt-find-ink: #131616;
   --nt-code: #ff7369; /* inline code, Notion's dark-mode red */
   --nt-code-bg: rgba(135, 131, 120, 0.15);
   --nt-shadow:
@@ -360,6 +371,9 @@
   --nt-placeholder: rgba(55, 53, 47, 0.32);
   --nt-blue: #2383e2;
   --nt-select: rgba(35, 131, 226, 0.2);
+  --nt-find: rgba(161, 98, 7, 0.18);
+  --nt-find-active: rgba(245, 196, 81, 0.85);
+  --nt-find-ink: #2a1f05;
   --nt-code: #eb5757;
   --nt-code-bg: rgba(135, 131, 120, 0.15);
   --nt-shadow:
@@ -1064,6 +1078,42 @@
   background: var(--nt-select);
 }
 
+/* ── find-in-document highlights ──────────────────────────────────────────
+   Painted through the CSS Custom Highlight API (features/find/useDomFind.ts),
+   which draws from `Range`s held in JS rather than from markup. That is the
+   whole reason these are `::highlight()` rules and not a `<mark>` class: half
+   the surfaces they run over are a live ProseMirror contenteditable, and
+   injecting elements into one corrupts the document it is editing.
+
+   Global rather than scoped under `.notion-doc`: `::highlight()` cannot be
+   nested inside a descendant selector the way `::selection` can, so the
+   registry name is what scopes it — nothing else registers these two names.
+
+   Both need an explicit `color`. A highlight only repaints the background, so
+   on the strong active fill the document's own foreground would otherwise sit
+   at whatever contrast the theme happens to give it.
+
+   These used to print two lightningcss warnings per `vite build` ("'highlight'
+   is not recognized as a valid pseudo-element"), twice over — once from
+   Tailwind's optimizer and once from Vite's minifier, both of which embed
+   lightningcss. The warnings were cosmetic (the rules always passed through
+   verbatim), but lightningcss 1.32.0's selector table simply predates
+   `::highlight()`; 1.33.0 added it. `@tailwindcss/node` pins 1.32.0 *exactly*,
+   so package.json carries an `overrides.lightningcss` of `^1.33.0` to lift
+   both consumers past that pin. Verified behaviourally neutral: 1.32 and 1.33
+   minify this stylesheet to the same byte count, differing only in how
+   `rounded-full`'s effectively-infinite radius is spelled (`3.40282e38px` vs
+   `2147483647px` — both clamp to a pill).
+
+   Drop the override once Tailwind ships a build that pins >= 1.33.0. */
+::highlight(devdeck-find) {
+  background-color: var(--nt-find);
+}
+::highlight(devdeck-find-active) {
+  background-color: var(--nt-find-active);
+  color: var(--nt-find-ink);
+}
+
 /* ── block rhythm ─────────────────────────────────────────────────────────
    Notion's: 1px between blocks, 3px/2px inside each, so a line's hit area is
    taller than its text. Spacing sits on the elements rather than on a flex
@@ -1450,4 +1500,133 @@
    The 400ms opacity transition it fades with is ungated, so it still applies. */
 [data-sonner-toast][data-expanded='false'][data-front='false'] > * {
   opacity: 0;
+}
+
+/* ── Guided tour (driver.js) ────────────────────────────────────────────────
+   driver.js ships one light-mode look and exposes no colour variables — its
+   popover is `all: unset` plus hard-coded `#fff` / `#2d2d2d`, which lands on a
+   dark app as a white card with a white arrow. These rules restate it in
+   DevDeck tokens, so it follows the palette rather than fighting it.
+
+   Scoped to `.devdeck-tour`, the `popoverClass` startTour.ts passes, so this is
+   a deliberate skin rather than a blanket override of a vendored sheet. The
+   `all: unset` upstream also strips inherited typography, hence the explicit
+   font stack: without it the popover renders in Helvetica while the rest of
+   the app is in the app font. */
+.driver-popover.devdeck-tour {
+  /* Restated outright rather than through upstream's
+     `--driver-popover-font-family` hook: measured in a browser, feeding that
+     variable `inherit` leaves the popover in Helvetica, because a CSS-wide
+     keyword arriving through var() substitution is not honoured as one. A
+     direct declaration outranks the base rule on specificity and is not
+     subject to that rule at all. */
+  font-family: var(--font-sans);
+  max-width: 340px;
+  padding: 14px 16px;
+  color: var(--devdeck-fg);
+  background-color: var(--devdeck-glass-solid);
+  border: 1px solid var(--devdeck-border-menu);
+  border-radius: var(--r-container, 12px);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 55%);
+}
+
+.devdeck-tour .driver-popover-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--devdeck-fg);
+  /* Clears the close button parked in the top-right corner. */
+  padding-right: 26px;
+}
+
+.devdeck-tour .driver-popover-description {
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--devdeck-fg-2);
+}
+
+/* The copy in tourCopy.ts marks key nouns with <b> and CLI fragments with
+   <code>; both need a value that reads as emphasis against fg-2 body text. */
+.devdeck-tour .driver-popover-description b {
+  font-weight: 600;
+  color: var(--devdeck-fg);
+}
+
+.devdeck-tour .driver-popover-description code {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--devdeck-fg);
+  background-color: var(--devdeck-card-wash);
+  border-radius: 4px;
+}
+
+.devdeck-tour .driver-popover-close-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  color: var(--devdeck-fg-2);
+}
+.devdeck-tour .driver-popover-close-btn:hover,
+.devdeck-tour .driver-popover-close-btn:focus {
+  color: var(--devdeck-fg);
+}
+
+.devdeck-tour .driver-popover-footer {
+  margin-top: 14px;
+}
+
+.devdeck-tour .driver-popover-progress-text {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--devdeck-fg-2);
+}
+
+.devdeck-tour .driver-popover-footer-btn {
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--devdeck-fg-2);
+  background-color: transparent;
+  border: 1px solid var(--devdeck-border-menu);
+  border-radius: 6px;
+  text-shadow: none;
+}
+.devdeck-tour .driver-popover-footer-btn:hover,
+.devdeck-tour .driver-popover-footer-btn:focus {
+  color: var(--devdeck-fg);
+  background-color: var(--devdeck-hover-wash);
+}
+
+/* The forward button is the one the reader is meant to press, on every step. */
+.devdeck-tour .driver-popover-next-btn {
+  color: var(--devdeck-accent);
+  background-color: var(--devdeck-accent-tint);
+  border-color: var(--devdeck-border-accent);
+}
+.devdeck-tour .driver-popover-next-btn:hover,
+.devdeck-tour .driver-popover-next-btn:focus {
+  color: var(--devdeck-accent);
+  background-color: var(--devdeck-accent-tint-hover);
+}
+
+/* Upstream paints the arrow with `border: 5px solid #fff` and then makes three
+   of the four sides transparent per side-class, so recolouring means naming
+   the one edge that is still visible in each case — a blanket `border-color`
+   would repaint the transparent ones too and turn the arrow into a square.
+   `popoverClass` lands on the wrapper, and the arrow is its child, so these are
+   descendant selectors. */
+.devdeck-tour .driver-popover-arrow-side-left {
+  border-left-color: var(--devdeck-glass-solid);
+}
+.devdeck-tour .driver-popover-arrow-side-right {
+  border-right-color: var(--devdeck-glass-solid);
+}
+.devdeck-tour .driver-popover-arrow-side-top {
+  border-top-color: var(--devdeck-glass-solid);
+}
+.devdeck-tour .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--devdeck-glass-solid);
 }

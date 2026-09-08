@@ -20,6 +20,7 @@ import {
   Sparkles,
   Terminal,
   TriangleAlert,
+  UserRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -27,9 +28,8 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { StatusDot } from '@/components/ui/status-dot'
 import { changeHub, openLogFile } from '@/features/desktop/desktopBridge'
-import { useMachines, useTailscaleStatus } from '@/features/data/queries'
+import { useMachines } from '@/features/data/queries'
 import { useCompletionsConfig, useUpdateCompletionsConfig } from '@/features/editor/useCompletionsConfig'
 import { useVsCodeMode } from '@/features/editor/useVsCodeMode'
 import { useAutoSaveSetting } from '@/features/editor/useAutoSaveSetting'
@@ -37,10 +37,13 @@ import { KeybindingsSection } from '@/features/keybindings/KeybindingsSection'
 import { MemoryLocalPanel } from '@/features/memory/MemoryLocalPanel'
 import { useMemoryConfig, useTestMemoryConnection, useUpdateMemoryConfig } from '@/features/memory/useMemory'
 import { AppearanceSetting } from '@/features/theme/AppearanceSetting'
-import type { MemoryConfig, TailscaleHubStatus } from '@/lib/api'
+import type { MemoryConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { AccountSection } from './AccountSection'
+import { BindAddressSection } from './BindAddressSection'
 import { SocksPublishSection } from './SocksPublishSection'
+import { TailscaleServeSection } from './TailscaleServeSection'
 import { TelegramPublishSection } from './TelegramSection'
 import { VersionSection } from './VersionSection'
 
@@ -48,6 +51,7 @@ const MASKED_KEY = '••••••••••••••••'
 
 type SectionId =
   | 'general'
+  | 'account'
   | 'access'
   | 'network'
   | 'published'
@@ -75,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Hub',
     items: [
       { id: 'general', label: 'General', icon: Settings },
+      { id: 'account', label: 'Account', icon: UserRound },
       { id: 'access', label: 'Access', icon: KeyRound },
       { id: 'network', label: 'Network', icon: Radio },
       { id: 'published', label: 'Published', icon: Send },
@@ -98,6 +103,10 @@ const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
   general: {
     title: 'General',
     subtitle: 'Choose whether this device hosts the hub or connects to a remote one.',
+  },
+  account: {
+    title: 'Account',
+    subtitle: 'The email and password you sign in to this hub with from a browser.',
   },
   access: {
     title: 'Access',
@@ -141,15 +150,6 @@ const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
   },
 }
 
-function tailscaleLabel(status: TailscaleHubStatus | undefined, isLoading: boolean): { color: string; text: string } {
-  if (isLoading || !status) return { color: '#6b7280', text: 'checking…' }
-  if (status.ready) return { color: '#56d58a', text: status.url ?? 'ready' }
-  if (status.reason === 'not_installed') return { color: '#f87171', text: "Tailscale isn't installed" }
-  if (status.reason === 'not_ready') return { color: '#f87171', text: "Tailscale isn't signed in" }
-  if (status.reason === 'serve_target_mismatch')
-    return { color: '#f87171', text: 'tailscale serve points at a stale port — run `tailscale serve reset`' }
-  return { color: '#f87171', text: 'Restart DevDeck to expose this hub' }
-}
 
 /** Card wrapping a settings section's body, right pane. */
 function SettingsCard({ children }: { children: ReactNode }) {
@@ -200,7 +200,6 @@ export function DesktopSettingsDialog() {
   const close = useDevDeckStore((s) => s.closeDesktopSettings)
   const showToast = useDevDeckStore((s) => s.showToast)
   const hubApiKey = useDevDeckStore((s) => s.hubApiKey)
-  const tailscaleStatus = useTailscaleStatus(open)
   const machines = useMachines()
   const localMachineId = machines.data?.find((m) => m.isLocal)?.id
   const [confirmingSwitch, setConfirmingSwitch] = useState(false)
@@ -243,7 +242,6 @@ export function DesktopSettingsDialog() {
     openLogFile().catch((err) => showToast(err instanceof Error ? err.message : 'Failed to open log file'))
   }
 
-  const label = tailscaleLabel(tailscaleStatus.data, tailscaleStatus.isLoading)
   const meta = SECTION_META[section]
 
   return (
@@ -360,6 +358,19 @@ export function DesktopSettingsDialog() {
               </>
             )}
 
+            {section === 'account' && (
+              <>
+                <SectionHeadRow
+                  label="Operator"
+                  title="Sign-in credentials"
+                  description="The desktop app signs itself in with the hub key; these are for reaching this hub from a browser instead - over the tailnet, or a bound network address."
+                />
+                <div className="mt-3">
+                  <AccountSection />
+                </div>
+              </>
+            )}
+
             {section === 'access' && (
               <>
                 <SectionHeadRow
@@ -405,19 +416,23 @@ export function DesktopSettingsDialog() {
 
             {section === 'network' && (
               <>
-                <SectionHeadRow label="Network" title="Tailscale" description="Tailscale exposure status for this hub." />
+                <SectionHeadRow
+                  label="Network"
+                  title="Bind address"
+                  description="Which address this device's hub and runtime listen on. Loopback keeps them reachable only from here; anything else exposes them to that network."
+                />
+                <div className="mt-3">
+                  <BindAddressSection />
+                </div>
                 <Divider />
-                <InsetPanel>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">
-                      Status
-                    </span>
-                    <span className="inline-flex items-center gap-2 font-mono text-[11px]" style={{ color: label.color }}>
-                      <StatusDot color={label.color} size={6} />
-                      {label.text}
-                    </span>
-                  </div>
-                </InsetPanel>
+                <SectionHeadRow
+                  label="Network"
+                  title="Tailscale"
+                  description="Expose this hub on your tailnet, and stop exposing it, without restarting."
+                />
+                <div className="mt-3">
+                  <TailscaleServeSection open={open && section === 'network'} />
+                </div>
                 <Divider />
                 <SectionHeadRow
                   label="Forward proxy"

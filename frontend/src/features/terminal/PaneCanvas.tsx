@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core'
 import { cn } from '@/lib/utils'
+import { useMountedTabIds } from '@/features/tabs/useMountedTabIds'
 import { findContent, moveTab, resizeSplit } from './paneTree'
 import type {
   DropZone,
@@ -247,6 +248,11 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
   })
   const isFocused = ctx.focusedPaneId === pane.id
   const activeContent = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
+  // Same rule as the workspace tile strip: a tab's content is built the first
+  // time it is opened, not every time this pane mounts. A worktree reopened
+  // after a workspace switch pays for the one editor/terminal/chat on screen
+  // rather than for every tab left in its layout — see `useMountedTabIds`.
+  const mountedTabIds = useMountedTabIds(pane.id, pane.activeTabId)
 
   const tabs: PanelHeaderTab[] = pane.tabs.map((content) => ({
     id: content.id,
@@ -284,14 +290,16 @@ function LeafPaneView({ pane, ctx }: { pane: LeafPane; ctx: PaneRenderContext })
         />
       </div>
       <div ref={setNodeRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {pane.tabs.map((content) => (
-          <div
-            key={content.id}
-            className={cn('absolute inset-0', content.id === pane.activeTabId ? 'flex' : 'hidden')}
-          >
-            {ctx.renderers[content.kind]({ content, paneId: pane.id, isActive: content.id === pane.activeTabId })}
-          </div>
-        ))}
+        {pane.tabs
+          .filter((content) => mountedTabIds.has(content.id))
+          .map((content) => (
+            <div
+              key={content.id}
+              className={cn('absolute inset-0', content.id === pane.activeTabId ? 'flex' : 'hidden')}
+            >
+              {ctx.renderers[content.kind]({ content, paneId: pane.id, isActive: content.id === pane.activeTabId })}
+            </div>
+          ))}
         {hoverZone ? (
           <div
             className="pointer-events-none absolute z-10 border-2 border-devdeck-line bg-devdeck-on"

@@ -44,7 +44,6 @@ type Config struct {
 	Tailscale TailscaleConfig `yaml:"tailscale,omitempty"`
 	Auth      AuthConfig      `yaml:"auth,omitempty"`
 	Network   NetworkConfig   `yaml:"network,omitempty"`
-	Tools     ToolsConfig     `yaml:"tools,omitempty"`
 	Proxy     ProxyConfig     `yaml:"proxy,omitempty"`
 	Updates   UpdatesConfig   `yaml:"updates,omitempty"`
 }
@@ -87,13 +86,6 @@ type NetworkConfig struct {
 	OnlyFrom       []string `yaml:"only_from,omitempty"`        // --only-from
 	TrustedProxies []string `yaml:"trusted_proxies,omitempty"`  // --trusted-proxies
 	ClientIPHeader string   `yaml:"client_ip_header,omitempty"` // --client-ip-header
-}
-
-// ToolsConfig points at the external binaries the Tools module shells out to.
-type ToolsConfig struct {
-	PythonBin string `yaml:"python_bin,omitempty"` // --python-bin
-	PandocBin string `yaml:"pandoc_bin,omitempty"` // --pandoc-bin
-	MmdcBin   string `yaml:"mmdc_bin,omitempty"`   // --mmdc-bin
 }
 
 // ProxyConfig configures the optional SOCKS5 / HTTP forward proxies.
@@ -238,9 +230,9 @@ func Resolve(explicit string) (*Config, string, error) {
 // resolves to when no config file, environment variable, or flag is present.
 // It is what DefaultsYAML documents, and what the setup wizard pre-fills from.
 //
-// Keys whose default is derived at runtime (db, python_bin) or that have no
-// default (every secret, machine name, hub URL) stay empty, so writing this
-// file changes nothing about how the server boots.
+// Keys whose default is derived at runtime (db) or that have no default
+// (every secret, machine name, hub URL) stay empty, so writing this file
+// changes nothing about how the server boots.
 func Defaults() *Config {
 	no, yes := false, true
 	return &Config{
@@ -251,7 +243,6 @@ func Defaults() *Config {
 		Auth:      AuthConfig{TwoFA: &yes, SecureCookies: &yes},
 		// Non-nil empty slices, matching the literal `[]` in DefaultsYAML.
 		Network: NetworkConfig{OnlyFrom: []string{}, TrustedProxies: []string{}},
-		Tools:   ToolsConfig{PandocBin: "pandoc", MmdcBin: "mmdc"},
 	}
 }
 
@@ -332,15 +323,6 @@ network:
   # Cloudflare Tunnel (--client-ip-header). Only honored when the direct peer
   # is listed in trusted_proxies.
   client_ip_header: ""
-
-tools:
-  # Python interpreter running the markitdown conversion script (--python-bin).
-  # Empty = ./tools/venv/bin/python3 when present, otherwise python3.
-  python_bin: ""
-  # pandoc binary for markdown -> docx/pdf export (--pandoc-bin).
-  pandoc_bin: pandoc
-  # mermaid-cli binary for rendering diagrams during export (--mmdc-bin).
-  mmdc_bin: mmdc
 
 proxy:
   # SOCKS5 forward-proxy listen address (--socks5-addr). Empty = disabled.

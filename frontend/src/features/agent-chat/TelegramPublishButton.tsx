@@ -32,6 +32,7 @@ import {
 } from '@/lib/telegramApi'
 import { cn } from '@/lib/utils'
 import { useWorkspaces } from '@/features/data/queries'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import type { TelegramBinding } from '@/store/types'
 
 /**
@@ -415,6 +416,7 @@ export function TelegramPublishButton({ machine, threadId }: { machine: Telegram
           which DESIGN.md reserves for focus and primary actions). */}
       <button
         type="button"
+        {...tourAnchor('chat-telegram')}
         onClick={() => setDialogOpen(true)}
         title={title}
         className={cn(

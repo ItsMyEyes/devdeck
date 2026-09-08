@@ -1,10 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { SSHConnectionsModule } from '@/features/ssh/SSHConnectionsModule'
+import { Outlet, createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/w/$wsId/ssh')({
-  component: SSHRoute,
+  component: () => <Outlet />,
 })
-
-function SSHRoute() {
-  return <SSHConnectionsModule />
-}

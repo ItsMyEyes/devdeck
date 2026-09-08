@@ -74,6 +74,7 @@ import { createComposerSkillTrigger } from '@/features/agent-chat/composerSkillT
 import type { SkillCatalogSnapshot } from '@/features/agent-chat/composerSkillTrigger'
 import { createComposerSlashTrigger } from '@/features/agent-chat/composerSlashTrigger'
 import type { InteractionMode } from '@/features/agent-chat/useAgentChatSocket'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 
 /**
  * Plan T14 — the escape hatch for callers that need to put a chip in the
@@ -305,7 +306,7 @@ export const ComposerPromptEditor = forwardRef<ComposerPromptEditorHandle, Compo
     // of growing it without bound. The editor is the composer's only
     // auto-height child, so before this a pasted essay pushed the transcript
     // (or, in the hero placement, the heading) off screen.
-    <div className="relative max-h-[min(40vh,220px)] min-w-0 overflow-y-auto">
+    <div {...tourAnchor('chat-input')} className="relative max-h-[min(40vh,220px)] min-w-0 overflow-y-auto">
       {value.length === 0 && placeholder ? (
         // `inset-x-0` + `truncate`, NOT `left-0`: the placeholder is
         // absolutely positioned over a one-line-tall editor, so an unbounded

@@ -47,6 +47,7 @@ import { sshMentionSource } from '@/features/agent-chat/composerMention'
 import { nextFreeThreadKey, SessionsPanel } from '@/features/agent-chat/SessionsPanel'
 import { useAgentThreads, useMachineCapabilities, useMachines, useSSHConnections } from '@/features/data/queries'
 import { sshChatAvailability, sshChatUnavailableMessage } from '@/features/ssh/sshChatAvailability'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import type { Machine } from '@/store/types'
 
 /** `name` is not cosmetic: the composer's connection and missing-agent
@@ -159,6 +160,7 @@ export function SSHAgentChatPanel({
     <>
       <TabStripPopoverMenu
         trigger={<History size={13} aria-hidden="true" />}
+        triggerAnchor={tourAnchor('ssh-chat-history')}
         triggerClassName={chatHeaderActionClassName}
         triggerTitle="Session history"
         triggerAriaLabel="Session history"
@@ -180,6 +182,7 @@ export function SSHAgentChatPanel({
       </TabStripPopoverMenu>
       <button
         type="button"
+        {...tourAnchor('ssh-chat-new-session')}
         title="New session"
         aria-label="New session"
         onClick={handleNewSession}

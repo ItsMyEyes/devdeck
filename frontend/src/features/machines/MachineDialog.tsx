@@ -20,8 +20,8 @@ function tailscaleGuidance(reason: TailscaleHubStatus['reason']): {
   switch (reason) {
     case 'not_installed':
       return {
-        title: "Tailscale isn't installed on this machine",
-        body: 'Remote runtimes reach this hub over your tailnet. Install Tailscale here, then restart DevDeck.',
+        title: "Tailscale's CLI isn't reachable from this machine",
+        body: "Remote runtimes reach this hub over your tailnet. Install Tailscale here — or, if the app is already installed, run its \"Install Tailscale command line tool\" menu action, since DevDeck shells out to the CLI. You can also skip Tailscale entirely and expose the hub on your local network from Settings › Network.",
         copyLabel: 'Copy Tailscale download link',
         copyValue: 'https://tailscale.com/download',
       }

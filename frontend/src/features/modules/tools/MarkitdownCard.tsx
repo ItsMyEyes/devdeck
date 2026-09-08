@@ -6,7 +6,7 @@ import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { ApiError, convertToMarkdown, type MarkitdownResult } from '@/lib/api'
 import { saveText } from '@/lib/saveFile'
 
-/** Uploads a document (pdf/docx/pptx/xlsx/image/audio/html/...) and converts it to markdown via markitdown. */
+/** Uploads a document (pdf/docx/pptx/xlsx/image/html/...) and converts it to markdown - fully self-contained, no external tools required. */
 export function MarkitdownCard() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState(false)
@@ -49,7 +49,7 @@ export function MarkitdownCard() {
         <div>
           <div className="text-[12.5px] font-medium text-devdeck-fg">Convert to Markdown</div>
           <div className="mt-0.5 text-[11px] text-devdeck-fg-2">
-            PDF, Word, PowerPoint, Excel, images, audio, HTML → markdown via markitdown.
+            PDF, Word, PowerPoint, Excel, images, HTML → markdown. Nothing to install.
           </div>
         </div>
         <Button variant="secondary" size="sm" disabled={pending} onClick={() => fileInputRef.current?.click()}>

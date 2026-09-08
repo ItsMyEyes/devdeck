@@ -48,7 +48,22 @@ import { DEFAULT_CONTEXT_WINDOW, DEFAULT_EFFORT } from '@/features/agent-chat/co
 import { ModelPicker } from '@/features/agent-chat/ModelPicker'
 import type { ModelChoice } from '@/features/agent-chat/ModelPicker'
 import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
+import { tourAnchor, type TourAnchor } from '@/features/tour/tourAnchors'
 import type { Machine } from '@/store/types'
+
+/** Keeps a pill's tour anchor on the row that is really on screen. This row
+ *  renders twice — once inline, once inside the "More controls" popup below
+ *  `@2xl/composer` — and only one of the two is ever visible. Anchoring both
+ *  would leave `document.querySelector` free to pick the hidden copy and
+ *  spotlight nothing.
+ *
+ *  Takes the built anchor rather than its name so each call site still reads
+ *  `tourAnchor('chat-model')` literally: `tourAnchors.guard.test.ts` greps the
+ *  source for exactly that call, and an anchor hidden behind a name argument
+ *  would look unattached to it. */
+function inlineOnly(variant: 'inline' | 'menu', anchor: { 'data-tour': TourAnchor }) {
+  return variant === 'inline' ? anchor : undefined
+}
 
 // The defaults live in `composerTurnOptions.ts` (a pure module the store can
 // import); re-exported here for the callers that always read them from this
@@ -276,10 +291,16 @@ function PillWrap({
   variant,
   first,
   shrink,
+  anchor,
   children,
 }: {
   variant: 'inline' | 'menu'
   first?: boolean
+  /** The guided tour's anchor for this pill. Passed only by the `inline`
+   *  variant — the `menu` copy renders the identical row inside a popover, so
+   *  attaching it to both would put two elements with the same `data-tour` in
+   *  the document and let the tour spotlight whichever came first. */
+  anchor?: { 'data-tour': TourAnchor }
   /** Lets this pill absorb the row's overflow instead of pushing its
    *  neighbours out. Exactly one pill should set it — the model pill, whose
    *  label is the only one whose length varies with the data.
@@ -293,6 +314,7 @@ function PillWrap({
 }) {
   return (
     <span
+      {...anchor}
       className={cn(
         'flex min-w-0 items-center',
         // `overflow-hidden` is the backstop, and it is load-bearing: `Button`'s
@@ -345,7 +367,7 @@ function PermissionPicker({
   const active = PERMISSION_OPTIONS.find((option) => option.value === displayed) ?? PERMISSION_OPTIONS[0]
 
   return (
-    <PillWrap variant={variant}>
+    <PillWrap variant={variant} anchor={inlineOnly(variant, tourAnchor('chat-permission'))}>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger render={<ComposerControl className={variant === 'menu' ? 'w-full justify-start' : undefined} />}>
           <ComposerControlIcon icon={active.icon} />
@@ -422,7 +444,7 @@ function EffortContextPicker({
   }
 
   return (
-    <PillWrap variant={variant}>
+    <PillWrap variant={variant} anchor={inlineOnly(variant, tourAnchor('chat-effort'))}>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger render={<ComposerControl className={variant === 'menu' ? 'w-full justify-start' : undefined} />}>
           <ComposerControlIcon icon={Gauge} />
@@ -571,7 +593,7 @@ function ContextWindowIndicator({
   const summary = `Context window: ${percentLabel}% used, ${formatTokenCount(contextTokens)} of ${formatTokenCount(max)} tokens`
 
   return (
-    <PillWrap variant={variant}>
+    <PillWrap variant={variant} anchor={inlineOnly(variant, tourAnchor('chat-usage'))}>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger
           render={<ComposerControl aria-label={summary} title={summary} className={cn('px-1.5', variant === 'menu' && 'w-full justify-start')} />}
@@ -630,7 +652,7 @@ export function ComposerControls({
 }: ComposerControlsProps) {
   return (
     <>
-      <PillWrap variant={variant} first shrink>
+      <PillWrap variant={variant} first shrink anchor={inlineOnly(variant, tourAnchor('chat-model'))}>
         <ModelPicker
           machine={machine}
           worktreeAgentId={worktreeAgentId}

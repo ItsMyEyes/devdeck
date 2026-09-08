@@ -389,11 +389,15 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 // switchModelIfNeeded sends set_model when the turn asks for a different
 // model than the session is currently running. Only attempted in explicit
 // "provider/id" form: set_model's schema takes provider and modelId as
-// separate fields, and a bare id (the shape DevDeck's model catalog
-// currently hands out for pi — see detect.ReadModels) can't be split into
-// those without guessing which of Pi's 15+ providers it belongs to. A bare
-// id therefore leaves the session on its current model rather than risk a
-// wrong guess; the turn still runs, just not on the requested model.
+// separate fields, and a bare id can't be split into those without guessing
+// which of Pi's providers it belongs to. A bare id therefore leaves the
+// session on its current model rather than risk a wrong guess; the turn still
+// runs, just not on the requested model. detect.ReadModels always yields the
+// qualified form, so this is a guard against hand-entered ids, not the norm.
+//
+// Cut takes the FIRST slash on purpose — an openrouter id contains one of its
+// own ("openrouter/aion-labs/aion-2.0" is provider "openrouter", modelId
+// "aion-labs/aion-2.0"), which is exactly what set_model expects.
 func (a *adapter) switchModelIfNeeded(sess *session, model string) {
 	if model == "" || model == sess.model {
 		return

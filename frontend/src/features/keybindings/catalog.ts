@@ -22,13 +22,22 @@ import type { Chord } from '@/features/keybindings/chord'
  * inside one; Cmd+S saves a file but stashes a prompt when the chat composer
  * holds focus — and flagging those would make the conflict column noise.
  */
-export type KeybindingScope = 'workspace' | 'terminal' | 'editor' | 'explorer' | 'browser' | 'chat' | 'git'
+export type KeybindingScope =
+  | 'workspace'
+  | 'terminal'
+  | 'editor'
+  | 'document'
+  | 'explorer'
+  | 'browser'
+  | 'chat'
+  | 'git'
 
 /** Full sentences: this reads as the one-line subtitle under a section heading. */
 export const SCOPE_LABEL: Record<KeybindingScope, string> = {
   workspace: 'Active anywhere in the workspace.',
   terminal: 'Active while a terminal or SSH pane has focus.',
   editor: 'Active while a file editor has focus.',
+  document: 'Active while a rendered markdown document has focus — the rich-text .md view, a preview tab, or an issue description.',
   explorer: 'Active while the file explorer tree has focus.',
   browser: 'Active while a browser tile has focus.',
   chat: 'Active while the agent chat composer has focus.',
@@ -207,6 +216,15 @@ export const KEYBINDING_COMMANDS: KeybindingCommand[] = [
     scope: 'terminal',
     defaults: ['mod+f'],
   },
+  {
+    id: 'terminal.selectAll',
+    label: 'Select all scrollback',
+    description:
+      "Selects the terminal's whole buffer. xterm.js ships no binding for this, and the browser's own Select All acts on xterm's hidden one-character input instead — so without this the chord looks dead.",
+    section: 'Terminal & SSH',
+    scope: 'terminal',
+    defaults: ['mod+a'],
+  },
 
   // ---- Editor ------------------------------------------------------------
   {
@@ -216,6 +234,30 @@ export const KEYBINDING_COMMANDS: KeybindingCommand[] = [
     section: 'Editor',
     scope: 'editor',
     defaults: ['mod+s'],
+  },
+
+  // ---- Markdown documents ------------------------------------------------
+  //
+  // Monaco owns both of these chords inside a *raw* buffer and needs no row
+  // here. These are for the surfaces Monaco isn't on: the WYSIWYG .md canvas,
+  // the rendered preview tab, and an issue description with its comments.
+  {
+    id: 'document.find',
+    label: 'Find in document',
+    description:
+      'Opens a find bar over the rendered markdown, with match count and next/previous. Raw markdown keeps Monaco\'s own find widget.',
+    section: 'Markdown documents',
+    scope: 'document',
+    defaults: ['mod+f'],
+  },
+  {
+    id: 'document.selectAll',
+    label: 'Select all',
+    description:
+      'Scopes Select All to the document rather than the whole page — which is what an unfocused rendered view would otherwise hand the browser.',
+    section: 'Markdown documents',
+    scope: 'document',
+    defaults: ['mod+a'],
   },
 
   // ---- File explorer -----------------------------------------------------

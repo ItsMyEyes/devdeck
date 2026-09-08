@@ -32,6 +32,7 @@ import type { Machine } from '@/store/types'
 import type { AgentThreadView } from '@/features/agent-chat/types'
 import type { AgentSocketStatus } from '@/features/agent-chat/useAgentChatSocket'
 import { TelegramPublishButton } from '@/features/agent-chat/TelegramPublishButton'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 
 const THREAD_STATUS_LABEL: Record<AgentThreadView['status'], string> = {
   idle: 'Idle',
@@ -103,7 +104,10 @@ export function ChatHeader({ machine, worktreeId, threadKey, socketStatus, threa
     // at rail width the fixed row (icon + "Chat" + a connection-name badge +
     // buttons + "Idle") ran past the edge. Nothing is dropped — the badge
     // truncates and the status word folds down to its dot, both reversibly.
-    <div className="@container/chat-header flex min-w-0 flex-none items-center gap-2 border-b border-devdeck-hairline bg-devdeck-pane px-2.5 py-2 @sm/chat-header:px-4 @sm/chat-header:py-2.5">
+    <div
+      {...tourAnchor('chat-header')}
+      className="@container/chat-header flex min-w-0 flex-none items-center gap-2 border-b border-devdeck-hairline bg-devdeck-pane px-2.5 py-2 @sm/chat-header:px-4 @sm/chat-header:py-2.5"
+    >
       <MessageSquare size={14} className="flex-none text-devdeck-fg-2" />
       <span className="flex-none text-[13px] font-medium text-devdeck-fg">Chat</span>
       {threadSuffix ? (

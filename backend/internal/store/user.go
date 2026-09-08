@@ -9,19 +9,21 @@ import (
 )
 
 const userColumns = `id, email, password_hash, totp_secret_enc, totp_enabled, backup_code_hashes,
-	failed_attempts, lockout_level, locked_until, last_failed_at, created_at`
+	failed_attempts, lockout_level, locked_until, last_failed_at, password_set, desktop_operator, created_at`
 
 func scanUser(sc scanner) (domain.User, error) {
 	var u domain.User
-	var totpEnabled int
+	var totpEnabled, passwordSet, desktopOperator int
 	var backupCodesJSON string
 	var lockedUntil, lastFailedAt sql.NullString
 	err := sc.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.TotpSecretEnc, &totpEnabled, &backupCodesJSON,
-		&u.FailedAttempts, &u.LockoutLevel, &lockedUntil, &lastFailedAt, &u.CreatedAt)
+		&u.FailedAttempts, &u.LockoutLevel, &lockedUntil, &lastFailedAt, &passwordSet, &desktopOperator, &u.CreatedAt)
 	if err != nil {
 		return u, err
 	}
 	u.TotpEnabled = totpEnabled != 0
+	u.PasswordSet = passwordSet != 0
+	u.DesktopOperator = desktopOperator != 0
 	if err := json.Unmarshal([]byte(backupCodesJSON), &u.BackupCodeHashes); err != nil {
 		return u, err
 	}
@@ -58,6 +60,18 @@ func (s *Store) UserByEmail(email string) (domain.User, error) {
 	return u, nil
 }
 
+// DesktopOperatorUser returns the account KeySession auto-created for the
+// desktop shell, whatever the operator has since renamed it to. Not found when
+// this hub's only account was registered by hand.
+func (s *Store) DesktopOperatorUser() (domain.User, error) {
+	u, err := scanUser(s.db.QueryRow(
+		`SELECT ` + userColumns + ` FROM users WHERE desktop_operator = 1 ORDER BY created_at, id LIMIT 1`))
+	if err != nil {
+		return domain.User{}, mapNotFound(err)
+	}
+	return u, nil
+}
+
 // UserCount returns the number of registered users (0 or 1 in the
 // single-operator model; the service layer enforces the cap).
 func (s *Store) UserCount() (int, error) {
@@ -84,6 +98,10 @@ func (s *Store) UpdateUser(id string, p port.UserPatch) (domain.User, error) {
 		return domain.User{}, err
 	}
 	if err := firstErr(
+		setStr(s.db, "users", "email", id, p.Email),
+		setStr(s.db, "users", "password_hash", id, p.PasswordHash),
+		setBool(s.db, "users", "password_set", id, p.PasswordSet),
+		setBool(s.db, "users", "desktop_operator", id, p.DesktopOperator),
 		setStr(s.db, "users", "totp_secret_enc", id, p.TotpSecretEnc),
 		setBool(s.db, "users", "totp_enabled", id, p.TotpEnabled),
 		setJSONStrSlice(s.db, "users", "backup_code_hashes", id, p.BackupCodeHashes),

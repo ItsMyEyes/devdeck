@@ -12,7 +12,7 @@ import {
   Power,
   PowerOff,
   Search,
-  SlidersHorizontal,
+  Settings,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -44,6 +44,11 @@ const SLOTS = [
 
 type InnerTab = 'profiles' | 'editor'
 
+/** Agents whose LLM env profiles DevDeck can write — see the backend's
+ *  `validateEnvProfileAgent`. Every other installed agent still gets this
+ *  panel, showing its config file alone. */
+const ENV_PROFILE_AGENTS = new Set(['claude', 'codex'])
+
 interface PendingRemoval {
   profile: EnvProfileSummary
 }
@@ -68,6 +73,13 @@ export function EnvProfileManagement({
   const [editing, setEditing] = useState<EnvProfileSummary | null>(null)
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
   const [innerTab, setInnerTab] = useState<InnerTab>('profiles')
+  // Only Claude and Codex have LLM env profiles; the other agents get this
+  // panel purely for their config file. Deriving the shown tab instead of
+  // syncing state means switching to pi lands on the editor without a frame of
+  // an empty profile list, and switching back to Claude restores the tab the
+  // operator was actually on.
+  const supportsProfiles = ENV_PROFILE_AGENTS.has(agentId)
+  const activeTab: InnerTab = supportsProfiles ? innerTab : 'editor'
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [envExpanded, setEnvExpanded] = useState(false)
   const activate = useActivateAgentEnvProfile()
@@ -144,25 +156,43 @@ export function EnvProfileManagement({
   const currentAgent = allSettingsAgents.find((a) => a.id === agentId)
 
   return (
-    <div className="flex flex-none flex-col md:min-h-0 md:flex-1">
+    <div className="flex flex-none flex-col md:min-h-[24rem] md:flex-1">
       {/* ── stat header ── */}
-      <div className="grid flex-none grid-cols-2 border-b border-devdeck-border bg-devdeck-pane/15 md:grid-cols-[minmax(260px,1.2fr)_140px_140px]">
+      <div
+        className={cn(
+          'grid flex-none grid-cols-2 border-b border-devdeck-border bg-devdeck-pane/15',
+          supportsProfiles && 'md:grid-cols-[minmax(260px,1.2fr)_140px_140px]',
+        )}
+      >
         {/* description + agent switcher */}
-        <div className="col-span-2 flex flex-col border-b border-devdeck-border px-4 pb-3 pt-3 md:col-span-1 md:border-b-0 md:border-r md:pb-0">
+        <div
+          className={cn(
+            'col-span-2 flex flex-col px-4 pb-3 pt-3',
+            // The border-and-column treatment only earns its keep next to the
+            // stat tiles; without them it would draw a rule down empty space.
+            supportsProfiles && 'border-b border-devdeck-border md:col-span-1 md:border-b-0 md:border-r md:pb-0',
+          )}
+        >
           <div className="flex items-center gap-2.5">
-            <SlidersHorizontal size={16} className="text-devdeck-fg-2" />
+            <Settings size={16} className="text-devdeck-fg-2" />
             <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-devdeck-fg">
-              LLM environments
+              {supportsProfiles ? 'LLM environments' : 'Agent settings'}
             </h2>
           </div>
           <p className="mt-1.5 max-w-[48ch] text-[11.5px] leading-relaxed text-devdeck-fg-2">
-            Save provider profiles and switch the live one. Activating writes the{' '}
-            <span className="font-mono">env</span> block into settings.json.
+            {supportsProfiles ? (
+              <>
+                Save provider profiles and switch the live one. Activating writes the{' '}
+                <span className="font-mono">env</span> block into settings.json.
+              </>
+            ) : (
+              <>Edit this agent&apos;s own configuration file on {machine.name}.</>
+            )}
           </p>
 
           {/* agent switcher pills */}
           {allSettingsAgents.length > 1 ? (
-            <div className="mt-5 mb-5 flex gap-1.5" role="radiogroup" aria-label="Select agent">
+            <div className="mt-5 mb-5 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Select agent">
               {allSettingsAgents.map((agent) => (
                 <button
                   key={agent.id}
@@ -191,30 +221,34 @@ export function EnvProfileManagement({
           ) : null}
         </div>
 
-        {/* profiles count */}
-        <div className="flex flex-col justify-center border-r border-devdeck-border px-4 py-3">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-fg-2">
-            Profiles
-          </span>
-          <span className="mt-0.5 font-mono text-[22px] font-semibold leading-none tracking-tight text-devdeck-fg">
-            {profiles.length}
-          </span>
-        </div>
+        {supportsProfiles ? (
+          <>
+            {/* profiles count */}
+            <div className="flex flex-col justify-center border-r border-devdeck-border px-4 py-3">
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-fg-2">
+                Profiles
+              </span>
+              <span className="mt-0.5 font-mono text-[22px] font-semibold leading-none tracking-tight text-devdeck-fg">
+                {profiles.length}
+              </span>
+            </div>
 
-        {/* active count */}
-        <div className="flex flex-col justify-center px-4 py-3">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-fg-2">
-            Active
-          </span>
-          <span
-            className={cn(
-              'mt-0.5 font-mono text-[22px] font-semibold leading-none tracking-tight',
-              activeProfile ? 'text-devdeck-run' : 'text-devdeck-fg-2',
-            )}
-          >
-            {activeProfile ? 1 : 0}
-          </span>
-        </div>
+            {/* active count */}
+            <div className="flex flex-col justify-center px-4 py-3">
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-devdeck-fg-2">
+                Active
+              </span>
+              <span
+                className={cn(
+                  'mt-0.5 font-mono text-[22px] font-semibold leading-none tracking-tight',
+                  activeProfile ? 'text-devdeck-run' : 'text-devdeck-fg-2',
+                )}
+              >
+                {activeProfile ? 1 : 0}
+              </span>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* ── inner tabs ── */}
@@ -223,31 +257,33 @@ export function EnvProfileManagement({
         role="tablist"
         aria-label="Settings views"
       >
+        {supportsProfiles ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'profiles'}
+            onClick={() => setInnerTab('profiles')}
+            className={cn(
+              'flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              activeTab === 'profiles'
+                ? 'bg-devdeck-on text-devdeck-fg'
+                : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
+            )}
+          >
+            <Layers size={13} />
+            Profiles
+          </button>
+        ) : null}
         <button
           type="button"
           role="tab"
-          aria-selected={innerTab === 'profiles'}
-          onClick={() => setInnerTab('profiles')}
-          className={cn(
-            'flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-            innerTab === 'profiles'
-              ? 'bg-devdeck-on text-devdeck-fg'
-              : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
-          )}
-        >
-          <Layers size={13} />
-          Profiles
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={innerTab === 'editor'}
+          aria-selected={activeTab === 'editor'}
           onClick={() => setInnerTab('editor')}
           className={cn(
             'flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-            innerTab === 'editor'
+            activeTab === 'editor'
               ? 'bg-devdeck-on text-devdeck-fg'
               : 'text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg',
           )}
@@ -257,7 +293,7 @@ export function EnvProfileManagement({
         </button>
       </div>
 
-      {innerTab === 'profiles' ? (
+      {activeTab === 'profiles' ? (
         <>
           {/* ── active env collapsible list ── */}
           {activeEnv ? (
@@ -334,7 +370,7 @@ export function EnvProfileManagement({
             ) : profiles.length === 0 ? (
               <div className="flex min-h-[340px] flex-col items-center justify-center rounded-xl border border-dashed border-devdeck-border-strong text-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-devdeck-border-card bg-devdeck-card-wash text-devdeck-fg-2">
-                  <SlidersHorizontal size={18} strokeWidth={1.5} />
+                  <Settings size={18} strokeWidth={1.5} />
                 </div>
                 <p className="mt-3 text-[13px] font-medium text-devdeck-fg-2">No LLM environments saved</p>
                 <p className="mt-1.5 max-w-[44ch] text-[11.5px] leading-relaxed text-devdeck-fg-2">

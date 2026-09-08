@@ -3,6 +3,76 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.4
+
+**The Tools module no longer needs anything installed, machines wire
+themselves up, and the app finally works on a phone.**
+
+### Tools module: pure Go, nothing to install
+
+The document-conversion pipeline used to shell out to a Python `markitdown`
+venv, `pandoc`, and `mermaid-cli`, with a `--python-bin`/`--pandoc-bin`/
+`--mmdc-bin` config block to point at each one. All of that is gone —
+conversion now runs in-process in Go, so the Tools module works the moment
+the binary starts, with nothing to install or configure.
+
+### Automatic runtime binding
+
+Adding a machine used to mean hand-configuring `--hub-url`/`--hub-key` on
+that machine's runtime before it could talk back to the hub. The hub now
+pushes its own URL and the machine's hub-assigned id to the runtime
+automatically once it's registered — a runtime already started with an
+explicit `--hub-url` is left alone.
+
+### Bind address, LAN advertising, and account settings
+
+New Settings controls: a bind-address picker (loopback / all interfaces /
+a specific address) for the hub and runtime, and a real email/password
+account for a locally-hosted hub in place of the placeholder
+`operator@devdeck.desktop` — needed once the hub is reachable from more
+than localhost. Alongside the picker, a runtime bound to `0.0.0.0` no
+longer registers that unreachable address with the hub; it now advertises
+its actual outbound-facing IP.
+
+### Tailscale serve is now a live toggle
+
+Serve used to be an all-or-nothing launch flag, and a desktop-shell
+preflight race against Tailscale still starting at login could pin it
+permanently to "disabled" until the next restart. It's now a runtime
+toggle that can be flipped on or off without restarting. Fixed alongside
+it: DevDeck's own serve mapping lives under the CLI's `Foreground.<id>.Web`
+key, not the top-level `Web` the status check was reading, so DevDeck's own
+serve state always reported "unknown" no matter how it was actually
+configured.
+
+### Mobile layout
+
+The app has a mobile nav drawer, but nothing below the `md` breakpoint could
+open it. A top bar with a menu button now makes it reachable on a phone,
+and the sidebar gained a full labelled drawer mode to go with it.
+
+### Also in this release
+
+- A guided first-run tour, with a help button to replay it.
+- In-page find and scoped select-all in the chat transcript and issue view
+  — select-all in the transcript previously selected the entire app (tabs,
+  sidebar, composer), not just the message text.
+- Tab bodies now mount only when first activated instead of all at once on
+  every workspace switch (a measured ~490ms main-thread block with four
+  agent tabs open, gone).
+- The file explorer now reveals and scrolls to the active file when a tab
+  is opened or switched, VS Code-style.
+- Stacked `AskUserQuestion` prompts get explicit Back/Next navigation
+  instead of auto-advancing after 200ms with no way to revisit an earlier
+  answer or confirm before the last question submitted the turn.
+- Linux and Windows get their own Tauri window config and custom title-bar
+  controls, instead of sharing the macOS config that assumed native
+  traffic lights.
+- A new in-browser compress tool, and the command palette now works on the
+  web build, not just the desktop app.
+- The Agents sidebar item was a no-op when clicked from an SSH shell tile;
+  it now explicitly switches to the Agents tab.
+
 ## v0.2.3
 
 **The desktop app can update itself, subagents are visible, and Full access

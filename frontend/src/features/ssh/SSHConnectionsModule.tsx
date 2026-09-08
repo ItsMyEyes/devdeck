@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import {
   ArrowRight,
   Cable,
@@ -22,7 +21,9 @@ import { useScope } from '@/features/useScope'
 import { cn } from '@/lib/utils'
 import type { SSHConnection } from '@/store/types'
 import { useAcceptSSHHostKey, useMachines, useSSHConnections } from '@/features/data/queries'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import { ALL_SSH_GROUPS, useDevDeckStore } from '@/store/useDevDeckStore'
+import { useOpenSSHShell } from './useOpenSSHShell'
 
 type AuthType = SSHConnection['authType']
 
@@ -65,13 +66,19 @@ function HostKeyBadge({ connection }: { connection: SSHConnection }) {
   const showToast = useDevDeckStore((s) => s.showToast)
 
   if (!connection.hostKeyFingerprint) {
-    return <span className="font-mono text-[10px] text-devdeck-fg-2">trust on first connect</span>
+    // Anchored too, so the tour's host-key step lands on a host that has never
+    // been connected to — which is the state the step is most worth reading in.
+    return (
+      <span {...tourAnchor('ssh-host-key')} className="font-mono text-[10px] text-devdeck-fg-2">
+        trust on first connect
+      </span>
+    )
   }
 
   return (
     <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-devdeck-fg-2">
       <Fingerprint size={10} className="flex-none" />
-      <span className="min-w-0 truncate" title={connection.hostKeyFingerprint}>
+      <span {...tourAnchor('ssh-host-key')} className="min-w-0 truncate" title={connection.hostKeyFingerprint}>
         {connection.hostKeyFingerprint}
       </span>
       <button
@@ -103,21 +110,21 @@ function HostCard({
   jumpName: string | null
   variant?: 'card' | 'list'
 }) {
-  const navigate = useNavigate()
   const { wsId } = useScope()
-  const openSSHShellTab = useDevDeckStore((s) => s.openSSHShellTab)
+  const openShell = useOpenSSHShell(wsId)
   const openEditSSHConnection = useDevDeckStore((s) => s.openEditSSHConnection)
   const askDelete = useDevDeckStore((s) => s.askDelete)
 
   function connect() {
-    if (!wsId) return
-    openSSHShellTab(wsId, connection.id)
-    navigate({ to: '/w/$wsId', params: { wsId } })
+    openShell(connection.id)
   }
 
   if (variant === 'list') {
     return (
-      <article className="flex min-w-0 flex-col gap-2 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-strong lg:flex-row lg:items-center">
+      <article
+        {...tourAnchor('ssh-host-card')}
+        className="flex min-w-0 flex-col gap-2 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5 transition-colors hover:border-devdeck-border-strong lg:flex-row lg:items-center"
+      >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <HostGlyph authType={connection.authType} />
           <div className="min-w-0 flex-1">
@@ -144,6 +151,7 @@ function HostCard({
         <div className="flex flex-none items-center gap-1.5 pl-12 lg:pl-0">
           <button
             type="button"
+            {...tourAnchor('ssh-host-connect')}
             onClick={connect}
             className="flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-menu bg-transparent px-2.5 text-[11.5px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
@@ -152,6 +160,7 @@ function HostCard({
           </button>
           <button
             type="button"
+            {...tourAnchor('ssh-host-edit')}
             aria-label={`Edit ${connection.name}`}
             onClick={() => openEditSSHConnection(connection)}
             className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -160,6 +169,7 @@ function HostCard({
           </button>
           <button
             type="button"
+            {...tourAnchor('ssh-host-delete')}
             aria-label={`Delete ${connection.name}`}
             onClick={() => askDelete('ssh', connection.id, connection.name)}
             className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -172,7 +182,10 @@ function HostCard({
   }
 
   return (
-    <article className="group flex min-h-[150px] flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-strong">
+    <article
+      {...tourAnchor('ssh-host-card')}
+      className="group flex min-h-[150px] flex-col overflow-hidden rounded-control border border-devdeck-border-card bg-devdeck-glass-solid transition-colors hover:border-devdeck-border-strong"
+    >
       <div className="flex items-start gap-3 px-3 pb-2 pt-3">
         <HostGlyph authType={connection.authType} />
         <div className="min-w-0 flex-1 pt-0.5">
@@ -181,6 +194,7 @@ function HostCard({
         </div>
         <button
           type="button"
+          {...tourAnchor('ssh-host-delete')}
           aria-label={`Delete ${connection.name}`}
           onClick={() => askDelete('ssh', connection.id, connection.name)}
           className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-devdeck-fg-2 hover:bg-devdeck-red-tint hover:text-devdeck-err focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -213,6 +227,7 @@ function HostCard({
       <div className="grid grid-cols-2 gap-2 px-3 pb-3">
         <button
           type="button"
+          {...tourAnchor('ssh-host-connect')}
           onClick={connect}
           className="flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-devdeck-border-menu bg-transparent text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
@@ -221,6 +236,7 @@ function HostCard({
         </button>
         <button
           type="button"
+          {...tourAnchor('ssh-host-edit')}
           onClick={() => openEditSSHConnection(connection)}
           className="flex h-8 cursor-pointer items-center justify-center rounded-md bg-devdeck-card-wash text-[12px] font-semibold text-devdeck-fg-2 hover:bg-devdeck-glass-solid hover:text-devdeck-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
@@ -396,7 +412,7 @@ export function SSHConnectionsModule() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-container bg-devdeck-pane">
       <section className="flex-none border-b border-devdeck-border bg-devdeck-pane px-3 py-3 sm:px-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
+          <div {...tourAnchor('ssh-heading')} className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-[15px] font-semibold text-devdeck-fg">SSH</h1>
               <span className="rounded-full bg-devdeck-card-wash px-2 py-0.5 font-mono text-[10px] text-devdeck-fg-2">{hosts.length}</span>
@@ -415,7 +431,7 @@ export function SSHConnectionsModule() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
-            <div className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
+            <div {...tourAnchor('ssh-search')} className="relative min-w-0 sm:w-[280px] lg:w-[340px]">
               <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-devdeck-fg-2" />
               <input
                 value={query}
@@ -436,7 +452,12 @@ export function SSHConnectionsModule() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="grid h-9 grid-cols-2 rounded-control border border-devdeck-border-card bg-devdeck-pane p-1" role="group" aria-label="Host layout">
+              <div
+                {...tourAnchor('ssh-view-toggle')}
+                className="grid h-9 grid-cols-2 rounded-control border border-devdeck-border-card bg-devdeck-pane p-1"
+                role="group"
+                aria-label="Host layout"
+              >
                 <ViewButton label="Show card view" active={view === 'cards'} onClick={() => setView('cards')}>
                   <Grid2X2 size={14} />
                 </ViewButton>
@@ -447,6 +468,7 @@ export function SSHConnectionsModule() {
 
               <button
                 type="button"
+                {...tourAnchor('ssh-new-host')}
                 onClick={openAddSSHConnection}
                 className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-devdeck-border-accent bg-devdeck-accent-tint px-3 text-[12px] font-semibold text-devdeck-accent transition-colors hover:bg-devdeck-accent-tint-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >

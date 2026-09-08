@@ -120,6 +120,19 @@ type EnvModelOption struct {
 	ID string `json:"id"`
 }
 
+// AgentSettingsFile is an agent CLI's own configuration file, returned for
+// direct editing. Every installed agent has one, unlike EnvProfile — see
+// detect/settingsfile.go for where each agent keeps it.
+type AgentSettingsFile struct {
+	// Path is ~-shortened for display; the absolute path stays on the machine.
+	Path string `json:"path"`
+	// Syntax is the editor language: "json", "jsonc" or "toml".
+	Syntax string `json:"syntax"`
+	// Content is the file's raw text, or the empty default for its format when
+	// the agent has not written one yet.
+	Content string `json:"content"`
+}
+
 // AgentThread is a chat thread's read-model row for the sessions sidebar —
 // title, status, and recency without replaying the thread's whole event log.
 // Written by store.CommitAgentEvents when it commits an EvtThreadCreated

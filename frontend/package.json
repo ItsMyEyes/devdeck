@@ -65,6 +65,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
+    "driver.js": "^1.8.0",
     "immer": "^10.1.1",
     "lucide-react": "^1.22.0",
     "material-icon-theme": "^5.36.1",
@@ -88,6 +89,9 @@
     "use-stick-to-bottom": "^1.1.6",
     "vscode-languageserver-protocol": "^3.18.2",
     "zustand": "^5.0.14"
+  },
+  "overrides": {
+    "lightningcss": "^1.33.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",

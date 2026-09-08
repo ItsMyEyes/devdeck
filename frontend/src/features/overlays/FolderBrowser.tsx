@@ -1,34 +1,43 @@
 import { useState } from 'react'
-import { Check, ChevronRight, CornerLeftUp, Folder, FolderPlus, FolderTree, Loader2, X } from 'lucide-react'
+import { Check, ChevronRight, CornerLeftUp, Folder, FolderPlus, FolderTree, HardDrive, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { useCreateFsFolder, useFsList, useMachines } from '@/features/data/queries'
+import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
+import { useCreateFsFolder, useFsList, useFsRoots, useMachines } from '@/features/data/queries'
 import { DataLoading } from '@/features/screens/DataLoading'
-import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { formatBrowsePath, useDevDeckStore } from '@/store/useDevDeckStore'
 
 export function FolderBrowser() {
   const [creating, setCreating] = useState(false)
   const [folderName, setFolderName] = useState('')
   const [createError, setCreateError] = useState('')
+  const [rootsOpen, setRootsOpen] = useState(false)
   const browse = useDevDeckStore((s) => s.browse)
   const closeBrowse = useDevDeckStore((s) => s.closeBrowse)
   const enterFolder = useDevDeckStore((s) => s.enterFolder)
   const browseUp = useDevDeckStore((s) => s.browseUp)
   const browseTo = useDevDeckStore((s) => s.browseTo)
+  const browseToRoot = useDevDeckStore((s) => s.browseToRoot)
   const useFolder = useDevDeckStore((s) => s.useFolder)
 
-  const pathLabel = '~' + (browse.path.length ? '/' + browse.path.join('/') : '')
+  const pathLabel = formatBrowsePath(browse.root, browse.path)
   const machines = useMachines().data
   const machine = machines?.find((m) => m.id === browse.machineId)
   const { data, isLoading, error, refetch } = useFsList(machine, pathLabel)
+  const roots = useFsRoots(machine).data?.roots ?? []
   const createFolder = useCreateFsFolder(machine)
   const folders = data?.entries.filter((entry) => entry.isDir) ?? []
   const currentGit = data?.git ?? false
-  const crumbs = ['~', ...browse.path]
+  const crumbs = [browse.root, ...browse.path]
   const title = browse.target === 'cloneParent' ? 'Choose clone location' : 'Choose a folder'
+
+  function pickRoot(root: string) {
+    browseToRoot(root)
+    setRootsOpen(false)
+  }
 
   function cancelCreate() {
     setCreating(false)
@@ -152,7 +161,35 @@ export function FolderBrowser() {
             </Button>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-[3px] font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+          <TabStripPopoverMenu
+            trigger={<HardDrive size={12} />}
+            triggerClassName="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-accent"
+            triggerTitle="Switch drive or root"
+            triggerAriaLabel="Switch drive or root"
+            align="start"
+            open={rootsOpen}
+            onOpenChange={setRootsOpen}
+          >
+            <button
+              type="button"
+              onClick={() => pickRoot('~')}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
+            >
+              ~ Home
+            </button>
+            {roots.map((root) => (
+              <button
+                key={root}
+                type="button"
+                onClick={() => pickRoot(root)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
+              >
+                <HardDrive size={12} className="flex-none text-devdeck-fg-2" />
+                {root}
+              </button>
+            ))}
+          </TabStripPopoverMenu>
           {crumbs.map((name, i) => {
             const last = i === crumbs.length - 1
             return (

@@ -239,6 +239,27 @@ export function shellSidebarState(shellSidebars: Record<string, ShellSidebarStat
   return shellSidebars[shellKey] ?? DEFAULT_SHELL_SIDEBAR
 }
 
+/** Whether one shell's sidebar is open, with the unseen-key default resolved
+ *  per viewport rather than by `DEFAULT_SHELL_SIDEBAR` alone.
+ *
+ *  `inline` is ShellSidebar's own prop: true when the sidebar is a column
+ *  beside the terminal (desktop), false when it overlays the pane (phone
+ *  widths). A shell nobody has toggled starts open in the first case and
+ *  closed in the second — 280px of a 390px viewport spent on a file tree
+ *  leaves the terminal wrapping one character per line.
+ *
+ *  Every "is this sidebar open?" reader must come through here. Reading
+ *  `shellSidebarState(...).open` instead makes the toggle believe an
+ *  untouched mobile sidebar is already open, so its first tap writes the
+ *  state the pane is *already* in and appears to do nothing. */
+export function shellSidebarOpen(
+  shellSidebars: Record<string, ShellSidebarState>,
+  shellKey: string,
+  inline: boolean,
+): boolean {
+  return shellSidebars[shellKey]?.open ?? inline
+}
+
 /** `'sessions'` is legacy: the SSH rail used to carry a History button for a
  *  full-height session list, which the chat header's own history popover
  *  replaced (`SSHAgentChatPanel`). Kept in the union only so a value persisted
@@ -313,7 +334,12 @@ interface DevDeckState {
   spawn: SpawnState
   newProject: NewProjectState
   newWorkspace: { open: boolean; name: string }
-  browse: { open: boolean; target: BrowseTarget; path: string[]; machineId: string }
+  /** `root` anchors `path`'s segments: `'~'` for home, `'/'` for a Unix
+   *  filesystem root, or a Windows drive root like `'C:\\'` — see
+   *  formatBrowsePath/parseBrowseInitialPath. Segments themselves stay
+   *  root-agnostic, so enterFolder/browseUp/browseTo don't need to care
+   *  which root is active. */
+  browse: { open: boolean; target: BrowseTarget; root: string; path: string[]; machineId: string }
   edit: EditState
   confirmDelete: { kind: EditKind; id: string; name: string } | null
   confirmMachineAction: {
@@ -541,6 +567,9 @@ interface DevDeckState {
   enterFolder: (name: string) => void
   browseUp: () => void
   browseTo: (index: number) => void
+  /** Jumps straight to a different root (e.g. switching from ~ to a `D:\`
+   *  drive, or to `/`), clearing any segments under the previous root. */
+  browseToRoot: (root: string) => void
   useFolder: () => void
 
   // todos (draft only — mutations live in the module UI)
@@ -633,15 +662,46 @@ function projectOfWorktree(list: Workspace[], wtId: string): Project | null {
   return null
 }
 
-function browsePathSegments(path: string | undefined) {
+const WINDOWS_DRIVE_ROOT_RE = /^[A-Za-z]:[\\/]/
+
+/** Splits a path string into the root it's anchored to (`'~'`, `'/'`, or a
+ *  Windows drive like `'C:\\'`) plus the remaining path segments under that
+ *  root. Anything unrecognized (a bare relative path, an empty string)
+ *  falls back to home with no segments — same as the pre-existing
+ *  behavior, just widened to also accept absolute and drive-rooted paths
+ *  instead of collapsing them to home. */
+function parseBrowseInitialPath(path: string | undefined): { root: string; path: string[] } {
   const trimmed = path?.trim() ?? ''
-  if (!trimmed || trimmed === '~') return []
-  if (!trimmed.startsWith('~/')) return []
-  return trimmed
-    .slice(2)
-    .split('/')
-    .map((part) => part.trim())
-    .filter(Boolean)
+  if (!trimmed || trimmed === '~') return { root: '~', path: [] }
+  if (trimmed.startsWith('~/')) {
+    return {
+      root: '~',
+      path: trimmed.slice(2).split('/').map((part) => part.trim()).filter(Boolean),
+    }
+  }
+  if (WINDOWS_DRIVE_ROOT_RE.test(trimmed)) {
+    return {
+      root: trimmed[0].toUpperCase() + ':\\',
+      path: trimmed.slice(2).split(/[\\/]+/).map((part) => part.trim()).filter(Boolean),
+    }
+  }
+  if (trimmed.startsWith('/')) {
+    return {
+      root: '/',
+      path: trimmed.slice(1).split('/').map((part) => part.trim()).filter(Boolean),
+    }
+  }
+  return { root: '~', path: [] }
+}
+
+/** Inverse of parseBrowseInitialPath: joins a root + segments back into the
+ *  path string the backend/other UI expects, using that root's native
+ *  separator (`/` for home and Unix roots, `\` under a Windows drive). */
+export function formatBrowsePath(root: string, path: string[]): string {
+  if (root === '~') return '~' + (path.length ? '/' + path.join('/') : '')
+  if (root === '/') return '/' + path.join('/')
+  const base = root.replace(/[\\/]+$/, '')
+  return path.length ? `${base}\\${path.join('\\')}` : root
 }
 
 export const useDevDeckStore = create<DevDeckState>()(
@@ -656,7 +716,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '', existingWtId: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
       newWorkspace: { open: false, name: '' },
-      browse: { open: false, target: 'newPath', path: [], machineId: '' },
+      browse: { open: false, target: 'newPath', root: '~', path: [], machineId: '' },
       edit: { kind: null, id: null, a: '', b: '', model: '' },
       confirmDelete: null,
       confirmMachineAction: null,
@@ -960,6 +1020,7 @@ export const useDevDeckStore = create<DevDeckState>()(
             cloneFolder: '',
             machineId: '',
           }
+          s.browse.root = '~'
           s.browse.path = []
           s.wsMenuOpen = false
         }),
@@ -988,18 +1049,23 @@ export const useDevDeckStore = create<DevDeckState>()(
       cancelMachineAction: () => set((s) => void (s.confirmMachineAction = null)),
 
       openBrowse: (target, initialPath, machineId) =>
-        set(
-          (s) =>
-            void (s.browse = { open: true, target, path: browsePathSegments(initialPath), machineId: machineId ?? '' }),
-        ),
+        set((s) => {
+          const { root, path } = parseBrowseInitialPath(initialPath)
+          s.browse = { open: true, target, root, path, machineId: machineId ?? '' }
+        }),
       closeBrowse: () => set((s) => void (s.browse.open = false)),
       enterFolder: (name) => set((s) => void s.browse.path.push(name)),
       browseUp: () => set((s) => void s.browse.path.pop()),
       browseTo: (index) => set((s) => void (s.browse.path = s.browse.path.slice(0, index))),
+      browseToRoot: (root) =>
+        set((s) => {
+          s.browse.root = root
+          s.browse.path = []
+        }),
       useFolder: () =>
         set((s) => {
           const bp = s.browse.path
-          const path = '~' + (bp.length ? '/' + bp.join('/') : '')
+          const path = formatBrowsePath(s.browse.root, bp)
           const last = bp[bp.length - 1] ?? ''
           if (s.browse.target === 'edit') {
             s.browse.open = false

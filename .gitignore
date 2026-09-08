@@ -20,3 +20,6 @@ temp
 
 # @gg/ — reference only, kept locally but not tracked.
 gg/
+
+# Sidecar process output from local Tauri dev runs.
+sidecar.log

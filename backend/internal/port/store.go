@@ -222,6 +222,7 @@ type Store interface {
 	CreateUser(email, passwordHash, createdAt string) (domain.User, error)
 	UserByEmail(email string) (domain.User, error)
 	UserByID(id string) (domain.User, error)
+	DesktopOperatorUser() (domain.User, error)
 	UserCount() (int, error)
 	UpdateUser(id string, p UserPatch) (domain.User, error)
 
@@ -229,6 +230,7 @@ type Store interface {
 	CreateSession(userID, tokenHash string, expiresAt time.Time) error
 	SessionUserID(tokenHash string, now time.Time) (string, error)
 	DeleteSession(tokenHash string) error
+	DeleteUserSessionsExcept(userID, keepTokenHash string) error
 	CreatePendingLogin(userID, tokenHash string, expiresAt time.Time) error
 	PendingLoginUserID(tokenHash string, now time.Time) (string, error)
 	DeletePendingLogin(tokenHash string) error
@@ -461,6 +463,10 @@ type IssuePatch struct {
 
 // UserPatch carries optional fields for a partial user update.
 type UserPatch struct {
+	Email            *string
+	PasswordHash     *string
+	PasswordSet      *bool
+	DesktopOperator  *bool
 	TotpSecretEnc    *string
 	TotpEnabled      *bool
 	BackupCodeHashes *[]string

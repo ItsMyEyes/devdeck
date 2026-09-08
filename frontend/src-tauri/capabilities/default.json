@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions, plus window start_dragging: core:window:default omits it, so the data-tauri-drag-region title-bar strip could not move the window (drag.js fires the IPC on mousedown and the ACL rejected it). Double-click-to-maximize was unaffected because internal_toggle_maximize is in the default set.",
+  "description": "enables the default permissions, plus window start_dragging: core:window:default omits it, so the data-tauri-drag-region title-bar strip could not move the window (drag.js fires the IPC on mousedown and the ACL rejected it). Double-click-to-maximize was unaffected because internal_toggle_maximize is in the default set. close/minimize/toggle-maximize are likewise absent from core:window:default (it only carries read-only queries plus internal_toggle_maximize) — needed for the Windows/Linux custom caption buttons that replace the native title bar (decorations: false in tauri.windows.conf.json / tauri.linux.conf.json).",
   "windows": [
     "main"
   ],
@@ -11,8 +11,12 @@
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
     "allow-browser-tiles",
     "allow-hub-mode",
+    "allow-bind-config",
     "allow-diagnostics",
     "allow-prepare-for-update",
     "process:allow-restart",

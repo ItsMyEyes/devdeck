@@ -96,6 +96,71 @@ func TestOpenCodeModelsKeepOnlyProviderQualifiedIDs(t *testing.T) {
 	}
 }
 
+// Rows are captured verbatim from `pi --list-models` (pi 0.84.3). Two of them
+// carry the cases that broke the old reader: an openrouter id that itself
+// contains a slash, and a "~"-prefixed alias row.
+func TestPiModelsReadEveryProviderRow(t *testing.T) {
+	out := []byte(
+		"provider               model                                               context  max-out  thinking  images\n" +
+			"deepseek               deepseek-v4-flash                                   1M       384K     yes       no    \n" +
+			"ollama                 glm-5.2:cloud                                       128K     16.4K    yes       no    \n" +
+			"openrouter             aion-labs/aion-2.0                                  131.1K   32.8K    yes       no    \n" +
+			"openrouter             ~anthropic/claude-opus-latest                       1M       128K     yes       yes   \n" +
+			"deepseek               deepseek-v4-flash                                   1M       384K     yes       no    \n" +
+			"\n" +
+			"warning: catalog refresh failed\n")
+
+	want := []string{
+		"deepseek/deepseek-v4-flash",
+		"ollama/glm-5.2:cloud",
+		// The model column is never split on "/" — pi resolves this exact
+		// string back to one row.
+		"openrouter/aion-labs/aion-2.0",
+		"openrouter/~anthropic/claude-opus-latest",
+	}
+	got := parsePiListModels(out)
+	if !equalStrings(ids(got), want) {
+		t.Fatalf("ids = %v, want %v", ids(got), want)
+	}
+	if got[1].ContextWindow != 128000 {
+		t.Fatalf("context window = %d, want 128000", got[1].ContextWindow)
+	}
+	if got[2].ContextWindow != 131100 {
+		t.Fatalf("context window = %d, want 131100", got[2].ContextWindow)
+	}
+	// The header row must not become a model, and neither must a banner.
+	if parsePiListModels([]byte("provider  model  context  max-out  thinking  images\n")) != nil {
+		t.Fatal("a header-only table must be nil so the caller falls back")
+	}
+}
+
+// The custom-provider file is the fallback for a pi too old to have
+// --list-models. It is NOT the catalog: this is the exact shape that showed
+// three models in the picker while the CLI offered 412.
+func TestPiCustomProviderFileIsOnlyTheFallback(t *testing.T) {
+	home := t.TempDir()
+	agentDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	models := `{"providers":{"ollama":{"models":[{"id":"glm-5.2:cloud"},{"id":"kimi-k2.7-code:cloud"}]}}}`
+	if err := os.WriteFile(filepath.Join(agentDir, "models.json"), []byte(models), 0o644); err != nil {
+		t.Fatalf("write models: %v", err)
+	}
+	settings := `{"defaultProvider":"zai","defaultModel":"glm-5.3"}`
+	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	// The configured default is prepended because a custom-provider file need
+	// not contain the model this machine actually runs.
+	want := []string{"zai/glm-5.3", "ollama/glm-5.2:cloud", "ollama/kimi-k2.7-code:cloud"}
+	if got := ids(readPiModelsFromFile()); !equalStrings(got, want) {
+		t.Fatalf("ids = %v, want %v", got, want)
+	}
+}
+
 // The configured model is what this machine actually runs, and it is routinely
 // a custom-provider id that appears in no catalog — so it has to survive the
 // scan. A [model_providers.*] table's `name` key must not be mistaken for one.

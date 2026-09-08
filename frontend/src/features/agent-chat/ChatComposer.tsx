@@ -102,6 +102,7 @@ import type { AgentThreadView, ChatItem, PendingApproval, PendingUserInput } fro
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { Machine } from '@/store/types'
 import { matchesBinding } from '@/features/keybindings/store'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 
 /** t3code's own `COMPOSER_PERSIST_DEBOUNCE_MS` (`composerDraftStore.ts:67`,
  *  design spec §2): a keystroke's mirror-write re-serializes zustand's whole
@@ -592,6 +593,13 @@ export function ChatComposer({
     if (resolved) onRespondToUserInput(prompt.requestId, resolved)
   }
 
+  /** The panel's Back button. Nothing is discarded on the way back — `answers`
+   *  is keyed by question id, so an earlier question re-opens on the pick it
+   *  already had and stepping forward again finds every later answer intact. */
+  function onBack() {
+    setQuestionIndex((index) => Math.max(0, index - 1))
+  }
+
   function submit() {
     const trimmed = text.trim()
     const attachments = attachmentsRef.current?.attachments() ?? []
@@ -777,6 +785,7 @@ export function ChatComposer({
                   questionIndex={questionIndex}
                   onToggleOption={onToggleOption}
                   onAdvance={onAdvance}
+                  onBack={onBack}
                 />
               ) : pendingApprovals.length > 0 ? (
                 <ComposerPendingApprovalPanel
@@ -844,6 +853,7 @@ export function ChatComposer({
                 <div className="@2xl/composer:hidden">
                   <TabStripPopoverMenu
                     trigger={<MoreHorizontal size={14} aria-hidden="true" />}
+                    triggerAnchor={tourAnchor('chat-more-controls')}
                     triggerClassName={cn(composerControlClassName, 'flex w-7 items-center justify-center px-0')}
                     triggerTitle="More controls"
                     triggerAriaLabel="More controls"
@@ -857,6 +867,7 @@ export function ChatComposer({
               </div>
 
               <PromptInputButton
+                {...tourAnchor('chat-attach')}
                 aria-label="Attach image"
                 disabled={attachmentsDisabled}
                 title={attachmentsDisabled ? "Image attachments aren't supported on pi" : 'Attach an image'}
@@ -866,7 +877,15 @@ export function ChatComposer({
               </PromptInputButton>
 
               {interrupting ? (
-                <PromptInputButton aria-label="Stop" className={STOP} onClick={onAbort} title="Interrupt this turn">
+                // Carries the tour's send anchor too: it is the same slot at
+                // the end of the row, and the step describing it says so.
+                <PromptInputButton
+                  {...tourAnchor('chat-send')}
+                  aria-label="Stop"
+                  className={STOP}
+                  onClick={onAbort}
+                  title="Interrupt this turn"
+                >
                   <Square size={11} fill="currentColor" aria-hidden="true" />
                 </PromptInputButton>
               ) : followUpSubmission ? (
@@ -890,6 +909,7 @@ export function ChatComposer({
                    falls back to its own icon set, so a rejected turn shows the
                    vendored ✕ rather than an arrow that looks ready to send. */
                 <PromptInputSubmit
+                  {...tourAnchor('chat-send')}
                   className={SEND}
                   status={chatStatus === 'error' ? 'error' : 'ready'}
                   disabled={draft.length === 0}

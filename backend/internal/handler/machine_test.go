@@ -540,3 +540,82 @@ func TestGetMachineBusy404sForAnUnknownMachine(t *testing.T) {
 		t.Errorf("status = %d, want 404 for an unknown machine", rec.Code)
 	}
 }
+
+func TestGetMachineBindingStatusReportsUnknownWithNoCacheWired(t *testing.T) {
+	h := newTestMachineHandler(t)
+	m, err := h.st.CreateMachine("remote", "http://example.invalid", "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/binding-status", h.GetMachineBindingStatus)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/binding-status", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["known"] != false {
+		t.Errorf("known = %v, want false when no cache is wired", got["known"])
+	}
+}
+
+func TestGetMachineBindingStatusReportsCachedResult(t *testing.T) {
+	h := newTestMachineHandler(t)
+	cache := service.NewBindingStatusCache()
+	h.SetBindingCache(cache)
+	m, err := h.st.CreateMachine("remote", "http://example.invalid", "k", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.Set(m.ID, service.BindingStatus{HubReachable: false, Reason: "hub has no reachable address"})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/binding-status", h.GetMachineBindingStatus)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/binding-status", nil))
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["known"] != true {
+		t.Errorf("known = %v, want true", got["known"])
+	}
+	if got["hubReachable"] != false {
+		t.Errorf("hubReachable = %v, want false", got["hubReachable"])
+	}
+	if got["reason"] != "hub has no reachable address" {
+		t.Errorf("reason = %v, want %q", got["reason"], "hub has no reachable address")
+	}
+}
+
+func TestGetMachineBindingStatusAlwaysUnknownForLocalMachine(t *testing.T) {
+	h := newTestMachineHandler(t)
+	cache := service.NewBindingStatusCache()
+	h.SetBindingCache(cache)
+	m, err := h.st.CreateMachine("local", "http://127.0.0.1:8989", "k", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A local machine is never pushed to, so even a stray cache entry for its
+	// id (which should never happen) must not be reported as its status.
+	cache.Set(m.ID, service.BindingStatus{HubReachable: true, Adopted: true})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/machines/{id}/binding-status", h.GetMachineBindingStatus)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/machines/"+m.ID+"/binding-status", nil))
+
+	var got map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["known"] != false {
+		t.Errorf("known = %v, want false for a local machine", got["known"])
+	}
+}

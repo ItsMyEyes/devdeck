@@ -9,9 +9,13 @@ function bytesToHex(buf: ArrayBuffer): string {
     .join('')
 }
 
-/** Hex digest of UTF-8 text under the given algorithm. */
-export async function digestHex(text: string, algo: HashAlgorithm): Promise<string> {
-  const bytes = new TextEncoder().encode(text)
+/** Hex digest of arbitrary bytes under the given algorithm. */
+export async function digestHexBytes(bytes: BufferSource, algo: HashAlgorithm): Promise<string> {
   const digest = await crypto.subtle.digest(algo, bytes)
   return bytesToHex(digest)
+}
+
+/** Hex digest of UTF-8 text under the given algorithm. */
+export function digestHex(text: string, algo: HashAlgorithm): Promise<string> {
+  return digestHexBytes(new TextEncoder().encode(text), algo)
 }

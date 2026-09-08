@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ShellSidebarState } from '@/store/useDevDeckStore'
-import { shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import { shellSidebarOpen, shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 
 // Per-shell sidebar (open/panel/width), keyed by `wt:<worktreeId>` /
 // `ssh:<connectionId>` — see docs/superpowers/specs/2026-08-04-sidebar-shell-explorer-design.md §3.
@@ -15,6 +15,28 @@ describe('shellSidebars slice', () => {
   it('defaults an unseen key to open explorer at 280px', () => {
     const state = shellSidebarState(useDevDeckStore.getState().shellSidebars, 'wt:never-seen')
     expect(state).toEqual(DEFAULTS)
+  })
+
+  // A 280px file tree beside a 390px viewport leaves the terminal ~50px wide,
+  // wrapping one character per line — so on phone widths (where ShellSidebar
+  // overlays the pane, `inline={false}`) an untouched shell starts closed.
+  // Every reader must agree on this or the pane and its toggle disagree about
+  // the first tap; see `shellSidebarOpen`'s doc comment.
+  describe('shellSidebarOpen — viewport-dependent unseen-key default', () => {
+    it('defaults an unseen key to open when the sidebar is an inline column', () => {
+      expect(shellSidebarOpen(useDevDeckStore.getState().shellSidebars, 'wt:never-seen', true)).toBe(true)
+    })
+
+    it('defaults an unseen key to closed when the sidebar would overlay the pane', () => {
+      expect(shellSidebarOpen(useDevDeckStore.getState().shellSidebars, 'wt:never-seen', false)).toBe(false)
+    })
+
+    it('lets an explicit toggle win over the viewport default, both ways', () => {
+      useDevDeckStore.getState().setShellSidebarOpen('wt:a', true)
+      expect(shellSidebarOpen(useDevDeckStore.getState().shellSidebars, 'wt:a', false)).toBe(true)
+      useDevDeckStore.getState().setShellSidebarOpen('wt:a', false)
+      expect(shellSidebarOpen(useDevDeckStore.getState().shellSidebars, 'wt:a', true)).toBe(false)
+    })
   })
 
   it('setShellSidebarWidth clamps below the 200px floor', () => {

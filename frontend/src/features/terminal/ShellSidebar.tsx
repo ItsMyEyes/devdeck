@@ -4,8 +4,15 @@ import { Files, GitBranch, MessagesSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Machine } from '@/store/types'
 import type { ShellSidebarPanel } from '@/store/useDevDeckStore'
-import { SHELL_SIDEBAR_MAX_WIDTH, SHELL_SIDEBAR_MIN_WIDTH, shellSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
+import {
+  SHELL_SIDEBAR_MAX_WIDTH,
+  SHELL_SIDEBAR_MIN_WIDTH,
+  shellSidebarOpen,
+  shellSidebarState,
+  useDevDeckStore,
+} from '@/store/useDevDeckStore'
 import { SessionsPanel } from '@/features/agent-chat/SessionsPanel'
+import { tourAnchor } from '@/features/tour/tourAnchors'
 import type { FilesTarget } from './filesTarget'
 import type { GitDiffTarget } from './paneTree'
 import { GitPanel } from './GitPanel'
@@ -43,6 +50,17 @@ export interface ShellSidebarProps {
   onRequestQuickOpen: () => void
   onRequestContentSearch: () => void
   contentSearchShortcut?: string
+  /** The focused pane's currently open file, if any — forwarded straight
+   *  through to the Explorer panel's `TerminalExplorer.activePath` so it
+   *  auto-expands and highlights that file. See that prop's doc comment. */
+  activeFilePath?: string
+  /** Whether there is room to lay this out as an in-flow column beside the
+   *  terminal (the default). Pass `false` at phone widths: a 280px column next
+   *  to a 390px viewport leaves the terminal ~50px wide, wrapping every line
+   *  one character per row. When `false` the sidebar overlays the pane with a
+   *  tap-to-dismiss backdrop, and a shell the operator has never toggled
+   *  starts closed instead of open. */
+  inline?: boolean
 }
 
 /**
@@ -74,12 +92,15 @@ export function ShellSidebar({
   onRequestQuickOpen,
   onRequestContentSearch,
   contentSearchShortcut,
+  activeFilePath,
+  inline = true,
 }: ShellSidebarProps) {
   const shellSidebars = useDevDeckStore((s) => s.shellSidebars)
   const setShellSidebarPanel = useDevDeckStore((s) => s.setShellSidebarPanel)
   const setShellSidebarWidth = useDevDeckStore((s) => s.setShellSidebarWidth)
-
-  const { open, panel, width } = shellSidebarState(shellSidebars, shellKey)
+  const setShellSidebarOpen = useDevDeckStore((s) => s.setShellSidebarOpen)
+  const { panel, width } = shellSidebarState(shellSidebars, shellKey)
+  const open = shellSidebarOpen(shellSidebars, shellKey, inline)
   // A shell with no git support can still carry a stale 'git'/'sessions'
   // panel value (persisted from before, or hand-edited) — fall back to
   // explorer rather than mounting a GitPanel/SessionsPanel with no
@@ -134,12 +155,39 @@ export function ShellSidebar({
   )
 
   return (
-    <div className="flex min-h-0 flex-none" style={open ? undefined : { display: 'none' }}>
-      <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-card-wash" style={{ width }}>
+    <>
+      {/* Tap-to-dismiss backdrop for the overlay form. The pane header's
+          `ShellSidebarToggle` can also close it, but on a phone the sidebar
+          covers most of the pane and reaching back for that toggle is the
+          long way round. */}
+      {!inline && open ? (
+        <div
+          aria-hidden
+          onClick={() => setShellSidebarOpen(shellKey, false)}
+          className="absolute inset-0 z-20 bg-[rgba(6,7,9,0.55)]"
+        />
+      ) : null}
+      <div
+        className={cn(
+          'flex min-h-0',
+          // Overlaying keeps the terminal at full width underneath instead of
+          // handing 280px of a 390px viewport to the file tree. The pane roots
+          // that render this are `relative` so these insets resolve to them.
+          inline ? 'flex-none' : 'absolute inset-y-0 left-0 z-30 shadow-[8px_0_40px_rgba(0,0,0,0.55)]',
+        )}
+        style={open ? undefined : { display: 'none' }}
+      >
+      <div
+        className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden bg-devdeck-card-wash"
+        style={{ width: inline ? width : 'min(78vw, 320px)' }}
+      >
         {/* Only worth a switcher when there is something to switch between —
             an SSH shell has Explorer alone, so its header would be dead chrome. */}
         {git ? (
-          <div className="flex h-8 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-pane px-1.5">
+          <div
+            {...tourAnchor('shell-sidebar-tabs')}
+            className="flex h-8 flex-none items-center gap-1 border-b border-devdeck-border bg-devdeck-pane px-1.5"
+          >
             <PanelButton
               label="Explorer"
               icon={<Files size={13} />}
@@ -171,6 +219,7 @@ export function ShellSidebar({
             onRequestQuickOpen={onRequestQuickOpen}
             onRequestContentSearch={onRequestContentSearch}
             contentSearchShortcut={contentSearchShortcut}
+            activePath={activeFilePath}
           />
         </div>
         {git ? (
@@ -197,22 +246,28 @@ export function ShellSidebar({
         ) : null}
       </div>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        aria-valuenow={width}
-        aria-valuemin={SHELL_SIDEBAR_MIN_WIDTH}
-        aria-valuemax={SHELL_SIDEBAR_MAX_WIDTH}
-        tabIndex={0}
-        className="w-1 flex-none cursor-col-resize touch-none bg-devdeck-border transition-colors hover:bg-devdeck-line active:bg-devdeck-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onDoubleClick={handleDoubleClick}
-        onKeyDown={handleKeyDown}
-      />
-    </div>
+      {/* The overlay form is viewport-sized, not operator-sized — there is
+          nothing beside it to trade width with, so the drag strip has no
+          meaning there (and would sit under a thumb on a touch screen). */}
+      {inline ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={width}
+          aria-valuemin={SHELL_SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SHELL_SIDEBAR_MAX_WIDTH}
+          tabIndex={0}
+          className="w-1 flex-none cursor-col-resize touch-none bg-devdeck-border transition-colors hover:bg-devdeck-line active:bg-devdeck-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onDoubleClick={handleDoubleClick}
+          onKeyDown={handleKeyDown}
+        />
+      ) : null}
+      </div>
+    </>
   )
 }
 

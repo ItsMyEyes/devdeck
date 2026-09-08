@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { SSHRightSidebarPanel } from '@/store/useDevDeckStore'
 import { SSH_RIGHT_SIDEBAR_MAX_WIDTH, SSH_RIGHT_SIDEBAR_MIN_WIDTH, sshRightSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { StatsPane } from '@/features/stats/StatsPane'
+import { tourAnchor, type TourAnchor } from '@/features/tour/tourAnchors'
 import { useAgentThreads } from '@/features/data/queries'
 import { HUB_MACHINE, SSHAgentChatPanel } from './SSHAgentChatPanel'
 import { SSHForwardsPanel } from './SSHForwardsPanel'
@@ -185,6 +186,7 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
       <div className="flex w-9 flex-none flex-col items-center gap-1 border-l border-devdeck-border bg-devdeck-pane py-1.5">
         <RailButton
           label="DevOps Chat"
+          anchor={tourAnchor('ssh-rail-chat')}
           icon={<Bot size={15} />}
           active={open && panel === 'chat'}
           onClick={() => handleIconClick('chat')}
@@ -196,12 +198,14 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
             of which this was the worse one. */}
         <RailButton
           label="Stats"
+          anchor={tourAnchor('ssh-rail-stats')}
           icon={<Activity size={15} />}
           active={open && panel === 'stats'}
           onClick={() => handleIconClick('stats')}
         />
         <RailButton
           label="Port Forwarding"
+          anchor={tourAnchor('ssh-rail-forwards')}
           icon={<Waypoints size={15} />}
           active={open && panel === 'forwards'}
           onClick={() => handleIconClick('forwards')}
@@ -211,10 +215,25 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
   )
 }
 
-function RailButton({ label, icon, active, onClick }: { label: string; icon: ReactNode; active: boolean; onClick: () => void }) {
+function RailButton({
+  label,
+  icon,
+  active,
+  anchor,
+  onClick,
+}: {
+  label: string
+  icon: ReactNode
+  active: boolean
+  /** The guided tour's anchor for this rail entry — every one of the three is
+   *  a step in the SSH chapter. */
+  anchor?: { 'data-tour': TourAnchor }
+  onClick: () => void
+}) {
   return (
     <button
       type="button"
+      {...anchor}
       title={label}
       aria-label={label}
       aria-pressed={active}

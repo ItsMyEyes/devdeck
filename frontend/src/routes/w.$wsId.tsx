@@ -4,6 +4,8 @@ import { fetchWorkspaces } from '@/lib/api'
 import { qk } from '@/features/data/keys'
 import { useSettings, useUpdateSettings, useWorkspaces } from '@/features/data/queries'
 import { Sidebar } from '@/features/sidebar/Sidebar'
+import { MobileTopBar } from '@/features/layout/MobileTopBar'
+import { WebPaletteHost } from '@/features/palette/WebPaletteHost'
 import { GlobalOverlays } from '@/features/overlays/GlobalOverlays'
 import { WorkspaceTileArea } from '@/features/tabs/WorkspaceTileArea'
 import { useHasMacVibrancy, useIsTauri } from '@/features/tabs/useIsTauri'
@@ -121,9 +123,19 @@ function WorkspaceLayout() {
           tabs, "+" spawn action) on every workspace route — Header would
           just duplicate it, so it only renders on the web build. */}
       {/* {!workspaceMode && !isTauri && <Header />} */}
+      {/* The phone's only way to reach the sidebar drawer — the rail is
+          off-canvas below `md` and the Tauri tab strip that replaced Header as
+          the top bar never mounts on the web. `md:hidden` lives inside the
+          component, so desktop is untouched. In workspace mode the rail stays
+          permanently visible instead (`mobileDrawer` below), so no trigger is
+          needed there. */}
+      {!workspaceMode && !isTauri ? <MobileTopBar /> : null}
       <div className="relative flex min-h-0 flex-1">
         <Sidebar mobileDrawer={!workspaceMode && !isTauri} />
-        <section className="flex min-w-0 flex-1 flex-col gap-[var(--devdeck-gap)] p-[var(--devdeck-gap)] pl-0">
+        {/* `pl-0` only from `md` up: it exists to close the gap against the
+            inline rail, and below `md` the rail is off-canvas, so keeping it
+            there ran the content flush into the left edge of the screen. */}
+        <section className="flex min-w-0 flex-1 flex-col gap-[var(--devdeck-gap)] p-[var(--devdeck-gap)] max-md:gap-2 max-md:p-2 md:pl-0">
           {isTauri ? (
             // Always mounted so the pinned strip never disappears; only its
             // tiling body is suppressed off the tile-owned routes
@@ -136,6 +148,10 @@ function WorkspaceLayout() {
           {!inTiledScope ? <Outlet /> : null}
         </section>
       </div>
+      {/* The desktop build mounts the palette (and its Ctrl/Cmd+K chord) inside
+          WorkspaceTileArea, which never renders here — so without this the web
+          build has no palette at all. */}
+      {!isTauri ? <WebPaletteHost wsId={wsId} /> : null}
       <GlobalOverlays />
     </div>
   )
