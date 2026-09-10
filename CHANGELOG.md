@@ -3,6 +3,27 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.6
+
+**Codex SSH chat can reach `devdeck-ssh` again, and Settings can check for
+updates on demand.**
+
+### Fixed: `devdeck-ssh` "command not found" on Codex-based SSH chat
+
+Codex and OpenCode run one process per *instance*, not per thread, so the
+per-thread `PATH` prepend that makes `devdeck-ssh` resolve (built when an SSH
+chat thread's workspace is seeded) never reached their already-running
+process — only claude/pi, which spawn a process per thread, ever saw it. A
+shared `devdeck-ssh` shim is now seeded once at startup and threaded into
+every freshly started instance's environment, so it resolves regardless of
+which provider or thread got there first.
+
+### Added: manual "Check for updates" button
+
+The desktop Settings → About panel only checked for updates automatically,
+every 6 hours, with no way to ask sooner. It now has a button that runs the
+same check on demand.
+
 ## v0.2.5
 
 **A lighter desktop install, and Windows no longer accumulates orphaned agent

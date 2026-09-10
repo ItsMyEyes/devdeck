@@ -132,6 +132,41 @@ func BinDir(workspace string) string {
 	return filepath.Join(workspace, binSubdir)
 }
 
+// SeedGlobalShim installs the devdeck-ssh shim at BinDir(root), with no
+// per-thread workspace around it — root/bin/devdeck-ssh, not
+// root/<slug>/bin/devdeck-ssh.
+//
+// This exists because Seed's own shim never reaches every provider: claude
+// and pi spawn one OS process per THREAD, so a thread's SessionStartInput.Env
+// (which is where the caller prepends Seed's own BinDir to PATH) reaches that
+// process directly. codex and opencode spawn one process per INSTANCE,
+// started lazily by whichever thread's session happens to start it first,
+// and its env is fixed for that process's whole life — a later SSH thread's
+// own workspace shim can never reach it. This shim is the PATH entry that
+// closes that gap: baked into every instance's env at creation time (see
+// Reactor.InstanceEnv), independent of which thread — if any — triggers it.
+//
+// Safe to share across every thread and provider despite being a single
+// copy: the binding it forwards to (which SSH connection, which token) is
+// resolved at runtime from the CALLING process's own working directory (see
+// sshtoolcli's doc comment), never from which copy of the shim ran. Content
+// is byte-identical to a per-thread one — see writeShim.
+//
+// Returns BinDir(root), or "" with no error when hostExe is empty (Seed's
+// own writeShim doc comment explains why that is the right outcome).
+func SeedGlobalShim(root, hostExe string) (string, error) {
+	if err := os.MkdirAll(filepath.Join(root, binSubdir), dirMode); err != nil {
+		return "", err
+	}
+	if err := writeShim(root, hostExe); err != nil {
+		return "", err
+	}
+	if hostExe == "" {
+		return "", nil
+	}
+	return BinDir(root), nil
+}
+
 // writeShim installs bin/devdeck-ssh, a two-line forwarder to
 // `<hostExe> ssh-tool "$@"`.
 //

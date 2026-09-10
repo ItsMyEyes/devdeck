@@ -668,6 +668,18 @@ type Reactor struct {
 	// testable without a real worktree — main.go builds this from port.Store.
 	InstanceFor func(threadID string) (provider.InstanceID, provider.SessionStartInput, error)
 
+	// InstanceEnv seeds every freshly started instance's process env
+	// (InstanceSpec.Env), independent of whichever thread's session happens
+	// to trigger the start. It exists for providers whose adapter runs ONE
+	// process per INSTANCE rather than per thread (codex, opencode): for
+	// those, the per-thread env InstanceFor's SessionStartInput.Env carries —
+	// e.g. an SSH thread's devdeck-ssh PATH prepend — is applied only to
+	// whichever thread happens to start the instance first (claude/pi read it
+	// on every StartSession instead, since each spawns its own process). Nil
+	// is a valid, tested configuration: an instance simply starts with no
+	// extra env, same as before this field existed.
+	InstanceEnv map[string]string
+
 	// OnInstanceStarted fires exactly once per FRESHLY started instance, with
 	// the adapter just created. main.go uses it to start the Ingestion loop
 	// that drains Adapter.Events() back into the engine.
@@ -1294,6 +1306,7 @@ func (r *Reactor) ensureInstanceStarted(ctx context.Context, id provider.Instanc
 		InstanceID:  id,
 		DisplayName: string(id),
 		Config:      cfg,
+		Env:         r.InstanceEnv,
 		Enabled:     true,
 	})
 	if err != nil {

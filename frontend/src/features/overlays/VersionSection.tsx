@@ -38,7 +38,7 @@ export function VersionSection({ machineId }: { machineId: string | undefined })
   const isTauri = useIsTauri()
   // Safe to call on the web: the hook self-gates on the same Tauri test and
   // never runs a check, so `staged` stays null and this branch stays dead.
-  const { staged, installing, checking, downloading, install } = useDesktopUpdate()
+  const { staged, installing, checking, downloading, install, checkNow } = useDesktopUpdate()
   const desktopStaged = isTauri ? staged : null
   // Settings is opened deliberately, unlike the always-mounted pill, so
   // surfacing the in-flight state here does not create a launch-time
@@ -113,9 +113,9 @@ export function VersionSection({ machineId }: { machineId: string | undefined })
                 {desktopStatusLabel}
               </p>
             ) : (
-              <p className="max-w-[220px] text-right font-mono text-[10.5px] text-devdeck-fg-2">
-                The desktop app checks for updates on its own.
-              </p>
+              <Button variant="secondary" size="sm" onClick={() => void checkNow()}>
+                Check for updates
+              </Button>
             )
           ) : check.data?.managed ? (
             <p className="max-w-[220px] text-right font-mono text-[10.5px] text-devdeck-fg-2">

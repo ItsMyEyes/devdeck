@@ -41,9 +41,10 @@ const localMachine: Machine = {
 }
 
 const install = vi.fn()
+const checkNow = vi.fn()
 
 function update(over: Partial<DesktopUpdate> = {}): DesktopUpdate {
-  return { staged: null, installing: false, checking: false, downloading: false, install, ...over }
+  return { staged: null, installing: false, checking: false, downloading: false, install, checkNow, ...over }
 }
 
 function busyOk(data: MachineBusy) {

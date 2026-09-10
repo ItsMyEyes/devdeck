@@ -601,6 +601,27 @@ func main() {
 	// later verify against the same store.
 	tokenStore := sshtool.NewTokenStore()
 
+	// sshThreadsRoot holds every SSH thread's own seeded workspace
+	// (sshthread.Seed, in the Reactor.InstanceFor SSH branch below) plus the
+	// global devdeck-ssh shim seeded next — sibling directories under one
+	// root, never colliding: SlugForThread never produces the literal
+	// segment writeShim uses.
+	sshThreadsRoot := filepath.Join(filepath.Dir(*dbPath), "ssh-threads")
+
+	// globalSSHShimDir puts devdeck-ssh on PATH for every freshly started
+	// agent instance (Reactor.InstanceEnv below), not just the thread whose
+	// own workspace happens to seed it. codex and opencode run one process
+	// per INSTANCE rather than per thread (see their driver.go package
+	// comments), so a per-thread workspace's own shim — what
+	// Reactor.InstanceFor's SSH branch puts on PATH for claude/pi — never
+	// reaches whichever already-running process serves a LATER SSH thread.
+	// See sshthread.SeedGlobalShim's doc comment for why one shared copy is
+	// safe for every thread and provider.
+	globalSSHShimDir, err := sshthread.SeedGlobalShim(sshThreadsRoot, hostExecutable())
+	if err != nil {
+		log.Printf("agent: seed global devdeck-ssh shim: %v", err)
+	}
+
 	// loopbackHubURL is filled in once the real listener has bound, well
 	// below — --addr may use port 0 and get an OS-assigned port. Declared
 	// here so the SSH branch of Reactor.InstanceFor, built next, can close
@@ -719,6 +740,15 @@ func main() {
 		// Recalls persistent-memory context before every turn — see
 		// MemoryHooks above.
 		Memory: memoryHooks,
+		// Puts devdeck-ssh on PATH for every codex/opencode instance from the
+		// moment it starts — see globalSSHShimDir's doc comment for why those
+		// two providers need this and claude/pi do not. A nil map (the shim
+		// could not be seeded) is a valid, tested configuration: instances
+		// simply start with no extra env, same as before this field existed.
+		// agentPathEnv("") would instead prepend an empty PATH entry, which
+		// every shell resolves as the current directory — never build that
+		// even for a fallback.
+		InstanceEnv: instanceEnvFor(globalSSHShimDir),
 		// The Reactor is the only component that learns an adapter was just
 		// created, so it is what starts that adapter's Ingestion loop.
 		OnInstanceStarted: func(ctx context.Context, a provider.Adapter) {
@@ -830,7 +860,7 @@ func main() {
 				// previous session on this same thread, must not keep
 				// working once a fresh one exists.
 				token := tokenStore.Mint(threadID, connectionID)
-				dir, err := sshthread.Seed(filepath.Join(filepath.Dir(*dbPath), "ssh-threads"), sshthread.Binding{
+				dir, err := sshthread.Seed(sshThreadsRoot, sshthread.Binding{
 					HubURL:       loopbackHubURL,
 					ThreadID:     threadID,
 					ConnectionID: connectionID,
@@ -2039,6 +2069,18 @@ func agentPathEnv(binDir string) map[string]string {
 		return map[string]string{"PATH": binDir}
 	}
 	return map[string]string{"PATH": binDir + string(os.PathListSeparator) + existing}
+}
+
+// instanceEnvFor builds Reactor.InstanceEnv from globalSSHShimDir, or returns
+// nil when it is empty (the shim could not be seeded — see hostExecutable's
+// own logging for why). Kept separate from agentPathEnv: that helper always
+// prepends its argument verbatim, and an empty binDir there would prepend an
+// empty PATH entry — resolved by every shell as the current directory.
+func instanceEnvFor(globalSSHShimDir string) map[string]string {
+	if globalSSHShimDir == "" {
+		return nil
+	}
+	return agentPathEnv(globalSSHShimDir)
 }
 
 // randomHex(8) -> "1a2b3c4d5e6f7a8b". Mirrors the type-prefixed hex ids used

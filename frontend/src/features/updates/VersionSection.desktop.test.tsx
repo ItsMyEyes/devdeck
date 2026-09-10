@@ -41,6 +41,7 @@ const { VersionSection } = await import('@/features/overlays/VersionSection')
 const SUPERVISED = /Supervised by the desktop app/
 
 const install = vi.fn()
+const checkNow = vi.fn()
 
 function version(over: Partial<MachineVersion> = {}) {
   return {
@@ -72,7 +73,7 @@ function check(data: Partial<MachineUpdateCheck> | undefined) {
 }
 
 function update(over: Partial<DesktopUpdate> = {}): DesktopUpdate {
-  return { staged: null, installing: false, checking: false, downloading: false, install, ...over }
+  return { staged: null, installing: false, checking: false, downloading: false, install, checkNow, ...over }
 }
 
 function busyOk(data: MachineBusy) {
@@ -153,6 +154,29 @@ describe('VersionSection inside the desktop shell', () => {
     expect(screen.queryByRole('button', { name: /Restart & install/ })).toBeNull()
     // Nothing to install means nothing a restart would destroy worth asking about.
     expect(mockUseMachineBusy).toHaveBeenCalledWith(undefined)
+  })
+
+  // The 6-hour timer is silent (D6) — this button is the operator's only way
+  // to ask right now instead of waiting for it, or for the always-mounted
+  // pill to notice on its own.
+  it('offers a manual check button when nothing is staged and no check is running', async () => {
+    mockUseDesktopUpdate.mockReturnValue(update({ staged: null }))
+    render(<VersionSection machineId="m1" />)
+
+    const button = screen.getByRole('button', { name: /Check for updates/ })
+    await userEvent.click(button)
+    expect(checkNow).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the manual check button while a check or download is already in flight', () => {
+    mockUseDesktopUpdate.mockReturnValue(update({ checking: true }))
+    render(<VersionSection machineId="m1" />)
+    expect(screen.queryByRole('button', { name: /Check for updates/ })).toBeNull()
+
+    cleanup()
+    mockUseDesktopUpdate.mockReturnValue(update({ downloading: true }))
+    render(<VersionSection machineId="m1" />)
+    expect(screen.queryByRole('button', { name: /Check for updates/ })).toBeNull()
   })
 
   it('keeps the build identity block', () => {

@@ -55,6 +55,9 @@ func (fakeConfig) ProviderKind() provider.Kind { return fakeKind }
 type fakeDriver struct {
 	rec     *callRecorder
 	adapter *fakeAdapter
+
+	mu    sync.Mutex
+	specs []provider.InstanceSpec
 }
 
 func (d *fakeDriver) Kind() provider.Kind            { return fakeKind }
@@ -65,9 +68,18 @@ func (d *fakeDriver) DecodeConfig(json.RawMessage) (provider.Config, error) {
 func (d *fakeDriver) Probe(context.Context, provider.Config) (provider.Snapshot, error) {
 	return provider.Snapshot{}, nil
 }
-func (d *fakeDriver) Create(context.Context, provider.InstanceSpec) (provider.Adapter, error) {
+func (d *fakeDriver) Create(_ context.Context, spec provider.InstanceSpec) (provider.Adapter, error) {
 	d.rec.record("StartInstance")
+	d.mu.Lock()
+	d.specs = append(d.specs, spec)
+	d.mu.Unlock()
 	return d.adapter, nil
+}
+
+func (d *fakeDriver) specsSnapshot() []provider.InstanceSpec {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]provider.InstanceSpec(nil), d.specs...)
 }
 
 var _ provider.Driver = (*fakeDriver)(nil)
@@ -277,6 +289,7 @@ type reactorHarness struct {
 	engine  *Engine
 	reactor *Reactor
 	adapter *fakeAdapter
+	driver  *fakeDriver
 	rec     *callRecorder
 	store   *MemStore
 	cancel  context.CancelFunc
@@ -315,12 +328,13 @@ func newReactorHarnessWithState(t *testing.T, brokerFn func(rec *callRecorder) a
 	t.Helper()
 	rec := &callRecorder{}
 	adapter := &fakeAdapter{rec: rec, ch: make(chan event.Event, 4)}
-	registry := provider.NewRegistry(&fakeDriver{rec: rec, adapter: adapter})
+	driver := &fakeDriver{rec: rec, adapter: adapter}
+	registry := provider.NewRegistry(driver)
 	dir := &recordingDir{rec: rec, inner: NewThreadDirectory()}
 	svc := &provider.Service{Registry: registry, Dir: dir}
 
 	store := NewMemStore()
-	h := &reactorHarness{adapter: adapter, rec: rec, store: store}
+	h := &reactorHarness{adapter: adapter, driver: driver, rec: rec, store: store}
 	h.engine = NewEngine(EngineOptions{
 		Store: store, Initial: initial, Now: func() int64 { return 1000 }, QueueSize: 16,
 		NewID: func() string { h.idSeq++; return fmt.Sprintf("ae-%d", h.idSeq) },
@@ -391,6 +405,31 @@ func TestReactorProvisionsOnThreadCreated(t *testing.T) {
 	}
 	if !(idx["StartInstance"] < idx["Bind"] && idx["Bind"] < idx["StartSession"]) {
 		t.Fatalf("call order = %v, want StartInstance -> Bind -> StartSession", calls)
+	}
+}
+
+// TestReactorPassesInstanceEnvToFreshInstances proves InstanceEnv actually
+// reaches InstanceSpec.Env on a freshly started instance. This is what codex
+// and opencode need to ever see devdeck-ssh on PATH: unlike claude/pi, they
+// spawn one process per INSTANCE rather than per thread, so
+// InstanceFor's own SessionStartInput.Env (built per thread, in
+// main.go's real InstanceFor) never reaches their already-running process —
+// only whatever was on InstanceSpec.Env at the moment their instance was
+// first created ever does.
+func TestReactorPassesInstanceEnvToFreshInstances(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+	h.reactor.InstanceEnv = map[string]string{"PATH": "/global/shim/bin:/usr/bin"}
+
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustRaw(t, map[string]any{}))
+	h.waitForCall(t, "StartSession")
+
+	specs := h.driver.specsSnapshot()
+	if len(specs) != 1 {
+		t.Fatalf("StartInstance called %d times, want 1", len(specs))
+	}
+	if got := specs[0].Env["PATH"]; got != "/global/shim/bin:/usr/bin" {
+		t.Fatalf("InstanceSpec.Env[PATH] = %q, want the Reactor's InstanceEnv value", got)
 	}
 }
 

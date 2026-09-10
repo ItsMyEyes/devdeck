@@ -49,6 +49,12 @@ export interface DesktopUpdate {
    *  throwing) on failure, having already surfaced a toast — the caller's job
    *  is only to keep the pill on screen so it can be retried. */
   install: () => Promise<void>
+  /** Runs the same check the 6-hour timer runs, on demand — the "Check for
+   *  updates" button in VersionSection. A no-op while a check or download is
+   *  already in flight, so a click during the background timer's own run
+   *  cannot start a second overlapping `download()` onto the same
+   *  `readyUpdate` swap. */
+  checkNow: () => Promise<void>
 }
 
 /** D6, as a pure predicate so it can be asserted directly.
@@ -231,6 +237,15 @@ async function install(): Promise<void> {
   }
 }
 
+/** The manual half of `checkNow` — see the `DesktopUpdate.checkNow` doc
+ *  comment for the reentrancy guard's rationale. Reads `snapshot` directly
+ *  rather than a hook's stale closure, so it stays correct even if the timer
+ *  flips `checking`/`downloading` between render and click. */
+async function checkNow(): Promise<void> {
+  if (snapshot.checking || snapshot.downloading) return
+  await runCheck()
+}
+
 /** Test seam. The controller is process-wide by design, which means it also
  *  outlives a single test — this puts the module back to its initial state. */
 export function __resetDesktopUpdateForTests() {
@@ -253,5 +268,6 @@ export function useDesktopUpdate(): DesktopUpdate {
     checking: state.checking,
     downloading: state.downloading,
     install,
+    checkNow,
   }
 }

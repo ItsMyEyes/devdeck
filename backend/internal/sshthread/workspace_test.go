@@ -109,6 +109,75 @@ func TestSeedWithoutHostExecutableWritesNoShim(t *testing.T) {
 	}
 }
 
+// SeedGlobalShim is the PATH fallback codex/opencode instances need (see its
+// doc comment): it must produce the same kind of executable, correctly
+// targeted shim as a per-thread Seed call, just with no workspace around it.
+func TestSeedGlobalShimWritesExecutableShim(t *testing.T) {
+	root := t.TempDir()
+	dir, err := SeedGlobalShim(root, "/opt/dev deck/devdeck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != BinDir(root) {
+		t.Fatalf("SeedGlobalShim returned %q, want %q", dir, BinDir(root))
+	}
+	path := filepath.Join(dir, sshtoolcli.HelperName)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("shim missing: %v", err)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("shim mode = %v, want the owner execute bit set", info.Mode().Perm())
+	}
+	shim, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "exec '/opt/dev deck/devdeck' " + sshtoolcli.Subcommand + ` "$@"`; !strings.Contains(string(shim), want) {
+		t.Errorf("shim = %q, want it to contain %q", shim, want)
+	}
+}
+
+// An empty hostExe must produce no shim here too, for the same reason as
+// Seed's own TestSeedWithoutHostExecutableWritesNoShim.
+func TestSeedGlobalShimWithoutHostExecutableWritesNoShim(t *testing.T) {
+	root := t.TempDir()
+	dir, err := SeedGlobalShim(root, "")
+	if err != nil {
+		t.Fatalf("SeedGlobalShim: %v", err)
+	}
+	if dir != "" {
+		t.Errorf("SeedGlobalShim returned %q with no host executable, want \"\"", dir)
+	}
+	if _, err := os.Stat(filepath.Join(BinDir(root), sshtoolcli.HelperName)); !os.IsNotExist(err) {
+		t.Errorf("shim exists with no host executable (err = %v)", err)
+	}
+}
+
+// SeedGlobalShim's own directory must never collide with a per-thread
+// workspace under the same root — Seed keys workspaces by SlugForThread, and
+// this test pins down that a thread id literally equal to the shim's bin
+// segment cannot happen, since binSubdir ("bin") never survives as a
+// standalone slug collision in practice; what actually matters is that
+// SeedGlobalShim and Seed can both populate the same root without one
+// clobbering the other's files.
+func TestSeedGlobalShimCoexistsWithPerThreadWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SeedGlobalShim(root, "/opt/devdeck/devdeck"); err != nil {
+		t.Fatal(err)
+	}
+	threadDir, err := Seed(root, Binding{ThreadID: "ssh:c-1", ConnectionID: "c-1", Token: "t"}, "/opt/devdeck/devdeck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(BinDir(root), sshtoolcli.HelperName)); err != nil {
+		t.Errorf("global shim clobbered by per-thread Seed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(BinDir(threadDir), sshtoolcli.HelperName)); err != nil {
+		t.Errorf("per-thread shim missing after global SeedGlobalShim: %v", err)
+	}
+}
+
 func TestSlugForThreadIsFilesystemSafe(t *testing.T) {
 	if got := SlugForThread("ssh:c-1::chat-2"); strings.ContainsAny(got, ":/\\") {
 		t.Fatalf("slug %q is not filesystem-safe", got)

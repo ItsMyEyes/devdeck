@@ -207,4 +207,54 @@ describe('useDesktopUpdate', () => {
     await waitFor(() => expect(seen?.checking).toBe(false))
     expect(seen?.downloading).toBe(false)
   })
+
+  // The "Check for updates" button in VersionSection calls exactly this.
+  describe('checkNow', () => {
+    it('runs a fresh check on demand, independent of the 6-hour timer', async () => {
+      enterDesktopShell()
+      const first = fakeUpdate('0.2.1')
+      check.mockResolvedValue(first)
+
+      let seen: ReturnType<typeof useDesktopUpdate> | undefined
+      function Capture() {
+        seen = useDesktopUpdate()
+        return null
+      }
+      render(<Capture />)
+      // Let the automatic on-start check land and stage 0.2.1.
+      await waitFor(() => expect(first.download).toHaveBeenCalledTimes(1))
+
+      check.mockClear()
+      const second = fakeUpdate('0.2.2')
+      check.mockResolvedValue(second)
+      await seen!.checkNow()
+
+      expect(check).toHaveBeenCalledTimes(1)
+      await waitFor(() =>
+        expect(seen?.staged).toEqual({ version: '0.2.2', notes: 'notes for 0.2.2' }),
+      )
+    })
+
+    it('is a no-op while a check or download is already in flight', async () => {
+      enterDesktopShell()
+      let resolveCheck: (u: unknown) => void = () => {}
+      check.mockImplementation(() => new Promise((resolve) => (resolveCheck = resolve)))
+
+      let seen: ReturnType<typeof useDesktopUpdate> | undefined
+      function Capture() {
+        seen = useDesktopUpdate()
+        return null
+      }
+      render(<Capture />)
+      await waitFor(() => expect(seen?.checking).toBe(true))
+
+      // The automatic on-start check is still pending; a manual click must
+      // not start a second overlapping runCheck onto the same readyUpdate.
+      await seen!.checkNow()
+      expect(check).toHaveBeenCalledTimes(1)
+
+      resolveCheck(null)
+      await waitFor(() => expect(seen?.checking).toBe(false))
+    })
+  })
 })
