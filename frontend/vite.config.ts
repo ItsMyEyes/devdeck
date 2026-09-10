@@ -116,6 +116,8 @@ export default defineConfig({
       'src/features/tabs/WindowControls.test.tsx',
       'src/lib/fuzzyHighlight.test.ts',
       'src/lib/machineWsUrl.test.ts',
+      'src/lib/mermaidExport.test.ts',
+      'src/lib/openWithExternal.test.ts',
       'src/features/browser/splitUrlForDisplay.test.ts',
       'src/features/browser/BrowserTabStrip.test.tsx',
       'src/components/ui/progress-line.test.tsx',

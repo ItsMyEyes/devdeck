@@ -19,21 +19,22 @@ func renderDocx(blocks []docBlock) ([]byte, error) {
 	var body strings.Builder
 	var images []docxImageRef
 	imgSeq := 0
+	linker := newDocxLinker()
 
 	for _, b := range blocks {
 		switch b.kind {
 		case docBlockHeading:
-			body.WriteString(docxParagraphXML(fmt.Sprintf("Heading%d", clampHeadingLevel(b.level)), b.runs, 0))
+			body.WriteString(docxParagraphXML(fmt.Sprintf("Heading%d", clampHeadingLevel(b.level)), b.runs, 0, linker))
 		case docBlockParagraph:
 			if len(b.runs) == 0 {
 				continue
 			}
-			body.WriteString(docxParagraphXML("Normal", b.runs, 0))
+			body.WriteString(docxParagraphXML("Normal", b.runs, 0, linker))
 		case docBlockBlockquote:
-			body.WriteString(docxParagraphXML("Quote", b.runs, 0))
+			body.WriteString(docxParagraphXML("Quote", b.runs, 0, linker))
 		case docBlockListItem:
 			if b.number < 0 {
-				body.WriteString(docxParagraphXML("ListParagraph", b.runs, b.level+1))
+				body.WriteString(docxParagraphXML("ListParagraph", b.runs, b.level+1, linker))
 				continue
 			}
 			marker := "•   "
@@ -41,11 +42,11 @@ func renderDocx(blocks []docBlock) ([]byte, error) {
 				marker = strconv.Itoa(b.number) + ".  "
 			}
 			runs := append([]docRun{{text: marker}}, b.runs...)
-			body.WriteString(docxParagraphXML("ListParagraph", runs, b.level))
+			body.WriteString(docxParagraphXML("ListParagraph", runs, b.level, linker))
 		case docBlockCodeBlock:
-			body.WriteString(docxCodeBlockXML(b))
+			body.WriteString(docxCodeBlockXML(b, linker))
 		case docBlockTable:
-			body.WriteString(docxTableXML(b.rows))
+			body.WriteString(docxTableXML(b.rows, linker))
 		case docBlockHR:
 			body.WriteString(`<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="94A3B8"/></w:pBdr></w:pPr></w:p>` + "\n")
 		case docBlockImage:
@@ -60,7 +61,38 @@ func renderDocx(blocks []docBlock) ([]byte, error) {
 		}
 	}
 
-	return buildDocxZip(body.String(), images)
+	return buildDocxZip(body.String(), images, linker.refs)
+}
+
+// docxLinkRef is one hyperlink relationship: OOXML requires a link's target
+// URL to live in word/_rels/document.xml.rels, referenced from the body by
+// relationship id, rather than appearing inline the way HTML's href does.
+type docxLinkRef struct {
+	id     int
+	target string
+}
+
+// docxLinker assigns a stable relationship id to each distinct link target
+// seen while walking the document, so two runs pointing at the same URL —
+// common for a repeated citation or footer link — share one relationship
+// instead of the rels file growing a duplicate per occurrence.
+type docxLinker struct {
+	ids  map[string]int
+	refs []docxLinkRef
+}
+
+func newDocxLinker() *docxLinker {
+	return &docxLinker{ids: map[string]int{}}
+}
+
+func (l *docxLinker) idFor(href string) int {
+	if id, ok := l.ids[href]; ok {
+		return id
+	}
+	id := len(l.refs) + 1
+	l.ids[href] = id
+	l.refs = append(l.refs, docxLinkRef{id: id, target: href})
+	return id
 }
 
 func clampHeadingLevel(l int) int {
@@ -77,7 +109,15 @@ var xmlTextReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;"
 
 func xmlEscapeText(s string) string { return xmlTextReplacer.Replace(s) }
 
-func docxParagraphXML(style string, runs []docRun, indentLevel int) string {
+// xmlEscapeAttr additionally escapes quotes, which xmlEscapeText's callers
+// never need since they only ever write into element text content — but a
+// link's href goes into a double-quoted XML attribute, where a literal `"`
+// would close it early.
+var xmlAttrReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+
+func xmlEscapeAttr(s string) string { return xmlAttrReplacer.Replace(s) }
+
+func docxParagraphXML(style string, runs []docRun, indentLevel int, linker *docxLinker) string {
 	var sb strings.Builder
 	sb.WriteString("<w:p><w:pPr>")
 	sb.WriteString(`<w:pStyle w:val="` + style + `"/>`)
@@ -85,57 +125,78 @@ func docxParagraphXML(style string, runs []docRun, indentLevel int) string {
 		sb.WriteString(fmt.Sprintf(`<w:ind w:left="%d"/>`, indentLevel*360))
 	}
 	sb.WriteString("</w:pPr>")
-	sb.WriteString(docxRunsXML(runs))
+	sb.WriteString(docxRunsXML(runs, linker))
 	sb.WriteString("</w:p>\n")
 	return sb.String()
 }
 
-func docxRunsXML(runs []docRun) string {
+func docxRunsXML(runs []docRun, linker *docxLinker) string {
 	var sb strings.Builder
 	for _, r := range runs {
-		if r.text == "" {
+		run := docxRunXML(r)
+		if run == "" {
 			continue
 		}
-		if r.text == "\n" {
-			sb.WriteString("<w:r><w:br/></w:r>")
+		if r.href == "" {
+			sb.WriteString(run)
 			continue
 		}
-		sb.WriteString("<w:r>")
-		var rpr strings.Builder
-		if r.bold {
-			rpr.WriteString("<w:b/>")
-		}
-		if r.italic {
-			rpr.WriteString("<w:i/>")
-		}
-		if r.code {
-			rpr.WriteString(`<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>`)
-		}
-		if rpr.Len() > 0 {
-			sb.WriteString("<w:rPr>" + rpr.String() + "</w:rPr>")
-		}
-		sb.WriteString(`<w:t xml:space="preserve">` + xmlEscapeText(r.text) + `</w:t>`)
-		sb.WriteString("</w:r>")
+		sb.WriteString(fmt.Sprintf(`<w:hyperlink r:id="rIdLink%d" w:history="1">`, linker.idFor(r.href)))
+		sb.WriteString(run)
+		sb.WriteString(`</w:hyperlink>`)
 	}
 	return sb.String()
 }
 
-func docxCodeBlockXML(b docBlock) string {
+func docxRunXML(r docRun) string {
+	if r.text == "" {
+		return ""
+	}
+	if r.text == "\n" {
+		return "<w:r><w:br/></w:r>"
+	}
+	var sb strings.Builder
+	sb.WriteString("<w:r>")
+	var rpr strings.Builder
+	if r.bold {
+		rpr.WriteString("<w:b/>")
+	}
+	if r.italic {
+		rpr.WriteString("<w:i/>")
+	}
+	if r.code {
+		rpr.WriteString(`<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>`)
+	}
+	if r.href != "" {
+		// Word's own "Hyperlink" character style, applied by value rather
+		// than as a named w:rStyle so a link keeps its color/underline even
+		// without adding that style to styles.xml.
+		rpr.WriteString(`<w:color w:val="2563EB"/><w:u w:val="single"/>`)
+	}
+	if rpr.Len() > 0 {
+		sb.WriteString("<w:rPr>" + rpr.String() + "</w:rPr>")
+	}
+	sb.WriteString(`<w:t xml:space="preserve">` + xmlEscapeText(r.text) + `</w:t>`)
+	sb.WriteString("</w:r>")
+	return sb.String()
+}
+
+func docxCodeBlockXML(b docBlock, linker *docxLinker) string {
 	var sb strings.Builder
 	if b.lang == "mermaid (unrendered)" {
-		sb.WriteString(docxParagraphXML("Normal", []docRun{{text: "Mermaid diagram (could not be rendered — showing source):", italic: true}}, 0))
+		sb.WriteString(docxParagraphXML("Normal", []docRun{{text: "Mermaid diagram (could not be rendered — showing source):", italic: true}}, 0, linker))
 	}
 	code := strings.TrimRight(b.code, "\n")
 	for _, line := range strings.Split(code, "\n") {
 		if line == "" {
 			line = " "
 		}
-		sb.WriteString(docxParagraphXML("CodeBlock", []docRun{{text: line, code: true}}, 0))
+		sb.WriteString(docxParagraphXML("CodeBlock", []docRun{{text: line, code: true}}, 0, linker))
 	}
 	return sb.String()
 }
 
-func docxTableXML(rows [][]docCell) string {
+func docxTableXML(rows [][]docCell, linker *docxLinker) string {
 	if len(rows) == 0 {
 		return ""
 	}
@@ -178,7 +239,7 @@ func docxTableXML(rows [][]docCell) string {
 				runs = bolded
 			}
 			sb.WriteString(fmt.Sprintf(`<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/></w:tcPr>`, colW))
-			sb.WriteString(docxParagraphXML("Normal", runs, 0))
+			sb.WriteString(docxParagraphXML("Normal", runs, 0, linker))
 			sb.WriteString("</w:tc>")
 		}
 		sb.WriteString("</w:tr>\n")
@@ -234,7 +295,7 @@ func docxImageXML(ref docxImageRef, cx, cy int64) string {
 		cx, cy, ref.id, ref.id, ref.id, ref.id, ref.ext, rid, cx, cy)
 }
 
-func buildDocxZip(bodyXML string, images []docxImageRef) ([]byte, error) {
+func buildDocxZip(bodyXML string, images []docxImageRef, links []docxLinkRef) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
@@ -274,6 +335,11 @@ func buildDocxZip(bodyXML string, images []docxImageRef) ([]byte, error) {
 <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`)
 	for _, img := range images {
 		docRels.WriteString(fmt.Sprintf(`<Relationship Id="rIdImg%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image%d.%s"/>`, img.id, img.id, img.ext))
+	}
+	for _, link := range links {
+		// TargetMode="External" is what tells Word this Target is a URL to
+		// open, not a path to another part inside this same package.
+		docRels.WriteString(fmt.Sprintf(`<Relationship Id="rIdLink%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="%s" TargetMode="External"/>`, link.id, xmlEscapeAttr(link.target)))
 	}
 	docRels.WriteString("</Relationships>")
 	if err := write("word/_rels/document.xml.rels", []byte(docRels.String())); err != nil {

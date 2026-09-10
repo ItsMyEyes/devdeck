@@ -1,11 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
-import { Download, Loader2, PenLine, RotateCcw, Trash2 } from 'lucide-react'
+import { Download, ExternalLink, Loader2, PenLine, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
+import { openWithExternalApp } from '@/lib/openWithExternal'
 import { cn } from '@/lib/utils'
 import { useDeleteFileTarget } from '@/features/data/queries'
 import { qk } from '@/features/data/keys'
 import { useQueryClient } from '@tanstack/react-query'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import type { FilesTarget } from '@/features/terminal/filesTarget'
 import { useFileTransfers } from '@/features/terminal/useFileTransfers'
 import { MaterialFileIcon } from '@/features/terminal/MaterialFileIcon'
@@ -47,6 +49,8 @@ export const DocumentFileTab = forwardRef<
   const deleteFile = useDeleteFileTarget(target)
   const { downloadFile, downloading } = useFileTransfers(target)
   const queryClient = useQueryClient()
+  const isTauri = useIsTauri()
+  const [openingExternal, setOpeningExternal] = useState(false)
 
   // Every open file tab stays mounted (inactive ones are just `hidden`), so
   // without this latch restoring a layout with several document tabs would
@@ -82,6 +86,23 @@ export const DocumentFileTab = forwardRef<
     }
   }
 
+  /** Downloads to the Tauri shell's private temp store and hands it to the
+   *  OS's default app for this extension — desktop-only, since both steps
+   *  need the Tauri shell (see openWithExternal.ts / open_with.rs). The temp
+   *  copy is removed again once that app closes. */
+  async function openExternally() {
+    if (openingExternal) return
+    setOpeningExternal(true)
+    try {
+      const blob = await downloadFile(path, name)
+      await openWithExternalApp(name, new Uint8Array(await blob.arrayBuffer()))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Could not open ${name}`)
+    } finally {
+      setOpeningExternal(false)
+    }
+  }
+
   function refresh() {
     void queryClient.invalidateQueries({
       queryKey:
@@ -113,6 +134,17 @@ export const DocumentFileTab = forwardRef<
         <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-devdeck-fg-2">
           {path}
         </span>
+        {isTauri ? (
+          <button
+            type="button"
+            onClick={() => void openExternally()}
+            disabled={openingExternal}
+            title="Open with default app"
+            className="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-fg disabled:cursor-wait disabled:opacity-50"
+          >
+            {openingExternal ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+          </button>
+        ) : null}
         <span className="flex-none rounded bg-devdeck-glass-solid px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
           {format?.label ?? 'Document'} · read-only
         </span>

@@ -1,0 +1,10 @@
+# frontend/src-tauri/permissions/open-with.toml
+#
+# Grants the main window permission to call the "open with an external app"
+# command. Required for the same reason as browser-tiles.toml/hub-mode.toml/
+# diagnostics.toml: once an ACL manifest (capabilities/default.json) exists,
+# Tauri enforces ACL checks on every command, not just `core:*`/plugin ones.
+[[permission]]
+identifier = "allow-open-with"
+description = "Allows writing a file's bytes to a private temp location and opening it with the OS's default app (open_with_external)."
+commands.allow = ["open_with_external"]

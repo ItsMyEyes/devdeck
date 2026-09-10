@@ -23,7 +23,9 @@ import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { canPickSaveLocation, pickSaveTarget, SAVE_CANCELLED, type SaveTarget } from '@/lib/saveFile'
+import { openWithExternalApp } from '@/lib/openWithExternal'
 import { cn } from '@/lib/utils'
+import { useIsTauri } from '@/features/tabs/useIsTauri'
 import { qk } from '@/features/data/keys'
 import {
   useCopyFileTarget,
@@ -276,6 +278,7 @@ export function TerminalExplorer({
   activePath,
 }: TerminalExplorerProps) {
   const newFileShortcut = useCommandChordLabel('explorer.newFile')
+  const isTauri = useIsTauri()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [depsOpen, setDepsOpen] = useState(false)
   const [selection, setSelection] = useState<SelectionState>(emptySelection())
@@ -853,6 +856,19 @@ export function TerminalExplorer({
     }
   }
 
+  /** Downloads `entry` to the Tauri shell's private temp store and hands it
+   *  to the OS's default app for its extension (desktop-only — the context
+   *  menu item this backs is hidden otherwise). Removed again once that app
+   *  closes; see openWithExternal.ts / open_with.rs. */
+  async function openEntryExternally(entry: SelectedEntry) {
+    try {
+      const blob = await downloadFile(entry.path, entry.name)
+      await openWithExternalApp(entry.name, new Uint8Array(await blob.arrayBuffer()))
+    } catch (error) {
+      toast.error(errorMessage(error, `Could not open ${entry.name}`))
+    }
+  }
+
   return (
     <aside className="flex min-h-0 flex-1 flex-col bg-devdeck-pane" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
@@ -1069,6 +1085,13 @@ export function TerminalExplorer({
                   else void requestArchive(entries)
                 }}
               />
+              {isTauri ? (
+                <ContextMenuAction
+                  label="Open with default app"
+                  disabled={!menuEntry || menuEntry.isDir}
+                  onClick={() => menuEntry && void openEntryExternally(menuEntry)}
+                />
+              ) : null}
               <ContextMenuSeparator />
               <ContextMenuAction
                 danger

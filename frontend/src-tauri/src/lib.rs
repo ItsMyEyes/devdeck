@@ -2,6 +2,7 @@ mod bindconfig;
 mod browser_tiles;
 mod hubapi;
 mod hubmode;
+mod open_with;
 mod sidecar;
 mod tailscale;
 
@@ -149,6 +150,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .register_uri_scheme_protocol(APP_SCHEME, serve_bundled_asset)
         .manage(BrowserTiles::new())
+        .manage(open_with::OpenWithTempFiles::new())
         .on_page_load(|webview, payload| {
             // Global hook (fires for every webview in the app, including
             // the main UI) filtered to just the Browser tab's own child
@@ -196,6 +198,7 @@ pub fn run() {
             open_external_url,
             get_runtime_warning,
             prepare_for_update,
+            open_with::open_with_external,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) && std::env::var_os("DEVDECK_TAURI_DEV_FULL").is_none() {
@@ -245,7 +248,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| match event {
-            RunEvent::ExitRequested { .. } | RunEvent::Exit => kill_sidecar(handle),
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+                kill_sidecar(handle);
+                open_with::cleanup_all(handle);
+            }
             _ => {}
         });
 }
@@ -700,6 +706,7 @@ fn grant_origin_capability(handle: &AppHandle, host: &str) -> tauri::Result<()> 
             "allow-bind-config",
             "allow-diagnostics",
             "allow-prepare-for-update",
+            "allow-open-with",
             "process:allow-restart",
             "dialog:allow-save",
             "fs:allow-write-file",

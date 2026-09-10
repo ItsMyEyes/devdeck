@@ -25,8 +25,7 @@ func renderPDF(blocks []docBlock) ([]byte, error) {
 		switch b.kind {
 		case docBlockHeading:
 			size := pdfHeadingSize(b.level)
-			pdf.SetFont("Helvetica", "B", size)
-			pdf.MultiCell(0, size*0.5, runsPlainText(b.runs), "", "L", false)
+			writeInlineRuns(pdf, b.runs, size, true, false)
 			pdf.SetFont("Helvetica", "", 11)
 			pdf.Ln(2)
 
@@ -34,13 +33,11 @@ func renderPDF(blocks []docBlock) ([]byte, error) {
 			if len(b.runs) == 0 {
 				continue
 			}
-			writeInlineRuns(pdf, b.runs, 11)
+			writeInlineRuns(pdf, b.runs, 11, false, false)
 
 		case docBlockBlockquote:
 			pdf.SetTextColor(71, 85, 105)
-			pdf.SetFont("Helvetica", "I", 11)
-			pdf.MultiCell(0, 6, runsPlainText(b.runs), "", "L", false)
-			pdf.SetFont("Helvetica", "", 11)
+			writeInlineRuns(pdf, b.runs, 11, false, true)
 			pdf.SetTextColor(0, 0, 0)
 			pdf.Ln(2)
 
@@ -56,7 +53,9 @@ func renderPDF(blocks []docBlock) ([]byte, error) {
 				indent += 6
 			}
 			pdf.SetX(left + indent)
-			pdf.MultiCell(0, 6, marker+runsPlainText(b.runs), "", "L", false)
+			pdf.SetFont("Helvetica", "", 11)
+			pdf.Write(11*0.5, marker)
+			writeInlineRuns(pdf, b.runs, 11, false, false)
 
 		case docBlockCodeBlock:
 			if b.lang == "mermaid (unrendered)" {
@@ -117,7 +116,16 @@ func pdfHeadingSize(level int) float64 {
 // them -- fpdf continues text on the same flowing line (wrapping as needed)
 // across calls as long as no Ln() happens in between, which is how the
 // original FPDF library composes rich-text paragraphs from plain cells.
-func writeInlineRuns(pdf *fpdf.Fpdf, runs []docRun, size float64) {
+//
+// forceBold/forceItalic apply on top of each run's own flags rather than
+// replacing them, so e.g. a heading (forceBold) that also has an _italic_
+// word in its markdown source renders bold+italic there, not italic alone.
+// Headings, blockquotes and list items all carry inline runs the same way
+// paragraphs do (parseMarkdownToBlocks builds every block from the same
+// inlineRuns walk) -- rendering them through runsPlainText instead, as this
+// function's callers used to for anything but plain paragraphs, silently
+// dropped bold/italic/code formatting inside them.
+func writeInlineRuns(pdf *fpdf.Fpdf, runs []docRun, size float64, forceBold, forceItalic bool) {
 	for _, r := range runs {
 		if r.text == "" {
 			continue
@@ -131,14 +139,21 @@ func writeInlineRuns(pdf *fpdf.Fpdf, runs []docRun, size float64) {
 			fontFamily = "Courier"
 		}
 		style := ""
-		if r.bold {
+		if r.bold || forceBold {
 			style += "B"
 		}
-		if r.italic {
+		if r.italic || forceItalic {
 			style += "I"
 		}
-		pdf.SetFont(fontFamily, style, size)
-		pdf.Write(size*0.5, r.text)
+		if r.href != "" {
+			pdf.SetTextColor(37, 99, 235) // link blue, matches the docx exporter's hyperlink color
+			pdf.SetFont(fontFamily, style+"U", size)
+			pdf.WriteLinkString(size*0.5, r.text, r.href)
+			pdf.SetTextColor(0, 0, 0)
+		} else {
+			pdf.SetFont(fontFamily, style, size)
+			pdf.Write(size*0.5, r.text)
+		}
 	}
 	pdf.SetFont("Helvetica", "", size)
 	pdf.Ln(size * 0.7)

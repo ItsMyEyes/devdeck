@@ -19,6 +19,7 @@
     "allow-bind-config",
     "allow-diagnostics",
     "allow-prepare-for-update",
+    "allow-open-with",
     "process:allow-restart",
     "dialog:allow-save",
     "fs:allow-write-file",

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { MarkdownEditor } from '@/features/issues/MarkdownEditor'
 import { ApiError, exportMarkdown, type MarkdownExportFormat } from '@/lib/api'
+import { prerenderMermaidForExport } from '@/lib/mermaidExport'
 import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
 
 const FORMAT_OPTIONS = [
@@ -32,7 +33,8 @@ export function MarkdownExportCard() {
     if (saveTarget === SAVE_CANCELLED) return
     setPending(true)
     try {
-      const blob = await exportMarkdown(markdown, format, filename || 'document')
+      const rendered = await prerenderMermaidForExport(markdown)
+      const blob = await exportMarkdown(rendered, format, filename || 'document')
       await saveTarget.write(blob)
       toast.success(`Exported ${format.toUpperCase()}`)
     } catch (err) {

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,6 +203,92 @@ func TestToolsService_MarkdownToDocument_RoundTripIntegrity(t *testing.T) {
 			t.Fatal("pdf output missing EOF trailer marker")
 		}
 	})
+}
+
+// TestToolsService_MarkdownToDocument_PDFPreservesInlineStylingEverywhere
+// guards against headings, blockquotes and list items silently losing
+// bold/italic/code formatting in the PDF export — they used to render
+// through runsPlainText (plain concatenated text), while only plain
+// paragraphs went through writeInlineRuns and kept their styling. A heading
+// is always bold; combined with an *italic* word inside it, fpdf's core font
+// for that combination is literally named "...-BoldOblique" in the output
+// bytes (confirmed empirically against go-pdf/fpdf directly) — a plain-text
+// heading never requests that combined style, so its presence is a reliable
+// signal the inline run's italic flag survived alongside the heading's own
+// forced bold.
+func TestToolsService_MarkdownToDocument_PDFPreservesInlineStylingEverywhere(t *testing.T) {
+	svc := newTestToolsService(t)
+	markdown := "# Heading with *italic* inside\n\n" +
+		"> A blockquote with **bold** inside\n\n" +
+		"- A list item with **bold** *and italic*\n"
+
+	out, err := svc.MarkdownToDocument(context.Background(), markdown, "pdf")
+	if err != nil {
+		t.Fatalf("MarkdownToDocument(pdf): %v", err)
+	}
+	if !bytes.Contains(out, []byte("BoldOblique")) {
+		t.Fatal("expected the combined bold+italic core font to appear somewhere in the pdf, " +
+			"meaning a heading/blockquote/list item's inline styling survived export")
+	}
+}
+
+// TestToolsService_MarkdownToDocument_PreservesHyperlinks guards against a
+// markdown link's destination being silently discarded — it used to become
+// inert plain text with the URL nowhere in the output, in both formats.
+func TestToolsService_MarkdownToDocument_PreservesHyperlinks(t *testing.T) {
+	svc := newTestToolsService(t)
+	markdown := "See the [DevDeck repo](https://example.com/devdeck-test-link) for more.\n"
+
+	t.Run("docx", func(t *testing.T) {
+		out, err := svc.MarkdownToDocument(context.Background(), markdown, "docx")
+		if err != nil {
+			t.Fatalf("MarkdownToDocument(docx): %v", err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(out), int64(len(out)))
+		if err != nil {
+			t.Fatalf("docx output is not a valid zip: %v", err)
+		}
+		var doc, rels string
+		for _, f := range zr.File {
+			switch f.Name {
+			case "word/document.xml":
+				doc = readZipFile(t, f)
+			case "word/_rels/document.xml.rels":
+				rels = readZipFile(t, f)
+			}
+		}
+		if !strings.Contains(doc, "<w:hyperlink") {
+			t.Fatalf("expected document.xml to contain a w:hyperlink element, got: %q", doc)
+		}
+		if !strings.Contains(rels, "https://example.com/devdeck-test-link") ||
+			!strings.Contains(rels, `TargetMode="External"`) {
+			t.Fatalf("expected an external hyperlink relationship for the link target, got: %q", rels)
+		}
+	})
+
+	t.Run("pdf", func(t *testing.T) {
+		out, err := svc.MarkdownToDocument(context.Background(), markdown, "pdf")
+		if err != nil {
+			t.Fatalf("MarkdownToDocument(pdf): %v", err)
+		}
+		if !bytes.Contains(out, []byte("/URI")) || !bytes.Contains(out, []byte("example.com/devdeck-test-link")) {
+			t.Fatal("expected the pdf to contain a URI link annotation for the link target")
+		}
+	})
+}
+
+func readZipFile(t *testing.T, f *zip.File) string {
+	t.Helper()
+	rc, err := f.Open()
+	if err != nil {
+		t.Fatalf("open %s: %v", f.Name, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read %s: %v", f.Name, err)
+	}
+	return string(data)
 }
 
 func asUnsupported(err error, target **UnsupportedFormatError) bool {

@@ -19,6 +19,7 @@ import {
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ApiError, exportMarkdown, type MarkdownExportFormat } from '@/lib/api'
+import { prerenderMermaidForExport } from '@/lib/mermaidExport'
 import { pickSaveTarget, SAVE_CANCELLED } from '@/lib/saveFile'
 import { cn } from '@/lib/utils'
 
@@ -155,10 +156,11 @@ export function MarkdownFileEditor({
   const [exporting, setExporting] = useState(false)
 
   // Reuses the same backend conversion the Tools module's "Markdown ->
-  // Document" card already ships (POST /api/tools/markdown-export, pandoc +
-  // mermaid-cli under the hood) — no new dependency, client or server, for
-  // this button. Destination picked before the export request, not after:
-  // pandoc's round trip is slow enough to lose the click's transient
+  // Document" card already ships (POST /api/tools/markdown-export — a
+  // pure-Go docx/pdf renderer, no pandoc or mermaid-cli involved) — no new
+  // dependency, client or server, for this button. Destination picked
+  // before the export request, not after: rendering mermaid diagrams plus
+  // building the document is slow enough to lose the click's transient
   // activation, which would silently degrade showSaveFilePicker to the
   // Downloads folder (see saveFile.ts).
   async function handleExport(format: MarkdownExportFormat) {
@@ -168,7 +170,8 @@ export function MarkdownFileEditor({
     if (saveTarget === SAVE_CANCELLED) return
     setExporting(true)
     try {
-      const blob = await exportMarkdown(value, format, name)
+      const rendered = await prerenderMermaidForExport(value)
+      const blob = await exportMarkdown(rendered, format, name)
       await saveTarget.write(blob)
       toast.success(`Exported ${format.toUpperCase()}`)
     } catch (err) {

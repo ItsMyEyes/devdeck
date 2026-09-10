@@ -36,6 +36,10 @@ type docRun struct {
 	text         string
 	bold, italic bool
 	code         bool
+	// href is the link destination this run is part of, or "" for plain
+	// text. Carried per-run (rather than as a separate span type) so a link
+	// with bold/italic text inside it keeps both.
+	href string
 }
 
 type docCell struct {
@@ -274,7 +278,24 @@ func inlineRuns(source []byte, n ast.Node, bold, italic, code bool) []docRun {
 		case *ast.Image:
 			alt := strings.TrimSpace(string(c.Text(source)))
 			runs = append(runs, docRun{text: "[image: " + alt + "]", italic: true})
-		case *ast.AutoLink, *ast.Link, *ast.String, *ast.RawHTML:
+		case *ast.Link:
+			// Recursing (rather than taking c.Text(source) as one plain
+			// string, the way this used to be handled alongside AutoLink
+			// below) keeps a link's own bold/italic/code intact instead of
+			// flattening it — and stamping href on every resulting run is
+			// what makes the destination survive at all: it used to be
+			// discarded entirely, leaving only inert display text behind.
+			inner := inlineRuns(source, v, bold, italic, code)
+			href := string(v.Destination)
+			for i := range inner {
+				inner[i].href = href
+			}
+			runs = append(runs, inner...)
+		case *ast.AutoLink:
+			if txt := string(c.Text(source)); txt != "" {
+				runs = append(runs, docRun{text: txt, bold: bold, italic: italic, code: code, href: string(v.URL(source))})
+			}
+		case *ast.String, *ast.RawHTML:
 			if txt := string(c.Text(source)); txt != "" {
 				runs = append(runs, docRun{text: txt, bold: bold, italic: italic, code: code})
 			} else {
