@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ChevronRight, CornerLeftUp, Folder, FolderPlus, FolderTree, HardDrive, Loader2, X } from 'lucide-react'
+import { Check, ChevronRight, CornerLeftUp, Folder, FolderPlus, FolderTree, HardDrive, Loader2, Pencil, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -15,12 +15,15 @@ export function FolderBrowser() {
   const [folderName, setFolderName] = useState('')
   const [createError, setCreateError] = useState('')
   const [rootsOpen, setRootsOpen] = useState(false)
+  const [editingPath, setEditingPath] = useState(false)
+  const [pathDraft, setPathDraft] = useState('')
   const browse = useDevDeckStore((s) => s.browse)
   const closeBrowse = useDevDeckStore((s) => s.closeBrowse)
   const enterFolder = useDevDeckStore((s) => s.enterFolder)
   const browseUp = useDevDeckStore((s) => s.browseUp)
   const browseTo = useDevDeckStore((s) => s.browseTo)
   const browseToRoot = useDevDeckStore((s) => s.browseToRoot)
+  const browseToPath = useDevDeckStore((s) => s.browseToPath)
   const useFolder = useDevDeckStore((s) => s.useFolder)
 
   const pathLabel = formatBrowsePath(browse.root, browse.path)
@@ -39,6 +42,18 @@ export function FolderBrowser() {
     setRootsOpen(false)
   }
 
+  function startEditingPath() {
+    cancelCreate()
+    setPathDraft(pathLabel)
+    setEditingPath(true)
+  }
+
+  function submitPathEdit() {
+    const next = pathDraft.trim()
+    if (next) browseToPath(next)
+    setEditingPath(false)
+  }
+
   function cancelCreate() {
     setCreating(false)
     setFolderName('')
@@ -47,6 +62,7 @@ export function FolderBrowser() {
 
   function close() {
     cancelCreate()
+    setEditingPath(false)
     closeBrowse()
   }
 
@@ -155,57 +171,108 @@ export function FolderBrowser() {
           <DialogTitle className="text-[14.5px]">{title}</DialogTitle>
           <div className="flex-1" />
           {!creating && (
-            <Button variant="secondary" size="sm" onClick={() => setCreating(true)} disabled={!machine}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setEditingPath(false)
+                setCreating(true)
+              }}
+              disabled={!machine}
+            >
               <FolderPlus size={13} />
               New folder
             </Button>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
-          <TabStripPopoverMenu
-            trigger={<HardDrive size={12} />}
-            triggerClassName="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-accent"
-            triggerTitle="Switch drive or root"
-            triggerAriaLabel="Switch drive or root"
-            align="start"
-            open={rootsOpen}
-            onOpenChange={setRootsOpen}
-          >
+        {editingPath ? (
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              value={pathDraft}
+              onChange={(e) => setPathDraft(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  submitPathEdit()
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditingPath(false)
+                }
+              }}
+              placeholder="~/code/app, /Volumes/Data, D:\Projects…"
+              className="h-8 flex-1 font-mono text-[12.5px]"
+            />
+            <Button size="sm" onClick={submitPathEdit} disabled={!pathDraft.trim()}>
+              Go
+            </Button>
+            <Button variant="secondary" size="icon-sm" aria-label="Cancel typing a path" onClick={() => setEditingPath(false)}>
+              <X size={13} />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+            <TabStripPopoverMenu
+              trigger={<HardDrive size={12} />}
+              triggerClassName="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-accent"
+              triggerTitle="Switch drive or root"
+              triggerAriaLabel="Switch drive or root"
+              align="start"
+              z={70}
+              open={rootsOpen}
+              onOpenChange={setRootsOpen}
+            >
+              <button
+                type="button"
+                onClick={() => pickRoot('~')}
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
+              >
+                <span>~ Home</span>
+                {browse.root === '~' && <Check size={12} className="flex-none text-devdeck-accent" />}
+              </button>
+              {roots.map((root) => (
+                <button
+                  key={root}
+                  type="button"
+                  onClick={() => pickRoot(root)}
+                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
+                >
+                  <span className="flex items-center gap-2">
+                    <HardDrive size={12} className="flex-none text-devdeck-fg-2" />
+                    {root}
+                  </span>
+                  {browse.root === root && <Check size={12} className="flex-none text-devdeck-accent" />}
+                </button>
+              ))}
+            </TabStripPopoverMenu>
+            {crumbs.map((name, i) => {
+              const last = i === crumbs.length - 1
+              return (
+                <span key={i} className="flex items-center gap-[3px]">
+                  <button
+                    onClick={() => browseTo(i)}
+                    type="button"
+                    className={cn('cursor-pointer px-0.5 hover:text-devdeck-accent', last ? 'text-devdeck-fg-2' : 'text-devdeck-fg-2')}
+                  >
+                    {name}
+                  </button>
+                  {!last && <span className="text-devdeck-fg-2">/</span>}
+                </span>
+              )
+            })}
             <button
               type="button"
-              onClick={() => pickRoot('~')}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
+              onClick={startEditingPath}
+              title="Type a path"
+              aria-label="Type a path"
+              className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-devdeck-fg-2 hover:bg-devdeck-hover-wash hover:text-devdeck-accent"
             >
-              ~ Home
+              <Pencil size={11} />
             </button>
-            {roots.map((root) => (
-              <button
-                key={root}
-                type="button"
-                onClick={() => pickRoot(root)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-devdeck-fg-2 hover:bg-devdeck-hover-wash-menu"
-              >
-                <HardDrive size={12} className="flex-none text-devdeck-fg-2" />
-                {root}
-              </button>
-            ))}
-          </TabStripPopoverMenu>
-          {crumbs.map((name, i) => {
-            const last = i === crumbs.length - 1
-            return (
-              <span key={i} className="flex items-center gap-[3px]">
-                <button
-                  onClick={() => browseTo(i)}
-                  type="button"
-                  className={cn('cursor-pointer px-0.5 hover:text-devdeck-accent', last ? 'text-devdeck-fg-2' : 'text-devdeck-fg-2')}
-                >
-                  {name}
-                </button>
-                {!last && <span className="text-devdeck-fg-2">/</span>}
-              </span>
-            )
-          })}
-        </div>
+          </div>
+        )}
         {creating && (
           <div className="mt-3">
             <div className="flex gap-2">

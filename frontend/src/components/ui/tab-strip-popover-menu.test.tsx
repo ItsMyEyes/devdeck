@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+import { Dialog, DialogTitle } from '@/components/ui/dialog'
 import { TabStripPopoverMenu } from '@/components/ui/tab-strip-popover-menu'
 import type { TabStripPopoverMenuProps } from '@/components/ui/tab-strip-popover-menu'
 
@@ -98,5 +99,53 @@ describe('TabStripPopoverMenu — controlled', () => {
     await userEvent.keyboard('{Escape}')
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+/** The stacking level an element actually paints at: the nearest inline
+ *  `z-index` at or above it. Both surfaces set theirs as an inline style —
+ *  `Dialog` on the popup itself, `TabStripPopoverMenu` on the positioner that
+ *  wraps its popup — so one walk answers for both. */
+function stackingLevelOf(from: Element | null | undefined): number {
+  for (let el = from as HTMLElement | null; el; el = el.parentElement) {
+    if (el.style?.zIndex) return Number(el.style.zIndex)
+  }
+  throw new Error('no inline z-index found at or above this element')
+}
+
+describe('TabStripPopoverMenu — stacking level', () => {
+  it('defaults to 60, which is right for a tab strip on the page', () => {
+    renderMenu({ open: true, onOpenChange: vi.fn() })
+    expect(stackingLevelOf(screen.getByRole('dialog'))).toBe(60)
+  })
+
+  it('can be lifted above a Dialog it is opened from inside', () => {
+    // FolderBrowser's drive/root switcher, which is what this prop exists for.
+    // Its `Dialog z={65}` paints a backdrop at 65 and the card at 66, so the
+    // popover's default 60 put the menu UNDER the very dialog that owns it:
+    // clicking the drive button toggled a menu nobody could see or click, and
+    // the only symptom was a button that appeared to do nothing.
+    render(
+      <Dialog open onOpenChange={() => {}} z={65}>
+        <DialogTitle>Choose a folder</DialogTitle>
+        <TabStripPopoverMenu
+          trigger={<span>drive</span>}
+          triggerTitle="Switch drive or root"
+          triggerAriaLabel="Switch drive or root"
+          z={70}
+          open
+          onOpenChange={vi.fn()}
+        >
+          <button type="button">D:\</button>
+        </TabStripPopoverMenu>
+      </Dialog>,
+    )
+
+    const menu = stackingLevelOf(screen.getByRole('button', { name: 'D:\\' }))
+    const dialogCard = stackingLevelOf(screen.getByText('Choose a folder'))
+
+    // Asserted as a relationship, not against the literal 66: the guard is
+    // "the menu wins", and it must survive either surface changing its number.
+    expect(menu).toBeGreaterThan(dialogCard)
   })
 })

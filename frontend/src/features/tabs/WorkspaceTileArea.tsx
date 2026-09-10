@@ -125,8 +125,28 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
     if (tab?.kind === 'browser') {
       const tile = useDevDeckStore.getState().browserTiles[tabId]
       if (tile) {
+        // Best-effort, per doc. Tearing down the native webviews is awaited so
+        // it is ordered ahead of the store removal below, but it must never be
+        // able to PREVENT it: everything after this line — `removeBrowserTile`
+        // and `closeWorktreeTab` — is what actually closes the tab, and a
+        // throw here skips all of it, leaving a Browser tab that cannot be
+        // closed and no error anywhere (this is an async click handler, so the
+        // rejection is unhandled).
+        //
+        // `closeBrowserTile` already tolerates an already-gone webview, but
+        // that is only one of the ways this call can fail. An ACL denial is
+        // another, and it is not hypothetical: until
+        // `grant_remote_hub_capability` (lib.rs) existed, every Tauri command
+        // was denied in `HubMode::Remote`, and this `await` is exactly where
+        // that turned into "the browser tab won't close".
         await Promise.all(
-          tile.docs.filter((d) => d.url).map((d) => closeNativeBrowserTile(tabId, d.id)),
+          tile.docs
+            .filter((d) => d.url)
+            .map((d) =>
+              closeNativeBrowserTile(tabId, d.id).catch((err: unknown) => {
+                console.error(`browser tile ${tabId}/${d.id}: close failed`, err)
+              }),
+            ),
         )
       }
       removeBrowserTile(tabId)

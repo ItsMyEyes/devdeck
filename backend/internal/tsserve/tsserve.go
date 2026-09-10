@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"devdeck/backend/internal/detect"
 )
 
 // startGrace is how long Start waits to see whether the serve child survives.
@@ -124,11 +126,15 @@ func (c *Controller) Start(port string) error {
 	// Best-effort and deliberately not fatal: "there was nothing to remove" is
 	// the normal, healthy case and reports itself as a non-zero exit here. See
 	// clearArgs for why a stale mapping has to be cleared at all.
-	if err := exec.Command(bin, clearArgs()...).Run(); err != nil {
+	//
+	// detect.TailscaleCommand, not exec.Command: inside the desktop .app the
+	// macOS CLI answers as a GUI launcher instead of a CLI unless SHLVL is set,
+	// which would make both of these calls no-ops that look like successes.
+	if err := detect.TailscaleCommand(bin, clearArgs()...).Run(); err != nil {
 		log.Printf("tailscale: no existing 443 listener to clear (%v)", err)
 	}
 
-	cmd := exec.Command(bin, "serve", port)
+	cmd := detect.TailscaleCommand(bin, "serve", port)
 	out := &syncBuffer{}
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {

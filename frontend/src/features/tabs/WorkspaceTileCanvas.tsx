@@ -617,7 +617,16 @@ function ScrollableTabStrip({
       ) : null}
       <div
         ref={scrollerRef}
-        data-tauri-drag-region
+        // No `data-tauri-drag-region` of its own: the top chrome strip marks
+        // itself `deep` (see `TileLeafHeader`), which covers this scroller's
+        // empty space *and* everything else between the tabs. A bare marker
+        // here would actively undo that — Tauri's drag.js walks the composed
+        // path and a bare/`true` marker resolves to "only a direct click on
+        // this exact element", terminating the walk before it reaches the
+        // header, so the strip's separators and padding stopped dragging.
+        // This strip also renders as a split pane's own header, where
+        // dragging the OS window would be wrong; `deep` on the top strip
+        // alone keeps that distinction.
         onScroll={updateScrollState}
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
@@ -744,6 +753,25 @@ function TileLeafHeader({
     <div
       ref={setHeaderDropRef}
       style={headerStyle}
+      // The whole top strip is the window's title bar on Windows/Linux, where
+      // `decorations: false` means nothing drags the window unless the DOM
+      // opts in. `deep` (Tauri >= 2.9's drag.js) makes every *non-interactive*
+      // part of the strip a drag handle — the background, the gaps around the
+      // "+" button, the separators between tabs, the leftover space beside the
+      // scroller — while drag.js's own composed-path walk still refuses to
+      // drag from anything clickable: the caption buttons and "+" are
+      // `<button>`s, and every tab carries dnd-kit's `role="button"` +
+      // `tabIndex`, so tab drag-to-reorder and tab close are untouched.
+      //
+      // A bare `data-tauri-drag-region` cannot express this: it means "only a
+      // direct click on this exact element", which is why the strip previously
+      // dragged from just two slivers (the traffic-light gutter and the flex
+      // filler, the latter collapsing to `min-w-2` = 8px once the tabs fill
+      // the row) and from nowhere else.
+      //
+      // Only on `topChrome`. A split pane's in-pane header is not a title bar,
+      // and dragging the OS window from it would be wrong.
+      {...(topChrome ? { 'data-tauri-drag-region': 'deep' } : null)}
       className={cn(
         'flex items-center overflow-hidden',
         topChrome
@@ -758,7 +786,8 @@ function TileLeafHeader({
       )}
     >
       {topChrome && isTopLeft && isMac ? (
-        <div data-tauri-drag-region className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
+        // Pure spacing — the header's own `deep` drag region already covers it.
+        <div className="h-full flex-none" style={{ width: TRAFFIC_LIGHT_GUTTER }} />
       ) : null}
       <ScrollableTabStrip activeTabId={leaf.activeTabId} itemsKey={leaf.tabs.map((tab) => tab.id).join('|')}>
         {leaf.tabs.map((tab, i) => (
@@ -801,12 +830,13 @@ function TileLeafHeader({
       </button>
       {topChrome && !isMac && leaf.id === ctx.topRightLeafId ? (
         <>
-          {/* Fills whatever header width the tabs/new-tab button don't use,
-              so the window stays draggable from an empty strip on
-              Windows/Linux — decorations: false there means, unlike macOS's
-              native title-bar hit-testing, nothing drags the window unless
-              something in the DOM explicitly opts in. */}
-          <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
+          {/* Pushes the caption buttons to the strip's right edge. It no
+              longer needs its own drag marker — the header is `deep`, so this
+              filler drags the window by inheritance, and so does every other
+              empty part of the strip. It used to be one of only two draggable
+              regions, and `min-w-2` is what that was worth once the tabs
+              filled the row: an 8px handle. */}
+          <div className="h-full min-w-2 flex-1" />
           <WindowControls />
         </>
       ) : null}

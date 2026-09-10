@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -220,6 +221,77 @@ func TestTailscaleSelfURLWith(t *testing.T) {
 				t.Errorf("TailscaleSelfURLWith() = (%q, %q), want (%q, %q)", gotURL, gotReason, tt.wantURL, tt.wantReason)
 			}
 		})
+	}
+}
+
+// lastEnv returns the effective value of name in env — the LAST entry wins,
+// which is exactly the rule os/exec applies to a duplicate key.
+func lastEnv(env []string, name string) (string, bool) {
+	value, found := "", false
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			value, found = v, true
+		}
+	}
+	return value, found
+}
+
+// withoutSHLVL reproduces a LaunchServices-launched process: no SHLVL at all.
+// t.Setenv cannot express "unset", and the test suite itself runs from a shell
+// that always sets one — so without this the assertion below would pass on the
+// ambient value and prove nothing.
+func withoutSHLVL(t *testing.T) {
+	t.Helper()
+	orig, had := os.LookupEnv("SHLVL")
+	if err := os.Unsetenv("SHLVL"); err != nil {
+		t.Fatalf("unset SHLVL: %v", err)
+	}
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("SHLVL", orig)
+			return
+		}
+		os.Unsetenv("SHLVL")
+	})
+}
+
+// The macOS Tailscale.app CLI answers as a GUI launcher, not a CLI, unless
+// SHLVL is set — see TailscaleCommand. A GUI-launched process (the installed
+// desktop app) inherits none, which is why this has to be added rather than
+// merely passed through, and why the bug never reproduces under `tauri dev`.
+func TestTailscaleCommandSetsSHLVL(t *testing.T) {
+	withoutSHLVL(t)
+
+	cmd := TailscaleCommand("/Applications/Tailscale.app/Contents/MacOS/Tailscale", "status", "--self", "--json")
+
+	got, ok := lastEnv(cmd.Env, "SHLVL")
+	if !ok {
+		t.Fatal("TailscaleCommand did not set SHLVL; the macOS app-bundle CLI will try to launch the GUI and print a non-JSON error on stdout with exit 0")
+	}
+	if got == "" {
+		t.Errorf("SHLVL = %q, want a non-empty value (the CLI treats an empty SHLVL the same as an absent one)", got)
+	}
+}
+
+// An inherited SHLVL must not shadow the one we add: os/exec resolves a
+// duplicate key to the last entry, so ours has to be appended after the
+// environment, not before it.
+func TestTailscaleCommandSHLVLWinsOverInheritedValue(t *testing.T) {
+	t.Setenv("SHLVL", "")
+
+	got, ok := lastEnv(TailscaleCommand("tailscale", "status").Env, "SHLVL")
+	if !ok || got == "" {
+		t.Fatalf("effective SHLVL = (%q, %v), want a non-empty value even when the process inherits an empty one", got, ok)
+	}
+}
+
+// The whole environment still has to reach the CLI: it needs HOME to find the
+// tailnet state, and PATH like any other exec here.
+func TestTailscaleCommandKeepsInheritedEnvironment(t *testing.T) {
+	t.Setenv("DEVDECK_TAILSCALE_ENV_PROBE", "kept")
+
+	if got, ok := lastEnv(TailscaleCommand("tailscale", "status").Env, "DEVDECK_TAILSCALE_ENV_PROBE"); !ok || got != "kept" {
+		t.Errorf("inherited var = (%q, %v), want (%q, true)", got, ok, "kept")
 	}
 }
 

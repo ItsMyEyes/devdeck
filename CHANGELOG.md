@@ -3,6 +3,58 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.7
+
+**The desktop window controls work when the app points at a remote hub, and an
+installed macOS app can reach the tailnet again.**
+
+### Fixed: dead title bar when the desktop app points at a remote hub
+
+A capability can only name origins known at build time, but remote-hub mode
+navigates the window to whatever hub the operator configured — an origin that
+exists only at runtime. Nothing in the ACL covered it, so every command the UI
+sent was denied: minimize, maximize and close did nothing, the title bar would
+not drag the window, and browser tiles, diagnostics and self-update never
+answered. The app now registers the operator's own hub origin at startup with
+the same permissions the built-in origins get. Only Windows and Linux showed
+the symptom, since macOS keeps its native traffic lights.
+
+Window commands that do fail now say so with a toast instead of leaving a
+button that silently does nothing.
+
+### Fixed: Tailscale read as "not signed in" on a signed-in machine
+
+The macOS Tailscale.app ships its GUI binary *as* the CLI, and that binary
+decides whether it was run from a terminal by looking for `SHLVL` — which a
+process launched by LaunchServices, like the DevDeck app and everything it
+spawns, does not have. It concluded it had been double-clicked, tried to open
+the GUI, and printed the failure to *stdout* while exiting 0. Every probe read
+that sentence where JSON should have been and reported a healthy node as not
+ready: no tailnet URL, no `--enable-tailscale-serve`, no runtime bindings
+pushed, and SSH DevOps chat failing every turn with "not found". All Tailscale
+invocations now set `SHLVL`. The bug never appeared under `tauri dev`, which
+inherits one from the shell that starts it.
+
+### Fixed: the title bar drags from anywhere again
+
+Only two small regions of the tab strip were marked draggable, so once tabs
+filled the row the window could be moved by an 8px sliver. The header now opts
+its whole subtree in, and every empty part of the strip drags the window.
+
+### Faster window painting on Windows and Linux
+
+Those builds painted a full-window `blur(48px)` backdrop filter — the most
+expensive thing a page can composite, re-run whenever anything above it
+repaints, which on this app is continuously. It bought nothing: the window and
+body are opaque there, so the blurred backdrop was a flat colour. Only macOS
+needs it, for its native vibrancy layer, and macOS never took that path.
+
+### Added: type or paste a path in the folder browser
+
+The path in the folder browser's header is now editable — enter `~/code/app`,
+`/Volumes/Data` or `D:\Projects` and jump straight there, instead of clicking
+down to a deep path one folder at a time.
+
 ## v0.2.6
 
 **Codex SSH chat can reach `devdeck-ssh` again, and Settings can check for

@@ -76,13 +76,39 @@ fn resolve_binary() -> String {
     "tailscale".to_string()
 }
 
+/// Builds `tailscale status --self --json` so the CLI answers as a CLI.
+///
+/// The macOS Tailscale.app ships its GUI binary AS the CLI (the
+/// fallback_paths() entry above), and that binary decides whether it was run
+/// from a terminal or opened as an app by looking for SHLVL — the variable
+/// every shell sets, and the only marker it has. This process is launched by
+/// LaunchServices and has none, so the CLI concludes it was double-clicked,
+/// tries to start the GUI, and reports the failure by printing
+/// "The Tailscale GUI failed to start: ... (Tailscale.CLIError error 3.)" to
+/// STDOUT while exiting 0 — so public_url()'s success check passes and
+/// parse_dns_name then fails on a node that is perfectly signed in. The
+/// preflight this feeds decides whether the sidecar gets
+/// `--enable-tailscale-serve` at all, so without SHLVL the installed app can
+/// never expose itself on the tailnet, while `tauri dev` (spawned via `sh -c`,
+/// which sets SHLVL) always could. Mirrors
+/// backend/internal/detect/detect.go's TailscaleCommand, whose doc comment
+/// carries the full chain.
+fn status_command(bin: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(["status", "--self", "--json"]);
+    // Value is irrelevant — the CLI only tests for a non-empty one — so it is
+    // set unconditionally rather than preserving an inherited SHLVL, keeping
+    // the behaviour identical whoever launched us.
+    cmd.env("SHLVL", "1");
+    cmd
+}
+
 /// Runs `tailscale status --self --json` and derives this device's
 /// tailnet-reachable public URL. Fails if the `tailscale` binary is
 /// missing, the command errors, or the node isn't logged in (no DNSName).
 pub async fn public_url() -> Result<String, String> {
     let bin = resolve_binary();
-    let output = tokio::process::Command::new(&bin)
-        .args(["status", "--self", "--json"])
+    let output = status_command(&bin)
         .output()
         .await
         .map_err(|e| format!("run tailscale status: {e}"))?;
@@ -136,6 +162,41 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!is_on_path("tailscale", &dir.to_string_lossy()));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The macOS Tailscale.app CLI answers as a GUI launcher, not a CLI,
+    /// unless SHLVL is set — see status_command. This process is launched by
+    /// LaunchServices and inherits none, so it has to be added explicitly;
+    /// `tauri dev` inherits one from `sh -c`, which is the only reason the bug
+    /// is invisible in development.
+    #[test]
+    fn status_command_sets_shlvl() {
+        let cmd = status_command("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
+        let shlvl = cmd
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("SHLVL"))
+            .map(|(_, v)| v);
+
+        match shlvl {
+            None => panic!(
+                "status_command did not set SHLVL; the app-bundle CLI will try to launch the GUI \
+                 and print a non-JSON error on stdout while exiting 0"
+            ),
+            // Some(None) is an explicit REMOVAL of the variable, which the CLI
+            // reads the same as absent.
+            Some(v) => assert!(
+                v.is_some_and(|v| !v.is_empty()),
+                "SHLVL must be set to a non-empty value, got {v:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn status_command_asks_for_self_json() {
+        let cmd = status_command("tailscale");
+        let args: Vec<_> = cmd.as_std().get_args().collect();
+        assert_eq!(args, ["status", "--self", "--json"]);
     }
 
     #[test]

@@ -39,6 +39,24 @@ describe('folder browser root handling', () => {
     expect(useDevDeckStore.getState().browse).toMatchObject({ root: 'D:\\', path: [] })
   })
 
+  it('browseToPath jumps straight to a typed/pasted path, replacing any existing segments', () => {
+    const { openBrowse, enterFolder, browseToPath } = useDevDeckStore.getState()
+    openBrowse('newPath', '~/work', 'm-1')
+    enterFolder('sub')
+    browseToPath('D:\\Code\\devdeck')
+    expect(useDevDeckStore.getState().browse).toMatchObject({ root: 'D:\\', path: ['Code', 'devdeck'] })
+  })
+
+  it('browseToPath understands a plain unix path and falls back to home for garbage input', () => {
+    const { openBrowse, browseToPath } = useDevDeckStore.getState()
+    openBrowse('newPath', undefined, 'm-1')
+    browseToPath('/Volumes/Data')
+    expect(useDevDeckStore.getState().browse).toMatchObject({ root: '/', path: ['Volumes', 'Data'] })
+
+    browseToPath('not-a-real-path')
+    expect(useDevDeckStore.getState().browse).toMatchObject({ root: '~', path: [] })
+  })
+
   it('useFolder formats the final path per-root and writes it to the right target field', () => {
     const store = useDevDeckStore.getState()
     store.openBrowse('newPath', '/', 'm-1')

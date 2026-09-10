@@ -113,6 +113,7 @@ export default defineConfig({
       'src/features/tabs/tileTree.ssh.test.ts',
       'src/features/tabs/WorkspaceTileCanvas.focus.test.tsx',
       'src/features/tabs/WorkspaceTileCanvas.lazyMount.test.tsx',
+      'src/features/tabs/WorkspaceTileCanvas.dragRegion.test.tsx',
       'src/features/tabs/WindowControls.test.tsx',
       'src/lib/fuzzyHighlight.test.ts',
       'src/lib/machineWsUrl.test.ts',

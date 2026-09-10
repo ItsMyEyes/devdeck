@@ -202,6 +202,45 @@ func ResolveTailscale() (string, error) {
 	return "", fmt.Errorf("detect: tailscale: not found on PATH or in common install locations")
 }
 
+// TailscaleCommand builds an exec.Cmd for the tailscale CLI that the CLI will
+// actually answer as a CLI. Every tailscale invocation in this codebase must
+// go through it — including package tsserve's.
+//
+// The macOS Tailscale.app ships its GUI binary AS the CLI
+// (/Applications/Tailscale.app/Contents/MacOS/Tailscale, the path
+// tailscaleExtraPaths falls back to), and that one binary decides whether it
+// was run from a terminal or opened as an app by looking for SHLVL in its
+// environment — the variable every shell sets, and the only marker it has.
+// A GUI-launched process has none: macOS LaunchServices hands its children a
+// bare PATH/HOME/USER/TMPDIR and nothing else, and the desktop app spawns this
+// server as one of those children.
+//
+// Deciding "opened as an app", the CLI tries to start the GUI and — the sharp
+// edge — reports its failure by printing
+//
+//	The Tailscale GUI failed to start: The operation couldn't be completed. (Tailscale.CLIError error 3.)
+//
+// to STDOUT and exiting 0. Callers here read stdout and treat a zero exit as
+// success, so that sentence lands where JSON was expected and every probe
+// degrades to its unparseable-output branch: "not_ready", which the UI states
+// as "Tailscale isn't signed in" about a node that is signed in and healthy.
+// From there the hub has no tailnet URL, never pushes a binding to any runtime
+// (service.RunBindingPushLoop), and every SSH DevOps chat turn on that runtime
+// fails "not found" — with nothing anywhere naming the real cause.
+//
+// This is why the bug is invisible in development: `tauri dev` is spawned
+// through `sh -c`, so SHLVL is inherited and the CLI answers normally, while
+// the installed .app fails every time. The value is irrelevant — the CLI only
+// tests for a non-empty one — so it is set unconditionally rather than
+// preserving an inherited SHLVL, which keeps the behaviour identical whoever
+// launched us. A duplicate key is well-defined: exec uses the LAST value for
+// each name in Env.
+func TailscaleCommand(bin string, args ...string) *exec.Cmd {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), "SHLVL=1")
+	return cmd
+}
+
 // tailscaleSelfStatus is the subset of `tailscale status --self --json` that
 // TailscaleSelfURL reads.
 type tailscaleSelfStatus struct {
@@ -233,7 +272,7 @@ func TailscaleSelfURLWith(resolve func() (string, error)) (url string, reason st
 	if err != nil {
 		return "", "not_installed"
 	}
-	out, err := exec.Command(bin, "status", "--self", "--json").Output()
+	out, err := TailscaleCommand(bin, "status", "--self", "--json").Output()
 	if err != nil {
 		return "", "not_ready"
 	}
@@ -301,7 +340,7 @@ func TailscaleServeTargetPort(resolve func() (string, error)) (port string, ok b
 	if err != nil {
 		return "", false
 	}
-	out, err := exec.Command(bin, "serve", "status", "--json").Output()
+	out, err := TailscaleCommand(bin, "serve", "status", "--json").Output()
 	if err != nil {
 		return "", false
 	}

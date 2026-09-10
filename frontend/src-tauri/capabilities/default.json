@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions, plus window start_dragging: core:window:default omits it, so the data-tauri-drag-region title-bar strip could not move the window (drag.js fires the IPC on mousedown and the ACL rejected it). Double-click-to-maximize was unaffected because internal_toggle_maximize is in the default set. close/minimize/toggle-maximize are likewise absent from core:window:default (it only carries read-only queries plus internal_toggle_maximize) — needed for the Windows/Linux custom caption buttons that replace the native title bar (decorations: false in tauri.windows.conf.json / tauri.linux.conf.json).",
+  "description": "SOURCE OF TRUTH for what the UI may do — `grant_remote_hub_capability` in lib.rs mirrors this permission list to register the operator's own hub origin at runtime (`remote` below can only name build-time origins, and in HubMode::Remote the window is navigated somewhere only known at runtime); keep the two lists in step. Enables the default permissions, plus window start_dragging: core:window:default omits it, so the data-tauri-drag-region title-bar strip could not move the window (drag.js fires the IPC on mousedown and the ACL rejected it). Double-click-to-maximize was unaffected because internal_toggle_maximize is in the default set. close/minimize/toggle-maximize are likewise absent from core:window:default (it only carries read-only queries plus internal_toggle_maximize) — needed for the Windows/Linux custom caption buttons that replace the native title bar (decorations: false in tauri.windows.conf.json / tauri.linux.conf.json).",
   "windows": [
     "main"
   ],

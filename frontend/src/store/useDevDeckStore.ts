@@ -570,6 +570,11 @@ interface DevDeckState {
   /** Jumps straight to a different root (e.g. switching from ~ to a `D:\`
    *  drive, or to `/`), clearing any segments under the previous root. */
   browseToRoot: (root: string) => void
+  /** Parses a typed/pasted path (via `parseBrowseInitialPath`: `~/...`,
+   *  `/...`, or `D:\...`) and jumps straight there in one step — the
+   *  address-bar shortcut for a path the click-through folder list would
+   *  take many steps to reach (e.g. a deep path on another drive). */
+  browseToPath: (raw: string) => void
   useFolder: () => void
 
   // todos (draft only — mutations live in the module UI)
@@ -1061,6 +1066,12 @@ export const useDevDeckStore = create<DevDeckState>()(
         set((s) => {
           s.browse.root = root
           s.browse.path = []
+        }),
+      browseToPath: (raw) =>
+        set((s) => {
+          const { root, path } = parseBrowseInitialPath(raw)
+          s.browse.root = root
+          s.browse.path = path
         }),
       useFolder: () =>
         set((s) => {

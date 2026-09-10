@@ -102,11 +102,26 @@ function WorkspaceLayout() {
         // and hide it — see DESIGN.md §1. The native material also honours
         // prefers-reduced-transparency on its own, so `reducedTransparency`
         // only matters below. Windows/Linux Tauri builds have no native
-        // transparency configured (`useHasMacVibrancy`'s doc comment), so
-        // they fall through to the same CSS path as the web build.
+        // transparency configured (`useHasMacVibrancy`'s doc comment).
+        //
+        // They also get the SOLID fill rather than the blurred one, and that
+        // is a performance fix, not a style choice. `--devdeck-glass-filter`
+        // is `blur(48px) saturate(.34) brightness(.92)`, and on this div it
+        // covers the entire window — the single most expensive thing a
+        // Chromium page can composite, re-run whenever anything above it
+        // repaints, which on this app is continuously (streaming transcripts,
+        // terminals, spinners). It buys nothing here: those builds have an
+        // opaque window and an opaque `body` (globals.css only drops the body
+        // fill under `html.mac-vibrancy`), so the backdrop being blurred is a
+        // flat colour with no wallpaper or OS material behind it. macOS never
+        // paid this cost — it takes the `undefined` branch and lets the native
+        // vibrancy layer show through — so the blur was a Windows/Linux-only
+        // per-frame tax. `--devdeck-glass-solid` is the design system's own
+        // stand-in for the same surface (it is what `reducedTransparency`
+        // already switches to), so the window looks the same.
         hasMacVibrancy
           ? undefined
-          : reducedTransparency
+          : reducedTransparency || isTauri
             ? 'bg-devdeck-glass-solid'
             : 'bg-devdeck-glass [backdrop-filter:var(--devdeck-glass-filter)]',
         // Reserves space for WorkspaceTileCanvas's top-left leaf strip,

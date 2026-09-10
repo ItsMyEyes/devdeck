@@ -369,9 +369,219 @@ fn set_bind_config(app: AppHandle, host: String) -> Result<(), String> {
     app.restart();
 }
 
+/// Grants this app's own Tauri commands to an operator-hosted hub's origin.
+///
+/// `capabilities/default.json` can only name origins that are known when the
+/// binary is built, and it names exactly one remote: `http://127.0.0.1:*`,
+/// the local sidecar. `HubMode::Remote`, though, points the main window at a
+/// URL the operator types on the first-run screen (see `navigate_remote`),
+/// and `Webview::is_local_url` classifies that as a *remote* origin. Every
+/// `invoke` from the UI was therefore resolved against a capability that does
+/// not list it, and denied — the app's entire command surface, silently,
+/// because a denial comes back as a rejected promise the frontend rarely
+/// awaits.
+///
+/// On macOS that is nearly invisible: the window is natively decorated
+/// (`titleBarStyle: "Overlay"` in tauri.macos.conf.json), so moving, closing,
+/// minimising and zooming it are AppKit's job and never touch the ACL. On
+/// Windows and Linux the title bar IS the web page (`decorations: false`), so
+/// the same denial takes out the whole strip at once: `start_dragging` (the
+/// window cannot be moved), `minimize` / `close` / `toggle_maximize` (the
+/// caption buttons do nothing), `internal_toggle_maximize`
+/// (double-click-to-zoom), and `browser_tile_close` with them (a Browser tab
+/// cannot be closed). That is the shape of the bug this fixes.
+///
+/// Registering the one origin at runtime, rather than widening default.json
+/// to something like `http://*:*`, keeps the grant to the host the operator
+/// deliberately chose as their hub: the ACL still refuses every other page
+/// the webview can reach, including anything a hub page links out to.
+///
+/// The permission list mirrors `capabilities/default.json` — that file stays
+/// the source of truth for what the UI may do, and this one exists only to
+/// say *where else* the same UI is allowed to be served from. Keep them in
+/// step.
+fn grant_remote_hub_capability(handle: &AppHandle, hub_url: &str) {
+    let (origin, capability) = match remote_hub_capability(hub_url) {
+        Ok(pair) => pair,
+        Err(e) => {
+            log_runtime_line(handle, &format!("remote hub capability: {e}"));
+            return;
+        }
+    };
+
+    // Written to the runtime log (the same file "Open log file" surfaces),
+    // which is the only diagnostic channel remote mode has — there is no
+    // registered `log` implementation in this binary, so `log::` macros here
+    // would go nowhere. Both outcomes are recorded: the success line is what
+    // tells an operator debugging a dead title bar that the grant DID happen
+    // and the fault is elsewhere.
+    match handle.add_capability(capability) {
+        Ok(()) => log_runtime_line(handle, &format!("remote hub capability: granted app commands to {origin}")),
+        // Not fatal — the hub's UI still loads and works over HTTP. What stops
+        // working is everything needing the desktop shell, so say so rather
+        // than leaving it to be rediscovered from the symptoms.
+        Err(e) => log_runtime_line(
+            handle,
+            &format!("remote hub capability: could not grant commands to {origin}: {e}"),
+        ),
+    }
+}
+
+/// `(origin, capability json)` for `hub_url`, or a message describing why the
+/// URL is unusable. Split out from `grant_remote_hub_capability` so both the
+/// origin normalisation and the capability's shape are testable without an
+/// `AppHandle`.
+fn remote_hub_capability(hub_url: &str) -> Result<(String, String), String> {
+    // Normalised to a bare origin. An operator who saved
+    // `https://hub.example.com/` — or with any other path — still needs every
+    // SPA route under it to match: `RemoteUrlPattern` rewrites an empty or `/`
+    // pathname to `*`, but keeps a non-trivial one literal, so handing it the
+    // raw string would grant exactly one route and deny every other page of
+    // the very app being served.
+    let url: tauri::Url = hub_url
+        .parse()
+        .map_err(|e| format!("unparseable hub url {hub_url}: {e}"))?;
+    let origin = url.origin();
+    if !origin.is_tuple() {
+        // `Origin::Opaque` — a `data:`/`file:`-ish URL with no host to grant
+        // anything to. Serialising it yields the string "null", which would
+        // silently become a pattern matching nothing.
+        return Err(format!("hub url {hub_url} has no host to grant commands to"));
+    }
+    let origin = origin.ascii_serialization();
+
+    let capability = serde_json::json!({
+        "identifier": "remote-hub",
+        "description": "Grants the same commands as the default capability to the operator's own hub origin, which is only known at runtime.",
+        "windows": ["main"],
+        // Local origins are already covered by capabilities/default.json;
+        // this one exists purely to add the remote context.
+        "local": false,
+        "remote": { "urls": [origin] },
+        "permissions": remote_hub_permissions(),
+    })
+    .to_string();
+
+    Ok((origin, capability))
+}
+
+/// The permission list this capability grants, mirroring
+/// `capabilities/default.json`. `permissions_match_default_capability` below
+/// holds the two together.
+fn remote_hub_permissions() -> serde_json::Value {
+    serde_json::json!([
+        "core:default",
+        "core:window:allow-start-dragging",
+        "core:window:allow-close",
+        "core:window:allow-minimize",
+        "core:window:allow-toggle-maximize",
+        "allow-browser-tiles",
+        "allow-hub-mode",
+        "allow-bind-config",
+        "allow-diagnostics",
+        "allow-prepare-for-update",
+        "allow-open-with",
+        "process:allow-restart",
+        "dialog:allow-save",
+        "fs:allow-write-file",
+        "updater:default",
+        { "identifier": "opener:allow-open-path", "allow": [{ "path": "$APPLOG/*" }] }
+    ])
+}
+
+#[cfg(test)]
+mod remote_hub_capability_tests {
+    use super::*;
+    use std::str::FromStr;
+    use tauri::utils::acl::capability::Capability;
+    use tauri::utils::acl::RemoteUrlPattern;
+
+    fn capability_of(hub_url: &str) -> Capability {
+        let (_, json) = remote_hub_capability(hub_url).expect("hub url should be usable");
+        // Deserialising through Tauri's own type is the point: it proves the
+        // JSON this file hand-builds is a capability Tauri will accept, not
+        // just well-formed JSON.
+        serde_json::from_str(&json).expect("capability should deserialize")
+    }
+
+    fn pattern_of(hub_url: &str) -> RemoteUrlPattern {
+        let cap = capability_of(hub_url);
+        let urls = cap.remote.expect("remote should be set").urls;
+        assert_eq!(urls.len(), 1);
+        RemoteUrlPattern::from_str(&urls[0]).expect("url pattern should parse")
+    }
+
+    #[test]
+    fn grants_only_the_remote_context_on_the_main_window() {
+        let cap = capability_of("https://hub.example.com");
+        assert_eq!(cap.identifier, "remote-hub");
+        // Local is already granted by capabilities/default.json; leaving this
+        // true would silently duplicate every local grant.
+        assert!(!cap.local);
+        assert_eq!(cap.windows.iter().map(|w| w.as_str()).collect::<Vec<_>>(), ["main"]);
+    }
+
+    #[test]
+    fn matches_every_spa_route_under_the_hub_origin() {
+        let pattern = pattern_of("https://hub.example.com");
+        // The window is navigated at the bare hub URL, but the ACL is checked
+        // against the CURRENT page url, which the SPA router rewrites the
+        // moment it boots. All of these must resolve to the same grant.
+        for url in [
+            "https://hub.example.com/",
+            "https://hub.example.com/w/ws-1",
+            "https://hub.example.com/w/ws-1/p/p-2?tab=agents",
+            "https://hub.example.com/w/ws-1#section",
+        ] {
+            assert!(pattern.test(&tauri::Url::parse(url).unwrap()), "{url} should be granted");
+        }
+    }
+
+    #[test]
+    fn a_saved_path_does_not_narrow_the_grant_to_that_one_route() {
+        // The regression this normalisation exists for: passing the raw string
+        // through would pin the pattern's pathname to `/devdeck`.
+        let pattern = pattern_of("https://hub.example.com/devdeck");
+        assert!(pattern.test(&tauri::Url::parse("https://hub.example.com/w/ws-1").unwrap()));
+    }
+
+    #[test]
+    fn keeps_a_non_default_port_and_refuses_other_origins() {
+        let pattern = pattern_of("http://192.168.1.5:8989/");
+        assert!(pattern.test(&tauri::Url::parse("http://192.168.1.5:8989/w/ws-1").unwrap()));
+        // A different port, host or scheme is a different origin, and the
+        // whole point of granting one origin instead of `http://*:*` is that
+        // these stay denied.
+        assert!(!pattern.test(&tauri::Url::parse("http://192.168.1.5:9999/w/ws-1").unwrap()));
+        assert!(!pattern.test(&tauri::Url::parse("http://evil.example.com/w/ws-1").unwrap()));
+        assert!(!pattern.test(&tauri::Url::parse("https://192.168.1.5:8989/w/ws-1").unwrap()));
+    }
+
+    #[test]
+    fn rejects_a_url_with_no_host() {
+        assert!(remote_hub_capability("not a url").is_err());
+        assert!(remote_hub_capability("data:text/html,hi").is_err());
+    }
+
+    #[test]
+    fn permissions_match_default_capability() {
+        // The runtime grant must not drift from the file that documents what
+        // the UI may do — a permission added to one and not the other means
+        // the same app is more capable against a local hub than a remote one,
+        // which is exactly the asymmetry this whole function exists to remove.
+        let default: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).expect("default.json should parse");
+        assert_eq!(default["permissions"], remote_hub_permissions());
+    }
+}
+
 async fn proceed_with_mode(handle: &AppHandle, mode: hubmode::HubMode) {
     match mode {
         hubmode::HubMode::Remote { url, key } => {
+            // Before the navigation, not after: the ACL is consulted per
+            // `invoke`, and the hub's UI starts calling commands as soon as
+            // it loads.
+            grant_remote_hub_capability(handle, &url);
             navigate_remote(handle, &url);
             let handle2 = handle.clone();
             tauri::async_runtime::spawn(async move { run_remote_runtime_loop(&handle2, &url, &key).await });
