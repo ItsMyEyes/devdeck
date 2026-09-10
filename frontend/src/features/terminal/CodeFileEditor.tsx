@@ -410,11 +410,24 @@ export function CodeFileEditor({
     // rename would silently skip every file that is not open — see
     // lspWorkspaceEdit.ts. DevDeck's dialog shows the full blast radius and
     // writes the other files through the machine API instead.
+    //
+    // `contextMenuGroupId`/`contextMenuOrder` give this its own right-click
+    // entry too, next to the built-in one (same '1_modification' group monaco's
+    // RenameAction uses, right after its own 1.1) — without them, F2 was the
+    // only way to reach this override. `addAction` scopes the command it
+    // registers to this editor instance (`${editorId}:devdeck.rename`), so
+    // there was never a chance of colliding with and replacing monaco's own
+    // 'editor.action.rename' menu entry by id; the built-in item stays put and
+    // still hits the broken cross-file path if clicked. The label keeps the two
+    // distinguishable, matching this file's "(heuristic)" convention below for
+    // a different provider gap.
     disposables.push(
       instance.addAction({
         id: 'devdeck.rename',
         label: 'Rename Symbol (DevDeck)',
         keybindings: [monaco.KeyCode.F2],
+        contextMenuGroupId: '1_modification',
+        contextMenuOrder: 1.15,
         run: (ed) => {
           const position = ed.getPosition()
           if (position) void handlersRef.current.startRename(ed, position)

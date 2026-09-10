@@ -32,6 +32,25 @@ describe('uriHelpers', () => {
     expect(pathFromUri('file:///work/repo-other/main.go')).toBeNull()
     expect(pathFromUri('not a uri')).toBeNull()
   })
+
+  // A language server canonicalises the Windows drive letter in every uri it
+  // emits — gopls to UPPERcase, vscode-uri-based servers (typescript-language-
+  // server, pyright) to lowercase — while the rootUri carries whatever case
+  // the worktree path was stored with. Neither case is "right", so both
+  // directions have to resolve; before this, the plain string-prefix match
+  // rejected the mismatching one outright and clicking a cross-file
+  // definition/references result silently did nothing.
+  it('matches the worktree root regardless of Windows drive-letter case', () => {
+    const windows = uriHelpers('file:///c:/Users/andsy/superapps')
+    expect(windows.pathFromUri('file:///C:/Users/andsy/superapps/internal/usecase.go')).toBe(
+      'internal/usecase.go',
+    )
+
+    const windowsUpper = uriHelpers('file:///C:/Users/andsy/superapps')
+    expect(windowsUpper.pathFromUri('file:///c:/Users/andsy/superapps/internal/webhook_usecase.go')).toBe(
+      'internal/webhook_usecase.go',
+    )
+  })
 })
 
 describe('createLspSessionPool', () => {

@@ -21,6 +21,7 @@ import (
 	"devdeck/backend/internal/detect"
 	gitpkg "devdeck/backend/internal/git"
 	"devdeck/backend/internal/port"
+	"devdeck/backend/internal/procgroup"
 
 	"nhooyr.io/websocket"
 )
@@ -145,6 +146,23 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.closeWithError(ctx, conn, fmt.Sprintf("start %s: %v", spec.binary, err))
 		return
 	}
+
+	// Best-effort: groups the server's process tree so it cannot outlive
+	// this connection as an orphan — a shell-wrapped server (npm's .cmd
+	// shims, e.g. typescript-language-server/pyright on Windows) whose real
+	// child a plain Process.Kill leaves running, or ANY language server left
+	// behind by this backend itself dying (crash, force quit, a self-update
+	// replacing the binary) with nothing left alive to signal it. No-op on
+	// Unix, where the process exiting when its stdin pipe closes already
+	// covers this. See procgroup's package doc.
+	job, jobErr := procgroup.Attach(cmd.Process)
+	if jobErr != nil {
+		log.Printf("lsp: %s process group for %s: %v", spec.binary, worktreeID, jobErr)
+	}
+	go func() {
+		<-ctx.Done()
+		job.Terminate()
+	}()
 
 	rootURI := fileURI(root)
 	if err := writeControl(ctx, conn, controlMessage{
@@ -336,6 +354,17 @@ func (s *Server) closeWithError(ctx context.Context, conn *websocket.Conn, messa
 	_ = conn.Close(websocket.StatusPolicyViolation, message)
 }
 
+// fileURI builds the rootUri handed to the frontend in the `ready` control
+// frame. It deliberately does NOT normalise the case of a Windows drive
+// letter: there is no single convention to normalise towards. gopls
+// canonicalises a drive letter to UPPERcase (x/tools gopls/internal/protocol/
+// uri.go: "we change them to uppercase to remain consistent", asserted by its
+// own uri_windows_test.go), while vscode-uri — and therefore
+// typescript-language-server, pyright and most of the rest of the ecosystem —
+// canonicalises to lowercase. Picking either one here would guarantee a
+// mismatch with the other family of servers. Drive-letter case is instead
+// treated as insignificant at every point where a uri is *compared*; see
+// normalizeDriveLetter in frontend/src/features/terminal/lsp/lspSession.ts.
 func fileURI(path string) string {
 	slashed := filepath.ToSlash(path)
 	if runtime.GOOS == "windows" && !strings.HasPrefix(slashed, "/") {

@@ -72,7 +72,7 @@ function check(data: Partial<MachineUpdateCheck> | undefined) {
 }
 
 function update(over: Partial<DesktopUpdate> = {}): DesktopUpdate {
-  return { staged: null, installing: false, install, ...over }
+  return { staged: null, installing: false, checking: false, downloading: false, install, ...over }
 }
 
 function busyOk(data: MachineBusy) {
@@ -207,5 +207,28 @@ describe('VersionSection inside the desktop shell', () => {
     mockUseDesktopUpdate.mockReturnValue(update({ staged: { version: '0.2.1' }, installing: true }))
     render(<VersionSection machineId="m1" />)
     expect(screen.getByRole('button', { name: /install/i })).toBeDisabled()
+  })
+
+  // The operator has no other way to learn a background check or download is
+  // under way — the pill never renders for either (spec, UI section) — so
+  // this is the one place that state is surfaced at all.
+  it('shows a loading indicator while a check is in flight', () => {
+    mockUseDesktopUpdate.mockReturnValue(update({ checking: true }))
+    render(<VersionSection machineId="m1" />)
+    expect(screen.getAllByText(/Checking for updates…/).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /Restart & install/ })).toBeNull()
+  })
+
+  it('shows a loading indicator while a found update downloads', () => {
+    mockUseDesktopUpdate.mockReturnValue(update({ downloading: true }))
+    render(<VersionSection machineId="m1" />)
+    expect(screen.getAllByText(/Downloading update…/).length).toBeGreaterThan(0)
+  })
+
+  it('prefers the staged pill over an in-flight indicator once an update lands', () => {
+    mockUseDesktopUpdate.mockReturnValue(update({ staged: { version: '0.2.1' }, checking: true }))
+    render(<VersionSection machineId="m1" />)
+    expect(screen.queryByText(/Checking for updates…/)).toBeNull()
+    expect(screen.getByText(/v0\.2\.1 ready to install/)).toBeInTheDocument()
   })
 })

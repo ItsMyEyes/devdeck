@@ -19,6 +19,7 @@ import (
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
 	"devdeck/backend/internal/detect"
+	"devdeck/backend/internal/procgroup"
 )
 
 const eventBufferSize = 256
@@ -54,6 +55,7 @@ type adapter struct {
 	startErr  error
 	baseURL   string
 	cmd       *exec.Cmd
+	job       procgroup.Handle
 	http      *http.Client
 
 	// globalOnce guards the ONE server-wide /api/event subscription this
@@ -170,6 +172,22 @@ func (a *adapter) ensureServer(mcpEndpoints []provider.MCPEndpoint) error {
 			a.startErr = fmt.Errorf("opencode: start server: %w", err)
 			return
 		}
+
+		// Best-effort: groups the server's process tree so a shell-wrapped
+		// install cannot leave a real child orphaned when this is killed, or
+		// when this backend itself dies with nothing left alive to signal
+		// it. No-op on Unix. See procgroup's package doc — same fix as
+		// internal/terminal and internal/lsp apply already.
+		job, jobErr := procgroup.Attach(cmd.Process)
+		if jobErr != nil {
+			log.Printf("opencode: instance %s: process group: %v", a.instanceID, jobErr)
+		}
+		a.job = job
+		go func() {
+			<-a.ctx.Done()
+			job.Terminate()
+		}()
+
 		a.cmd = cmd
 
 		ready := make(chan string, 1)
@@ -619,10 +637,16 @@ func (a *adapter) StopAll(context.Context) error {
 	a.sessions = map[string]*session{}
 	a.byOpencode = map[string]*session{}
 	cmd := a.cmd
+	job := a.job
 	a.mu.Unlock()
 	for _, s := range sessions {
 		s.cancel()
 	}
+	// job.Terminate tears down the whole process tree on Windows (see
+	// procgroup's package doc); a plain Process.Kill only ever killed this
+	// one PID and left a shell-wrapped install's real child running. It is a
+	// no-op on Unix, where the fallback below already does the real work.
+	job.Terminate()
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}

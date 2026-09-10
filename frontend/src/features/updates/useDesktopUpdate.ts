@@ -38,6 +38,13 @@ export interface StagedUpdate {
 export interface DesktopUpdate {
   staged: StagedUpdate | null
   installing: boolean
+  /** True while `check()` is in flight. Not for the pill (see `StagedUpdate`)
+   *  — it exists so `VersionSection`, opened deliberately from Settings, can
+   *  show the operator that something is happening instead of going quiet. */
+  checking: boolean
+  /** True from the moment a found update starts downloading until it is
+   *  staged or the download fails. Same rationale as `checking`. */
+  downloading: boolean
   /** Installs the staged payload and relaunches. Resolves (rather than
    *  throwing) on failure, having already surfaced a toast — the caller's job
    *  is only to keep the pill on screen so it can be retried. */
@@ -72,9 +79,11 @@ export function isUnstampedBuild(currentVersion: string): boolean {
 interface Snapshot {
   staged: StagedUpdate | null
   installing: boolean
+  checking: boolean
+  downloading: boolean
 }
 
-let snapshot: Snapshot = { staged: null, installing: false }
+let snapshot: Snapshot = { staged: null, installing: false, checking: false, downloading: false }
 // The live `Update` handle whose payload has been downloaded. Held outside
 // React: it is an opaque Tauri `Resource` with a Rust-side lifetime (the
 // downloaded bytes are retained in the Rust process until `close()`), and it
@@ -112,6 +121,10 @@ async function closeQuietly(update: Update | null) {
 }
 
 async function runCheck() {
+  // `checking`/`downloading` are read by VersionSection only — Settings is
+  // opened deliberately, so surfacing them there does not create the
+  // every-launch flicker the pill avoids by never rendering for either.
+  emit({ ...snapshot, checking: true })
   let found: Update | null
   try {
     // Dynamically imported so no Tauri plugin code is pulled into the web
@@ -122,11 +135,16 @@ async function runCheck() {
     // Silent by design: offline and an absent `latest.json` both land here,
     // and a background check the operator never asked for must not produce
     // noise. A *download* failure is different — see below.
+    emit({ ...snapshot, checking: false })
     return
   }
-  if (!found) return
+  if (!found) {
+    emit({ ...snapshot, checking: false })
+    return
+  }
 
   if (isUnstampedBuild(found.currentVersion)) {
+    emit({ ...snapshot, checking: false })
     await closeQuietly(found)
     return
   }
@@ -136,10 +154,12 @@ async function runCheck() {
   // operator restarts. A dashboard left open for a week would otherwise pull
   // the full bundle 28 times and retain every copy.
   if (readyUpdate && readyUpdate.version === found.version) {
+    emit({ ...snapshot, checking: false })
     await closeQuietly(found)
     return
   }
 
+  emit({ ...snapshot, checking: false, downloading: true })
   try {
     // D2: the download is silent and automatic; only the install needs
     // consent. `download()` stages the payload without touching the installed
@@ -152,13 +172,14 @@ async function runCheck() {
     // signature does not verify would otherwise strand every desktop install
     // on the old version with no signal at all.
     toast.error(`Update ${found.version} failed to download: ${e instanceof Error ? e.message : String(e)}`)
+    emit({ ...snapshot, downloading: false })
     await closeQuietly(found)
     return
   }
 
   const previous = readyUpdate
   readyUpdate = found
-  emit({ ...snapshot, staged: { version: found.version, notes: found.body } })
+  emit({ ...snapshot, downloading: false, staged: { version: found.version, notes: found.body } })
   // Only after the swap, so a failure to free the old one cannot strand the
   // new staged payload.
   await closeQuietly(previous)
@@ -218,7 +239,7 @@ export function __resetDesktopUpdateForTests() {
   controllerStarted = false
   readyUpdate = null
   subscribers.clear()
-  snapshot = { staged: null, installing: false }
+  snapshot = { staged: null, installing: false, checking: false, downloading: false }
 }
 
 export function useDesktopUpdate(): DesktopUpdate {
@@ -226,5 +247,11 @@ export function useDesktopUpdate(): DesktopUpdate {
     startController()
   }, [])
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  return { staged: state.staged, installing: state.installing, install }
+  return {
+    staged: state.staged,
+    installing: state.installing,
+    checking: state.checking,
+    downloading: state.downloading,
+    install,
+  }
 }

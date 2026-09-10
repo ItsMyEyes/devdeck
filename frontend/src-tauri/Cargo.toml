@@ -10,6 +10,19 @@ rust-version = "1.77.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# Tauri's own size guide (https://v2.tauri.app/concept/size/): none of this
+# was set before, so every release shipped the Cargo defaults (opt-level=3,
+# no LTO, no strip, 16 codegen-units) — a needlessly large, non-stripped
+# shell binary bundled into every desktop install. Scoped to [profile.release]
+# only, so `cargo test`/dev builds (and their unwinding-based tests) are
+# unaffected by panic = "abort".
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

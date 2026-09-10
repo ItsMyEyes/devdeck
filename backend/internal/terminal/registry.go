@@ -13,6 +13,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/procgroup"
 )
 
 const (
@@ -138,7 +139,11 @@ type ptySession struct {
 	id   string
 	ptmx crosspty.Pty
 	cmd  *crosspty.Cmd
-	buf  *ringBuffer
+	// job groups cmd's process with every process it goes on to spawn, so
+	// kill() can tear down the whole tree instead of leaking a shell
+	// wrapper's real child. See procgroup's package doc.
+	job procgroup.Handle
+	buf *ringBuffer
 	// flushCh nudges the pump's coalescing writer to flush immediately,
 	// e.g. so a freshly attached connection gets its replay without waiting
 	// out the flush interval.
@@ -361,6 +366,15 @@ func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySessi
 		return nil, err
 	}
 
+	// Best-effort: groups cmd's process tree so a later kill() (or this
+	// backend itself dying) cannot leave an orphan behind. A no-op on Unix,
+	// where the process-group signalling below already covers this; see
+	// procgroup's package doc for why Windows needs it.
+	job, jobErr := procgroup.Attach(cmd.Process)
+	if jobErr != nil {
+		log.Printf("terminal: session %s: process group: %v", id, jobErr)
+	}
+
 	// The parent must not keep the Unix slave end open or the master never
 	// receives EOF after the child exits. ConPTY exposes separate pipe ends.
 	if unixPTY, ok := ptmx.(crosspty.UnixPty); ok {
@@ -371,6 +385,7 @@ func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySessi
 		id:        id,
 		ptmx:      ptmx,
 		cmd:       cmd,
+		job:       job,
 		buf:       newRingBuffer(ringBufferMaxBytes),
 		flushCh:   make(chan struct{}, 1),
 		cols:      cols,
@@ -388,6 +403,12 @@ func (r *registry) spawn(id string, source *exec.Cmd, cols, rows int) (*ptySessi
 	go func() {
 		_ = cmd.Wait()
 		sess.close()
+		// Release the job handle so it doesn't leak (no-op on Unix, and safe
+		// even if kill() already called Terminate on this same session).
+		// cmd has exited, so the job is normally empty by now — but closing
+		// its last handle also kills any descendant that outlived it, which
+		// is exactly the orphan this package exists to prevent.
+		sess.job.Release()
 		r.discard(sess)
 	}()
 	return sess, nil
@@ -572,8 +593,17 @@ func (r *registry) kill(id string) {
 	}
 
 	// Closing a ConPTY tears down the attached console. Unix additionally
-	// signals the process group; Windows kills the attached process directly.
+	// signals the process group; Windows tears down the whole job (see
+	// sess.job's doc) so a shell-wrapped CLI's real child cannot survive as
+	// an orphan. terminateProcess still runs after, and on Unix it does the
+	// real work exactly as before — but note it is not a Windows fallback:
+	// go-pty adopts the child via os.FindProcess, whose handle carries no
+	// PROCESS_TERMINATE, so Process.Kill() there fails in DuplicateHandle
+	// with access denied. On Windows the job is the only thing that actually
+	// kills a PTY session, which is why attaching it is worth doing even
+	// though the call below looks like it already covers this.
 	sess.close()
+	sess.job.Terminate()
 	terminateProcess(sess.cmd)
 }
 

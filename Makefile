@@ -16,6 +16,13 @@ WINDOWS_EXT := $(if $(filter windows,$(GOOS)),.exe,)
 # available update against its own tag, forever.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X devdeck/backend/internal/version.Version=$(VERSION)
+# -s -w drop the symbol table and DWARF debug info respectively — ~17%
+# smaller binary (measured: 74.7MB -> 62.1MB on darwin/arm64), no behavior
+# change. Split from LDFLAGS rather than folded into it so `make build-api`/
+# `dev-api` — the local dev loop — keeps debug symbols for delve/gdb; every
+# target that actually ships a binary (portable*, the sidecar builds) uses
+# this one instead.
+RELEASE_LDFLAGS := $(LDFLAGS) -s -w
 
 # Shared dev hub bearer key: gives the hub started by `make dev`/`make
 # dev-api` a --key, purely as an additional auth path alongside the
@@ -110,7 +117,7 @@ portable: portable-current
 
 portable-current: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-$(GOOS)-$(GOARCH)$(WINDOWS_EXT) ./cmd/server
 
 # Release matrix: macOS, Linux, and Windows on Intel/AMD and ARM64. One artifact
 # per target: the SSH chat helper an agent calls as `devdeck-ssh` is a
@@ -118,12 +125,12 @@ portable-current: prepare-webui
 # wrong in a release.
 portable-all: prepare-webui
 	mkdir -p $(DIST_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-amd64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-arm64 ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-amd64.exe ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-arm64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-darwin-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-amd64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-linux-arm64 ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-amd64.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(DIST_DIR)/devdeck-windows-arm64.exe ./cmd/server
 
 # ── Desktop (Tauri) ──────────────────────────────────────────
 # Sidecar binaries for the desktop app, named by Rust target triple as
@@ -133,13 +140,13 @@ TAURI_BIN_DIR := frontend/src-tauri/binaries
 
 prepare-sidecar: prepare-webui
 	mkdir -p $(TAURI_BIN_DIR)
-	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-aarch64-apple-darwin ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-pc-windows-msvc.exe ./cmd/server
-	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-unknown-linux-gnu ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-aarch64-apple-darwin ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-pc-windows-msvc.exe ./cmd/server
+	cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-x86_64-unknown-linux-gnu ./cmd/server
 
 sidecar-host: prepare-webui
 	mkdir -p $(TAURI_BIN_DIR)
-	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
+	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o ../$(TAURI_BIN_DIR)/devdeck-server-$$(rustc --print host-tuple)$(WINDOWS_EXT) ./cmd/server
 
 # Run the desktop app in dev mode: builds the host-triple sidecar, then
 # `tauri dev` opens a native window against the Vite dev server (:5173) —

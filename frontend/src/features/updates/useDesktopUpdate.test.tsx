@@ -157,4 +157,54 @@ describe('useDesktopUpdate', () => {
 
     expect(found.download).not.toHaveBeenCalled()
   })
+
+  // Settings is opened deliberately (unlike the always-mounted pill), so it
+  // may surface these two phases without recreating the launch-time flicker
+  // the pill avoids by never rendering for either.
+  it('reports checking while check() is in flight, then downloading while the payload is fetched', async () => {
+    enterDesktopShell()
+    const found = fakeUpdate('0.2.1')
+    let resolveDownload: () => void = () => {}
+    found.download.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDownload = resolve
+        }),
+    )
+    let resolveCheck: (u: typeof found) => void = () => {}
+    check.mockImplementation(() => new Promise((resolve) => (resolveCheck = resolve)))
+
+    let seen: ReturnType<typeof useDesktopUpdate> | undefined
+    function Capture() {
+      seen = useDesktopUpdate()
+      return null
+    }
+    render(<Capture />)
+
+    await waitFor(() => expect(seen?.checking).toBe(true))
+    expect(seen?.downloading).toBe(false)
+
+    resolveCheck(found)
+    await waitFor(() => expect(seen?.downloading).toBe(true))
+    expect(seen?.checking).toBe(false)
+
+    resolveDownload()
+    await waitFor(() => expect(seen?.downloading).toBe(false))
+    expect(seen?.staged).toEqual({ version: '0.2.1', notes: 'notes for 0.2.1' })
+  })
+
+  it('clears checking without ever setting downloading when no update is found', async () => {
+    enterDesktopShell()
+    check.mockResolvedValue(null)
+
+    let seen: ReturnType<typeof useDesktopUpdate> | undefined
+    function Capture() {
+      seen = useDesktopUpdate()
+      return null
+    }
+    render(<Capture />)
+
+    await waitFor(() => expect(seen?.checking).toBe(false))
+    expect(seen?.downloading).toBe(false)
+  })
 })

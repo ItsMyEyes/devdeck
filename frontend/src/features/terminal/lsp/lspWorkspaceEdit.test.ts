@@ -79,6 +79,22 @@ describe('splitWorkspaceEdit', () => {
     const result = splitWorkspaceEdit(null, `${ROOT}/main.go`, pathFromUri)
     expect(result).toEqual({ currentEdits: [], otherFiles: [], unsupportedOps: [], outsideRoot: [] })
   })
+
+  // gopls canonicalises a uri's drive letter to uppercase; currentUri carries
+  // whatever case the worktree root happens to be stored with. A rename that
+  // targets the file already open in the editor must still land in
+  // currentEdits (applied to the live buffer), not otherFiles (a disk write
+  // racing that buffer), regardless of which side's case "wins".
+  it('matches the current document regardless of Windows drive-letter case', () => {
+    const result = splitWorkspaceEdit(
+      { changes: { 'file:///C:/work/repo/main.go': [edit(0, 5, 8, 'Bar')] } },
+      'file:///c:/work/repo/main.go',
+      pathFromUri,
+    )
+
+    expect(result.currentEdits).toHaveLength(1)
+    expect(result.otherFiles).toEqual([])
+  })
 })
 
 describe('applyTextEdits', () => {

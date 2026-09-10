@@ -61,6 +61,21 @@ export function languageIdForPath(path: string): string | null {
   }
 }
 
+/** Lowercases a `/c:/...`-style drive-letter segment, if present — the one
+ *  part of a `file://` uri that two otherwise-identical Windows paths can
+ *  legitimately disagree on, and which the filesystem itself treats as
+ *  insignificant. Lowercase is picked only because it is a fixed point; every
+ *  caller runs both sides of a comparison through this, so which case it
+ *  lands on never matters. Works on either a bare pathname (`/c:/repo`) or a
+ *  full uri (`file:///c:/repo`) — the pattern only ever matches right after a
+ *  path separator, which for a full uri is the third slash in `file:///`.
+ *  No-op for anything with no drive letter (every non-Windows path, and a
+ *  Windows uri whose host carries the drive instead — neither of those
+ *  shapes reaches this function's callers). */
+export function normalizeDriveLetter(value: string): string {
+  return value.replace(/\/([A-Za-z]):(?=\/|$)/, (_, letter: string) => `/${letter.toLowerCase()}:`)
+}
+
 /** Worktree-relative path ↔ `file://` uri, both anchored at the root the
  *  backend reported in its `ready` control frame. */
 export function uriHelpers(rootUri: string) {
@@ -81,7 +96,22 @@ export function uriHelpers(rootUri: string) {
         const target = new URL(uri)
         if (rootUrl.protocol !== target.protocol || rootUrl.host !== target.host) return null
         const rootPath = rootUrl.pathname.endsWith('/') ? rootUrl.pathname : `${rootUrl.pathname}/`
-        if (!target.pathname.startsWith(rootPath)) return null
+        // A Windows drive letter is not case-sensitive on the filesystem, but
+        // this prefix check is a plain string compare, and the two sides
+        // genuinely disagree. `rootPath` comes from the backend's rootUri,
+        // which carries whatever case the worktree path was stored with;
+        // `target` comes from the language server, which canonicalises the
+        // drive letter to a case of its own choosing — gopls to UPPERcase
+        // (x/tools gopls/internal/protocol/uri.go: "we change them to
+        // uppercase to remain consistent"), vscode-uri-based servers such as
+        // typescript-language-server and pyright to lowercase. A worktree
+        // stored as `c:\…` therefore made every gopls result for a sibling
+        // file — go-to-definition, references — fall out of the worktree
+        // here, so `createEditorOpener` declined the navigation and the click
+        // silently did nothing. Since no single case is "right", neither side
+        // is normalised at the source (see fileURI's doc in
+        // backend/internal/lsp/server.go); the comparison is what ignores it.
+        if (!normalizeDriveLetter(target.pathname).startsWith(normalizeDriveLetter(rootPath))) return null
         return decodeURIComponent(target.pathname.slice(rootPath.length))
       } catch {
         return null

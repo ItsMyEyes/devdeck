@@ -1,3 +1,5 @@
+import { normalizeDriveLetter } from './lspSession'
+
 export interface LspPosition {
   line: number
   character: number
@@ -89,9 +91,17 @@ export function splitWorkspaceEdit(
   const otherFiles: FileEdits[] = []
   const outsideRoot: string[] = []
 
+  // A straight string compare would miss its own target on Windows: gopls
+  // canonicalises a uri's drive letter to uppercase while this session's own
+  // currentUri carries whatever case the worktree root was stored with (see
+  // fileURI's doc in backend/internal/lsp/server.go). A rename that touches
+  // the file already open in the editor would then be misrouted into
+  // otherFiles — a direct disk write racing the live buffer — instead of
+  // currentEdits, which applies to it in place.
+  const normalizedCurrentUri = normalizeDriveLetter(currentUri)
   for (const [uri, edits] of byUri) {
     if (edits.length === 0) continue
-    if (uri === currentUri) {
+    if (normalizeDriveLetter(uri) === normalizedCurrentUri) {
       currentEdits.push(...edits)
       continue
     }

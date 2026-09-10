@@ -313,6 +313,17 @@ have `import.meta.env.DEV === false`; and `scripts/gen-latest-json.test.mjs`
 now runs in both `test.yml` and release's gating `test` job, having previously
 run nowhere.
 
+**A6 — `checking`/`downloading` are surfaced, but only to `VersionSection`
+(amends the UI section).** Before this, an operator had no way to tell a
+background check or download was happening at all — the pill in the UI
+section above deliberately never renders for either, and that stays true.
+`useDesktopUpdate` now also exposes `checking`/`downloading` booleans off the
+same singleton snapshot; `VersionSection` (opened deliberately from Settings,
+unlike the always-mounted pill) shows a small spinner + "Checking for
+updates…" / "Downloading update…" in place of the old static "The desktop app
+checks for updates on its own." `UpdateBanner` ignores both fields — nothing
+about the pill's launch-time flicker avoidance changes.
+
 ## Out of scope
 
 - Apple codesigning and notarization. The app is unsigned today and stays so;

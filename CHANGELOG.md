@@ -3,6 +3,52 @@
 Notable changes per release. Each `## vX.Y.Z` section here becomes the body of
 the matching GitHub Release — see `.github/workflows/release.yml`.
 
+## v0.2.5
+
+**A lighter desktop install, and Windows no longer accumulates orphaned agent
+and language-server processes.**
+
+### Windows: agent CLIs and language servers no longer leak on kill
+
+`Process.Kill()` only ever terminates the exact PID it's given — never its
+children. On Windows, every agent CLI (`claude`, `codex`, `pi`, `opencode`)
+and language server DevDeck spawns runs as `cmd.exe /c foo.cmd args` when
+installed as an npm shim, so stopping a session, or the backend itself
+crashing or self-updating, left the real Node process running forever,
+invisible and still burning memory and CPU. All of them now run inside a
+Windows Job Object configured to kill the whole process tree the instant its
+last handle closes — no-op on macOS/Linux, where process-group signalling
+already covered this.
+
+### Smaller desktop install
+
+The Go sidecar binary shipped with debug symbols and DWARF info still
+attached (~17% smaller once stripped from release builds), and the Tauri
+shell had no `[profile.release]` at all, so it built with Cargo's defaults
+instead of Tauri's own documented size profile (LTO, single codegen unit,
+size-optimized, stripped). Both are fixed; the local dev build
+(`make dev-api`) keeps its debug symbols.
+
+### Go to definition and rename on a Windows worktree
+
+gopls canonicalises a `file://` uri's drive letter to uppercase; every other
+language server (typescript-language-server, pyright, …) canonicalises to
+lowercase. A worktree stored with the other case made every gopls
+go-to-definition/references result fall outside the worktree root as far as
+the frontend was concerned — the click silently did nothing — and could
+misroute a rename touching the open file into a direct disk write racing the
+live editor buffer instead of applying in place. Drive-letter case is now
+treated as insignificant everywhere a uri is compared.
+
+### Also in this release
+
+- "Rename Symbol (DevDeck)" — the cross-file-aware rename that replaces
+  Monaco's own broken-on-multi-file version — now has its own right-click
+  menu entry; F2 was previously the only way to reach it.
+- Settings now shows "Checking for updates…" / "Downloading update…" while
+  the desktop updater is working instead of going quiet until something is
+  staged or nothing happens.
+
 ## v0.2.4
 
 **The Tools module no longer needs anything installed, machines wire

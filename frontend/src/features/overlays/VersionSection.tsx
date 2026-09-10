@@ -38,8 +38,13 @@ export function VersionSection({ machineId }: { machineId: string | undefined })
   const isTauri = useIsTauri()
   // Safe to call on the web: the hook self-gates on the same Tauri test and
   // never runs a check, so `staged` stays null and this branch stays dead.
-  const { staged, installing, install } = useDesktopUpdate()
+  const { staged, installing, checking, downloading, install } = useDesktopUpdate()
   const desktopStaged = isTauri ? staged : null
+  // Settings is opened deliberately, unlike the always-mounted pill, so
+  // surfacing the in-flight state here does not create a launch-time
+  // flicker — it tells the operator something they'd otherwise have no way
+  // to know: the app is checking, or is already pulling the payload down.
+  const desktopStatusLabel = checking ? 'Checking for updates…' : downloading ? 'Downloading update…' : null
   // Advisory only, and only worth asking once something is actually staged —
   // with no update to install, "what would a restart destroy" is a question
   // nobody is asking.
@@ -102,6 +107,11 @@ export function VersionSection({ machineId }: { machineId: string | undefined })
                 {installing && <Loader2 size={13} className="animate-spin" />}
                 {'Restart & install'}
               </Button>
+            ) : desktopStatusLabel ? (
+              <p className="flex max-w-[220px] items-center justify-end gap-1.5 text-right font-mono text-[10.5px] text-devdeck-fg-2">
+                <Loader2 size={12} className="flex-none animate-spin" />
+                {desktopStatusLabel}
+              </p>
             ) : (
               <p className="max-w-[220px] text-right font-mono text-[10.5px] text-devdeck-fg-2">
                 The desktop app checks for updates on its own.
@@ -126,14 +136,14 @@ export function VersionSection({ machineId }: { machineId: string | undefined })
       </div>
 
       {isTauri ? (
-        // One string, not spans: "no update staged" is deliberately narrower
-        // than "up to date". The updater reports nothing between a silent
-        // failed check, a check still in flight, and a genuine no-op, so
-        // claiming the last of the three would be a guess.
+        // "no update staged" is deliberately narrower than "up to date": a
+        // silent failed check and a genuine no-op both land here, and
+        // claiming the latter would be a guess. checking/downloading are
+        // distinguishable from that idle state via `desktopStatusLabel`.
         <p className="mt-2.5 font-mono text-[10.5px] text-devdeck-fg-2">
           {desktopStaged
             ? `v${desktopStaged.version} ready to install${countsLabel ? ` · ${countsLabel}` : ''}`
-            : 'no update staged'}
+            : desktopStatusLabel ?? 'no update staged'}
         </p>
       ) : (
         <>

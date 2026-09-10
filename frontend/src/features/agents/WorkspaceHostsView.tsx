@@ -58,7 +58,7 @@ export function WorkspaceHostsView({ wsId, projects, selectedProjectId }: Worksp
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <section className="flex-none border-b border-devdeck-border bg-devdeck-pane px-3 py-3 sm:px-4">
+      <section className="flex-none border-b border-devdeck-border bg-devdeck-pane px-3 py-3 sm:px-4" style={{ borderRadius: '12px'}}>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div {...tourAnchor('agents-heading')} className="min-w-0">
             <div className="flex items-center gap-2">

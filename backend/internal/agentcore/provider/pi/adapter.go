@@ -17,6 +17,7 @@ import (
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
 	"devdeck/backend/internal/detect"
+	"devdeck/backend/internal/procgroup"
 )
 
 // eventBufferSize bounds the adapter's single instance-wide events channel.
@@ -254,6 +255,22 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		cancel()
 		return provider.Session{}, fmt.Errorf("pi: spawn: %w", err)
 	}
+
+	// Best-effort: groups the CLI's process tree so a shell-wrapped install
+	// (pi is a Node script, often launched via an npm .cmd shim on Windows)
+	// cannot leave its real Node process orphaned when this session is
+	// stopped, or when this backend itself dies with nothing left alive to
+	// signal it. No-op on Unix, where cmd's own process-group signalling
+	// already covers this. See procgroup's package doc — same fix as
+	// internal/terminal and internal/lsp apply already.
+	job, jobErr := procgroup.Attach(cmd.Process)
+	if jobErr != nil {
+		log.Printf("pi: instance %s thread %s: process group: %v", a.instanceID, in.ThreadID, jobErr)
+	}
+	go func() {
+		<-sctx.Done()
+		job.Terminate()
+	}()
 
 	sess := &session{
 		threadID:  in.ThreadID,
