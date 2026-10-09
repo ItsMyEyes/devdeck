@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { BrainCog, SquareTerminal, LayoutGrid, Server, Wrench, type LucideIcon } from 'lucide-react'
+import { Box, BrainCog, SquareTerminal, LayoutGrid, Server, Wrench, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useScope } from '@/features/useScope'
@@ -9,7 +9,7 @@ import { useDevDeckStore } from '@/store/useDevDeckStore'
 import type { ModuleView } from '@/store/types'
 
 interface RailDef {
-  key: Extract<ModuleView, 'agents' | 'ssh' | 'database' | 'tools' | 'invoices' | 'machines' | 'memory'>
+  key: Extract<ModuleView, 'agent-workspace' | 'agents' | 'ssh' | 'database' | 'tools' | 'invoices' | 'machines' | 'memory'>
   label: string
   Icon: LucideIcon
   badge?: number
@@ -31,6 +31,7 @@ export function SidebarNav({ compact = true }: SidebarNavProps = {}) {
   const runningHosts = ws?.projects.flatMap((project) => project.worktrees).filter((worktree) => worktree.state === 'running').length ?? 0
 
   const items: RailDef[] = [
+    { key: 'agent-workspace', label: 'Agent Workspace 3D', Icon: Box },
     { key: 'agents', label: 'Agents', Icon: LayoutGrid, badge: runningHosts },
     { key: 'ssh', label: 'SSH', Icon: SquareTerminal },
     { key: 'machines', label: 'Runtimes', Icon: Server },

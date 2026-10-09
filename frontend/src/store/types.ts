@@ -411,7 +411,7 @@ export interface CatalogSnapshot {
   sshConnections: SSHConnection[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database' | 'memory'
+export type ModuleView = 'agent-workspace' | 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database' | 'memory'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {
@@ -559,3 +559,43 @@ export interface OverlayBlockerRect {
  *  backdrop, the mobile sidebar drawer. Anything smaller reports its own
  *  `OverlayBlockerRect` instead. See `useNativeOverlayBlocker.ts`. */
 export type OverlayBlockerRegion = OverlayBlockerRect | 'viewport'
+
+/** Mirrors the Office DTOs in backend/internal/domain/models.go. */
+export interface OfficeSubagent {
+  id: string
+  title: string
+  role: string
+  status: string
+  activity: string
+  tokens?: number
+  updatedAt: number
+}
+export interface OfficeActivity {
+  id: string
+  agentId?: string
+  text: string
+  createdAt: number
+}
+export interface OfficeSession {
+  id: string
+  worktreeId?: string
+  projectId?: string
+  connectionId?: string
+  title: string
+  agent: string
+  model: string
+  status: string
+  turnInFlight: boolean
+  approvals: number
+  questions: number
+  planReady: boolean
+  activity: string
+  updatedAt: number
+  subagents: OfficeSubagent[]
+  recent: OfficeActivity[]
+}
+export interface OfficeOverview {
+  workspaceId: string
+  sampledAt: number
+  sessions: OfficeSession[]
+}

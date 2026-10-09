@@ -266,6 +266,9 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		// (Memory.Retain was nil throughout, or the turn produced no text).
 		in.Memory.retain(ctx, ev.ThreadID, "assistant", in.takeMemoryText(ev.ThreadID))
 		payload := map[string]any{"status": string(ThreadIdle)}
+		if completed, ok := ev.Payload.(*event.TurnCompletedPayload); ok {
+			payload["turnOutcome"] = completed.Status
+		}
 		// The context window's actual occupancy after this turn — not a sum
 		// across turns, which would double-count history that is already
 		// folded into every request's own input/cache-read/cache-creation

@@ -127,6 +127,7 @@ export function TodosModule({ wsId }: { wsId: string }) {
                 return (
                   <div
                     key={t.id}
+                    id={`todo-${t.id}`}
                     className="flex items-center gap-3 rounded-control border border-devdeck-border-card bg-devdeck-glass-solid px-3 py-2.5"
                   >
                     <button

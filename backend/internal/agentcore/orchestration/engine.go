@@ -25,6 +25,7 @@ const (
 )
 
 type Thread struct {
+	Overview    OfficeProjection
 	ID          string
 	InstanceID  provider.InstanceID
 	Status      ThreadStatus
@@ -104,6 +105,7 @@ func (s *State) clone() *State {
 	n := &State{Threads: make(map[string]*Thread, len(s.Threads))}
 	for k, v := range s.Threads {
 		c := *v
+		c.Overview = cloneOffice(v.Overview)
 		c.PendingRequests = make(map[string]bool, len(v.PendingRequests))
 		for r := range v.PendingRequests {
 			c.PendingRequests[r] = true
@@ -298,6 +300,9 @@ func Apply(s *State, evts []Event) *State {
 }
 
 func applyOne(s *State, e Event) {
+	if t, ok := s.Threads[e.ThreadID]; ok {
+		projectOffice(t, e)
+	}
 	switch e.Type {
 	case EvtThreadCreated:
 		var p struct {

@@ -35,6 +35,7 @@ export interface EntityActions {
  * the menu itself shows, never a second one picked here.
  */
 export const APP_PAGES = [
+  { path: 'agent-workspace', label: 'Agent Workspace 3D', icon: MODULE_ICON['agent-workspace'] },
   { path: '', label: 'Agents', icon: MODULE_ICON.agents },
   { path: 'machines', label: 'Machines', icon: MODULE_ICON.machines },
   { path: 'database', label: 'Database', icon: MODULE_ICON.database },

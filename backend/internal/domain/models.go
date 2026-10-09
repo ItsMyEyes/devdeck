@@ -707,3 +707,43 @@ type TelegramBinding struct {
 	// pin in the chat, which may be something the operator pinned themselves.
 	PinnedMessageID int64 `json:"-"`
 }
+
+// Office DTOs mirror frontend/src/store/types.ts. No transcripts or credentials.
+type OfficeSubagent struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	Activity  string `json:"activity"`
+	Tokens    *int64 `json:"tokens,omitempty"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+type OfficeActivity struct {
+	ID        string `json:"id"`
+	AgentID   string `json:"agentId,omitempty"`
+	Text      string `json:"text"`
+	CreatedAt int64  `json:"createdAt"`
+}
+type OfficeSession struct {
+	ID           string           `json:"id"`
+	WorktreeID   string           `json:"worktreeId,omitempty"`
+	ProjectID    string           `json:"projectId,omitempty"`
+	ConnectionID string           `json:"connectionId,omitempty"`
+	Title        string           `json:"title"`
+	Agent        string           `json:"agent"`
+	Model        string           `json:"model"`
+	Status       string           `json:"status"`
+	TurnInFlight bool             `json:"turnInFlight"`
+	Approvals    int              `json:"approvals"`
+	Questions    int              `json:"questions"`
+	PlanReady    bool             `json:"planReady"`
+	Activity     string           `json:"activity"`
+	UpdatedAt    int64            `json:"updatedAt"`
+	Subagents    []OfficeSubagent `json:"subagents"`
+	Recent       []OfficeActivity `json:"recent"`
+}
+type OfficeOverview struct {
+	WorkspaceID string          `json:"workspaceId"`
+	SampledAt   int64           `json:"sampledAt"`
+	Sessions    []OfficeSession `json:"sessions"`
+}
