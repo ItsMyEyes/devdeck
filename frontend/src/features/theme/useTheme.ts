@@ -8,13 +8,17 @@ import {
   subscribeThemePreference,
   type ResolvedTheme,
   type ThemePreference,
-} from './theme'
+} from '@/features/theme/theme'
 
 /** The theme actually in force, for surfaces that cannot read CSS variables
  *  (monaco, xterm, mermaid, the toaster). */
 export function useResolvedTheme(): ResolvedTheme {
   const [resolved, setResolved] = useState<ResolvedTheme>(currentResolvedTheme)
-  useEffect(() => subscribeResolvedTheme(setResolved), [])
+  useEffect(() => {
+    const unsubscribe = subscribeResolvedTheme(setResolved)
+    setResolved(currentResolvedTheme())
+    return unsubscribe
+  }, [])
   return resolved
 }
 
@@ -56,6 +60,10 @@ export function useThemeSync(): ResolvedTheme {
  *  through to every subscriber. */
 export function useThemePreference(): [ThemePreference, (next: ThemePreference) => void] {
   const [preference, setPreference] = useState<ThemePreference>(readThemePreference)
-  useEffect(() => subscribeThemePreference(setPreference), [])
+  useEffect(() => {
+    const unsubscribe = subscribeThemePreference(setPreference)
+    setPreference(readThemePreference())
+    return unsubscribe
+  }, [])
   return [preference, useCallback((next: ThemePreference) => setThemePreference(next), [])]
 }

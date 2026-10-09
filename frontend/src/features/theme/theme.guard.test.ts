@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { THEME_STORAGE_KEY } from '@/features/theme/theme'
 
 // `new URL(..., import.meta.url)` resolves against jsdom's document location
 // rather than the file: base under this project's test environment — see the
@@ -10,33 +11,37 @@ const here = dirname(fileURLToPath(import.meta.url))
 const indexHtml = readFileSync(join(here, '..', '..', '..', 'index.html'), 'utf8')
 const globalsCss = readFileSync(join(here, '..', '..', 'styles', 'globals.css'), 'utf8')
 
-/**
- * The pre-paint script in `index.html` deliberately duplicates the class
- * names `theme.ts`'s `applyTheme` uses — the app bundle has not loaded when
- * it runs, so it cannot import them. That duplication is only safe while the
- * two agree, and nothing else enforces that.
- */
-describe('pre-paint theme script', () => {
-  it('forces the dark class and removes light', () => {
-    expect(indexHtml).toContain("classList.add('dark')")
-    expect(indexHtml).toContain("classList.remove('light')")
-    expect(indexHtml).toContain("colorScheme = 'dark'")
-  })
+// Execute the actual inline script, before React has loaded.
+const prePaintScript = indexHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+beforeEach(() => {
+  window.localStorage.clear()
+  document.documentElement.className = 'dark'
+})
+afterEach(() => vi.restoreAllMocks())
 
-  /** Dark is the only theme, so an existing user sees no change. */
-  it('leaves dark on <html> as the default before the script runs', () => {
-    expect(indexHtml).toMatch(/<html lang="en" class="dark">/)
+describe('pre-paint theme script', () => {
+  it.each([
+    [null, false, 'dark'], ['invalid', false, 'dark'],
+    ['light', true, 'light'], ['dark', false, 'dark'],
+    ['system', false, 'light'], ['system', true, 'dark'],
+  ] as const)('applies stored %s with OS dark=%s before first paint', (stored, dark, expected) => {
+    if (stored !== null) window.localStorage.setItem(THEME_STORAGE_KEY, stored)
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: dark } as MediaQueryList)
+    expect(prePaintScript).toBeTruthy()
+    window.eval(prePaintScript!)
+    expect(document.documentElement.classList.contains(expected)).toBe(true)
+    expect(document.documentElement.classList.contains(expected === 'light' ? 'dark' : 'light')).toBe(false)
+    expect(document.documentElement.style.colorScheme).toBe(expected)
+  })
+  it('defaults safely when localStorage is blocked', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    expect(() => window.eval(prePaintScript!)).not.toThrow()
+    expect(document.documentElement.style.colorScheme).toBe('dark')
   })
 })
 
-/**
- * The `.light` palette in globals.css is unreachable while light mode is
- * disabled (`applyTheme` never adds the `.light` class), but the block stays
- * in place so re-enabling the feature is a change to `theme.ts` only. These
- * guards keep that block intact rather than letting it silently bit-rot.
- */
-describe('light palette (currently unreachable)', () => {
-  it('is declared, and after the reduced-transparency block that overrides it', () => {
+describe('light palette', () => {
+  it('is declared before the reduced-transparency override', () => {
     const light = globalsCss.indexOf('\n.light {')
     const reduced = globalsCss.indexOf('@media (prefers-reduced-transparency: reduce)')
     expect(light).toBeGreaterThan(0)

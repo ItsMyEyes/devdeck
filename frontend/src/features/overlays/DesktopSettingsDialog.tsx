@@ -472,7 +472,7 @@ export function DesktopSettingsDialog() {
 
             {section === 'appearance' && (
               <>
-                <SectionHeadRow label="Theme" title="Colour scheme" description="DevDeck is dark-only." />
+                <SectionHeadRow label="Theme" title="Colour scheme" description="Choose a light or dark workspace, or follow your device." />
                 <SettingsCard>
                   <AppearanceSetting />
                 </SettingsCard>

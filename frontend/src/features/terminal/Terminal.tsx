@@ -93,18 +93,18 @@ export const TERMINAL_THEME = {
    keeps its hue and takes enough lightness contrast to stay readable as
    program output. */
 export const TERMINAL_THEME_LIGHT = {
-  background: '#f8faf9',
+  background: '#ffffff',
   foreground: '#1f2626',
-  cursor: '#0e8a83',
-  cursorAccent: '#f8faf9',
-  selectionBackground: '#0e8a8340',
+  cursor: '#0e7c74',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#0e7c7440',
   black: '#24292e',
   red: '#c02626',
   green: '#217a3a',
   yellow: '#8a6413',
   blue: '#0e6fa8',
   magenta: '#8b3fc4',
-  cyan: '#0e8a83',
+  cyan: '#0e7c74',
   white: '#5c6363',
   brightBlack: '#6a7171',
   brightRed: '#d63a2f',

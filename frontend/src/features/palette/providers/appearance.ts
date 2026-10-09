@@ -1,13 +1,24 @@
+import { Monitor, Moon, Sun } from 'lucide-react'
+import { setThemePreference } from '@/features/theme/theme'
 import type { ThemePreference } from '@/features/theme/theme'
 import type { PaletteItem } from '@/features/palette/paletteTypes'
 
-/**
- * Used to be "Appearance: Light / Dark / System" in the command palette.
- * Light mode is disabled — DevDeck is dark-only — so there is no longer
- * anything to switch; this returns no rows. Kept as a function (rather than
- * removed from `useCommandPalette`) so re-enabling light mode later is a
- * change to this file only.
- */
-export function appearanceItems(_current: ThemePreference): PaletteItem[] {
-  return []
+export function appearanceItems(current: ThemePreference): PaletteItem[] {
+  return ([
+    { value: 'light', label: 'Light', icon: Sun },
+    { value: 'dark', label: 'Dark', icon: Moon },
+    { value: 'system', label: 'System', icon: Monitor },
+  ] as const).map(({ value, label, icon }) => ({
+    id: `appearance:${value}`,
+    kind: 'command',
+    group: 'create',
+    title: `Appearance: ${label}`,
+    subtitle: current === value ? 'Current theme' : value === 'system' ? 'Follow your device' : `Switch to ${label.toLowerCase()} theme`,
+    keywords: ['theme', 'colour', 'color', 'appearance'],
+    icon,
+    run: ({ close }) => {
+      setThemePreference(value)
+      close()
+    },
+  }))
 }

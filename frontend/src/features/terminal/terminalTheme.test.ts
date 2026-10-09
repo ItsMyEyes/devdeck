@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TERMINAL_THEME } from './Terminal'
+import { TERMINAL_THEME, terminalTheme } from './Terminal'
 
 describe('TERMINAL_THEME', () => {
   it('matches the pane surface so the terminal and its card are one plane', () => {
@@ -16,5 +16,13 @@ describe('TERMINAL_THEME', () => {
   it('uses the dim-pane token for recessive chrome, not the retired value', () => {
     expect(TERMINAL_THEME.brightBlack).toBe('#727575')
     expect(TERMINAL_THEME.brightBlack).not.toBe('#686e73')
+  })
+})
+
+describe('light terminal', () => {
+  it('matches the light pane and uses its accent for the cursor', () => {
+    expect(terminalTheme('light').background).toBe('#ffffff')
+    expect(terminalTheme('light').cursorAccent).toBe('#ffffff')
+    expect(terminalTheme('light').cursor).toBe('#0e7c74')
   })
 })

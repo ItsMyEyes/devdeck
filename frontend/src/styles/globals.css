@@ -15,7 +15,7 @@
 @custom-variant is-user (&:is(.is-user *));
 
 /*
- * devdeck design tokens - dark-only, neutral developer-workspace palette.
+ * devdeck design tokens - dark and light developer-workspace palettes.
  * Raw palette is exposed as --devdeck-* for pixel-faithful spots; semantic tokens
  * (--background, --primary, …) drive the shadcn/base-ui component layer.
  */

@@ -5,19 +5,27 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <!-- Light mode is disabled — DevDeck is dark-only. `<html>` already
-         carries `class="dark"` above; this just forces it defensively in
-         case a class set by an older build (or a stale `.light` some other
-         script adds) ever lingers. Deliberately duplicates the small amount
-         of logic in features/theme/theme.ts rather than importing it — the
-         app bundle has not loaded yet at this point. `theme.guard.test.ts`
-         pins the class names so the two cannot drift apart. -->
+    <!-- Apply the stored choice before the app bundle loads to avoid a theme
+         flash. theme.guard.test.ts exercises this script against the resolver. -->
     <script>
       (function () {
+        var preference = 'dark'
+        try {
+          var stored = localStorage.getItem('devdeck.appearance.theme')
+          if (stored === 'light' || stored === 'dark' || stored === 'system') preference = stored
+        } catch (_) {}
+        var resolved = preference
+        if (preference === 'system') {
+          try {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          } catch (_) {
+            resolved = 'dark'
+          }
+        }
         var root = document.documentElement
-        root.classList.add('dark')
-        root.classList.remove('light')
-        root.style.colorScheme = 'dark'
+        root.classList.toggle('dark', resolved === 'dark')
+        root.classList.toggle('light', resolved === 'light')
+        root.style.colorScheme = resolved
       })()
     </script>
     <!-- interactive-widget=resizes-content: on Android Chrome, resize the
@@ -25,7 +33,7 @@
          opens instead of just overlaying it, so useViewportHeight's
          --app-height tracks the actually-visible area. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0c0d10" />
     <link rel="icon" type="image/png" href="/devdeck-logo.png" />
     <title>devdeck — one operator, many companies</title>

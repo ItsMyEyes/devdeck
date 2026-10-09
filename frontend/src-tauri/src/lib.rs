@@ -475,6 +475,7 @@ fn remote_hub_permissions() -> serde_json::Value {
         "core:window:allow-close",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
+        "core:window:allow-set-theme",
         "allow-browser-tiles",
         "allow-hub-mode",
         "allow-bind-config",
@@ -561,6 +562,18 @@ mod remote_hub_capability_tests {
     fn rejects_a_url_with_no_host() {
         assert!(remote_hub_capability("not a url").is_err());
         assert!(remote_hub_capability("data:text/html,hi").is_err());
+    }
+
+    #[test]
+    fn theme_switch_is_authorized_for_local_and_remote_hubs() {
+        let local: Capability = serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("default capability should deserialize");
+        let remote = capability_of("https://hub.example.com");
+        for capability in [local, remote] {
+            let permissions = serde_json::to_value(capability.permissions).unwrap();
+            assert!(permissions.as_array().unwrap().contains(&serde_json::json!("core:window:allow-set-theme")),
+                "the appearance switch must be allowed to change the native window theme");
+        }
     }
 
     #[test]
@@ -911,6 +924,7 @@ fn grant_origin_capability(handle: &AppHandle, host: &str) -> tauri::Result<()> 
         "permissions": [
             "core:default",
             "core:window:allow-start-dragging",
+            "core:window:allow-set-theme",
             "allow-browser-tiles",
             "allow-hub-mode",
             "allow-bind-config",

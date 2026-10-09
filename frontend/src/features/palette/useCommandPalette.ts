@@ -69,8 +69,7 @@ export interface PaletteItemSources {
   bookmarks: PaletteItem[]
   verbHints: PaletteItem[]
   createActions: PaletteItem[]
-  /** Appearance. Light mode is disabled, so this is always empty — see
-   *  `providers/appearance.ts`. */
+  /** Theme choices shown when searching the command palette. */
   appearance: PaletteItem[]
   recent: PaletteItem[]
 }

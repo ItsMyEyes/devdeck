@@ -19,7 +19,7 @@ paths:
 - Components live in `src/features/<name>/` — one component per file.
 - Every data surface must render explicit loading, error, and empty states.
 - Mutations invalidate query cache on success via `queryClient.invalidateQueries()`. Failed mutations show toast + invalidate to resync UI.
-- Design is dark-only. Use the CSS custom properties defined in `globals.css` (DevDeck v2 tokens).
+- Support dark and light themes. Use the CSS custom properties defined in `globals.css` (DevDeck v2 tokens); avoid hardcoded chrome colours.
 - Icons: use `lucide-react` only.
 - Toasts: use `sonner` (`toast()` / `toast.success()` / `toast.error()`).
 - Dates: use `date-fns` (v4+) with `@date-fns/tz` for timezone-aware formatting.

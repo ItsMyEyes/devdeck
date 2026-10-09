@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { currentResolvedTheme } from '@/features/theme/theme'
+import { useResolvedTheme } from '@/features/theme/useTheme'
 
 /** How long the source has to hold still before the diagram re-renders.
  *  On the editing canvas `chart` changes on every keystroke, and mermaid's
@@ -22,6 +22,7 @@ const RERENDER_DELAY_MS = 300
  * chunk of every surface that can display markdown.
  */
 export function MermaidDiagram({ chart, className }: { chart: string; className?: string }) {
+  const resolvedTheme = useResolvedTheme()
   // mermaid renders into a DOM id it derives from this, so it has to be unique
   // per instance — two diagrams in one document would otherwise collide.
   const reactId = useId().replace(/[^a-zA-Z0-9]/g, '')
@@ -43,7 +44,7 @@ export function MermaidDiagram({ chart, className }: { chart: string; className?
           .then(async ({ default: mermaid }) => {
             mermaid.initialize({
               startOnLoad: false,
-              theme: currentResolvedTheme() === 'light' ? 'default' : 'dark',
+              theme: resolvedTheme === 'light' ? 'default' : 'dark',
               securityLevel: 'strict',
             })
             const result = await mermaid.render(id, chart)
@@ -69,7 +70,7 @@ export function MermaidDiagram({ chart, className }: { chart: string; className?
       cancelled = true
       clearTimeout(timer)
     }
-  }, [chart, reactId])
+  }, [chart, reactId, resolvedTheme])
 
   if (error) {
     return (
