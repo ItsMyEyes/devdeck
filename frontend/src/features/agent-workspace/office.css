@@ -653,3 +653,43 @@
     animation: none !important;
   }
 }
+
+.office-floor-nav {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-devdeck-border);
+  flex-wrap: wrap;
+}
+.office-floor-nav .office-button {
+  gap: 6px;
+}
+.office-floor-nav button[aria-pressed='true'] {
+  background: var(--color-devdeck-accent-tint);
+  border-color: var(--color-devdeck-accent);
+}
+.office-floor-nav button > span {
+  color: var(--color-devdeck-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.office-floor-attention {
+  color: #d99738;
+  font-weight: 650;
+}
+.office-division-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin: 10px 10px 6px;
+  font-weight: 650;
+}
+.office-division-title.is-developer,
+.office-object-label.is-developer {
+  color: #668b74;
+}
+.office-division-title.is-devops,
+.office-object-label.is-devops {
+  color: #638ba6;
+}
+
+.office-runtime-summary { display: block; font-size: 9px; color: var(--color-devdeck-fg-2); margin-top: 3px; }

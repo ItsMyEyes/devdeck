@@ -10,22 +10,23 @@ interface SideDrawerProps {
   width?: number
   z?: number
   className?: string
+  modal?: boolean
 }
 
 /** Right-anchored settings drawer (worktree / project / workspace details). */
-export function SideDrawer({ open, onOpenChange, children, width = 380, z = 50, className }: SideDrawerProps) {
+export function SideDrawer({ open, onOpenChange, children, width = 380, z = 50, className, modal = true }: SideDrawerProps) {
   useNativeOverlayBlocker(open)
 
   return (
-    <BaseDialog.Root open={open} onOpenChange={onOpenChange}>
+    <BaseDialog.Root open={open} onOpenChange={onOpenChange} modal={modal} disablePointerDismissal={!modal}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop
+        {modal && <BaseDialog.Backdrop
           style={{ zIndex: z }}
           className={cn(
             'fixed inset-0 bg-[rgba(6,7,9,0.5)] transition-opacity duration-150',
             'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}
-        />
+        />}
         <BaseDialog.Popup
           style={{ width, maxWidth: '92vw', zIndex: z + 1 }}
           className={cn(

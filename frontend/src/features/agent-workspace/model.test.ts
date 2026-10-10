@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   avatarKey,
+  divisionOf,
+  visibleOfficeSessions,
+  readOfficeView,
   officeLayout,
   sessionOwner,
   visibleSessions,
@@ -130,4 +133,79 @@ it('keeps a failed subagent in attention after its parent turn finishes', () => 
     ],
   }
   expect(visibleSessions([parent], false)).toEqual([parent])
+})
+
+it('classifies SSH by connection identity even with a project and a different provider', () => {
+  expect(divisionOf({ ...session('local', 'running'), agent: 'claude' })).toBe(
+    'developer',
+  )
+  const ssh = {
+    ...session('remote', 'waiting'),
+    connectionId: 'vm',
+    projectId: 'p',
+    subagents: [{ id: 'child', status: 'running' }],
+  } as OfficeSession
+  expect(divisionOf(ssh)).toBe('devops')
+  expect(visibleOfficeSessions([ssh], 'developer', true)).toEqual([])
+  expect(visibleOfficeSessions([ssh], 'devops', false)).toEqual([ssh])
+})
+it('alternates bounded building history between divisions while prioritizing attention', () => {
+  const local = Array.from({ length: 30 }, (_, i) =>
+    session(`local${i}`, 'idle'),
+  )
+  const remote = Array.from({ length: 90 }, (_, i) => ({
+    ...session(`ssh${i}`, 'idle'),
+    connectionId: 'vm',
+    updatedAt: i + 10,
+  }))
+  const waiting = { ...session('ask', 'waiting'), connectionId: 'vm' }
+  const building = visibleOfficeSessions(
+    [...local, ...remote, waiting],
+    'building',
+    true,
+  )
+  expect(building).toHaveLength(20)
+  expect(building[0]).toEqual(waiting)
+  expect(building.filter((s) => divisionOf(s) === 'developer')).toHaveLength(10)
+  expect(
+    visibleOfficeSessions([...local, ...remote], 'developer', true),
+  ).toHaveLength(20)
+  expect(visibleOfficeSessions(remote, 'developer', true)).toEqual([])
+  expect(
+    visibleOfficeSessions([...local, ...remote], 'building', false),
+  ).toEqual([])
+})
+it('isolates the saved floor by workspace and ignores invalid preferences', () => {
+  localStorage.setItem('devdeck.office-view.a', 'devops')
+  localStorage.setItem('devdeck.office-view.b', 'invalid')
+  expect(readOfficeView('a')).toBe('devops')
+  expect(readOfficeView('b')).toBe('building')
+  expect(readOfficeView('missing')).toBe('building')
+})
+
+it('caps the scene at twenty while admitting attention before running work', () => {
+  const busy = Array.from({ length: 35 }, (_, i) =>
+    session(`busy${i}`, 'running'),
+  )
+  const ask = { ...session('ask', 'waiting'), connectionId: 'vm' }
+  expect(visibleOfficeSessions([...busy, ask], 'building', false)).toHaveLength(
+    20,
+  )
+  expect(visibleOfficeSessions([...busy, ask], 'building', false)[0]).toEqual(
+    ask,
+  )
+  expect(
+    visibleOfficeSessions([...busy, ask], 'developer', false),
+  ).toHaveLength(20)
+})
+
+it('uses both wings and keeps circulation compact for a single twenty-session division', () => {
+  const desks = officeLayout(
+    Array.from({ length: 20 }, (_, i) => session(`vm${i}`, 'idle')),
+  )
+  expect(Math.min(...desks.map((d) => d.x))).toBeLessThan(0)
+  expect(Math.max(...desks.map((d) => d.x))).toBeGreaterThan(0)
+  expect(
+    Math.max(...desks.map((d) => d.z)) - Math.min(...desks.map((d) => d.z)),
+  ).toBeLessThan(12)
 })

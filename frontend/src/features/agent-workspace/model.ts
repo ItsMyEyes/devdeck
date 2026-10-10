@@ -36,6 +36,53 @@ export function visibleSessions<T extends OfficeSession>(
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
   return [...active, ...idle.slice(0, Math.max(0, 20 - active.length))]
 }
+export type OfficeDivision = 'developer' | 'devops'
+export type OfficeView = 'building' | OfficeDivision
+export const divisionOf = (s: OfficeSession): OfficeDivision =>
+  s.connectionId ? 'devops' : 'developer'
+export const floorLabels: Record<OfficeView, string> = {
+  building: 'Gedung',
+  developer: '1 · Developer',
+  devops: '2 · DevOps',
+}
+export function readOfficeView(workspaceId: string): OfficeView {
+  try {
+    const saved = localStorage.getItem(`devdeck.office-view.${workspaceId}`)
+    if (saved === 'developer' || saved === 'devops') return saved
+  } catch {
+    /* Optional preference. */
+  }
+  return 'building'
+}
+export function visibleOfficeSessions<T extends OfficeSession>(
+  sessions: T[],
+  view: OfficeView,
+  history: boolean,
+): T[] {
+  const eligible = sessions.filter(
+    (s) =>
+      (view === 'building' || divisionOf(s) === view) &&
+      (history || isActive(s)),
+  )
+  const result: T[] = []
+  for (const priority of [2, 1, 0]) {
+    const candidates = eligible
+      .filter((s) => (needsAttention(s) ? 2 : isActive(s) ? 1 : 0) === priority)
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+    const developer = candidates.filter((s) => divisionOf(s) === 'developer')
+    const devops = candidates.filter((s) => divisionOf(s) === 'devops')
+    for (
+      let i = 0;
+      result.length < 20 && (i < developer.length || i < devops.length);
+      i++
+    ) {
+      if (developer[i]) result.push(developer[i])
+      if (devops[i] && result.length < 20) result.push(devops[i])
+    }
+  }
+  return result
+}
+
 export function sessionOwner(
   session: OfficeSession,
   projects: Project[],
@@ -77,8 +124,11 @@ export function officeLayout(
         positions.push({
           id: s.id,
           group: groups[i + column],
-          x: column * 9 + (j % 3) * 2.5 - 6,
-          z: rowZ + Math.floor(j / 3) * 3,
+          x:
+            groups.length === 1
+              ? Math.floor((j % 6) / 3) * 9 + (j % 3) * 2.5 - 6
+              : column * 9 + (j % 3) * 2.5 - 6,
+          z: rowZ + Math.floor(j / (groups.length === 1 ? 6 : 3)) * 3,
         }),
       )
     }

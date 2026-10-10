@@ -21,13 +21,16 @@ import { DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { useOfficeOverview } from '@/features/agent-workspace/useOfficeOverview'
 import {
+  divisionOf,
+  floorLabels,
+  readOfficeView,
+  visibleOfficeSessions,
   isActive,
   needsAttention,
   statusColor,
   statusLabel,
-  visibleSessions,
 } from '@/features/agent-workspace/model'
-import type { OfficeMember } from '@/features/agent-workspace/model'
+import type { OfficeMember, OfficeView } from '@/features/agent-workspace/model'
 import { sshMentionSource } from '@/features/agent-chat/composerMention'
 import type { Workspace } from '@/store/types'
 import '@/features/agent-workspace/office.css'
@@ -80,7 +83,8 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
   const openWorktreeTab = useDevDeckStore((s) => s.openWorktreeTab)
   const [projectFilter, setProjectFilter] = useState('all')
   const [agentFilter, setAgentFilter] = useState('all')
-  const [history, setHistory] = useState(false)
+  const [history, setHistory] = useState({ developer: false, devops: false })
+  const [focusId, setFocusId] = useState(0)
   const [selection, setSelection] = useState<{
     key: string
     child?: string
@@ -88,6 +92,22 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
   const [panel, setPanel] = useState<'activity' | 'sessions' | null>(null)
   const [flat, setFlat] = useState(false)
   const [cameraReset, setCameraReset] = useState(0)
+  const [viewState, setViewState] = useState(() => ({
+    workspaceId: workspace.id,
+    view: readOfficeView(workspace.id),
+  }))
+  const view =
+    viewState.workspaceId === workspace.id
+      ? viewState.view
+      : readOfficeView(workspace.id)
+  function changeView(next: OfficeView) {
+    setViewState({ workspaceId: workspace.id, view: next })
+    try {
+      localStorage.setItem(`devdeck.office-view.${workspace.id}`, next)
+    } catch {
+      /* Optional preference. */
+    }
+  }
   const selected = data.members.find((m) => m.key === selection?.key)
   const mentionSource = useMemo(
     () =>
@@ -105,29 +125,43 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
           : m.projectId === projectFilter)) &&
       (agentFilter === 'all' || m.key === agentFilter),
   )
-  const displayed = visibleSessions(filtered, history)
+  const displayed = visibleOfficeSessions(
+    filtered.filter((m) => isActive(m) || history[divisionOf(m)]),
+    view,
+    true,
+  )
   const allVisible = displayed.length
     ? displayed
-    : visibleSessions(
+    : visibleOfficeSessions(
         filtered.filter((m) => m.limited),
+        view,
         true,
       )
   if (
     selected &&
+    (view === 'building' || divisionOf(selected) === view) &&
     filtered.some((m) => m.key === selected.key) &&
     !allVisible.some((m) => m.key === selected.key)
-  )
+  ) {
+    if (allVisible.length >= 20) allVisible.pop()
     allVisible.push(selected)
-  const admitted = visibleSessions(data.members, true)
-  if (selected && !admitted.some((m) => m.key === selected.key))
-    admitted.push(selected)
+  }
+  const admitted = (['developer', 'devops'] as const).flatMap((division) => {
+    const members = allVisible.filter((m) => divisionOf(m) === division)
+    for (const member of visibleOfficeSessions(data.members, division, true)) {
+      if (members.length >= 20) break
+      if (!members.some((m) => m.key === member.key)) members.push(member)
+    }
+    return members
+  })
   const activity = useMemo(
     () =>
       filtered
+        .filter((m) => view === 'building' || divisionOf(m) === view)
         .flatMap((m) => m.recent.map((e) => ({ ...e, member: m })))
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 50),
-    [filtered],
+    [filtered, view],
   )
   const running = data.members.filter(
     (m) => !m.stale && m.status === 'running',
@@ -135,8 +169,11 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
   const waiting = data.members.filter((m) => needsAttention(m)).length
   const offline = data.sources.filter((s) => s.error).length
   const choose = (member: OfficeMember, child?: string) => {
+    changeView(divisionOf(member))
+    setFocusId((n) => n + 1)
     setSelection({ key: member.key, child })
-    if (!isActive(member)) setHistory(true)
+    if (!isActive(member))
+      setHistory((prev) => ({ ...prev, [divisionOf(member)]: true }))
     setPanel(null)
   }
   function openWorktree(member: { projectId?: string; worktreeId?: string }) {
@@ -185,46 +222,67 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
         <span>{filtered.length}</span>
       </div>
       <div className="office-roster">
-        {filtered
-          .filter((m) => isActive(m) || m.limited)
-          .sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)))
-          .map((m) => (
-            <SessionRow
-              key={m.key}
-              member={m}
-              selected={selected?.key === m.key}
-              onSelect={choose}
-            />
-          ))}
-        {!data.loading && !filtered.some((m) => isActive(m) || m.limited) && (
-          <p className="office-note">
-            No active sessions. Start an agent or open recent sessions below.
-          </p>
-        )}
-        <details
-          onToggle={(e) => setHistory(e.currentTarget.open)}
-          open={history}
-          className="office-history"
-        >
-          <summary>
-            <Clock3 size={13} /> Recent & idle{' '}
-            <span>
-              {filtered.filter((m) => !isActive(m) && !m.limited).length}
-            </span>
-            <ChevronDown size={12} />
-          </summary>
-          {filtered
-            .filter((m) => !isActive(m) && !m.limited)
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .map((m) => (
-              <SessionRow
-                key={m.key}
-                member={m}
-                selected={selected?.key === m.key}
-                onSelect={choose}
-              />
-            ))}
-        </details>
+        {(['developer', 'devops'] as const).map((division) => {
+          const sessions = filtered.filter((m) => divisionOf(m) === division)
+          return (
+            <section
+              key={division}
+              aria-label={`${floorLabels[division]} sessions`}
+            >
+              <h3 className={`office-division-title is-${division}`}>
+                {floorLabels[division]} <span>{sessions.length}</span>
+              </h3>
+              {sessions
+                .filter((m) => isActive(m) || m.limited)
+                .sort(
+                  (a, b) =>
+                    Number(needsAttention(b)) - Number(needsAttention(a)),
+                )
+                .map((m) => (
+                  <SessionRow
+                    key={m.key}
+                    member={m}
+                    selected={selected?.key === m.key}
+                    onSelect={choose}
+                  />
+                ))}
+              {!data.loading && !sessions.length && (
+                <p className="office-note">No sessions in this division.</p>
+              )}
+              <details
+                onToggle={(e) => {
+                  const open = e.currentTarget.open
+                  setHistory((prev) =>
+                    prev[division] === open
+                      ? prev
+                      : { ...prev, [division]: open },
+                  )
+                }}
+                open={history[division]}
+                className="office-history"
+              >
+                <summary>
+                  <Clock3 size={13} /> Recent & idle{' '}
+                  <span>
+                    {sessions.filter((m) => !isActive(m) && !m.limited).length}
+                  </span>
+                  <ChevronDown size={12} />
+                </summary>
+                {sessions
+                  .filter((m) => !isActive(m) && !m.limited)
+                  .sort((a, b) => b.updatedAt - a.updatedAt)
+                  .map((m) => (
+                    <SessionRow
+                      key={m.key}
+                      member={m}
+                      selected={selected?.key === m.key}
+                      onSelect={choose}
+                    />
+                  ))}
+              </details>
+            </section>
+          )
+        })}
       </div>
       <details className="office-history">
         <summary>Terminals without chat</summary>
@@ -478,6 +536,13 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
             onChange={(e) => {
               setProjectFilter(e.target.value)
               setAgentFilter('all')
+              changeView(
+                e.target.value === 'all'
+                  ? 'building'
+                  : e.target.value === 'shared-ssh'
+                    ? 'devops'
+                    : 'developer',
+              )
             }}
           >
             <option value="all">All projects</option>
@@ -493,7 +558,11 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
           Agent{' '}
           <select
             value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
+            onChange={(e) => {
+              setAgentFilter(e.target.value)
+              const member = data.members.find((m) => m.key === e.target.value)
+              if (member) changeView(divisionOf(member))
+            }}
           >
             <option value="all">All sessions</option>
             {data.members.map((m) => (
@@ -527,6 +596,54 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
           </button>
         </div>
       </div>
+      <nav className="office-floor-nav" aria-label="Office floors">
+        {(['building', 'developer', 'devops'] as const).map((floor) => {
+          const sessions = data.members.filter(
+            (m) => floor === 'building' || divisionOf(m) === floor,
+          )
+          const attention = sessions.filter(needsAttention).length
+          return (
+            <button
+              key={floor}
+              className={`office-button is-${floor}`}
+              aria-pressed={view === floor}
+              onKeyDown={(e) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))
+                  return
+                e.preventDefault()
+                const floors: OfficeView[] = ['building', 'developer', 'devops']
+                const index =
+                  e.key === 'Home'
+                    ? 0
+                    : e.key === 'End'
+                      ? 2
+                      : (floors.indexOf(floor) +
+                          (e.key === 'ArrowRight' ? 1 : 2)) %
+                        3
+                changeView(floors[index])
+                e.currentTarget.parentElement
+                  ?.querySelectorAll('button')
+                  [index]?.focus()
+              }}
+              onClick={(e) => {
+                e.currentTarget.focus()
+                changeView(floor)
+              }}
+            >
+              <Layers3 size={14} /> {floorLabels[floor]}{' '}
+              <span>{sessions.length}</span>
+              {attention > 0 && (
+                <small
+                  className="office-floor-attention"
+                  aria-label={`${attention} need attention`}
+                >
+                  {attention} !
+                </small>
+              )}
+            </button>
+          )
+        })}
+      </nav>
       {data.catalogError && (
         <div role="alert" className="office-warning">
           Some catalog data could not be loaded.{' '}
@@ -556,7 +673,16 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               <button
                 className="office-icon-button"
                 aria-label="Reset camera"
-                onClick={() => setCameraReset((n) => n + 1)}
+                onClick={() => {
+                  try {
+                    localStorage.removeItem(
+                      `devdeck.office-camera.${workspace.id}.${view}`,
+                    )
+                  } catch {
+                    /* Optional preference. */
+                  }
+                  setCameraReset((n) => n + 1)
+                }}
               >
                 <Maximize2 size={15} />
               </button>
@@ -564,6 +690,8 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
           </div>
           {flat ? (
             <div className="office-flat-list">{sessionList}</div>
+          ) : data.loading ? (
+            <div className="office-empty">Connecting to your office…</div>
           ) : (
             <SceneBoundary key={workspace.id}>
               <Suspense
@@ -572,11 +700,16 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
                 }
               >
                 <OfficeScene
+                  key={workspace.id}
                   workspaceId={workspace.id}
+                  view={view}
+                  onViewChange={changeView}
                   members={allVisible}
                   allMembers={admitted}
                   projects={projects}
                   selectedKey={selected?.key}
+                  focusId={focusId}
+                  runtimeSummary={`${data.sources.length} sources · ${offline} unreachable · ${data.sources.filter((s) => s.limited).length} limited`}
                   visible={data.visible}
                   reset={cameraReset}
                   onSelect={choose}
@@ -627,6 +760,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
         {panel === 'activity' ? activityPanel : sessionList}
       </SideDrawer>
       <SideDrawer
+        modal={false}
         open={!!selection}
         onOpenChange={(open) => {
           if (!open) setSelection(null)
@@ -640,7 +774,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
             </DialogTitle>
             <DialogDescription>
               {selected
-                ? `${selected.agent} · ${selected.sourceName}${selected.connectionId ? ' · Shared SSH' : ''}`
+                ? `${floorLabels[divisionOf(selected)]} · ${selected.agent} · ${selected.sourceName}${selected.connectionId ? ' · Shared SSH' : ''}`
                 : 'Session no longer available'}
             </DialogDescription>
           </div>

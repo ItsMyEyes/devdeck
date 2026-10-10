@@ -1,15 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentRef } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Html, OrbitControls } from '@react-three/drei'
-import {
-  BoxGeometry,
-  CylinderGeometry,
-  SphereGeometry,
-  Vector3,
-  MOUSE,
-  TOUCH,
-} from 'three'
+import { useMemo, useRef, useState } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
+import { BoxGeometry, CylinderGeometry, SphereGeometry } from 'three'
 import type { Group } from 'three'
 import {
   ArrowDown,
@@ -24,16 +16,20 @@ import {
 import { useReducedMotion } from 'motion/react'
 import { useResolvedTheme } from '@/features/theme/useTheme'
 import {
+  divisionOf,
+  floorLabels,
   officeLayout,
   statusColor,
   statusLabel,
 } from '@/features/agent-workspace/model'
 import type {
   DeskPosition,
+  OfficeDivision,
+  OfficeView,
   OfficeMember,
 } from '@/features/agent-workspace/model'
 import type { Project } from '@/store/types'
-import { applyCameraAction } from '@/features/agent-workspace/camera'
+import OfficeCamera from '@/features/agent-workspace/OfficeCamera'
 
 const box = new BoxGeometry(1, 1, 1)
 const sphere = new SphereGeometry(1, 12, 10)
@@ -45,10 +41,14 @@ function hash(text: string) {
 }
 interface Props {
   workspaceId: string
+  view: OfficeView
+  onViewChange: (view: OfficeView) => void
   members: OfficeMember[]
   allMembers: OfficeMember[]
   projects: Project[]
   selectedKey?: string
+  focusId: number
+  runtimeSummary: string
   visible: boolean
   reset: number
   onSelect: (m: OfficeMember, child?: string) => void
@@ -217,6 +217,7 @@ function Desk({
   member,
   selected,
   animate,
+  compact = false,
   onSelect,
 }: {
   x: number
@@ -224,6 +225,7 @@ function Desk({
   member?: OfficeMember
   selected: boolean
   animate: boolean
+  compact?: boolean
   onSelect: Props['onSelect']
 }) {
   const status = member?.stale ? 'unknown' : (member?.status ?? 'idle')
@@ -305,7 +307,14 @@ function Desk({
                 textOverflow: 'ellipsis',
               }}
             >
-              {member.title || member.agent || 'Agent'}
+              {compact && !selected
+                ? (member.title || member.agent || 'Agent')
+                    .split(/\s+/)
+                    .slice(0, 2)
+                    .map((word) => word[0])
+                    .join('')
+                    .toUpperCase()
+                : member.title || member.agent || 'Agent'}
             </span>
             {selected && (
               <span style={{ fontSize: 8, opacity: 0.7 }}>
@@ -347,120 +356,408 @@ function Desk({
     </group>
   )
 }
-function Camera({
-  workspaceId,
+
+function OfficeFloor({
+  props,
+  division,
+  layout,
+  dark,
+  animate,
+  minX,
+  minZ,
+  maxX,
+  maxZ,
+  width,
+  depth,
   center,
-  span,
-  reset,
-  selected,
-  action,
-  mode,
 }: {
-  workspaceId: string
+  props: Props
+  division: OfficeDivision
+  layout: DeskPosition[]
+  dark: boolean
+  animate: boolean
+  minX: number
+  minZ: number
+  maxX: number
+  maxZ: number
+  width: number
+  depth: number
   center: [number, number, number]
-  span: number
-  reset: number
-  selected?: [number, number, number]
-  action: { id: number; type: string }
-  mode: 'pan' | 'rotate'
 }) {
-  const controls = useRef<ComponentRef<typeof OrbitControls>>(null)
-  const { camera, invalidate } = useThree()
-  const saveCamera = useCallback(() => {
-    const c = controls.current
-    if (!c) return
-    try {
-      localStorage.setItem(
-        `devdeck.office-camera.${workspaceId}`,
-        JSON.stringify({
-          position: camera.position.toArray(),
-          target: c.target.toArray(),
-        }),
-      )
-    } catch {
-      /* Optional preference. */
-    }
-  }, [camera, workspaceId])
-  const defaults = useRef({ center, span })
-  defaults.current = { center, span }
-  useEffect(() => {
-    const c = controls.current
-    if (!c) return
-    const { center, span } = defaults.current
-    const target = new Vector3(...center)
-    camera.position.set(
-      target.x + span * 0.8,
-      span * 0.9,
-      target.z + span * 0.8,
-    )
-    c.target.copy(target)
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem(`devdeck.office-camera.${workspaceId}`) || 'null',
-      )
-      if (
-        reset === 0 &&
-        saved &&
-        [saved.position, saved.target].every(
-          (a) =>
-            Array.isArray(a) &&
-            a.length === 3 &&
-            a.every(
-              (n: unknown) =>
-                typeof n === 'number' &&
-                Number.isFinite(n) &&
-                Math.abs(n) < 10000,
-            ),
-        )
-      ) {
-        camera.position.fromArray(saved.position)
-        c.target.fromArray(saved.target)
-      }
-    } catch {
-      /* Camera preferences are optional. */
-    }
-    c.update()
-    invalidate()
-  }, [workspaceId, reset, camera, invalidate, span, center[0], center[2]])
-  useEffect(() => {
-    const c = controls.current
-    if (!c || !selected) return
-    const next = new Vector3(...selected)
-    camera.position.add(next.clone().sub(c.target))
-    c.target.copy(next)
-    c.update()
-    invalidate()
-  }, [selected?.[0], selected?.[2], camera, invalidate])
-  useEffect(() => {
-    const c = controls.current
-    if (!c || !action.id) return
-    applyCameraAction(camera, c.target, action.type)
-    c.update()
-    saveCamera()
-    invalidate()
-  }, [action, camera, invalidate, saveCamera])
+  const wall = dark ? '#3d4a50' : '#e3dfd3',
+    floor = dark ? '#454c4b' : '#ded6c1'
   return (
-    <OrbitControls
-      ref={controls}
-      makeDefault
-      enableDamping={false}
-      minDistance={5}
-      maxDistance={100}
-      minPolarAngle={0.2}
-      maxPolarAngle={Math.PI / 2.25}
-      enablePan
-      screenSpacePanning={false}
-      mouseButtons={{
-        LEFT: mode === 'pan' ? MOUSE.PAN : MOUSE.ROTATE,
-        MIDDLE: MOUSE.DOLLY,
-        RIGHT: mode === 'pan' ? MOUSE.ROTATE : MOUSE.PAN,
+    <group
+      position={[0, division === 'devops' ? 5 : 0, 0]}
+      onClick={(e) => {
+        if (props.view === 'building' && e.delta < 4) {
+          e.stopPropagation()
+          props.onViewChange(division)
+        }
       }}
-      touches={{
-        ONE: mode === 'pan' ? TOUCH.PAN : TOUCH.ROTATE,
-        TWO: TOUCH.DOLLY_PAN,
-      }}
-      onEnd={saveCamera}
-    />
+    >
+      <Block
+        at={[center[0], -0.22, center[2]]}
+        size={[width, 0.44, depth]}
+        color={dark ? '#303d42' : '#c4c7bc'}
+      />
+      <Block
+        at={[center[0], 0.005, center[2]]}
+        size={[width - 0.12, 0.06, depth - 0.12]}
+        color={floor}
+      />
+      {Array.from({ length: Math.ceil(depth) }, (_, i) => (
+        <Block
+          key={i}
+          at={[center[0], 0.044, minZ - 1 + i]}
+          size={[width - 0.2, 0.006, 0.025]}
+          color={dark ? '#394544' : '#cec7b3'}
+        />
+      ))}
+      <Block
+        at={[center[0], 1.35, minZ]}
+        size={[width, 2.7, 0.13]}
+        color={wall}
+      />
+      <Block
+        at={[minX, 1.35, center[2]]}
+        size={[0.13, 2.7, depth]}
+        color={wall}
+      />
+      {Array.from({ length: Math.floor(width / 3) }, (_, i) => (
+        <group key={i} position={[minX + 1.3 + i * 3, 1.7, minZ + 0.085]}>
+          <Block
+            at={[0, 0, 0]}
+            size={[2.2, 1.25, 0.04]}
+            color={dark ? '#516c80' : '#afcbd2'}
+          />
+          <Block
+            at={[0, 0, 0.03]}
+            size={[2.25, 0.065, 0.08]}
+            color={dark ? '#8a989a' : '#eef0e8'}
+          />
+          <Block
+            at={[0, 0, 0.03]}
+            size={[0.06, 1.3, 0.08]}
+            color={dark ? '#8a989a' : '#eef0e8'}
+          />
+          <Block
+            at={[0, -0.65, 0.06]}
+            size={[2.4, 0.1, 0.22]}
+            color="#b3b6ab"
+          />
+        </group>
+      ))}
+      {[...new Set(layout.map((d) => d.group))].map((group) => {
+        const desks = layout.filter((d) => d.group === group),
+          xs = desks.map((d) => d.x),
+          zs = desks.map((d) => d.z)
+        const x = (Math.min(...xs) + Math.max(...xs)) / 2,
+          z = (Math.min(...zs) + Math.max(...zs)) / 2
+        return (
+          <group key={group}>
+            <Block
+              at={[x, 0.058, z + 0.35]}
+              size={[
+                Math.max(...xs) - Math.min(...xs) + 2.65,
+                0.035,
+                Math.max(...zs) - Math.min(...zs) + 2.9,
+              ]}
+              color={
+                division === 'devops'
+                  ? dark
+                    ? '#405a6b'
+                    : '#bfd0da'
+                  : dark
+                    ? '#3c5c5a'
+                    : '#b6c9bf'
+              }
+            />
+            <Html
+              position={[x, 0.12, Math.min(...zs) - 1.25]}
+              center
+              zIndexRange={[1, 0]}
+            >
+              <span className="office-room-label">
+                {props.projects.find((p) => p.id === group)?.name ||
+                  'Operations'}
+              </span>
+            </Html>
+          </group>
+        )
+      })}
+      {props.members
+        .filter((m) => divisionOf(m) === division)
+        .map((member) => {
+          const desk = layout.find((d) => d.id === member.key)
+          return desk ? (
+            <Desk
+              key={member.key}
+              x={desk.x}
+              z={desk.z}
+              member={member}
+              selected={member.key === props.selectedKey}
+              animate={animate}
+              compact={props.view === 'building'}
+              onSelect={props.onSelect}
+            />
+          ) : null
+        })}
+      {!layout.length &&
+        [
+          [-5, -3],
+          [-2, -3],
+          [2, -3],
+          [5, -3],
+          [-5, 0],
+          [-2, 0],
+        ].map(([x, z], i) => (
+          <Desk
+            key={i}
+            x={x}
+            z={z}
+            selected={false}
+            animate={false}
+            onSelect={props.onSelect}
+          />
+        ))}
+      <Plant x={minX + 0.7} z={minZ + 0.7} large />
+      <Plant x={maxX} z={minZ + 0.8} large />
+      <Plant x={minX + 0.8} z={maxZ + 2} large />
+      <group position={[center[0] + 2, 0, maxZ + 1.4]}>
+        <Block at={[0, 0.77, 0]} size={[4.4, 0.16, 1.4]} color="#aa8f70" />
+        {[-1.4, 1.4].map((n) => (
+          <Block
+            key={n}
+            at={[n, 0.38, 0]}
+            size={[0.13, 0.76, 0.8]}
+            color="#526368"
+          />
+        ))}
+        {[-1.45, 0, 1.45].map((n) => (
+          <group key={n}>
+            <Chair x={n} z={1} />
+            <group rotation={[0, Math.PI, 0]}>
+              <Chair x={n} z={1} />
+            </group>
+            <Block
+              at={[n, 0.87, 0]}
+              size={[0.5, 0.035, 0.32]}
+              color="#d4cfbf"
+            />
+          </group>
+        ))}
+        <Html position={[0, 1.5, 0]} center zIndexRange={[2, 0]}>
+          <span className="office-room-label">
+            {division === 'developer' ? 'Discussion' : 'Incident coordination'}
+          </span>
+        </Html>
+      </group>
+      <group position={[minX + 0.7, 0, 1]}>
+        <Block at={[0, 1, 0]} size={[0.8, 2, 2]} color="#ad9277" />
+        {[0.4, 1, 1.6].map((y) => (
+          <Block
+            key={y}
+            at={[0.43, y, 0]}
+            size={[0.06, 0.45, 1.65]}
+            color={dark ? '#51686b' : '#9caead'}
+          />
+        ))}
+        <Html position={[0, 2.4, 0]} center zIndexRange={[3, 0]}>
+          <button
+            className="office-object-label"
+            onClick={() =>
+              props.onModule(division === 'developer' ? 'memory' : 'ssh')
+            }
+          >
+            {division === 'developer' ? 'Memory ↗' : 'Runbooks · SSH ↗'}
+          </button>
+        </Html>
+      </group>
+      <group position={[maxX - 0.4, 0, -1]}>
+        <Block at={[0, 1.1, 0]} size={[0.3, 1.6, 2.4]} color="#e2e0d2" />
+        <Block at={[0, 0.32, -0.9]} size={[0.14, 0.64, 0.14]} color="#677b7d" />
+        <Block at={[0, 0.32, 0.9]} size={[0.14, 0.64, 0.14]} color="#677b7d" />
+        {[
+          [-0.6, '#c19a72'],
+          [0, '#739f95'],
+          [0.6, '#8198b0'],
+        ].map(([z, c]) => (
+          <Block
+            key={z}
+            at={[-0.17, 1.35, Number(z)]}
+            size={[0.025, 0.5, 0.42]}
+            color={String(c)}
+          />
+        ))}
+        <Html position={[0, 2.2, 0]} center zIndexRange={[3, 0]}>
+          <button
+            className="office-object-label"
+            disabled={division === 'developer' && !props.projects.length}
+            onClick={() =>
+              props.onModule(division === 'developer' ? 'issues' : 'machines')
+            }
+          >
+            {division === 'developer' ? 'Issues ↗' : 'Runtime status ↗'}
+            {division === 'devops' && (
+              <small className="office-runtime-summary">
+                {props.runtimeSummary}
+              </small>
+            )}
+          </button>
+        </Html>
+      </group>
+      <Interior
+        division={division}
+        dark={dark}
+        minX={minX}
+        maxZ={maxZ}
+        onModule={props.onModule}
+      />
+      <Html position={[minX + 1.5, 3, minZ]} center zIndexRange={[4, 0]}>
+        <button
+          className={`office-object-label is-${division}`}
+          onClick={() => props.onViewChange(division)}
+        >
+          {floorLabels[division]} ↗
+        </button>
+      </Html>
+    </group>
+  )
+}
+function Glass({ x, z, width }: { x: number; z: number; width: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 1.1, 0]} scale={[width, 2.2, 0.04]} geometry={box}>
+        <meshStandardMaterial
+          color="#aacfd1"
+          transparent
+          opacity={0.16}
+          depthWrite={false}
+          roughness={0.2}
+        />
+      </mesh>
+      <Block at={[0, 2.2, 0]} size={[width, 0.04, 0.06]} color="#687b7c" />
+      {[-width / 2, width / 2].map((n) => (
+        <Block
+          key={n}
+          at={[n, 1.1, 0]}
+          size={[0.05, 2.2, 0.06]}
+          color="#687b7c"
+        />
+      ))}
+    </group>
+  )
+}
+function Interior({
+  division,
+  dark,
+  minX,
+  maxZ,
+  onModule,
+}: {
+  division: OfficeDivision
+  dark: boolean
+  minX: number
+  maxZ: number
+  onModule: (module: string) => void
+}) {
+  const developer = division === 'developer',
+    accent = developer ? '#668b74' : '#638ba6'
+  return (
+    <>
+      <Glass x={1.5} z={maxZ - 0.3} width={5.2} />
+      <group position={[minX + 3.4, 0, maxZ + 1.6]}>
+        {developer ? (
+          <>
+            <Block at={[0, 0.35, 0]} size={[3, 0.6, 1.2]} color={accent} />
+            <Block at={[0, 0.8, -0.5]} size={[3, 0.6, 0.25]} color={accent} />
+            {[-1.4, 1.4].map((x) => (
+              <Block
+                key={x}
+                at={[x, 0.65, 0]}
+                size={[0.25, 0.65, 1.2]}
+                color={accent}
+              />
+            ))}
+            <Block at={[0, 0.4, 1.2]} size={[1.5, 0.16, 0.7]} color="#bca082" />
+            <Block at={[0, 0.2, 1.2]} size={[0.7, 0.4, 0.35]} color="#687b7c" />
+          </>
+        ) : (
+          <>
+            <Glass x={0} z={-0.8} width={3.8} />
+            {[-1.25, 0, 1.25].map((x) => (
+              <group key={x} position={[x, 0, 0]}>
+                <Block at={[0, 1, 0]} size={[0.95, 2, 0.8]} color="#37484c" />
+                {[0.4, 0.7, 1, 1.3, 1.6].map((y) => (
+                  <Block
+                    key={y}
+                    at={[0, y, 0.42]}
+                    size={[0.8, 0.12, 0.04]}
+                    color="#637a89"
+                  />
+                ))}
+              </group>
+            ))}
+            <Html position={[0, 2.4, 0]} center zIndexRange={[3, 0]}>
+              <button
+                className="office-object-label"
+                onClick={() => onModule('machines')}
+              >
+                Server zone · Runtimes ↗
+              </button>
+            </Html>
+          </>
+        )}
+      </group>
+      <group position={[minX + 0.6, 0, maxZ - 1.6]}>
+        <Block
+          at={[0, 0.5, 0]}
+          size={[0.9, 1, 2.4]}
+          color={dark ? '#69736e' : '#c1b7a3'}
+        />
+        <Block at={[0, 1.05, 0]} size={[1.1, 0.1, 2.5]} color="#b89a78" />
+        <Block at={[0, 1.3, -0.7]} size={[0.5, 0.5, 0.5]} color="#425254" />
+        <Plant x={0} z={0.8} />
+        <Html position={[0, 1.9, 0]} center zIndexRange={[2, 0]}>
+          <span className="office-room-label">
+            {developer ? 'Pantry' : 'Equipment'}
+          </span>
+        </Html>
+      </group>
+      <group position={[5.5, 0, maxZ + 1.5]}>
+        <Block
+          at={[0, 1.3, 0]}
+          size={[0.12, 1.6, 1.9]}
+          color={dark ? '#60716e' : '#eeeee3'}
+        />
+        <Block at={[0, 0.45, 0]} size={[0.14, 0.9, 0.14]} color="#677b7d" />
+        <Html position={[0, 2.4, 0]} center zIndexRange={[3, 0]}>
+          {developer ? (
+            <button
+              className="office-object-label"
+              onClick={() => onModule('todos')}
+            >
+              Todos ↗
+            </button>
+          ) : (
+            <button
+              className="office-object-label"
+              onClick={() => onModule('ssh')}
+            >
+              Shared SSH ↗
+            </button>
+          )}
+        </Html>
+      </group>
+      {!developer && (
+        <group position={[6, 0, maxZ + 2.8]}>
+          <Chair x={0} z={0} />
+          <Chair x={1.4} z={0} />
+          <Plant x={2.2} z={0} />
+        </group>
+      )}
+    </>
   )
 }
 
@@ -470,15 +767,22 @@ export default function OfficeScene(props: Props) {
   const [lost, setLost] = useState(false)
   const [action, setAction] = useState({ id: 0, type: '' })
   const [mode, setMode] = useState<'pan' | 'rotate'>('pan')
-  const slots = useRef<DeskPosition[]>([])
-  const layout = useMemo(() => {
-    const next = officeLayout(
-      props.allMembers.map((m) => ({ ...m, id: m.key })),
-      slots.current,
-    )
-    slots.current = next
-    return next
+  const slots = useRef<Record<OfficeDivision, DeskPosition[]>>({
+    developer: [],
+    devops: [],
+  })
+  const layouts = useMemo(() => {
+    for (const division of ['developer', 'devops'] as const) {
+      slots.current[division] = officeLayout(
+        props.allMembers
+          .filter((m) => divisionOf(m) === division)
+          .map((m) => ({ ...m, id: m.key })),
+        slots.current[division],
+      )
+    }
+    return { ...slots.current }
   }, [props.allMembers])
+  const layout = [...layouts.developer, ...layouts.devops]
   const maxX = Math.max(8, ...layout.map((d) => d.x + 2))
   const maxZ = Math.max(5, ...layout.map((d) => d.z + 3))
   const minX = -9,
@@ -487,10 +791,15 @@ export default function OfficeScene(props: Props) {
     depth = maxZ - minZ + 6
   const center: [number, number, number] = [
     (minX + maxX) / 2,
-    0,
+    props.view === 'devops' ? 5 : props.view === 'building' ? 2.5 : 0,
     (minZ + maxZ) / 2 + 1,
   ]
-  const selected = layout.find((d) => d.id === props.selectedKey)
+  const selectedMember = props.members.find((m) => m.key === props.selectedKey)
+  const selected =
+    selectedMember &&
+    (props.view === 'building' || divisionOf(selectedMember) === props.view)
+      ? layout.find((d) => d.id === selectedMember.key)
+      : undefined
   const animate = !reduced && props.visible
   const working = props.members.some(
     (m) =>
@@ -508,8 +817,6 @@ export default function OfficeScene(props: Props) {
         </button>
       </div>
     )
-  const wall = dark ? '#3d4a50' : '#d8dcd1',
-    floor = dark ? '#454c4b' : '#ded6c1'
   return (
     <>
       <Canvas
@@ -547,237 +854,60 @@ export default function OfficeScene(props: Props) {
           shadow-camera-bottom={-25}
           shadow-bias={-0.001}
         />
-        <Camera
+        <OfficeCamera
           workspaceId={props.workspaceId}
+          view={props.view}
           center={center}
           span={Math.max(width, depth) * 1.45}
           reset={props.reset}
-          selected={selected ? [selected.x, 0, selected.z] : undefined}
+          selected={
+            selected
+              ? [
+                  selected.x,
+                  selectedMember && divisionOf(selectedMember) === 'devops'
+                    ? 5
+                    : 0,
+                  selected.z,
+                ]
+              : undefined
+          }
           action={action}
           mode={mode}
+          focusId={props.focusId}
         />
-        <group>
-          <Block
-            at={[center[0], -0.22, center[2]]}
-            size={[width, 0.44, depth]}
-            color={dark ? '#303d42' : '#c4c7bc'}
-          />
-          <Block
-            at={[center[0], 0.005, center[2]]}
-            size={[width - 0.12, 0.06, depth - 0.12]}
-            color={floor}
-          />
-          {Array.from({ length: Math.ceil(depth) }, (_, i) => (
-            <Block
-              key={i}
-              at={[center[0], 0.044, minZ - 1 + i]}
-              size={[width - 0.2, 0.006, 0.025]}
-              color={dark ? '#394544' : '#cec7b3'}
+        {(['developer', 'devops'] as const)
+          .filter(
+            (division) => props.view === 'building' || props.view === division,
+          )
+          .map((division) => (
+            <OfficeFloor
+              key={division}
+              props={props}
+              division={division}
+              layout={layouts[division]}
+              dark={dark}
+              animate={animate}
+              minX={minX}
+              minZ={minZ}
+              maxX={maxX}
+              maxZ={maxZ}
+              width={width}
+              depth={depth}
+              center={[center[0], 0, center[2]]}
             />
           ))}
-          <Block
-            at={[center[0], 1.35, minZ]}
-            size={[width, 2.7, 0.13]}
-            color={wall}
-          />
-          <Block
-            at={[minX, 1.35, center[2]]}
-            size={[0.13, 2.7, depth]}
-            color={wall}
-          />
-          {Array.from({ length: Math.floor(width / 3) }, (_, i) => (
-            <group key={i} position={[minX + 1.3 + i * 3, 1.7, minZ + 0.085]}>
+        {props.view === 'building' && (
+          <group position={[maxX - 0.1, 0, maxZ - 2]}>
+            {Array.from({ length: 16 }, (_, i) => (
               <Block
-                at={[0, 0, 0]}
-                size={[2.2, 1.25, 0.04]}
-                color={dark ? '#516c80' : '#afcbd2'}
-              />
-              <Block
-                at={[0, 0, 0.03]}
-                size={[2.25, 0.065, 0.08]}
-                color={dark ? '#8a989a' : '#eef0e8'}
-              />
-              <Block
-                at={[0, 0, 0.03]}
-                size={[0.06, 1.3, 0.08]}
-                color={dark ? '#8a989a' : '#eef0e8'}
-              />
-              <Block
-                at={[0, -0.65, 0.06]}
-                size={[2.4, 0.1, 0.22]}
-                color="#b3b6ab"
-              />
-            </group>
-          ))}
-          {[...new Set(layout.map((d) => d.group))].map((group, i) => {
-            const desks = layout.filter((d) => d.group === group),
-              xs = desks.map((d) => d.x),
-              zs = desks.map((d) => d.z)
-            const x = (Math.min(...xs) + Math.max(...xs)) / 2,
-              z = (Math.min(...zs) + Math.max(...zs)) / 2
-            return (
-              <group key={group}>
-                <Block
-                  at={[x, 0.058, z + 0.35]}
-                  size={[
-                    Math.max(...xs) - Math.min(...xs) + 2.65,
-                    0.035,
-                    Math.max(...zs) - Math.min(...zs) + 2.9,
-                  ]}
-                  color={
-                    dark
-                      ? ['#3c5c5a', '#59544d', '#484d65'][i % 3]
-                      : ['#b6c9bf', '#cfbda4', '#bfc4d4'][i % 3]
-                  }
-                />
-                <Html
-                  position={[x, 0.12, Math.min(...zs) - 1.25]}
-                  center
-                  zIndexRange={[1, 0]}
-                >
-                  <span className="office-room-label">
-                    {props.projects.find((p) => p.id === group)?.name ||
-                      'Shared SSH'}
-                  </span>
-                </Html>
-              </group>
-            )
-          })}
-          {props.members.map((member) => {
-            const desk = layout.find((d) => d.id === member.key)
-            return desk ? (
-              <Desk
-                key={member.key}
-                x={desk.x}
-                z={desk.z}
-                member={member}
-                selected={member.key === props.selectedKey}
-                animate={animate}
-                onSelect={props.onSelect}
-              />
-            ) : null
-          })}
-          {!props.allMembers.length &&
-            [
-              [-5, -3],
-              [-2, -3],
-              [2, -3],
-              [5, -3],
-              [-5, 0],
-              [-2, 0],
-            ].map(([x, z], i) => (
-              <Desk
                 key={i}
-                x={x}
-                z={z}
-                selected={false}
-                animate={false}
-                onSelect={props.onSelect}
+                at={[0, ((i + 1) * 5) / 16 / 2, i * 0.23]}
+                size={[1.3, ((i + 1) * 5) / 16, 0.24]}
+                color={dark ? '#7e8884' : '#c6b89f'}
               />
             ))}
-          <Plant x={minX + 0.7} z={minZ + 0.7} large />
-          <Plant x={maxX} z={minZ + 0.8} large />
-          <Plant x={minX + 0.8} z={maxZ + 2} large />
-          <group position={[center[0] + 2, 0, maxZ + 1.4]}>
-            <Block at={[0, 0.77, 0]} size={[4.4, 0.16, 1.4]} color="#aa8f70" />
-            {[-1.4, 1.4].map((n) => (
-              <Block
-                key={n}
-                at={[n, 0.38, 0]}
-                size={[0.13, 0.76, 0.8]}
-                color="#526368"
-              />
-            ))}
-            {[-1.45, 0, 1.45].map((n) => (
-              <group key={n}>
-                <Chair x={n} z={1} />
-                <group rotation={[0, Math.PI, 0]}>
-                  <Chair x={n} z={1} />
-                </group>
-                <Block
-                  at={[n, 0.87, 0]}
-                  size={[0.5, 0.035, 0.32]}
-                  color="#d4cfbf"
-                />
-              </group>
-            ))}
-            <Html position={[0, 1.5, 0]} center zIndexRange={[2, 0]}>
-              <span className="office-room-label">Team workspace</span>
-            </Html>
           </group>
-          <group position={[minX + 0.7, 0, 1]}>
-            <Block at={[0, 1, 0]} size={[0.8, 2, 2]} color="#ad9277" />
-            {[0.4, 1, 1.6].map((y) => (
-              <Block
-                key={y}
-                at={[0.43, y, 0]}
-                size={[0.06, 0.45, 1.65]}
-                color={dark ? '#51686b' : '#9caead'}
-              />
-            ))}
-            <Html position={[0, 2.4, 0]} center zIndexRange={[3, 0]}>
-              <button
-                className="office-object-label"
-                onClick={() => props.onModule('memory')}
-              >
-                Memory ↗
-              </button>
-            </Html>
-          </group>
-          <group position={[maxX - 0.4, 0, -1]}>
-            <Block at={[0, 1.1, 0]} size={[0.3, 1.6, 2.4]} color="#e2e0d2" />
-            <Block
-              at={[0, 0.32, -0.9]}
-              size={[0.14, 0.64, 0.14]}
-              color="#677b7d"
-            />
-            <Block
-              at={[0, 0.32, 0.9]}
-              size={[0.14, 0.64, 0.14]}
-              color="#677b7d"
-            />
-            {[
-              [-0.6, '#c19a72'],
-              [0, '#739f95'],
-              [0.6, '#8198b0'],
-            ].map(([z, c]) => (
-              <Block
-                key={z}
-                at={[-0.17, 1.35, Number(z)]}
-                size={[0.025, 0.5, 0.42]}
-                color={String(c)}
-              />
-            ))}
-            <Html position={[0, 2.2, 0]} center zIndexRange={[3, 0]}>
-              <button
-                className="office-object-label"
-                disabled={!props.projects.length}
-                onClick={() => props.onModule('issues')}
-              >
-                Work board ↗
-              </button>
-            </Html>
-          </group>
-          <group position={[minX + 1.3, 0, maxZ + 1.2]}>
-            <Block at={[0, 0.85, 0]} size={[0.95, 1.7, 0.8]} color="#37484c" />
-            {[0.4, 0.7, 1, 1.3].map((y) => (
-              <Block
-                key={y}
-                at={[0.49, y, 0]}
-                size={[0.025, 0.12, 0.58]}
-                color="#84a699"
-              />
-            ))}
-            <Html position={[0, 2.1, 0]} center zIndexRange={[3, 0]}>
-              <button
-                className="office-object-label"
-                onClick={() => props.onModule('machines')}
-              >
-                Runtimes ↗
-              </button>
-            </Html>
-          </group>
-        </group>
+        )}
       </Canvas>
       <div
         className="office-camera-controls"

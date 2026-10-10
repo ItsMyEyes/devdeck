@@ -7,8 +7,8 @@ The office is a page inside the DevDeck Tauri desktop app. Open **Agent Workspac
 - Select an avatar or a session in the keyboard-accessible roster to open its existing chat. Instructions, questions, approvals and Stop use the existing agent protocol and validation. Opening the office itself starts no agents.
 - Select a subagent to inspect its status and open the parent conversation. Subagents have no independent controls.
 - Working, waiting, failed, stopped, idle and unverified sessions have separate indicators. Typing follows actual turns. Failed subagents keep their parent in the attention roster.
-- Filter by project/session, expand idle history, or switch to List view. Up to 20 recent idle sessions can fill the office; all active/attention sessions remain available. Selecting an older session brings it into the scene.
-- In Move mode (the default), drag to slide the camera along the floor. Switch to Rotate to orbit. Use arrow buttons to move, scroll/pinch or +/− to zoom, and the reset button to return to the office view. Camera preferences are saved locally per workspace.
+- Filter by project/session, expand idle history, or switch to List view. Each scene has at most 20 session slots, prioritizing attention and active turns. All sessions remain available in the roster; selecting an older session brings it into the scene.
+- In Move mode (the default), drag to slide the camera along the floor. Switch to Rotate to orbit. Use arrow buttons to move, scroll/pinch or +/− to zoom, and the reset button to return to the office view. Camera preferences are saved locally per workspace and floor view.
 - Interactive office objects open existing modules. Issues and Todos retain links to their original items. Terminal-only worktrees show known process information and a terminal link.
 
 ## Data and compatibility
@@ -33,7 +33,7 @@ Local evidence is retained in `output/agent-workspace-3d/desktop-dark.png` and `
 
 The full frontend run under Node 26 reported 193 passing files and six files with timeout failures. All six were rerun under Node 24 with one worker: **151 tests passed**. The full backend run had two timing failures that passed when rerun, plus two Tailscale detection failures and a terminal PTY exit notification failure in unchanged packages. The three remaining failures were reproduced on the original d9bb849 checkout without this feature. These are recorded separately; the full suites are not claimed green.
 
-Not verified: installer/release packaging, Windows/Linux hardware, a real remote SSH host, every provider's event coverage, or a five-second latency SLA under a real remote network. Desktop testing used the development app and fake providers. This feature has no autonomous task allocation, decorative editor, multi-floor simulation or cost dashboard.
+Not verified in the initial release: installer/release packaging, Windows/Linux hardware, a real remote SSH host, every provider's event coverage, or a five-second latency SLA under a real remote network. Desktop testing used the development app and fake providers. This feature has no autonomous task allocation, decorative editor, simulated routines or cost dashboard.
 
 ## Checks and fixture
 
@@ -62,3 +62,19 @@ Three camera regression tests failed against the previous action behavior, then 
 
 The camera update's frontend build passed. The full frontend rerun passed 199 files / 2,226 tests, with one existing `src/features/editor/monacoLspClient.guard.test.ts` failure: importing Monaco exceeded its five-second timeout. The camera tests were green; editor code was unchanged.
 The Monaco guard passed with a 15-second test timeout (6.32-second import/test). Its original five-second limit remains unchanged.
+
+## Developer and DevOps floors — 2026-10-10
+
+The initial **Gedung** view shows an open building with two floors and stairs. **1 · Developer** contains repo/worktree sessions; **2 · DevOps** contains any session with a `connectionId`. Provider/model does not determine the division. Subagents use their parent's division and chat. Choosing a floor hides the other interior. The last view is saved under `devdeck.office-view.<workspace>`; camera poses use `devdeck.office-camera.<workspace>.<view>`. Reset affects only the current view, including when invoked in List mode.
+
+Roster groups retain all active/attention sessions and expandable idle history. The scene admits at most 20 sessions, alternating divisions within each status priority in Gedung. Each interior has its own 20-slot limit. Selection opens the correct floor and existing chat; manual floor changes preserve that chat and its division label. Project and Shared SSH filters select the corresponding floor, and the activity feed follows the visible floor. Arrow keys/Home/End operate the floor selector.
+
+Both floors share a footprint, with independently retained project/connection desk layouts. Developer adds collaboration tables, glass, whiteboard, Issues/Todos links, lounge, pantry and Memory. DevOps adds server racks, a coordination table, equipment storage and runbooks. Runtime boards show actual source availability only; server/operations objects open existing Runtimes/SSH modules. Empty floors have furniture without sample avatars. Layout, themes, camera controls, reduced motion, lazy loading and HTML fallback remain available. No backend endpoints, database migrations or agent protocol changes were made for this update.
+
+Native smoke testing covered Gedung, both interiors, drag/pan/rotate/zoom/reset, session selection and retained chat, light/dark themes, keyboard floor navigation, List reset and WebGL loss/recovery. The desktop preview also opened the existing local production workspace and its real Shared SSH catalog through the installed backend. Its older API shows **Unverified**/limited status rather than inventing turns. Production testing sent no agent instructions or interrupts and did not restart or upgrade that backend.
+
+Final verification under Node 24: **43 feature tests passed**, frontend typecheck/build passed, and the complete frontend suite passed **201 files / 2,247 tests**, using two workers and a 15-second test timeout. The unchanged Monaco guard previously exceeded the default five-second timeout; no repository timeout setting was changed. New regressions cover division identity/subagents, balanced admission and the hard 20-slot cap, filtered-session desks, history collapse, feed/view selection, workspace preferences, keyboard focus, per-view camera restore/reset/remount and persistence after session focus. A fresh independent review's scene-cap and navigation/reset findings were fixed and verified before completion.
+
+Performance fixture: 20 active avatars in Gedung (10 per division), then 20 on Developer; isolated test backend, no paid provider. Device: **Apple M3, 8 GB RAM, macOS 26.6.2**, Tauri 1400×845 and supplementary browser 1280×720, DPR capped at 1.5. Default-camera native samples measured **57.95–58.8 FPS** in Gedung and **57.59–59.2 FPS** on Developer. Browser foreground samples measured 37.25 FPS in Gedung and 40.39–41.59 FPS on Developer. Native and browser hidden checks both recorded **zero render frames and zero overview requests**.
+
+The 30 FPS target is met at the measured default camera on this device, but not consistently across all samples: native samples during closer zoom, interaction and concurrent browser/test workload fell to **21.59–28.99 FPS**. A browser 10.99 FPS sample overlapped the intentional hidden check and is not a foreground benchmark. Raw evidence is retained in untracked `output/agent-workspace-3d/two-floors-performance.jsonl`; temporary instrumentation was removed. Measurements preceded the final compact desk arrangement, which was subsequently smoke-tested visually in the native production preview. Performance on other hardware and physical touch gestures remains unverified; no production installer upgrade is included.
