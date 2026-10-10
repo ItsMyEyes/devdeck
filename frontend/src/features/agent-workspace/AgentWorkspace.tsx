@@ -595,12 +595,6 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               </p>
             </div>
           )}
-          {!flat && (
-            <div className="office-camera-hint">
-              Drag to rotate · Shift + drag to pan · Scroll to zoom · Select an
-              agent to connect
-            </div>
-          )}
         </section>
         <aside className="office-sessions-panel">{sessionList}</aside>
       </div>

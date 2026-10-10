@@ -387,6 +387,37 @@
   gap: 5px;
   pointer-events: auto;
 }
+.office-renderer canvas {
+  cursor: grab;
+}
+.office-renderer canvas:active {
+  cursor: grabbing;
+}
+.office-camera-controls {
+  position: absolute;
+  bottom: 38px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.office-camera-modes,
+.office-camera-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.office-camera-modes .office-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.office-camera-modes button[aria-pressed='true'] {
+  color: var(--color-devdeck-accent);
+  border-color: currentColor;
+}
 .office-camera-hint {
   position: absolute;
   bottom: 12px;

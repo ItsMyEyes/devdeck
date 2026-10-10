@@ -1,10 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, OrbitControls } from '@react-three/drei'
-import { BoxGeometry, CylinderGeometry, SphereGeometry, Vector3 } from 'three'
+import {
+  BoxGeometry,
+  CylinderGeometry,
+  SphereGeometry,
+  Vector3,
+  MOUSE,
+  TOUCH,
+} from 'three'
 import type { Group } from 'three'
-import { Minus, Plus, RotateCw } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Minus,
+  Move,
+  Plus,
+  RotateCw,
+} from 'lucide-react'
 import { useReducedMotion } from 'motion/react'
 import { useResolvedTheme } from '@/features/theme/useTheme'
 import {
@@ -17,6 +33,7 @@ import type {
   OfficeMember,
 } from '@/features/agent-workspace/model'
 import type { Project } from '@/store/types'
+import { applyCameraAction } from '@/features/agent-workspace/camera'
 
 const box = new BoxGeometry(1, 1, 1)
 const sphere = new SphereGeometry(1, 12, 10)
@@ -337,6 +354,7 @@ function Camera({
   reset,
   selected,
   action,
+  mode,
 }: {
   workspaceId: string
   center: [number, number, number]
@@ -344,9 +362,25 @@ function Camera({
   reset: number
   selected?: [number, number, number]
   action: { id: number; type: string }
+  mode: 'pan' | 'rotate'
 }) {
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null)
   const { camera, invalidate } = useThree()
+  const saveCamera = useCallback(() => {
+    const c = controls.current
+    if (!c) return
+    try {
+      localStorage.setItem(
+        `devdeck.office-camera.${workspaceId}`,
+        JSON.stringify({
+          position: camera.position.toArray(),
+          target: c.target.toArray(),
+        }),
+      )
+    } catch {
+      /* Optional preference. */
+    }
+  }, [camera, workspaceId])
   const defaults = useRef({ center, span })
   defaults.current = { center, span }
   useEffect(() => {
@@ -400,15 +434,11 @@ function Camera({
   useEffect(() => {
     const c = controls.current
     if (!c || !action.id) return
-    const offset = camera.position.clone().sub(c.target)
-    if (action.type === 'rotate')
-      offset.applyAxisAngle(new Vector3(0, 1, 0), Math.PI / 4)
-    else offset.multiplyScalar(action.type === 'in' ? 0.8 : 1.25)
-    offset.clampLength(5, 100)
-    camera.position.copy(c.target).add(offset)
+    applyCameraAction(camera, c.target, action.type)
     c.update()
+    saveCamera()
     invalidate()
-  }, [action, camera, invalidate])
+  }, [action, camera, invalidate, saveCamera])
   return (
     <OrbitControls
       ref={controls}
@@ -418,21 +448,18 @@ function Camera({
       maxDistance={100}
       minPolarAngle={0.2}
       maxPolarAngle={Math.PI / 2.25}
-      onEnd={() => {
-        const c = controls.current
-        if (!c) return
-        try {
-          localStorage.setItem(
-            `devdeck.office-camera.${workspaceId}`,
-            JSON.stringify({
-              position: camera.position.toArray(),
-              target: c.target.toArray(),
-            }),
-          )
-        } catch {
-          /* Optional preference. */
-        }
+      enablePan
+      screenSpacePanning={false}
+      mouseButtons={{
+        LEFT: mode === 'pan' ? MOUSE.PAN : MOUSE.ROTATE,
+        MIDDLE: MOUSE.DOLLY,
+        RIGHT: mode === 'pan' ? MOUSE.ROTATE : MOUSE.PAN,
       }}
+      touches={{
+        ONE: mode === 'pan' ? TOUCH.PAN : TOUCH.ROTATE,
+        TWO: TOUCH.DOLLY_PAN,
+      }}
+      onEnd={saveCamera}
     />
   )
 }
@@ -442,6 +469,7 @@ export default function OfficeScene(props: Props) {
   const reduced = useReducedMotion()
   const [lost, setLost] = useState(false)
   const [action, setAction] = useState({ id: 0, type: '' })
+  const [mode, setMode] = useState<'pan' | 'rotate'>('pan')
   const slots = useRef<DeskPosition[]>([])
   const layout = useMemo(() => {
     const next = officeLayout(
@@ -485,6 +513,7 @@ export default function OfficeScene(props: Props) {
   return (
     <>
       <Canvas
+        className="office-renderer"
         shadows="percentage"
         camera={{ position: [18, 22, 22], fov: 38 }}
         dpr={[1, 1.5]}
@@ -525,6 +554,7 @@ export default function OfficeScene(props: Props) {
           reset={props.reset}
           selected={selected ? [selected.x, 0, selected.z] : undefined}
           action={action}
+          mode={mode}
         />
         <group>
           <Block
@@ -750,28 +780,57 @@ export default function OfficeScene(props: Props) {
         </group>
       </Canvas>
       <div
-        style={{
-          position: 'absolute',
-          bottom: 34,
-          right: 12,
-          display: 'flex',
-          gap: 4,
-        }}
+        className="office-camera-controls"
+        role="group"
+        aria-label="Camera controls"
       >
-        {[
-          { type: 'in', label: 'Zoom in', Icon: Plus },
-          { type: 'out', label: 'Zoom out', Icon: Minus },
-          { type: 'rotate', label: 'Rotate office', Icon: RotateCw },
-        ].map(({ type, label, Icon }) => (
+        <div
+          className="office-camera-modes"
+          role="group"
+          aria-label="Camera drag mode"
+        >
           <button
-            key={type}
-            className="office-icon-button"
-            aria-label={label}
-            onClick={() => setAction((a) => ({ id: a.id + 1, type }))}
+            className="office-button"
+            aria-label="Move camera"
+            aria-pressed={mode === 'pan'}
+            onClick={() => setMode('pan')}
           >
-            <Icon size={14} />
+            <Move size={14} /> Move
           </button>
-        ))}
+          <button
+            className="office-button"
+            aria-label="Rotate camera"
+            aria-pressed={mode === 'rotate'}
+            onClick={() => setMode('rotate')}
+          >
+            <RotateCw size={14} /> Rotate
+          </button>
+        </div>
+        <div className="office-camera-actions">
+          {[
+            { type: 'left', label: 'Move camera left', Icon: ArrowLeft },
+            { type: 'up', label: 'Move camera forward', Icon: ArrowUp },
+            { type: 'down', label: 'Move camera backward', Icon: ArrowDown },
+            { type: 'right', label: 'Move camera right', Icon: ArrowRight },
+            { type: 'in', label: 'Zoom in', Icon: Plus },
+            { type: 'out', label: 'Zoom out', Icon: Minus },
+            { type: 'rotate', label: 'Rotate office', Icon: RotateCw },
+          ].map(({ type, label, Icon }) => (
+            <button
+              key={type}
+              className="office-icon-button"
+              aria-label={label}
+              title={label}
+              onClick={() => setAction((a) => ({ id: a.id + 1, type }))}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="office-camera-hint">
+        {mode === 'pan' ? 'Drag to move' : 'Drag to rotate'} · Scroll or pinch
+        to zoom · Use arrow buttons to move
       </div>
     </>
   )

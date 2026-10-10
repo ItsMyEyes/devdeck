@@ -8,7 +8,7 @@ The office is a page inside the DevDeck Tauri desktop app. Open **Agent Workspac
 - Select a subagent to inspect its status and open the parent conversation. Subagents have no independent controls.
 - Working, waiting, failed, stopped, idle and unverified sessions have separate indicators. Typing follows actual turns. Failed subagents keep their parent in the attention roster.
 - Filter by project/session, expand idle history, or switch to List view. Up to 20 recent idle sessions can fill the office; all active/attention sessions remain available. Selecting an older session brings it into the scene.
-- Drag to rotate, Shift-drag/right-drag to pan, scroll to zoom; camera buttons focus and reset. Camera preferences are saved locally per workspace.
+- In Move mode (the default), drag to slide the camera along the floor. Switch to Rotate to orbit. Use arrow buttons to move, scroll/pinch or +/− to zoom, and the reset button to return to the office view. Camera preferences are saved locally per workspace.
 - Interactive office objects open existing modules. Issues and Todos retain links to their original items. Terminal-only worktrees show known process information and a terminal link.
 
 ## Data and compatibility
@@ -53,3 +53,12 @@ CGO_ENABLED=0 go vet ./...
 ```
 
 An optional `TestWriteOfficeSmokeFixture` creates 20 thread fixtures in a fresh directory when `DEVDECK_OFFICE_SMOKE_DIR` is set. It refuses to overwrite an existing database and is skipped during normal tests. Use only with an isolated test server and fake provider; it is not demo data for a production workspace.
+
+## Camera controls update — 2026-10-10
+
+Direct dragging now pans by default, with visible Move/Rotate modes and four directional buttons. Panning follows the current view and preserves height, angle and zoom. Button movements also persist workspace camera preferences. One-finger touch follows the selected mode; two-finger pinch zooms and pans.
+
+Three camera regression tests failed against the previous action behavior, then passed with the movement change. All 23 feature tests and frontend typecheck passed. Native desktop testing against the existing production backend confirmed direct drag, directional movement and Rotate mode, leaving Move selected. This test sent no agent instructions and restarted no production sessions. Physical touch input was not tested.
+
+The camera update's frontend build passed. The full frontend rerun passed 199 files / 2,226 tests, with one existing `src/features/editor/monacoLspClient.guard.test.ts` failure: importing Monaco exceeded its five-second timeout. The camera tests were green; editor code was unchanged.
+The Monaco guard passed with a 15-second test timeout (6.32-second import/test). Its original five-second limit remains unchanged.
