@@ -43,7 +43,7 @@ func (h *AgentThreadHandler) GetWorkspaceOverview(w http.ResponseWriter, r *http
 			return err
 		}
 		for _, row := range threads {
-			item := domain.OfficeSession{ID: row.ID, Title: row.Title, Agent: row.AgentID, Model: row.Model, Status: "unknown", UpdatedAt: row.UpdatedAt, ProjectID: projectID, ConnectionID: connectionID, Subagents: []domain.OfficeSubagent{}, Recent: []domain.OfficeActivity{}}
+			item := domain.OfficeSession{CharacterName: row.CharacterName, ArchivedAt: row.ArchivedAt, ID: row.ID, Title: row.Title, Agent: row.AgentID, Model: row.Model, Status: "unknown", UpdatedAt: row.UpdatedAt, ProjectID: projectID, ConnectionID: connectionID, Subagents: []domain.OfficeSubagent{}, Recent: []domain.OfficeActivity{}}
 			if connectionID == "" {
 				item.WorktreeID = scope
 			}
@@ -52,6 +52,8 @@ func (h *AgentThreadHandler) GetWorkspaceOverview(w http.ResponseWriter, r *http
 					continue
 				}
 				item.Status = t.OfficeStatus()
+				item.ArchivedAt = t.ArchivedAt
+				item.Archiving = t.Archiving
 				item.TurnInFlight = t.TurnInFlight
 				item.PlanReady = t.ProposedPlan != nil
 				item.Activity = t.Overview.Activity

@@ -47,6 +47,18 @@ func TestWorkspaceOverviewIsolationAndNoSessionCreation(t *testing.T) {
 	if len(out.Sessions) != 1 || out.Sessions[0].Status != "idle" {
 		t.Fatalf("%+v", out)
 	}
+	if out.Sessions[0].CharacterName == "" {
+		t.Fatal("overview omitted persistent character name")
+	}
+	for _, typ := range []orchestration.CommandType{orchestration.CmdThreadArchive, orchestration.CmdThreadArchiveComplete} {
+		if _, err := engine.Dispatch(context.Background(), orchestration.Command{CommandID: string(typ), Type: typ, ThreadID: thread}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archived := read(ws).Sessions[0]
+	if archived.ArchivedAt == 0 || archived.Archiving || archived.CharacterName != out.Sessions[0].CharacterName {
+		t.Fatal("overview lost confirmed lifecycle")
+	}
 	if err := st.DeleteAgentThread(thread); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +82,7 @@ func TestWorkspaceOverviewIncludesSharedSSHAndNoSecrets(t *testing.T) {
 	engine, st, _, cleanup := newAgentWSTestEnv(t, "claude")
 	defer cleanup()
 	spaces, _ := st.Workspaces()
-	conn, err := st.CreateSSHConnection("Shared ops", "", "example.test", 22, "operator", "password", nil, nil)
+	conn, err := st.CreateSSHConnection("Shared ops", "", "example.test", 22, "operator", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

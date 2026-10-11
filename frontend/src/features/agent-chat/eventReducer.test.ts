@@ -1422,3 +1422,25 @@ describe('reduceAgentEvents — thread modes', () => {
     expect(again).toBe(first)
   })
 })
+
+it('archives only after confirmation, preserves messages, and resumes without a turn', () => {
+  const event = (seq: number, type: string): AgentEvent => ({ seq, type, threadId: "w-test", commandId: `c${seq}`, eventId: `e${seq}`, createdAt: seq * 1000 })
+  const original = reduceAgentEvents(emptyThreadView(), [delta(1, 'item', 'Retained answer', 1)])
+  const pending = reduceAgentEvents(original, [event(2, 'thread.archive-requested')])
+  expect(pending).toMatchObject({ archiving: true, archivedAt: 0 })
+  const ended = reduceAgentEvents(pending, [event(3, 'thread.archived')])
+  expect(ended).toMatchObject({ archiving: false, archivedAt: 3000, status: 'stopped', pendingApprovals: [], pendingUserInputs: [] })
+  expect(ended.items[0].text).toBe('Retained answer')
+  const late = reduceAgentEvents(ended, [{...event(4, 'thread.session-set'), payload: {status: 'running'}}])
+  expect(late.status).toBe('stopped')
+  const resumed = reduceAgentEvents(late, [event(5, 'thread.resumed')])
+  expect(resumed).toMatchObject({ archivedAt: 0, status: 'idle' })
+  expect(resumed.items).toEqual(ended.items)
+})
+
+it('retains Stop and turn status when ending a session fails', () => {
+ const event = (seq:number,type:string,payload?:unknown):AgentEvent=>({seq,type,payload,threadId:'w-test',commandId:`c${seq}`,eventId:`e${seq}`,createdAt:seq*1000})
+ const view=reduceAgentEvents(emptyThreadView(),[event(1,'thread.turn-start-requested'),event(2,'thread.archive-requested'),event(3,'thread.activity-appended',{kind:'runtime.error',message:'interrupt failed'}),event(4,'thread.archive-failed')])
+ expect(view).toMatchObject({status:'running',archivedAt:0,archiving:false})
+ expect(view.items.at(-1)?.text).toBe('interrupt failed')
+})

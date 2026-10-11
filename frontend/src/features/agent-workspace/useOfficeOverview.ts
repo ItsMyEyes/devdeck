@@ -35,6 +35,7 @@ interface Source {
 }
 interface Snapshot extends OfficeOverview {
   limited: boolean
+  lifecycle: boolean
 }
 
 export function useOfficeOverview(workspace: Workspace) {
@@ -86,7 +87,13 @@ export function useOfficeOverview(workspace: Workspace) {
           const data = await get<OfficeOverview>(
             `/agent/workspace-overview?workspaceId=${encodeURIComponent(workspace.id)}`,
           )
-          return { ...data, limited: false }
+          return {
+            ...data,
+            limited: false,
+            lifecycle: identity.capabilities.includes(
+              'agent-session-lifecycle',
+            ),
+          }
         }
         const scopes = workspace.projects
           .filter((p) => (p.machineId || 'hub') === source.id)
@@ -117,6 +124,9 @@ export function useOfficeOverview(workspace: Workspace) {
               (t) =>
                 ({
                   id: t.id,
+                  characterName: t.characterName,
+                  archivedAt: t.archivedAt,
+                  archiving: t.archiving,
                   title: t.title,
                   worktreeId: scope.worktreeId,
                   projectId: scope.projectId,
@@ -141,6 +151,8 @@ export function useOfficeOverview(workspace: Workspace) {
           sampledAt: Date.now(),
           sessions: batches.flat(),
           limited: true,
+          lifecycle:
+            identity.capabilities?.includes('agent-session-lifecycle') ?? false,
         }
       },
       refetchInterval: 2000,
@@ -159,6 +171,12 @@ export function useOfficeOverview(workspace: Workspace) {
         continue
       members.push({
         ...session,
+        parentProject: connections.data?.find(
+          (c) => c.id === session.connectionId,
+        )?.parentProject,
+        hostName: connections.data?.find((c) => c.id === session.connectionId)
+          ?.name,
+        lifecycle: query.data?.lifecycle ?? false,
         key: avatarKey(source.id, session.id),
         sourceId: source.id,
         sourceName: source.name,

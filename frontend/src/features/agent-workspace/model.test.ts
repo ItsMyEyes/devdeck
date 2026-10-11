@@ -209,3 +209,18 @@ it('uses both wings and keeps circulation compact for a single twenty-session di
     Math.max(...desks.map((d) => d.z)) - Math.min(...desks.map((d) => d.z)),
   ).toBeLessThan(12)
 })
+
+it('never admits an archived session, even when its last status or child is active', () => {
+ const archived={...session('ended','running'),archivedAt:100}
+ expect(visibleOfficeSessions([archived,session('live','idle')],'building',true).map(s=>s.id)).toEqual(['live'])
+})
+it('groups SSH desks by connection under parent project and preserves positions through status changes', () => {
+ const vm1={...session('a','idle'),connectionId:'vm1',parentProject:'AIGN'}
+ const vm2={...session('b','idle'),connectionId:'vm2',parentProject:'AIGN'}
+ const layout=officeLayout([vm1,vm2])
+ expect(layout[0].group).not.toBe(layout[1].group)
+ const next=officeLayout([{...vm1,status:'running'},vm2],layout)
+ expect(next).toEqual(layout)
+ const moved=officeLayout([{...vm1,parentProject:'Other'},vm2],layout)
+ expect(moved.find(d=>d.id==='a')?.group).not.toBe(layout.find(d=>d.id==='a')?.group)
+})

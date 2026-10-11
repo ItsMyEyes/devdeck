@@ -22,6 +22,9 @@ import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { useOfficeOverview } from '@/features/agent-workspace/useOfficeOverview'
 import {
   divisionOf,
+  deskGroup,
+  deskGroupLabel,
+  childCharacterName,
   floorLabels,
   readOfficeView,
   visibleOfficeSessions,
@@ -34,6 +37,7 @@ import type { OfficeMember, OfficeView } from '@/features/agent-workspace/model'
 import { sshMentionSource } from '@/features/agent-chat/composerMention'
 import type { Workspace } from '@/store/types'
 import '@/features/agent-workspace/office.css'
+import { OfficeHistory } from '@/features/agent-workspace/OfficeHistory'
 
 const OfficeScene = lazy(() => import('@/features/agent-workspace/OfficeScene'))
 const AgentChatPane = lazy(() =>
@@ -91,6 +95,8 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
   } | null>(null)
   const [panel, setPanel] = useState<'activity' | 'sessions' | null>(null)
   const [flat, setFlat] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const liveMembers = data.members.filter((m) => !m.archivedAt)
   const [cameraReset, setCameraReset] = useState(0)
   const [viewState, setViewState] = useState(() => ({
     workspaceId: workspace.id,
@@ -117,12 +123,17 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
     [selected?.connectionId],
   )
   const projects = workspace.projects
-  const filtered = data.members.filter(
+  const filtered = liveMembers.filter(
     (m) =>
       (projectFilter === 'all' ||
         (projectFilter === 'shared-ssh'
           ? !!m.connectionId
-          : m.projectId === projectFilter)) &&
+          : projectFilter.startsWith('ssh-parent:')
+            ? !!m.connectionId &&
+              (m.parentProject || '') === projectFilter.slice(11)
+            : projectFilter.startsWith('ssh-host:')
+              ? m.connectionId === projectFilter.slice(9)
+              : m.projectId === projectFilter)) &&
       (agentFilter === 'all' || m.key === agentFilter),
   )
   const displayed = visibleOfficeSessions(
@@ -148,7 +159,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
   }
   const admitted = (['developer', 'devops'] as const).flatMap((division) => {
     const members = allVisible.filter((m) => divisionOf(m) === division)
-    for (const member of visibleOfficeSessions(data.members, division, true)) {
+    for (const member of visibleOfficeSessions(liveMembers, division, true)) {
       if (members.length >= 20) break
       if (!members.some((m) => m.key === member.key)) members.push(member)
     }
@@ -236,15 +247,26 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
                 .filter((m) => isActive(m) || m.limited)
                 .sort(
                   (a, b) =>
+                    (division === 'devops'
+                      ? deskGroup(a).localeCompare(deskGroup(b))
+                      : 0) ||
                     Number(needsAttention(b)) - Number(needsAttention(a)),
                 )
-                .map((m) => (
-                  <SessionRow
-                    key={m.key}
-                    member={m}
-                    selected={selected?.key === m.key}
-                    onSelect={choose}
-                  />
+
+                .map((m, i, list) => (
+                  <div key={m.key}>
+                    {m.connectionId &&
+                      (i === 0 || deskGroup(list[i - 1]) !== deskGroup(m)) && (
+                        <h4 className="office-host-title">
+                          {deskGroupLabel(m)}
+                        </h4>
+                      )}
+                    <SessionRow
+                      member={m}
+                      selected={selected?.key === m.key}
+                      onSelect={choose}
+                    />
+                  </div>
                 ))}
               {!data.loading && !sessions.length && (
                 <p className="office-note">No sessions in this division.</p>
@@ -271,13 +293,23 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
                 {sessions
                   .filter((m) => !isActive(m) && !m.limited)
                   .sort((a, b) => b.updatedAt - a.updatedAt)
-                  .map((m) => (
-                    <SessionRow
-                      key={m.key}
-                      member={m}
-                      selected={selected?.key === m.key}
-                      onSelect={choose}
-                    />
+                  .sort((a, b) => deskGroup(a).localeCompare(deskGroup(b)))
+                  .map((m, i, list) => (
+                    <div key={m.key}>
+                      {m.connectionId &&
+                        (i === 0 ||
+                          deskGroup(list[i - 1]) !== deskGroup(m)) && (
+                          <h4 className="office-host-title">
+                            {deskGroupLabel(m)}
+                          </h4>
+                        )}
+                      <SessionRow
+                        key={m.key}
+                        member={m}
+                        selected={selected?.key === m.key}
+                        onSelect={choose}
+                      />
+                    </div>
                   ))}
               </details>
             </section>
@@ -539,7 +571,8 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               changeView(
                 e.target.value === 'all'
                   ? 'building'
-                  : e.target.value === 'shared-ssh'
+                  : e.target.value === 'shared-ssh' ||
+                      e.target.value.startsWith('ssh-')
                     ? 'devops'
                     : 'developer',
               )
@@ -552,6 +585,39 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               </option>
             ))}
             <option value="shared-ssh">Shared SSH</option>
+            {[
+              ...new Set(
+                liveMembers
+                  .filter((m) => m.connectionId)
+                  .map((m) => m.parentProject || ''),
+              ),
+            ]
+              .sort()
+              .map((parent) => (
+                <optgroup key={parent} label={parent || 'Tanpa project'}>
+                  <option value={`ssh-parent:${parent}`}>
+                    {parent || 'Tanpa project'} · Semua VM
+                  </option>
+                  {[
+                    ...new Map(
+                      liveMembers
+                        .filter(
+                          (m) =>
+                            m.connectionId &&
+                            (m.parentProject || '') === parent,
+                        )
+                        .map((m) => [m.connectionId, m]),
+                    ).values(),
+                  ].map((m) => (
+                    <option
+                      key={m.connectionId}
+                      value={`ssh-host:${m.connectionId}`}
+                    >
+                      {m.hostName || m.connectionId}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
           </select>
         </label>
         <label className="office-agent-filter">
@@ -565,14 +631,24 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
             }}
           >
             <option value="all">All sessions</option>
-            {data.members.map((m) => (
+            {liveMembers.map((m) => (
               <option key={m.key} value={m.key}>
-                {m.title || m.agent || 'Untitled session'}
+                {m.characterName
+                  ? `${m.characterName} · ${m.title}`
+                  : m.title || m.agent || 'Untitled session'}
               </option>
             ))}
           </select>
         </label>
         <div className="office-filter-actions">
+          <button
+            className="office-button"
+            aria-label="Riwayat sesi"
+            onClick={() => setHistoryOpen(true)}
+          >
+            Riwayat sesi{' '}
+            <span>{data.members.filter((m) => !!m.archivedAt).length}</span>
+          </button>
           <button
             className="office-button office-mobile-action"
             onClick={() => setPanel('activity')}
@@ -598,7 +674,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
       </div>
       <nav className="office-floor-nav" aria-label="Office floors">
         {(['building', 'developer', 'devops'] as const).map((floor) => {
-          const sessions = data.members.filter(
+          const sessions = liveMembers.filter(
             (m) => floor === 'building' || divisionOf(m) === floor,
           )
           const attention = sessions.filter(needsAttention).length
@@ -770,7 +846,11 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
         <div className="office-drawer-head">
           <div>
             <DialogTitle>
-              {child?.title || selected?.title || 'Agent session'}
+              {child
+                ? `${childCharacterName(selected!, child.id)} · ${child.title}`
+                : selected?.characterName
+                  ? `${selected.characterName} · ${selected.title || 'Untitled session'}`
+                  : selected?.title || 'Agent session'}
             </DialogTitle>
             <DialogDescription>
               {selected
@@ -827,6 +907,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               <SSHAgentChatPanel
                 key={selected.key}
                 connectionId={selected.connectionId}
+                archived={!!selected.archivedAt}
                 threadKey={selected.id}
                 visible
               />
@@ -844,6 +925,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
                 worktreeLabel={
                   selectedWorktree?.branch || selectedProject?.name
                 }
+                archived={!!selected.archivedAt}
                 agentId={selected.agent}
                 mentionSource={mentionSource}
               />
@@ -857,6 +939,13 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
           )}
         </Suspense>
       </SideDrawer>
+      <OfficeHistory
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        members={data.members}
+        workspace={workspace}
+        onSelect={choose}
+      />
     </main>
   )
 }
@@ -875,7 +964,7 @@ function SessionRow({
       <button
         className="office-member-main"
         onClick={() => onSelect(member)}
-        aria-label={`${member.title || 'Untitled session'} · ${member.stale ? 'Unverified' : statusLabel(member)}`}
+        aria-label={`${member.title || 'Untitled session'} · ${member.stale ? 'Unverified' : statusLabel(member)}${member.characterName ? ` · ${member.characterName}` : ''}`}
       >
         <span
           className="office-avatar-dot"
@@ -883,10 +972,17 @@ function SessionRow({
             background: statusColor(member.stale ? 'unknown' : member.status),
           }}
         >
-          {(member.agent || 'A').slice(0, 2).toUpperCase()}
+          {(member.characterName || member.agent || 'A')
+            .slice(0, 2)
+            .toUpperCase()}
         </span>
         <span>
-          <strong>{member.title || 'Untitled session'}</strong>
+          <strong>
+            {member.characterName || member.title || 'Untitled session'}
+          </strong>
+          {member.characterName && (
+            <small>{member.title || 'Untitled session'}</small>
+          )}
           <small>
             {member.stale ? 'Unverified' : statusLabel(member)} ·{' '}
             {member.agent || 'Agent'}
@@ -900,6 +996,7 @@ function SessionRow({
           {member.subagents.map((child) => (
             <button key={child.id} onClick={() => onSelect(member, child.id)}>
               <span style={{ color: statusColor(child.status) }}>●</span>
+              <span>{childCharacterName(member, child.id)}</span> ·{' '}
               {child.title || child.role || 'Subagent'}
               <small>{child.status}</small>
             </button>

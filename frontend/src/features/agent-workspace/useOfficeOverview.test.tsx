@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor, cleanup, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import type { Machine, Workspace } from '@/store/types'
+import type { Machine, Workspace, SSHConnection } from '@/store/types'
 import { useOfficeOverview } from '@/features/agent-workspace/useOfficeOverview'
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   role: 'hub' as string,
   machineId: '',
   machines: [] as Machine[],
+  connections: [] as SSHConnection[],
 }))
 vi.mock('@/lib/api', () => ({
   request: (...args: unknown[]) => mocks.request(...args),
@@ -22,7 +23,7 @@ vi.mock('@/features/data/queries', () => ({
     refetch: vi.fn(),
   }),
   useMachines: () => ({ data: mocks.machines, refetch: vi.fn() }),
-  useSSHConnections: () => ({ data: [], refetch: vi.fn() }),
+  useSSHConnections: () => ({ data: mocks.connections, refetch: vi.fn() }),
 }))
 const workspace = {
   id: 'ws',
@@ -43,6 +44,7 @@ afterEach(() => {
   mocks.role = 'hub'
   mocks.machineId = ''
   mocks.machines = []
+  mocks.connections = []
   Object.defineProperty(document, 'visibilityState', {
     configurable: true,
     value: 'visible',
@@ -226,4 +228,46 @@ it('retains stale sessions while offline and unlocks them after reconnection', a
   mocks.request.mockImplementation(healthy)
   act(() => result.current.refresh())
   await waitFor(() => expect(result.current.members[0].stale).toBe(false))
+})
+
+it('enriches archived SSH metadata from its saved host without inventing a local override', async () => {
+  mocks.connections = [
+    {
+      id: 'vm',
+      name: 'Production VM',
+      parentProject: 'AIGN',
+      executorMachineId: null,
+    } as SSHConnection,
+  ]
+  mocks.request.mockImplementation(async (_method, path) =>
+    path === '/whoami'
+      ? {
+          capabilities: ['agent-workspace-overview', 'agent-session-lifecycle'],
+        }
+      : {
+          workspaceId: 'ws',
+          sampledAt: Date.now(),
+          sessions: [
+            {
+              id: 'ssh:vm',
+              connectionId: 'vm',
+              characterName: 'Arka Wijaya',
+              archivedAt: 100,
+              status: 'stopped',
+              subagents: [],
+              recent: [],
+            },
+          ],
+        },
+  )
+  const { result } = renderHook(() => useOfficeOverview(workspace), { wrapper })
+  await waitFor(() => expect(result.current.members).toHaveLength(1))
+  expect(result.current.members[0]).toMatchObject({
+    characterName: 'Arka Wijaya',
+    archivedAt: 100,
+    parentProject: 'AIGN',
+    hostName: 'Production VM',
+    sourceId: 'hub',
+    lifecycle: true,
+  })
 })

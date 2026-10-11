@@ -183,6 +183,7 @@ func (h *SSHHandler) PostConnection(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name              *string `json:"name"`
 		Group             *string `json:"group"`
+		ParentProject     *string `json:"parentProject"`
 		Host              *string `json:"host"`
 		Port              *int    `json:"port"`
 		Username          *string `json:"username"`
@@ -240,7 +241,7 @@ func (h *SSHHandler) PostConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	conn, err := h.st.CreateSSHConnection(str(body.Name), str(body.Group), str(body.Host), portNum, str(body.Username), authType, jumpConnectionID, executorMachineID)
+	conn, err := h.st.CreateSSHConnection(str(body.Name), str(body.Group), str(body.Host), portNum, str(body.Username), authType, jumpConnectionID, executorMachineID, strings.TrimSpace(str(body.ParentProject)))
 	if handleStoreErr(w, err) {
 		return
 	}
@@ -267,6 +268,10 @@ func (h *SSHHandler) PatchConnection(w http.ResponseWriter, r *http.Request) {
 	if _, ok := raw["executorMachineId"]; ok {
 		body.HasExecutorMachineID = true
 		body.ExecutorMachineID = nilIfEmpty(body.ExecutorMachineID)
+	}
+	if body.ParentProject != nil {
+		v := strings.TrimSpace(*body.ParentProject)
+		body.ParentProject = &v
 	}
 	if body.AuthType != nil && !validSSHAuthType(*body.AuthType) {
 		writeErr(w, http.StatusBadRequest, "authType must be \"password\" or \"privatekey\"")

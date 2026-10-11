@@ -693,3 +693,8 @@
 }
 
 .office-runtime-summary { display: block; font-size: 9px; color: var(--color-devdeck-fg-2); margin-top: 3px; }
+.office-history-panel { padding: 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; overflow: auto; }
+.office-history-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.office-history-panel input, .office-history-panel select { padding: 8px; border: 1px solid var(--devdeck-line); border-radius: 8px; background: var(--devdeck-pane); color: var(--devdeck-fg); }
+.office-history-panel .office-roster { overflow: auto; flex: 1; }
+.office-host-title { font-size: 11px; padding: 8px 12px 4px; color: var(--devdeck-fg-2); }

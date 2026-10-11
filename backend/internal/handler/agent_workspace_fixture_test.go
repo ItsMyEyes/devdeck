@@ -71,7 +71,27 @@ func TestWriteOfficeSmokeFixture(t *testing.T) {
 			}
 		}
 	}
-	b, _ := json.Marshal(map[string]any{"workspaceId": ws.ID, "threadIds": threadIDs})
+	sshIDs := []string{}
+	for i := 0; i < 3; i++ {
+		parent := "AIGN"
+		if i == 2 {
+			parent = ""
+		}
+		connection, err := st.CreateSSHConnection(fmt.Sprintf("Fixture VM %d", i+1), "production", "fixture.invalid", 22, "fixture", "password", nil, nil, parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < []int{4, 3, 3}[i]; j++ {
+			id := fmt.Sprintf("ssh:%s::chat-%d", connection.ID, j+1)
+			sshIDs = append(sshIDs, id)
+			raw, _ := json.Marshal(map[string]any{"instanceId": "claude:default"})
+			_, err := st.CommitAgentEvents("ssh-fixture-"+id, []orchestration.Event{{EventID: "ssh-created-" + id, ThreadID: id, Type: orchestration.EvtThreadCreated, CreatedAt: now + 100, Payload: raw}})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	b, _ := json.Marshal(map[string]any{"workspaceId": ws.ID, "threadIds": threadIDs, "sshThreadIds": sshIDs})
 	if err := os.WriteFile(filepath.Join(dir, "fixture.json"), b, 0600); err != nil {
 		t.Fatal(err)
 	}

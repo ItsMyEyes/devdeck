@@ -279,7 +279,7 @@ func TestPayloadSurvivesRoundTrip(t *testing.T) {
 
 // The sessions sidebar read "Untitled session" forever: EvtThreadCreated is
 // committed on the WebSocket's hello, before any message exists, so it has
-// nothing to name a thread with and the row was inserted with title ''.
+// nothing to name a thread with and the row was inserted with title ”.
 func TestCommitProjectsThreadTitleFromTheUsersTurn(t *testing.T) {
 	st := NewTestStore(t)
 

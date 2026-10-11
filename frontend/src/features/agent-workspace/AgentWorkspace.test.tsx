@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   otherProject: false,
   child: false,
   loading: false,
+  archived: false,
+  name: undefined as string | undefined,
 }))
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mocks.navigate,
@@ -59,6 +61,8 @@ vi.mock('@/features/agent-workspace/useOfficeOverview', () => ({
         projectId: 'p',
         worktreeId: 'w',
         title: 'Inspect tests',
+        characterName: mocks.name,
+        archivedAt: mocks.archived ? 100 : 0,
         agent: 'codex',
         model: 'test',
         status: mocks.status,
@@ -120,6 +124,8 @@ afterEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   mocks.loading = false
+  mocks.archived = false
+  mocks.name = undefined
   mocks.child = false
   mocks.otherProject = false
   mocks.status = 'waiting'
@@ -314,4 +320,29 @@ it('focuses the chosen floor for WebKit keyboard navigation after clicking', asy
   const developer = screen.getByRole('button', { name: /^1 · Developer/ })
   fireEvent.click(developer)
   expect(developer).toHaveFocus()
+})
+
+it('keeps an ended session out of the office and opens retained history without adding an avatar', async () => {
+  mocks.archived = true
+  mocks.name = 'Arka Wijaya'
+  render(<AgentWorkspace workspace={workspace} />)
+  expect(
+    screen.queryByRole('button', { name: /Inspect tests.*Approval needed/i }),
+  ).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Riwayat sesi' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: /Arka Wijaya.*Inspect tests/i }),
+  )
+  expect(await screen.findByText('Existing chat')).toBeInTheDocument()
+  expect(mocks.chat.mock.calls.at(-1)?.[0]).toMatchObject({
+    threadKey: 'thread',
+    archived: true,
+  })
+  expect(mocks.scene.mock.calls.at(-1)?.[0].members).toHaveLength(0)
+})
+it('shows persistent character name together with the unchanged chat title', () => {
+  mocks.name = 'Arka Wijaya'
+  render(<AgentWorkspace workspace={workspace} />)
+  expect(screen.getByText('Arka Wijaya')).toBeInTheDocument()
+  expect(screen.getAllByText('Inspect tests').length).toBeGreaterThan(0)
 })

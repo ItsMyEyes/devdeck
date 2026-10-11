@@ -1298,6 +1298,7 @@ export function setLocalPublishedSocks(body: PublishedSOCKSRequest): Promise<Pub
 // ---- SSH connections (hub registry; secrets are write-only) ----
 
 export interface CreateSSHConnectionBody {
+  parentProject?: string
   name: string
   group?: string
   host: string

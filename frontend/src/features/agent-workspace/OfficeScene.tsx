@@ -19,6 +19,8 @@ import {
   divisionOf,
   floorLabels,
   officeLayout,
+  deskGroupLabel,
+  childCharacterName,
   statusColor,
   statusLabel,
 } from '@/features/agent-workspace/model'
@@ -297,7 +299,7 @@ function Desk({
           <button
             className={`office-label ${selected ? 'is-selected' : ''}`}
             onClick={() => onSelect(member)}
-            aria-label={`${member.title || member.agent} · ${statusLabel(member)}`}
+            aria-label={`${member.title || member.agent} · ${statusLabel(member)}${member.characterName ? ` · ${member.characterName}` : ''}`}
           >
             <i style={{ color: statusColor(status) }} />
             <span
@@ -308,13 +310,19 @@ function Desk({
               }}
             >
               {compact && !selected
-                ? (member.title || member.agent || 'Agent')
+                ? (
+                    member.characterName ||
+                    member.title ||
+                    member.agent ||
+                    'Agent'
+                  )
                     .split(/\s+/)
-                    .slice(0, 2)
-                    .map((word) => word[0])
+                    .slice(0, 1)
                     .join('')
-                    .toUpperCase()
-                : member.title || member.agent || 'Agent'}
+                : member.characterName ||
+                  member.title ||
+                  member.agent ||
+                  'Agent'}
             </span>
             {selected && (
               <span style={{ fontSize: 8, opacity: 0.7 }}>
@@ -348,7 +356,7 @@ function Desk({
                 style={{ fontSize: 8 }}
               >
                 <i style={{ color: statusColor(child.status) }} />
-                {child.role || 'Subagent'}
+                {childCharacterName(member, child.id)}
               </button>
             </Html>
           </group>
@@ -479,8 +487,12 @@ function OfficeFloor({
               zIndexRange={[1, 0]}
             >
               <span className="office-room-label">
-                {props.projects.find((p) => p.id === group)?.name ||
-                  'Operations'}
+                {division === 'devops'
+                  ? deskGroupLabel(
+                      props.allMembers.find((m) => m.key === desks[0].id)!,
+                    )
+                  : props.projects.find((p) => p.id === group)?.name ||
+                    'Developer'}
               </span>
             </Html>
           </group>

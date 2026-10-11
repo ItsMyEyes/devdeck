@@ -395,7 +395,7 @@ func main() {
 	// next to the handler, so the list stays visibly tied to what this
 	// process actually registers below rather than drifting into a constant
 	// nobody re-checks.
-	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapAgentWorkspaceOverview, handler.CapTelegram)
+	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapAgentWorkspaceOverview, handler.CapAgentSessionLifecycle, handler.CapSSHParentProject, handler.CapTelegram)
 	// Exposure is runtime state, not a launch-time decision: the controller
 	// owns the serve child so it can be started and stopped while the hub
 	// runs. --enable-tailscale-serve only chooses the STARTING state below.

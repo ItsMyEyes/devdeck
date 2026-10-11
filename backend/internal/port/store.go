@@ -164,7 +164,7 @@ type Store interface {
 	// docs/superpowers/specs/2026-07-14-ssh-management-design.md). Secrets
 	// are stored separately, encrypted by the service layer.
 	SSHConnections() ([]domain.SSHConnection, error)
-	CreateSSHConnection(name, group, host string, portNum int, username, authType string, jumpConnectionID, executorMachineID *string) (domain.SSHConnection, error)
+	CreateSSHConnection(name, group, host string, portNum int, username, authType string, jumpConnectionID, executorMachineID *string, parentProject string) (domain.SSHConnection, error)
 	UpdateSSHConnection(id string, p SSHConnectionPatch) (domain.SSHConnection, error)
 	DeleteSSHConnection(id string) error
 	SSHConnectionByID(id string) (domain.SSHConnection, error)
@@ -377,12 +377,13 @@ type BookmarkPatch struct {
 // SSHConnectionPatch carries optional fields for a partial SSH-connection
 // update. Secrets are not patched here — they go through SSHSecretService.
 type SSHConnectionPatch struct {
-	Name     *string
-	Group    *string
-	Host     *string
-	Port     *int
-	Username *string
-	AuthType *string
+	ParentProject *string
+	Name          *string
+	Group         *string
+	Host          *string
+	Port          *int
+	Username      *string
+	AuthType      *string
 	// JumpConnectionID chains this connection through another saved
 	// connection for bastion hops. HasJumpConnectionID distinguishes "not
 	// provided" from an explicit null (clears the jump host).

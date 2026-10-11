@@ -276,6 +276,7 @@ export interface Bookmark {
  *  requests and never serialize back, unlike Machine.key which clients need
  *  for direct-first connections. */
 export interface SSHConnection {
+  parentProject?: string
   id: string
   name: string
   group: string
@@ -530,6 +531,7 @@ export interface User {
 /** GET /api/whoami — an authenticated liveness probe that also reports this
  * process's role, so the SPA can tell a hub apart from a runtime. */
 export interface Whoami {
+  capabilities?: string[]
   status: string
   role: 'hub' | 'runtime'
   machineName: string
@@ -577,6 +579,9 @@ export interface OfficeActivity {
   createdAt: number
 }
 export interface OfficeSession {
+  characterName?: string
+  archivedAt?: number
+  archiving?: boolean
   id: string
   worktreeId?: string
   projectId?: string

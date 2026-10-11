@@ -1483,6 +1483,9 @@ export function useSeed() {
  *  plan's file list touches it. `CreatedAt`/`UpdatedAt` are epoch
  *  milliseconds, matching the backend's own doc comment. */
 export interface AgentThread {
+  characterName?: string
+  archivedAt?: number
+  archiving?: boolean
   id: string
   worktreeId: string
   instanceId: string

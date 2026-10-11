@@ -8,6 +8,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CircleStop, PackageX, ServerCog, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import type { LucideIcon } from 'lucide-react'
@@ -100,6 +101,7 @@ export interface AgentChatPaneProps {
    *  session-history and new-session pair here; every worktree call site
    *  leaves it unset and the header renders exactly as before. */
   headerActions?: ReactNode
+  archived?: boolean
 }
 
 /**
@@ -211,6 +213,7 @@ export function AgentChatPane({
   mentionSource,
   connectEnabled = true,
   headerActions,
+  archived = false,
 }: AgentChatPaneProps) {
   // Draft-thread connect gate (design spec §4, plan Task 10). `threadExists`
   // reads the same sidebar-backing query `SessionsPanel` already populates
@@ -245,7 +248,9 @@ export function AgentChatPane({
   // block a working older runtime that reports no capability list — read that
   // module's doc comment before changing the rule.
   const targetMachine = target.kind === 'machine' ? target.machine : undefined
-  const capabilities = useMachineCapabilities(targetMachine)
+  const capabilities = useMachineCapabilities(targetMachine ?? machine)
+  const lifecycleSupported = capabilities.data?.includes('agent-session-lifecycle') ?? false
+  const queryClient = useQueryClient()
   const chatSupport = agentChatSupport({ machine: targetMachine, capabilities: capabilities.data })
 
   const connect =
@@ -259,6 +264,8 @@ export function AgentChatPane({
     view,
     status,
     sendTurn,
+    archiveSession,
+    resumeSession,
     abortTurn,
     setRuntimeMode,
     setInteractionMode,
@@ -505,7 +512,15 @@ export function AgentChatPane({
   // `attachments` is whatever `ChatComposer`'s own `ComposerAttachments`
   // finished uploading before submit — forwarded straight through, this pane
   // has no opinion about it beyond passing it on to `sendTurn`.
+  const ended = archived || !!view.archivedAt || !!threadsQuery.data?.find((t) => t.id === threadKey)?.archivedAt
+  const ending = !!view.archiving
+  useEffect(() => {
+    void queryClient.invalidateQueries({
+      predicate: (q) => q.queryKey[0] === 'agent-workspace-overview' || q.queryKey.includes('agent-threads'),
+    })
+  }, [view.archivedAt, view.archiving, queryClient])
   function handleSend(text: string, attachments: AgentAttachmentRef[]) {
+    if (ended || ending) return
     // Refuse rather than queue. `sendTurn` parks a frame in the socket's
     // outbox when nothing is connected, which is exactly right for a draft
     // thread (the outbox flushes the moment it connects) and exactly wrong
@@ -544,7 +559,16 @@ export function AgentChatPane({
     handleSend(submission.text, [])
   }
 
-  const composer = (
+  const composer = ended || ending ? (
+    <div className="p-4 text-sm text-devdeck-fg-2" role="status">
+      {ending ? 'Mengakhiri sesi…' : 'Sesi diakhiri. Riwayat tetap tersimpan.'}
+      {ended && !ending && (
+        <button className="ml-3 text-devdeck-accent" disabled={!lifecycleSupported || status !== 'open'} onClick={resumeSession}>
+          Lanjutkan sesi
+        </button>
+      )}
+    </div>
+  ) : (
     <ChatComposer
       status={view.status}
       onSend={handleSend}
@@ -579,7 +603,16 @@ export function AgentChatPane({
         socketStatus={status}
         threadStatus={view.status}
         subjectLabel={worktreeId ? undefined : worktreeLabel}
-        actions={headerActions}
+        actions={<>
+          {headerActions}
+          <button
+            type="button"
+            className="px-2 text-[11px] text-devdeck-fg-2 disabled:opacity-50"
+            disabled={!lifecycleSupported || status !== 'open' || ended || ending}
+            title={lifecycleSupported ? 'Hentikan sesi dan simpan riwayat' : 'Update backend untuk mengakhiri sesi secara persisten'}
+            onClick={archiveSession}
+          >Akhiri sesi</button>
+        </>}
       />
 
       {isEmpty ? (

@@ -74,7 +74,7 @@ func TestPostSSHConnectionRejectsUnknownExecutorMachine(t *testing.T) {
 
 func TestPostSSHConnectionAcceptsValidJumpConnection(t *testing.T) {
 	h := newTestSSHHandler(t)
-	jump, err := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil)
+	jump, err := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestPostSSHConnectionAcceptsValidJumpConnection(t *testing.T) {
 
 func TestPatchSSHConnectionRejectsJumpChainCycle(t *testing.T) {
 	h := newTestSSHHandler(t)
-	a, _ := h.st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil)
-	b, err := h.st.CreateSSHConnection("b", "", "h", 22, "u", "password", &a.ID, nil)
+	a, _ := h.st.CreateSSHConnection("a", "", "h", 22, "u", "password", nil, nil, "")
+	b, err := h.st.CreateSSHConnection("b", "", "h", 22, "u", "password", &a.ID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +109,8 @@ func TestPatchSSHConnectionRejectsJumpChainCycle(t *testing.T) {
 
 func TestPatchSSHConnectionCanClearJumpConnection(t *testing.T) {
 	h := newTestSSHHandler(t)
-	jump, _ := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil)
-	c, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", &jump.ID, nil)
+	jump, _ := h.st.CreateSSHConnection("bastion", "", "b", 22, "root", "password", nil, nil, "")
+	c, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", &jump.ID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestSSHConnectionCRUDRoundtripNeverLeaksSecrets(t *testing.T) {
 
 func TestPatchSSHConnectionUpdatesFieldsAndSecrets(t *testing.T) {
 	h := newTestSSHHandler(t)
-	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestPatchSSHConnectionUpdatesFieldsAndSecrets(t *testing.T) {
 
 func TestPostAcceptHostKeyClearsPin(t *testing.T) {
 	h := newTestSSHHandler(t)
-	conn, _ := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, _ := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	fp := "SHA256:abc"
 	if err := h.st.SetSSHHostKey(conn.ID, &fp); err != nil {
 		t.Fatal(err)
@@ -187,5 +187,26 @@ func TestPostAcceptHostKeyClearsPin(t *testing.T) {
 	got, _ := h.st.SSHConnectionByID(conn.ID)
 	if got.HostKeyFingerprint != nil {
 		t.Errorf("fingerprint = %q, want cleared", *got.HostKeyFingerprint)
+	}
+}
+
+func TestSSHParentProjectCRUDPreservesGroup(t *testing.T) {
+	h := newTestSSHHandler(t)
+	rec := httptest.NewRecorder()
+	h.PostConnection(rec, httptest.NewRequest(http.MethodPost, "/api/ssh/connections", strings.NewReader(`{"name":"vm","host":"fixture.invalid","username":"fixture","authType":"password","password":"test","parentProject":" AIGN ","group":"production"}`)))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	rows, err := h.st.SSHConnections()
+	if err != nil || len(rows) != 1 || rows[0].ParentProject != "AIGN" || rows[0].Group != "production" {
+		t.Fatalf("parent create: %+v %v", rows, err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/ssh/connections/"+rows[0].ID, strings.NewReader(`{"parentProject":""}`))
+	req.SetPathValue("id", rows[0].ID)
+	rec = httptest.NewRecorder()
+	h.PatchConnection(rec, req)
+	rows, _ = h.st.SSHConnections()
+	if rec.Code != 200 || rows[0].ParentProject != "" || rows[0].Group != "production" {
+		t.Fatalf("parent patch: %d %s", rec.Code, rec.Body.String())
 	}
 }

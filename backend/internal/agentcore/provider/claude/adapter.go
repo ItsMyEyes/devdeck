@@ -62,6 +62,7 @@ type session struct {
 	// moment after the new one's first turn would flip the thread to
 	// "stopped" under a turn that is running fine.
 	stopped atomic.Bool
+	done    chan struct{}
 }
 
 // writeControlResponse is the one place this package writes a
@@ -456,6 +457,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		stdinEnc:  json.NewEncoder(stdin),
 		state:     newParseState(in.ThreadID, a.instanceID),
 		cancel:    cancel,
+		done:      make(chan struct{}),
 		startedAt: time.Now().UnixMilli(),
 		model:     in.Model.Model,
 	}
@@ -477,6 +479,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 // stdout pipe.
 func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 	defer a.readers.Done()
+	defer close(sess.done)
 	sc := bufio.NewScanner(stdout)
 	// A tool result can embed an entire file's contents; the scanner's
 	// default 64KB buffer is nowhere near enough for that.
@@ -851,15 +854,23 @@ func (a *adapter) RespondToUserInput(ctx context.Context, threadID, requestID st
 func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	a.mu.Lock()
 	sess, ok := a.sessions[threadID]
-	delete(a.sessions, threadID)
 	a.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	// Before cancel, so readLoop can never observe the exit first.
 	sess.stopped.Store(true)
 	sess.cancel()
-	return nil
+	select {
+	case <-sess.done:
+		a.mu.Lock()
+		if a.sessions[threadID] == sess {
+			delete(a.sessions, threadID)
+		}
+		a.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (a *adapter) StopAll(ctx context.Context) error {

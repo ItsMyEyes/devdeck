@@ -42,7 +42,7 @@ function authLabel(authType: AuthType) {
 }
 
 function hostSearchText(connection: SSHConnection) {
-  return `${connection.name} ${connection.group} ${connection.host} ${connection.port} ${connection.username} ${connection.authType}`.toLowerCase()
+  return `${connection.name} ${connection.parentProject || ''} ${connection.group} ${connection.host} ${connection.port} ${connection.username} ${connection.authType}`.toLowerCase()
 }
 
 function HostGlyph({ authType }: { authType: AuthType }) {
@@ -143,7 +143,8 @@ function HostCard({
                   {jumpName}
                 </span>
               ) : null}
-              <HostKeyBadge connection={connection} />
+              <span>Parent project: {connection.parentProject || 'Tanpa project'}</span>
+ <HostKeyBadge connection={connection} />
             </div>
           </div>
         </div>
@@ -219,7 +220,8 @@ function HostCard({
       </div>
 
       <div className="px-3 pt-1.5">
-        <HostKeyBadge connection={connection} />
+        <span>Parent project: {connection.parentProject || 'Tanpa project'}</span>
+ <HostKeyBadge connection={connection} />
       </div>
 
       <div className="mx-3 my-2 h-px bg-devdeck-border" />

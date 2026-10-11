@@ -6,6 +6,9 @@ import type {
 } from '@/store/types'
 
 export interface OfficeMember extends OfficeSession {
+  parentProject?: string
+  hostName?: string
+  lifecycle?: boolean
   key: string
   sourceId: string
   sourceName: string
@@ -14,14 +17,16 @@ export interface OfficeMember extends OfficeSession {
   limited: boolean
 }
 export const needsAttention = (s: OfficeSession) =>
-  s.status === 'waiting' ||
-  s.status === 'error' ||
-  s.planReady ||
-  s.subagents.some((c) => c.status === 'failed')
+  !s.archivedAt &&
+  (s.status === 'waiting' ||
+    s.status === 'error' ||
+    s.planReady ||
+    s.subagents.some((c) => c.status === 'failed'))
 export const isActive = (s: OfficeSession) =>
-  s.status === 'running' ||
-  needsAttention(s) ||
-  s.subagents.some((c) => c.status === 'running')
+  !s.archivedAt &&
+  (s.status === 'running' ||
+    needsAttention(s) ||
+    s.subagents.some((c) => c.status === 'running'))
 export function avatarKey(source: string, thread: string, child?: string) {
   return JSON.stringify([source, thread, child ?? ''])
 }
@@ -61,6 +66,7 @@ export function visibleOfficeSessions<T extends OfficeSession>(
 ): T[] {
   const eligible = sessions.filter(
     (s) =>
+      !s.archivedAt &&
       (view === 'building' || divisionOf(s) === view) &&
       (history || isActive(s)),
   )
@@ -108,12 +114,10 @@ export function officeLayout(
   sessions: OfficeSession[],
   previous: DeskPosition[] = [],
 ): DeskPosition[] {
-  const groups = [
-    ...new Set(sessions.map((s) => s.projectId || 'shared-ssh')),
-  ].sort()
+  const groups = [...new Set(sessions.map((s) => deskGroup(s)))].sort()
   const grouped = groups.map((group) =>
     sessions
-      .filter((s) => (s.projectId || 'shared-ssh') === group)
+      .filter((s) => deskGroup(s) === group)
       .sort((a, b) => a.id.localeCompare(b.id)),
   )
   const positions: DeskPosition[] = []
@@ -141,9 +145,7 @@ export function officeLayout(
       2
   }
   const retained = previous.filter((d) =>
-    sessions.some(
-      (s) => s.id === d.id && (s.projectId || 'shared-ssh') === d.group,
-    ),
+    sessions.some((s) => s.id === d.id && deskGroup(s) === d.group),
   )
   for (const desk of positions) {
     if (retained.some((d) => d.id === desk.id)) continue
@@ -184,3 +186,38 @@ export const statusLabel = (s: OfficeSession) =>
             stopped: 'Stopped',
             unknown: 'Unverified',
           }[s.status] ?? s.status)
+
+export function deskGroup(s: OfficeSession & { parentProject?: string }) {
+  return s.connectionId
+    ? JSON.stringify([s.parentProject || '', s.connectionId])
+    : s.projectId || 'unassigned'
+}
+export function deskGroupLabel(s: OfficeMember) {
+  return s.connectionId
+    ? `${s.parentProject || 'Tanpa project'} / ${s.hostName || s.connectionId}`
+    : ''
+}
+export function childCharacterName(parent: OfficeMember, id: string) {
+  const names = [
+    'Arka',
+    'Nara',
+    'Raka',
+    'Dina',
+    'Salsa',
+    'Fajar',
+    'Rani',
+    'Gilang',
+    'Bima',
+    'Ayu',
+    'Tara',
+    'Damar',
+    'Laras',
+    'Bayu',
+    'Nadia',
+    'Reza',
+  ]
+  let hash = 2166136261
+  for (const c of `${parent.characterName || parent.key}:${id}`)
+    hash = Math.imul(hash ^ c.charCodeAt(0), 16777619)
+  return `${names[(hash >>> 0) % names.length]} ${names[((hash >>> 8) >>> 0) % names.length]}`
+}

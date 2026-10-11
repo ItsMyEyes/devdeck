@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"devdeck/backend/internal/agentcore/approval"
 	"devdeck/backend/internal/agentcore/event"
@@ -156,6 +157,10 @@ func (in *Ingestion) Inject(ctx context.Context, ev event.Event) error {
 }
 
 func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
+	// Producers stamp CreatedAt locally; queued output must not cross an archive/resume boundary.
+	if t, ok := in.Engine.State().Thread(ev.ThreadID); ok && (t.Archiving || t.ArchivedAt > 0 || (!ev.CreatedAt.IsZero() && ev.CreatedAt.UnixNano() <= t.ProviderEventCutoff)) {
+		return nil
+	}
 	in.noteSignal(ev)
 
 	switch ev.Type {
@@ -186,7 +191,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		// leaves `waiting` again, because engine.go only returns it to
 		// `running` when that set empties — and the operator is left with a
 		// composer that refuses to send and no visible reason why.
-		if err := in.dispatch(ctx, Command{
+		if err := in.dispatchProvider(ctx, ev, Command{
 			Type:     CmdThreadActivityAppend,
 			ThreadID: ev.ThreadID,
 			Payload:  mustJSON(ev),
@@ -196,7 +201,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		if ev.RequestID == "" {
 			return nil
 		}
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type:     CmdThreadSessionSet,
 			ThreadID: ev.ThreadID,
 			Payload:  mustJSON(map[string]any{"pendingRequestRemove": ev.RequestID}),
@@ -219,7 +224,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		// travelled, on the session-set below, so a waiting thread arrived at
 		// the client indistinguishable from a running one and no panel had
 		// anything to render.
-		if err := in.dispatch(ctx, Command{
+		if err := in.dispatchProvider(ctx, ev, Command{
 			Type:     CmdThreadActivityAppend,
 			ThreadID: ev.ThreadID,
 			Payload:  mustJSON(ev),
@@ -228,7 +233,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		}
 		// Status last. A client that paints its panel on status === waiting
 		// must never find that panel empty for a frame.
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type:     CmdThreadSessionSet,
 			ThreadID: ev.ThreadID,
 			Payload: mustJSON(map[string]any{
@@ -245,7 +250,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 			// differs per provider and changes between versions.
 			payload["resumeCursor"] = p.Resume
 		}
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type: CmdThreadSessionSet, ThreadID: ev.ThreadID, Payload: mustJSON(payload),
 		})
 
@@ -289,7 +294,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 				p.Usage.CacheReadTokens + p.Usage.CacheCreationTokens
 			payload["turnOutputTokens"] = p.Usage.OutputTokens
 		}
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type: CmdThreadSessionSet, ThreadID: ev.ThreadID,
 			Payload: mustJSON(payload),
 		})
@@ -297,7 +302,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 	case event.SessionExited:
 		// Session died: clean up pending approvals, don't wait for a timeout.
 		in.Broker.CancelThread(ev.ThreadID)
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type: CmdThreadSessionSet, ThreadID: ev.ThreadID,
 			Payload: mustJSON(map[string]any{"status": string(ThreadStopped)}),
 		})
@@ -315,7 +320,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		if !ok {
 			return nil
 		}
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type: CmdThreadPlanPropose, ThreadID: ev.ThreadID,
 			Payload: mustJSON(PlanProposePayload{
 				PlanMarkdown: p.PlanMarkdown,
@@ -328,7 +333,7 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 		// Everything else becomes generic activity. Better to store an
 		// unrecognized event as activity than to drop it — you will need it
 		// when debugging a new provider.
-		return in.dispatch(ctx, Command{
+		return in.dispatchProvider(ctx, ev, Command{
 			Type: CmdThreadActivityAppend, ThreadID: ev.ThreadID,
 			Payload: mustJSON(ev),
 		})
@@ -550,6 +555,13 @@ func (in *Ingestion) emitDelta(ctx context.Context, ev event.Event, text string,
 	})
 }
 
+func (in *Ingestion) dispatchProvider(ctx context.Context, ev event.Event, cmd Command) error {
+	if !ev.CreatedAt.IsZero() {
+		cmd.providerEventAt = ev.CreatedAt.UnixNano()
+	}
+	return in.dispatch(ctx, cmd)
+}
+
 func (in *Ingestion) dispatch(ctx context.Context, cmd Command) error {
 	cmd.CommandID = in.NewID()
 	_, err := in.Engine.Dispatch(ctx, cmd)
@@ -594,7 +606,14 @@ func (in *Ingestion) dispatch(ctx context.Context, cmd Command) error {
 func ReconcileOrphanedThreads(ctx context.Context, e *Engine, newID func() string) (int, error) {
 	reconciled := 0
 	for id, t := range e.State().Threads {
-		if t.Deleted || (t.Status != ThreadRunning && t.Status != ThreadWaiting) {
+		if t.Archiving {
+			if _, err := e.Dispatch(ctx, Command{CommandID: newID(), Type: CmdThreadArchiveComplete, ThreadID: id}); err != nil {
+				return reconciled, err
+			}
+			reconciled++
+			continue
+		}
+		if t.Deleted || t.ArchivedAt > 0 || (t.Status != ThreadRunning && t.Status != ThreadWaiting) {
 			continue
 		}
 		if _, err := e.Dispatch(ctx, Command{
@@ -811,6 +830,12 @@ func (r *Reactor) reportError(ctx context.Context, e Event, cause error) {
 		log.Printf("agentcore: failed to report reactor error to thread=%s err=%v", e.ThreadID, err)
 	}
 
+	if e.Type == EvtThreadArchiveRequested {
+		if _, err := r.Engine.Dispatch(ctx, Command{CommandID: "ac-archive-failed-" + e.EventID, Type: CmdThreadArchiveFailed, ThreadID: e.ThreadID}); err != nil {
+			log.Printf("agentcore: archive failure: %v", err)
+		}
+		return
+	}
 	// Settle the thread as well as reporting the failure. A reactor error is a
 	// side effect that did NOT happen — the CLI never spawned, the turn was
 	// never delivered — so nothing is coming to move the thread off
@@ -1105,6 +1130,28 @@ func (r *Reactor) react(ctx context.Context, e Event) error {
 		}
 		return nil
 
+	case EvtThreadArchiveRequested:
+		stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		r.Broker.CancelThread(e.ThreadID)
+		if id, ok := r.Provider.Dir.InstanceFor(e.ThreadID); ok {
+			a, err := r.Provider.Registry.Adapter(id)
+			if err != nil {
+				return err
+			}
+			if t, known := r.Engine.State().Thread(e.ThreadID); known && t.TurnInFlight {
+				// Remote providers may only unsubscribe in StopSession.
+				if err = a.InterruptTurn(stopCtx, e.ThreadID, t.CurrentTurn); err != nil {
+					return err
+				}
+			}
+			if err = a.StopSession(stopCtx, e.ThreadID); err != nil {
+				return err
+			}
+		}
+		r.forgetSessionOptions(e.ThreadID)
+		_, err := r.Engine.Dispatch(ctx, Command{CommandID: "ac-archived-" + e.EventID, Type: CmdThreadArchiveComplete, ThreadID: e.ThreadID, Payload: mustJSON(map[string]any{"providerEventCutoff": time.Now().UnixNano()})})
+		return err
 	case EvtThreadSessionStopRequested:
 		r.Broker.CancelThread(e.ThreadID)
 		// Routed through r.Provider.Dir like every other case, instead of

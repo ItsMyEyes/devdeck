@@ -216,6 +216,8 @@ export interface SubagentRecord {
 }
 
 export interface AgentThreadView {
+ archivedAt?: number
+ archiving?: boolean
   items: ChatItem[]
   /** Subagents this thread has spawned, oldest first — see `SubagentRecord`.
    *  Empty for the overwhelming majority of threads, which never spawn one. */

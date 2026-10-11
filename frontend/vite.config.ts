@@ -215,6 +215,7 @@ export default defineConfig({
       'src/features/stats/StatsPane.tokens.test.ts',
       'src/features/ssh/SSHForwardsPanel.test.tsx',
       'src/features/ssh/SSHRightSidebar.test.tsx',
+      'src/features/ssh/SSHConnectionDialog.test.tsx',
       'src/features/ssh/SSHAgentChatPanel.test.tsx',
       'src/features/agent-chat/ComposerChip.test.tsx',
       'src/features/agent-chat/ComposerAttachments.test.tsx',

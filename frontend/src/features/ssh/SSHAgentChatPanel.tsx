@@ -61,8 +61,10 @@ export function SSHAgentChatPanel({
   connectionId,
   visible,
   threadKey,
+ archived=false,
   onSelectThread,
 }: {
+  archived?: boolean
   connectionId: string
   visible: boolean
   /** Which of this connection's sessions to show. Defaults to the primary
@@ -139,7 +141,7 @@ export function SSHAgentChatPanel({
   // poll rather than two.
   const sessionsWorktreeId = `ssh:${connectionId}`
   const activeThreadKey = threadKey ?? sessionsWorktreeId
-  const sessions = useAgentThreads(HUB_MACHINE, sessionsWorktreeId)
+  const sessions = useAgentThreads(availability.kind==='ready'?availability.machine:undefined, sessionsWorktreeId)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   // "New session" writes nothing: a thread is created by its WebSocket's
@@ -171,7 +173,7 @@ export function SSHAgentChatPanel({
         <div className="flex h-[min(60vh,320px)] w-[248px] flex-col">
           <SessionsPanel
             worktreeId={sessionsWorktreeId}
-            machine={HUB_MACHINE}
+            machine={availability.kind==='ready'?availability.machine:HUB_MACHINE}
             activeThreadKey={activeThreadKey}
             onSelectThread={(next) => {
               onSelectThread(next)
@@ -219,6 +221,7 @@ export function SSHAgentChatPanel({
         // fallback covers 'loading' and is inert, because connectEnabled below
         // refuses to dial anything until the machine is actually resolved.
         target={availability.kind === 'ready' ? { kind: 'machine', machine: availability.machine } : { kind: 'hub' }}
+        archived={archived}
         threadKey={activeThreadKey}
         machine={availability.kind === 'ready' ? availability.machine : HUB_MACHINE}
         worktreeLabel={connection?.name}

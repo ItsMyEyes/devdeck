@@ -444,12 +444,13 @@ const DefaultBookmarkGroup = "Portal"
 // via a shared key). Mirrors the frontend SSHConnection type. Credentials
 // live in SSHSecret rows, never on this struct.
 type SSHConnection struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Group    string `json:"group"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
+	ParentProject string `json:"parentProject"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Group         string `json:"group"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Username      string `json:"username"`
 	// AuthType is "password" or "privatekey".
 	AuthType string `json:"authType"`
 	// JumpConnectionID chains to another SSHConnection for bastion hops.
@@ -725,22 +726,25 @@ type OfficeActivity struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 type OfficeSession struct {
-	ID           string           `json:"id"`
-	WorktreeID   string           `json:"worktreeId,omitempty"`
-	ProjectID    string           `json:"projectId,omitempty"`
-	ConnectionID string           `json:"connectionId,omitempty"`
-	Title        string           `json:"title"`
-	Agent        string           `json:"agent"`
-	Model        string           `json:"model"`
-	Status       string           `json:"status"`
-	TurnInFlight bool             `json:"turnInFlight"`
-	Approvals    int              `json:"approvals"`
-	Questions    int              `json:"questions"`
-	PlanReady    bool             `json:"planReady"`
-	Activity     string           `json:"activity"`
-	UpdatedAt    int64            `json:"updatedAt"`
-	Subagents    []OfficeSubagent `json:"subagents"`
-	Recent       []OfficeActivity `json:"recent"`
+	CharacterName string           `json:"characterName"`
+	ArchivedAt    int64            `json:"archivedAt"`
+	Archiving     bool             `json:"archiving"`
+	ID            string           `json:"id"`
+	WorktreeID    string           `json:"worktreeId,omitempty"`
+	ProjectID     string           `json:"projectId,omitempty"`
+	ConnectionID  string           `json:"connectionId,omitempty"`
+	Title         string           `json:"title"`
+	Agent         string           `json:"agent"`
+	Model         string           `json:"model"`
+	Status        string           `json:"status"`
+	TurnInFlight  bool             `json:"turnInFlight"`
+	Approvals     int              `json:"approvals"`
+	Questions     int              `json:"questions"`
+	PlanReady     bool             `json:"planReady"`
+	Activity      string           `json:"activity"`
+	UpdatedAt     int64            `json:"updatedAt"`
+	Subagents     []OfficeSubagent `json:"subagents"`
+	Recent        []OfficeActivity `json:"recent"`
 }
 type OfficeOverview struct {
 	WorkspaceID string          `json:"workspaceId"`

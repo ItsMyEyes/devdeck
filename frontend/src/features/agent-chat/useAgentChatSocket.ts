@@ -64,6 +64,8 @@ const UNREACHABLE_AFTER_ATTEMPTS = 4
  *  the wire. Only the commands this hook issues are named here; the server
  *  rejects anything else a client tries to send via `ClientDispatchable`. */
 type AgentCommandType =
+  | 'thread.archive'
+  | 'thread.resume'
   | 'thread.turn.start'
   | 'thread.turn.interrupt'
   | 'thread.runtime-mode.set'
@@ -165,6 +167,8 @@ export interface UseAgentChatSocketResult {
   sendTurn: (text: string, model?: TurnModelSelection, attachments?: AgentAttachmentRef[]) => void
   /** Dispatches `thread.turn.interrupt` for the thread's in-flight turn. */
   abortTurn: () => void
+  archiveSession: () => void
+  resumeSession: () => void
   /** Dispatches `thread.runtime-mode.set` — the composer's runtime-mode
    *  pill (`ComposerControls.tsx`). Fire-and-forget like `sendTurn`: a
    *  rejection comes back as an `error` frame, never a return value, so the
@@ -470,6 +474,8 @@ export function useAgentChatSocket({ target, threadKey, connect = true }: UseAge
     (requestId: string, decision: string) => dispatch('thread.approval.respond', { requestId, decision }),
     [dispatch],
   )
+  const archiveSession = useCallback(() => dispatch('thread.archive'), [dispatch])
+  const resumeSession = useCallback(() => dispatch('thread.resume'), [dispatch])
   const clearError = useCallback(() => setTransportError(null), [])
 
   // Held only until the backend says otherwise — see `abortedAtSeq`.
@@ -484,6 +490,8 @@ export function useAgentChatSocket({ target, threadKey, connect = true }: UseAge
     status,
     sendTurn,
     abortTurn,
+    archiveSession,
+    resumeSession,
     setRuntimeMode,
     setInteractionMode,
     respondToUserInput,

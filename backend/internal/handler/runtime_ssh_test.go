@@ -48,7 +48,7 @@ func TestRuntimeSSHSecretReturnsCredentialToItsOwnExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create machine: %v", err)
 	}
-	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, &m.ID)
+	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, &m.ID, "")
 	if err != nil {
 		t.Fatalf("create connection: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRuntimeSSHSecretRefusesAnotherMachinesConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create machine: %v", err)
 	}
-	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, &owner.ID)
+	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, &owner.ID, "")
 	if err != nil {
 		t.Fatalf("create connection: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestRuntimeSSHSecretRefusesConnectionWithNoExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create machine: %v", err)
 	}
-	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, nil)
+	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "password", nil, nil, "")
 	if err != nil {
 		t.Fatalf("create connection: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRuntimeSSHSecretReportsMissingCredentialAsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create machine: %v", err)
 	}
-	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "privatekey", nil, &m.ID)
+	conn, err := st.CreateSSHConnection("prod", "", "10.0.0.5", 22, "clouduser", "privatekey", nil, &m.ID, "")
 	if err != nil {
 		t.Fatalf("create connection: %v", err)
 	}

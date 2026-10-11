@@ -51,6 +51,8 @@ const CapSSHChat = "ssh-chat"
 const CapAgentChat = "agent-chat"
 
 const CapAgentWorkspaceOverview = "agent-workspace-overview"
+const CapAgentSessionLifecycle = "agent-session-lifecycle"
+const CapSSHParentProject = "ssh-parent-project"
 
 // CapTelegram is advertised by a process that serves /api/telegram/*.
 //

@@ -139,6 +139,7 @@ interface SSHDialogState {
   /** Flow step 3 (alternative to direct): another saved connection id this
    *  one bastions through. '' means connect directly. */
   jumpConnectionId: string
+  parentProject: string
 }
 interface DBDialogState {
   open: boolean
@@ -735,6 +736,7 @@ export const useDevDeckStore = create<DevDeckState>()(
         editingId: null,
         name: '',
         group: '',
+              parentProject: '',
         host: '',
         port: '22',
         username: '',
@@ -1113,6 +1115,7 @@ export const useDevDeckStore = create<DevDeckState>()(
               editingId: null,
               name: '',
               group: '',
+              parentProject: '',
               host: '',
               port: '22',
               username: '',
@@ -1133,6 +1136,7 @@ export const useDevDeckStore = create<DevDeckState>()(
               editingId: conn.id,
               name: conn.name,
               group: conn.group,
+              parentProject: conn.parentProject || '',
               host: conn.host,
               port: String(conn.port),
               username: conn.username,
