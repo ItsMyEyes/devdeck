@@ -15,6 +15,23 @@ function delta(seq: number, itemId: string, text: string, sequence: number, stre
 }
 
 describe('reduceAgentEvents', () => {
+  it('tracks the requested provider before native turn startup so switching cannot lose a draft', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [{ seq:1, eventId:'request', type:'thread.turn-start-requested', threadId:'chat', commandId:'send', createdAt:1000, payload:{text:'hello',model:{instanceId:'antigravity:default',model:''}} }])
+    expect(view.status).toBe('running')
+    expect(view.turnAgent).toBe('antigravity')
+  })
+  it('retains the active provider through native init and resume cursor updates', () => {
+    const ev = (seq: number, type: string, payload: unknown): AgentEvent => ({seq, eventId:`event-${seq}`, type, threadId:'chat', commandId:`command-${seq}`, createdAt:1000, payload})
+    let view = emptyThreadView()
+    for (const event of [
+      ev(1,'thread.turn-start-requested',{model:{instanceId:'antigravity:default',model:''}}),
+      ev(2,'thread.activity-appended',{type:'turn.started',provider:'antigravity',payload:{model:''}}),
+      ev(3,'thread.session-set',{status:'running',resumeCursor:{conversationId:'agy'}}),
+    ]) view = reduceAgentEvents(view,[event])
+    expect(view.turnAgent).toBe('antigravity')
+    view = reduceAgentEvents(view,[ev(4,'thread.session-set',{status:'idle'})])
+    expect(view.turnAgent).toBeUndefined()
+  })
   it('appends deltas into a single assistant item', () => {
     const view = reduceAgentEvents(emptyThreadView(), [
       delta(1, 'i1', 'Hello ', 1),

@@ -59,7 +59,7 @@ func (svc *WorktreeService) Create(projectID, path, mode, branch, base, model, a
 	agent = strings.TrimSpace(agent)
 	path = gitpkg.ExpandHome(strings.TrimSpace(path))
 	if mode == "branch" {
-		if model == "" {
+		if model == "" && agent != "antigravity" {
 			model = "claude-sonnet-5"
 		}
 		if agent == "" {

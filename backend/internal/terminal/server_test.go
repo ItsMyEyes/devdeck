@@ -3,10 +3,41 @@ package terminal
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"testing"
 
 	"devdeck/backend/internal/store"
 )
+
+func TestResolveAntigravityUsesSelectedModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	bin := filepath.Join(home, "agy")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(filepath.Join(home, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	st := store.New(db)
+	ws, _ := st.CreateWorkspace("test")
+	proj, _ := st.CreateProject(ws.ID, "core", home, "", "")
+	wt, err := st.CreateWorktree(proj.ID, "root", "", "", "real-model", "antigravity", "hello", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotBin, args, cwd := NewServer(st).resolveCommand(wt.ID)
+	if gotBin != bin || cwd != home || !reflect.DeepEqual(args, []string{"--model", "real-model", "-p", "hello"}) {
+		t.Fatalf("bin=%s args=%v cwd=%s", gotBin, args, cwd)
+	}
+}
 
 func TestResolveCommandReturnsNoAgentForEmptyModelRootSession(t *testing.T) {
 	home := t.TempDir()

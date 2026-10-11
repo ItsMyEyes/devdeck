@@ -884,6 +884,11 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
       // Late provider state cannot reactivate a retained, read-only transcript.
     } else if (event.type === 'thread.turn-start-requested') {
       status = 'running'
+      const model = (event.payload as { model?: { instanceId?: unknown; model?: unknown } } | null)?.model
+      if (typeof model?.instanceId === 'string' && model.instanceId) {
+        turnAgent = model.instanceId.split(':')[0]
+        turnModel = typeof model.model === 'string' ? model.model : undefined
+      }
     } else if (event.type === 'thread.created') {
       // The projector's `EvtThreadCreated` case: the two modes start from the
       // creation payload, or from the same defaults it applies. Nothing else
@@ -958,11 +963,11 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
           },
         ]
       }
-      // Cleared whatever the status, not just on idle: the next turn brings its
-      // own `turn.started`, and carrying these across would label it with the
-      // model that ran the previous one.
-      turnAgent = undefined
-      turnModel = undefined
+      // Native init/cursor updates keep working; clear the identity only when settled.
+      if (status === 'idle' || status === 'stopped') {
+        turnAgent = undefined
+        turnModel = undefined
+      }
     } else if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
       // The user's own message. Keyed by eventId, not itemId — it has no
       // provider item and never accumulates deltas.
@@ -1014,8 +1019,7 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
       subagents = foldSubagent(subagents, event.payload, event.createdAt)
     } else if (isForwardedProviderEvent(event.payload) && event.payload.type === 'turn.started') {
       // Remembered, not rendered: `turn.started` has nothing to show on its
-      // own. It is the only place the turn's agent and model appear, and they
-      // are needed later, when the turn settles.
+      // own. Confirm the native agent/model for the stamp when the turn settles.
       turnAgent = event.payload.provider || undefined
       turnModel = event.payload.payload?.model || undefined
     } else if (isForwardedProviderEvent(event.payload) && event.payload.type === 'user-input.requested') {

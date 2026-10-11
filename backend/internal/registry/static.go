@@ -12,6 +12,12 @@ type StaticRegistry struct {
 // NewStaticRegistry creates a static registry with all known agents.
 func NewStaticRegistry() *StaticRegistry {
 	agents := map[string]domain.Agent{
+		"antigravity": {
+			ID: "antigravity", Name: "Antigravity", Icon: "antigravity",
+			Description: "Google Antigravity CLI — streaming chat with native agy permissions",
+			Models:      []domain.Model{{ID: "", Name: "CLI default"}},
+			Skills:      []domain.Skill{},
+		},
 		"claude": {
 			ID:          "claude",
 			Name:        "Claude Code",

@@ -50,16 +50,26 @@ type MCPServer struct {
 // browser talks to, so this must reflect the runtime's own probe, never a
 // cached hub-side assumption.
 type AgentSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-	Installed   bool   `json:"installed"`
-	ModelCount  int    `json:"modelCount"`
-	SkillCount  int    `json:"skillCount"`
-	Version     string `json:"version,omitempty"`
-	BinaryPath  string `json:"binaryPath,omitempty"`
-	Detail      string `json:"detail,omitempty"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description"`
+	Icon             string                `json:"icon"`
+	Installed        bool                  `json:"installed"`
+	ModelCount       int                   `json:"modelCount"`
+	SkillCount       int                   `json:"skillCount"`
+	Version          string                `json:"version,omitempty"`
+	BinaryPath       string                `json:"binaryPath,omitempty"`
+	Detail           string                `json:"detail,omitempty"`
+	ChatCapabilities AgentChatCapabilities `json:"chatCapabilities,omitzero"`
+}
+
+// AgentChatCapabilities describes restrictions beyond the existing chat defaults.
+type AgentChatCapabilities struct {
+	RuntimeModes         []string `json:"runtimeModes"`
+	Attachments          bool     `json:"attachments"`
+	NativeApprovals      bool     `json:"nativeApprovals"`
+	ContextWindow        bool     `json:"contextWindow"`
+	OptionsApplyNextTurn bool     `json:"optionsApplyNextTurn"`
 }
 
 // EnvProfile is a saved LLM-provider profile: the `env` block of an agent's

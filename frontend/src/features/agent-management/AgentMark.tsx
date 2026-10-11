@@ -1,5 +1,5 @@
 import { SiClaude, SiOpenai } from '@icons-pack/react-simple-icons'
-import { Bot } from 'lucide-react'
+import { Bot, Orbit } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function AgentMark({
@@ -53,6 +53,8 @@ export function AgentMark({
         <img src="/pi-logo.png" alt="" width={iconSize} height={iconSize} className="rounded-[3px]" />
       ) : id === 'opencode' ? (
         <img src="/opencode-logo-light.svg" alt="" width={iconSize} height={iconSize} />
+      ) : id === 'antigravity' ? (
+        <Orbit size={iconSize} />
       ) : name ? (
         name.slice(0, 1).toUpperCase()
       ) : (

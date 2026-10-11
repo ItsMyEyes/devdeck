@@ -26,6 +26,7 @@ import (
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/agentcore/provider/antigravity"
 	"devdeck/backend/internal/agentcore/provider/claude"
 	"devdeck/backend/internal/agentcore/provider/codex"
 	"devdeck/backend/internal/agentcore/provider/opencode"
@@ -528,7 +529,7 @@ func main() {
 	// Agent chat harness. Runs on every role, but only a runtime ever has
 	// worktrees to chat about; the hub simply proxies the WebSocket like it
 	// does for /ws/terminal and /ws/ssh.
-	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver(), codex.NewDriver(), opencode.NewDriver())
+	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver(), codex.NewDriver(), opencode.NewDriver(), antigravity.NewDriver())
 	// The engine's State is DERIVED from the event log, never stored — so it
 	// has to be rebuilt from that log on every boot. Skipping this was a real
 	// bug, not a theoretical one: the events survived the restart, so the

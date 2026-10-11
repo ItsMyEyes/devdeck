@@ -131,7 +131,7 @@ export function turnModel(model: ModelChoice | null, effort: string, contextWind
   // thread's first turn, just to pass the CLI the value it already uses.
   const options: Record<string, unknown> = {}
   if (effort !== DEFAULT_EFFORT) options.effort = effort === 'ultrathink' ? 'max' : effort
-  if (contextWindow !== DEFAULT_CONTEXT_WINDOW) options.contextWindow = contextWindow
+  if (model?.agentId !== 'antigravity' && contextWindow !== DEFAULT_CONTEXT_WINDOW) options.contextWindow = contextWindow
   const hasOptions = Object.keys(options).length > 0
 
   if (!model) return hasOptions ? { options } : undefined
@@ -342,11 +342,13 @@ export function AgentChatPane({
           // mean a second query that can lag or fail, and `modelPillLabel`
           // renders an id perfectly well. What matters is that the pill names
           // the model the conversation is actually on.
-          { agentId: resumedModel.agentId, modelId: resumedModel.modelId, modelName: resumedModel.modelId }
+          { agentId: resumedModel.agentId, modelId: resumedModel.modelId, modelName: resumedModel.modelId || 'CLI default' }
         : defaultModel),
     [pickedHere, resumedModel, defaultModel],
   )
   const setModel = useCallback((choice: ModelChoice | null) => setPicked({ threadKey, choice }), [threadKey])
+  const effectiveAgentId = model?.agentId ?? agentId
+  const chatCapabilities = agents.data?.find((agent) => agent.id === effectiveAgentId)?.chatCapabilities
 
   // Effort and context window also ride the next turn, but unlike the model
   // the thread's own history cannot answer for them — nothing on the wire
@@ -356,7 +358,8 @@ export function AgentChatPane({
   // session keeps running under something else.
   const turnOptions = useDevDeckStore((s) => s.composerTurnOptions[threadKey])
   const setComposerTurnOptions = useDevDeckStore((s) => s.setComposerTurnOptions)
-  const effort = turnOptions?.effort ?? DEFAULT_EFFORT
+  const storedEffort = turnOptions?.effort ?? DEFAULT_EFFORT
+  const effort = effectiveAgentId === 'antigravity' && storedEffort === 'ultrathink' ? 'max' : storedEffort
   const contextWindow = turnOptions?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const setEffort = useCallback((value: string) => setComposerTurnOptions(threadKey, { effort: value }), [setComposerTurnOptions, threadKey])
   const setContextWindow = useCallback(
@@ -405,6 +408,7 @@ export function AgentChatPane({
   const controls = useMemo(
     () => ({
       model,
+      chatCapabilities,
       onModelChange: setModel,
       machine,
       worktreeAgentId: agentId,
@@ -421,6 +425,7 @@ export function AgentChatPane({
     }),
     [
       model,
+      chatCapabilities,
       setModel,
       effort,
       setEffort,
@@ -571,6 +576,7 @@ export function AgentChatPane({
   ) : (
     <ChatComposer
       status={view.status}
+      runningAgentId={view.turnAgent ?? resumedModel?.agentId ?? agentId}
       onSend={handleSend}
       onAbort={abortTurn}
       controls={controls}

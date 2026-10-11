@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/agentcore/provider/antigravity"
 	"devdeck/backend/internal/agentcore/provider/claude"
 	"devdeck/backend/internal/agentcore/provider/codex"
 	"devdeck/backend/internal/agentcore/provider/opencode"
@@ -72,6 +73,11 @@ func (svc *AgentService) ListAgents() ([]domain.AgentSummary, error) {
 		return nil, err
 	}
 	for i := range agents {
+		if agents[i].ID == "antigravity" {
+			agents[i].ChatCapabilities = domain.AgentChatCapabilities{
+				RuntimeModes: []string{"auto", "full-access"}, OptionsApplyNextTurn: true,
+			}
+		}
 		p, ok := svc.probe(agents[i].ID)
 		if !ok {
 			continue
@@ -80,6 +86,12 @@ func (svc *AgentService) ListAgents() ([]domain.AgentSummary, error) {
 		agents[i].Version = p.Version
 		agents[i].BinaryPath = p.BinaryPath
 		agents[i].Detail = p.Detail
+		if agents[i].ID == "antigravity" && p.Installed {
+			if models := detect.ReadModels(agents[i].ID); models != nil {
+				agents[i].ModelCount = len(models)
+			}
+			agents[i].Detail = detect.ModelCatalogDetail(agents[i].ID)
+		}
 	}
 	return agents, nil
 }
@@ -103,10 +115,11 @@ type agentProbe struct {
 // binary-resolution probe below; they are still real entries the UI must
 // render, just with less detail until their turn comes.
 var probeDrivers = map[string]provider.Driver{
-	string(claude.Kind):   claude.NewDriver(),
-	string(pi.Kind):       pi.NewDriver(),
-	string(codex.Kind):    codex.NewDriver(),
-	string(opencode.Kind): opencode.NewDriver(),
+	string(antigravity.Kind): antigravity.NewDriver(),
+	string(claude.Kind):      claude.NewDriver(),
+	string(pi.Kind):          pi.NewDriver(),
+	string(codex.Kind):       codex.NewDriver(),
+	string(opencode.Kind):    opencode.NewDriver(),
 }
 
 // probe returns the cached per-machine probe for agentID, populating the

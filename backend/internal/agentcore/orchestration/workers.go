@@ -157,6 +157,10 @@ func (in *Ingestion) Inject(ctx context.Context, ev event.Event) error {
 }
 
 func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
+	if t, ok := in.Engine.State().Thread(ev.ThreadID); ok && t.InstanceID != "" && ev.InstanceID != "" && string(t.InstanceID) != ev.InstanceID {
+		// Output queued by the previous provider must not settle the replacement's turn.
+		return nil
+	}
 	// Producers stamp CreatedAt locally; queued output must not cross an archive/resume boundary.
 	if t, ok := in.Engine.State().Thread(ev.ThreadID); ok && (t.Archiving || t.ArchivedAt > 0 || (!ev.CreatedAt.IsZero() && ev.CreatedAt.UnixNano() <= t.ProviderEventCutoff)) {
 		return nil
@@ -245,6 +249,10 @@ func (in *Ingestion) handle(ctx context.Context, ev event.Event) error {
 	case event.SessionStarted:
 		p, _ := ev.Payload.(*event.SessionStartedPayload)
 		payload := map[string]any{"status": string(ThreadRunning)}
+		if t, ok := in.Engine.State().Thread(ev.ThreadID); ok && instanceKind(t.InstanceID) == "antigravity" && !t.TurnInFlight {
+			// A headless session is ready, but no process is working until a turn starts.
+			payload["status"] = string(ThreadIdle)
+		}
 		if p != nil && len(p.Resume) > 0 {
 			// Store the resume cursor as-is. Never interpret it — its shape
 			// differs per provider and changes between versions.
@@ -1258,14 +1266,30 @@ func (r *Reactor) ensureSession(ctx context.Context, threadID string, sel provid
 		}
 		sessionIn.Model.Options = merged
 	}
+	if instanceKind(sel.InstanceID) == "antigravity" {
+		// An explicit empty model selects agy's default, including when switching providers.
+		sessionIn.Model = sel
+	}
 	wantOptions := optionsKey(sessionIn.Model.Options)
 
 	thread, known := r.Engine.State().Thread(threadID)
+	if sel.InstanceID == "" && known && thread.InstanceID != "" {
+		id = thread.InstanceID
+	}
 	// Whether StartSession below gets the thread's resume cursor. Only the
 	// options-restart path ever clears it (the doc comment's second guard) —
 	// a dead session is re-provisioned with its cursor exactly as before,
 	// whatever Turns says.
 	resume := true
+	if bound, ok := r.Provider.Dir.InstanceFor(threadID); ok && bound != id {
+		if previous, err := r.Provider.Registry.Adapter(bound); err == nil {
+			if err := previous.StopSession(ctx, threadID); err != nil {
+				return fmt.Errorf("agentcore: stop previous provider: %w", err)
+			}
+		}
+		r.forgetSessionOptions(threadID)
+		resume = false
+	}
 
 	if bound, ok := r.Provider.Dir.InstanceFor(threadID); ok && bound == id {
 		// The instance adapter being alive is not enough: a provider with a

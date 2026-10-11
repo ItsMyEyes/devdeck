@@ -184,7 +184,7 @@ func resolveSkillContentTarget(agentID, skillName string) (skillContentTarget, e
 }
 
 func isManagedWritableSkillTarget(target string) (bool, error) {
-	ids := []string{"claude", "codex", "pi", "opencode", "gemini"}
+	ids := []string{"claude", "codex", "pi", "opencode", "gemini", "antigravity"}
 	writable := false
 	for _, agentID := range ids {
 		locations, err := agentSkillLocations(agentID)
@@ -365,6 +365,14 @@ func agentSkillLocations(agentID string) ([]skillLocation, error) {
 		return nil, err
 	}
 	switch agentID {
+	case "antigravity":
+		root := filepath.Join(home, ".gemini", "antigravity-cli")
+		locations := []skillLocation{{dir: filepath.Join(root, "skills")}}
+		plugins, _ := filepath.Glob(filepath.Join(root, "plugins", "*", "skills"))
+		for _, dir := range plugins {
+			locations = append(locations, skillLocation{dir: dir, readOnly: true})
+		}
+		return locations, nil
 	case "claude":
 		return []skillLocation{{dir: filepath.Join(home, ".claude", "skills")}}, nil
 	case "codex":
@@ -408,7 +416,7 @@ func allWritableSkillLocations() ([]struct {
 	agentID string
 	dir     string
 }, error) {
-	ids := []string{"claude", "codex", "pi", "opencode", "gemini"}
+	ids := []string{"claude", "codex", "pi", "opencode", "gemini", "antigravity"}
 	locations := make([]struct {
 		agentID string
 		dir     string

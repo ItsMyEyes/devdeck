@@ -360,7 +360,7 @@ export function turnSpans(entries: TimelineEntry[]): TurnSpan[] {
 export function lastTurnModel(items: readonly ChatItem[]): { agentId: string; modelId: string } | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const { turnAgent, turnModel } = items[i]
-    if (turnAgent && turnModel) return { agentId: turnAgent, modelId: turnModel }
+    if (turnAgent && (turnModel || turnAgent === 'antigravity')) return { agentId: turnAgent, modelId: turnModel ?? '' }
   }
   return undefined
 }

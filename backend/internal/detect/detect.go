@@ -18,11 +18,12 @@ import (
 
 // AgentBinary maps agent IDs to the CLI binary that must be resolvable.
 var AgentBinary = map[string]string{
-	"claude":   "claude",
-	"codex":    "codex",
-	"pi":       "pi",
-	"opencode": "opencode",
-	"gemini":   "gemini",
+	"antigravity": "agy",
+	"claude":      "claude",
+	"codex":       "codex",
+	"pi":          "pi",
+	"opencode":    "opencode",
+	"gemini":      "gemini",
 }
 
 // Installed checks whether an agent's CLI binary can be resolved.

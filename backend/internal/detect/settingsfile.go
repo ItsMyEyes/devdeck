@@ -37,6 +37,8 @@ func settingsFileSpecFor(agentID string) (settingsFileSpec, error) {
 		return settingsFileSpec{}, err
 	}
 	switch agentID {
+	case "antigravity":
+		return settingsFileSpec{candidates: []string{filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")}, syntax: "json", empty: "{}"}, nil
 	case "claude":
 		return settingsFileSpec{
 			candidates: []string{filepath.Join(home, ".claude", "settings.json")},

@@ -168,10 +168,13 @@ func (s *Server) resolveCommand(session string) (agentBin string, args []string,
 		return "", nil, workDir
 	}
 	agentBin = resolved
+	if wt.Agent == "antigravity" && wt.Model != "" {
+		args = append(args, "--model", wt.Model)
+	}
 
 	task := strings.TrimSpace(wt.Task)
 	if task != "" {
-		args = []string{"-p", task}
+		args = append(args, "-p", task)
 	}
 
 	return agentBin, args, workDir

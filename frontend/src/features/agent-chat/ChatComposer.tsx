@@ -200,6 +200,7 @@ const NO_MACHINE: Machine = { id: '', name: '', url: '', key: '', isLocal: false
 
 export interface ChatComposerProps {
   status: AgentThreadView['status']
+  runningAgentId?: string
   /** Fires on submit — Enter, the action button, or the plan follow-up
    *  bypass (see `onPlanFollowUp` below, which does not go through this).
    *  `attachments` is `ComposerAttachments`' `attachments()` at the moment of
@@ -335,6 +336,7 @@ const FOLLOW_UP_ACTION = [
 
 export function ChatComposer({
   status,
+  runningAgentId,
   onSend,
   onAbort,
   machine,
@@ -506,6 +508,8 @@ export function ChatComposer({
   // follow the agent that will actually run, not the worktree's static
   // default (design spec §5).
   const agentId = controls.model?.agentId ?? controls.worktreeAgentId
+  const antigravity = agentId === 'antigravity'
+  const blocksSteering = antigravity || runningAgentId === 'antigravity'
 
   // The adapter owns the thread-status → ChatStatus mapping, so "is the agent
   // generating" has one definition.
@@ -530,7 +534,7 @@ export function ChatComposer({
   // button is the interrupt. That is also why the vendored `PromptInputSubmit`
   // can't decide this on its own: it flips on status alone and would abort a
   // typed answer.
-  const interrupting = generating && draft.length === 0
+  const interrupting = generating && (draft.length === 0 || blocksSteering)
 
   // ── Plan follow-up (design spec §7) ──
   //
@@ -603,6 +607,14 @@ export function ChatComposer({
   function submit() {
     const trimmed = text.trim()
     const attachments = attachmentsRef.current?.attachments() ?? []
+    if (blocksSteering && generating) {
+      toast.error('Wait for Antigravity to finish, or stop the current turn first.')
+      return
+    }
+    if (antigravity && attachments.length > 0) {
+      toast.error('Antigravity headless chat accepts text only. Remove attachments before sending.')
+      return
+    }
     // A message needs either words or a picture — but not both: an image
     // with no caption is still a real send (design spec's C2 section never
     // requires text alongside an attachment), so the empty-draft guard only
@@ -638,14 +650,15 @@ export function ChatComposer({
   // already uses above — pi cannot carry attachments (provider/pi/adapter.go's
   // explicit error, T5), so the button is disabled before the user discovers
   // that at send time (design spec's Risks section, "Pi divergence").
-  const attachmentsDisabled = agentId === 'pi'
+  const attachmentsDisabled = controls.chatCapabilities?.attachments === false || agentId === 'pi' || antigravity
 
   function handleAttachmentFilesSelected(event: ChangeEvent<HTMLInputElement>) {
-    if (event.currentTarget.files) attachmentsRef.current?.addFiles(event.currentTarget.files)
+    if (!attachmentsDisabled && event.currentTarget.files) attachmentsRef.current?.addFiles(event.currentTarget.files)
     event.currentTarget.value = ''
   }
 
   function handleSurfacePaste(event: ReactClipboardEvent<HTMLDivElement>) {
+    if (attachmentsDisabled) return
     const files = event.clipboardData?.files
     if (files && files.length > 0) attachmentsRef.current?.addFiles(files)
   }
@@ -654,6 +667,7 @@ export function ChatComposer({
     const files = event.dataTransfer?.files
     if (!files || files.length === 0) return
     event.preventDefault()
+    if (attachmentsDisabled) return
     attachmentsRef.current?.addFiles(files)
   }
 
@@ -811,6 +825,10 @@ export function ChatComposer({
                 slot stays reserved (design spec §"Where they render"). */}
             <ComposerAttachments ref={attachmentsRef} machine={machine ?? NO_MACHINE} threadId={threadKey ?? ''} />
 
+            {antigravity && <p className="text-[11px] leading-snug text-devdeck-fg-2">
+              Text only · Native approvals cannot be answered here. Model, effort, Plan and permission changes apply to the next turn.
+            </p>}
+
             <ComposerPromptEditor
               ref={editorRef}
               value={text}
@@ -870,7 +888,7 @@ export function ChatComposer({
                 {...tourAnchor('chat-attach')}
                 aria-label="Attach image"
                 disabled={attachmentsDisabled}
-                title={attachmentsDisabled ? "Image attachments aren't supported on pi" : 'Attach an image'}
+                title={attachmentsDisabled ? `Image attachments aren't supported on ${agentId}` : 'Attach an image'}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Paperclip size={14} aria-hidden="true" />

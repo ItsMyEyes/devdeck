@@ -423,6 +423,18 @@ export interface AgentSummary {
   installed: boolean
   modelCount: number
   skillCount: number
+  version?: string
+  binaryPath?: string
+  detail?: string
+  chatCapabilities?: AgentChatCapabilities
+}
+
+export interface AgentChatCapabilities {
+  runtimeModes: string[]
+  attachments: boolean
+  nativeApprovals: boolean
+  contextWindow: boolean
+  optionsApplyNextTurn: boolean
 }
 
 export interface AgentModel {

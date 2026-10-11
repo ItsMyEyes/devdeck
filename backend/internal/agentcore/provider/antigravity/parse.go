@@ -3,7 +3,6 @@ package antigravity
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"devdeck/backend/internal/agentcore/event"
@@ -64,7 +63,7 @@ type parseState struct {
 	baseline                    *wireUsage
 	resuming                    bool
 	items                       map[string]*parsedItem
-	agents                      map[string]bool
+	subagentWarning             bool
 	steps                       map[int]bool
 	stepUsage                   wireUsage
 	gotStepUsage                bool
@@ -75,7 +74,7 @@ type parseState struct {
 
 func newParseState(instanceID provider.InstanceID, threadID, turnID string, resume cursor) *parseState {
 	return &parseState{instanceID: instanceID, threadID: threadID, turnID: turnID, resume: resume,
-		baseline: resume.Usage, resuming: resume.ConversationID != "", items: make(map[string]*parsedItem), agents: make(map[string]bool), steps: make(map[int]bool)}
+		baseline: resume.Usage, resuming: resume.ConversationID != "", items: make(map[string]*parsedItem), steps: make(map[int]bool)}
 }
 func envelope(id provider.InstanceID, thread, turn string, typ event.Type) event.Event {
 	return event.Event{Type: typ, Provider: string(Kind), InstanceID: string(id), ThreadID: thread, TurnID: turn, CreatedAt: time.Now().UTC()}
@@ -250,9 +249,6 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 			events = append(events, st.text(id, event.ItemAssistantMessage, s.Text)...)
 		}
 	case "tool":
-		if s.Subagent != nil {
-			return st.subagents(s, id), nil
-		}
 		name := s.ToolName
 		if s.Tool != nil && s.Tool.Name != "" {
 			name = s.Tool.Name
@@ -265,6 +261,9 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 			var detail json.RawMessage
 			if s.Tool != nil {
 				detail = s.Tool.Parameters
+			}
+			if s.Subagent != nil {
+				detail, _ = json.Marshal(map[string]any{"subagent_info": s.Subagent, "tool_info": s.Tool})
 			}
 			e := st.event(event.ItemStarted, &event.ItemStartedPayload{ItemType: event.ItemToolCall, Title: name, Detail: detail})
 			e.ItemID = id
@@ -281,9 +280,16 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 					detail, _ = json.Marshal(s.Tool.Error)
 				}
 			}
+			if s.Subagent != nil {
+				detail, _ = json.Marshal(map[string]any{"subagent_info": s.Subagent, "tool_info": s.Tool})
+			}
 			e := st.event(event.ItemCompleted, &event.ItemCompletedPayload{ItemType: event.ItemToolCall, Status: status, Detail: detail})
 			e.ItemID = id
 			events = append(events, e)
+		}
+		if s.Subagent != nil && !st.subagentWarning {
+			st.subagentWarning = true
+			events = append(events, st.event(event.RuntimeWarning, &event.WarningPayload{Message: "Antigravity reports subagent identities only; child activity and status are unavailable."}))
 		}
 	case "user_input", "checkpoint":
 	default:
@@ -299,31 +305,6 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 		events = append(events, e)
 	}
 	return events, nil
-}
-
-func (st *parseState) subagents(s wireStep, callID string) []event.Event {
-	var events []event.Event
-	for _, agent := range s.Subagent.Subagents {
-		if agent.ID == "" {
-			continue
-		}
-		if !st.agents[agent.ID] {
-			st.agents[agent.ID] = true
-			e := st.event(event.TaskStarted, &event.TaskStartedPayload{TaskID: agent.ID, ToolCallID: callID, Title: agent.Type, Role: agent.Role, Depth: 1})
-			raw, _ := json.Marshal(agent)
-			e.Raw = &event.Raw{Source: "antigravity.stream-json", Method: "subagent_info", Payload: raw}
-			e.AgentID = agent.ID
-			e.Refs.SubAgentID = agent.ID
-			events = append(events, e)
-		}
-		// The stream identifies spawned conversations, not their interior
-		// work or terminal outcome. Do not manufacture completed child tasks.
-		e := st.event(event.TaskProgress, &event.TaskProgressPayload{TaskID: agent.ID, Title: strings.TrimSpace(s.Text), Role: agent.Role, LastToolName: s.ToolName})
-		e.AgentID = agent.ID
-		e.Refs.SubAgentID = agent.ID
-		events = append(events, e)
-	}
-	return events
 }
 
 func (st *parseState) finishItems(status string) []event.Event {

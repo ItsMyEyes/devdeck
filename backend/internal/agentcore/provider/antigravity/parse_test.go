@@ -77,19 +77,23 @@ func TestToolsAndSubagentMetadata(t *testing.T) {
 		t.Fatal("tool failure lost")
 	}
 	agents := parseFixture(t, st, `{"event":"step_update","step_update":{"conversation_id":"parent","step_index":6,"state":"DONE","step_type":"tool","tool_name":"invoke_subagent","subagent_info":{"subagents":[{"type_name":"explore","role":"research","conversation_id":"child-1","log_uri":"/native/log","workspace_uris":["/native/workspace"]},{"type_name":"review","role":"reviewer","conversation_id":"child-2"}]}}}`)
-	if len(agents) != 4 {
+	if len(agents) != 3 || agents[0].Type != event.ItemStarted || agents[1].Type != event.ItemCompleted || agents[2].Type != event.RuntimeWarning {
 		t.Fatalf("subagent events: %+v", agents)
 	}
 	for _, e := range agents {
-		if e.AgentID == "" || e.Refs.SubAgentID != e.AgentID || e.ThreadID != "thread" || e.TurnID != "turn" {
+		if e.ThreadID != "thread" || e.TurnID != "turn" {
 			t.Fatalf("missing attribution: %+v", e)
 		}
-		if e.Type == event.TaskStarted && e.Payload.(*event.TaskStartedPayload).ToolCallID != "turn:step:6" {
-			t.Fatal("subagent spawn correlation lost")
+		if e.Type == event.TaskStarted || e.Type == event.TaskProgress || e.Type == event.TaskCompleted {
+			t.Fatal("invented child lifecycle")
 		}
-		if e.Type == event.TaskCompleted {
-			t.Fatal("invented child completion")
-		}
+	}
+	if detail := string(agents[1].Payload.(*event.ItemCompletedPayload).Detail); !strings.Contains(detail, "child-1") || !strings.Contains(detail, "research") {
+		t.Fatal("lost native subagent metadata", detail)
+	}
+	duplicate := parseFixture(t, st, `{"event":"step_update","step_update":{"conversation_id":"parent","step_index":6,"state":"DONE","step_type":"tool","tool_name":"invoke_subagent","subagent_info":{"subagents":[]}}}`)
+	if len(duplicate) != 0 {
+		t.Fatal("duplicate tool or warning", duplicate)
 	}
 	if end := st.finishItems("failed"); len(end) != 0 {
 		t.Fatalf("completed tool got duplicate end: %+v", end)

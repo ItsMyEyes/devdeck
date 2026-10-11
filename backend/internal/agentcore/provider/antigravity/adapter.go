@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -38,27 +40,31 @@ type turn struct {
 }
 
 type adapter struct {
-	instanceID provider.InstanceID
-	cfg        Config
-	env        map[string]string
-	ctx        context.Context
-	mu         sync.Mutex
-	sessions   map[string]*session
-	events     chan event.Event
-	readers    sync.WaitGroup
-	closed     bool
+	instanceID   provider.InstanceID
+	cfg          Config
+	env          map[string]string
+	ctx          context.Context
+	mu           sync.Mutex
+	sessions     map[string]*session
+	events       chan event.Event
+	queue        []event.Event
+	wake         chan struct{}
+	deliveryStop chan struct{}
+	readers      sync.WaitGroup
+	closed       bool
 }
 
 func newAdapter(ctx context.Context, id provider.InstanceID, cfg Config, env map[string]string) *adapter {
 	a := &adapter{instanceID: id, cfg: cfg, env: maps.Clone(env), ctx: ctx,
-		sessions: make(map[string]*session), events: make(chan event.Event, 256)}
+		sessions: make(map[string]*session), events: make(chan event.Event, 256), wake: make(chan struct{}, 1), deliveryStop: make(chan struct{})}
+	go a.deliverEvents()
 	go func() {
 		<-ctx.Done()
 		_ = a.StopAll(context.Background())
 		a.readers.Wait()
 		a.mu.Lock()
 		a.closed = true
-		close(a.events)
+		close(a.deliveryStop)
 		a.mu.Unlock()
 	}()
 	return a
@@ -194,10 +200,10 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 	if in.Interact == "" {
 		in.Interact = s.in.Interact
 	}
-	if in.Model.Model == "" {
+	if in.Model.Model == "" && in.Model.InstanceID == "" {
 		in.Model.Model = s.in.Model.Model
 	}
-	if in.Model.Options == nil {
+	if in.Model.Options == nil && in.Model.InstanceID == "" {
 		in.Model.Options = s.in.Model.Options
 	}
 	if err := validate(in.Mode, in.Interact, in.Model); err != nil {
@@ -212,16 +218,20 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 	cmd.Env = buildEnv(a.cfg, a.env, s.in.Env)
 	cmd.WaitDelay = 2 * time.Second
 	prepareProcess(cmd)
-	stdout, err := cmd.StdoutPipe()
+	// Own the pipe: Cmd.Wait must not close stdout before the reader drains it.
+	stdout, writer, err := os.Pipe()
 	if err != nil {
 		return provider.TurnStartResult{}, fmt.Errorf("antigravity: stdout: %w", err)
 	}
+	cmd.Stdout = writer
 	stderr := &boundedBuffer{}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
+		_ = writer.Close()
 		return provider.TurnStartResult{}, fmt.Errorf("antigravity: start CLI: %w", err)
 	}
+	_ = writer.Close()
 	job, err := procgroup.Attach(cmd.Process)
 	if err != nil {
 		log.Printf("antigravity: process group: %v", err)
@@ -247,6 +257,21 @@ func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.C
 	// A turn's CLI may leave tool descendants after exiting.
 	defer killProcess(cmd, job)
 	defer stdout.Close()
+	scanDone := make(chan struct{})
+	waitResult := make(chan error, 1)
+	go func() {
+		err := cmd.Wait()
+		// A descendant retaining stdout must not keep a completed turn alive.
+		killProcess(cmd, job)
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-scanDone:
+		case <-timer.C:
+			_ = stdout.Close()
+		}
+		waitResult <- err
+	}()
 	go func() {
 		select {
 		case <-t.done:
@@ -285,14 +310,15 @@ func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.C
 		}
 		a.mu.Unlock()
 	}
-	if err := scan.Err(); err != nil {
+	if err := scan.Err(); err != nil && !(st.status != "" && errors.Is(err, os.ErrClosed)) {
 		parseErr = fmt.Errorf("read stream: %w", err)
 		t.cancel()
 	}
 	if parseErr != nil {
 		_ = stdout.Close()
 	}
-	waitErr := cmd.Wait()
+	close(scanDone)
+	waitErr := <-waitResult
 	status, detail := st.status, st.failure
 	if parseErr != nil {
 		status, detail = "failed", parseErr.Error()
@@ -300,7 +326,7 @@ func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.C
 	if status == "" {
 		status, detail = "failed", "CLI exited without a result event"
 	}
-	if waitErr != nil && status == "completed" {
+	if waitErr != nil && !errors.Is(waitErr, exec.ErrWaitDelay) && status == "completed" {
 		status, detail = "failed", fmt.Sprintf("CLI exited after result: %v", waitErr)
 	}
 	if ctx.Err() != nil && parseErr == nil {
@@ -318,6 +344,11 @@ func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.C
 	if detail != "" {
 		e := envelope(a.instanceID, s.in.ThreadID, t.id, event.RuntimeError)
 		e.Payload = &event.ErrorPayload{Message: "antigravity: " + detail}
+		a.emitLocked(e)
+	}
+	if status != "failed" && stderr.String() != "" {
+		e := envelope(a.instanceID, s.in.ThreadID, t.id, event.RuntimeWarning)
+		e.Payload = &event.WarningPayload{Message: "antigravity: " + stderr.String()}
 		a.emitLocked(e)
 	}
 	for _, e := range st.finishItems(status) {
@@ -439,10 +470,43 @@ func (a *adapter) emitLocked(e event.Event) {
 	if a.closed {
 		return
 	}
+	// shortcut: live backlog is unbounded; add backpressure if ingestion can remain stalled.
+	a.queue = append(a.queue, e)
 	select {
-	case a.events <- e:
+	case a.wake <- struct{}{}:
 	default:
-		log.Printf("antigravity: instance %s: events full, dropping %s for thread %s", a.instanceID, e.Type, e.ThreadID)
+	}
+}
+
+// One delivery loop preserves stream order under a slow consumer. On adapter
+// shutdown it abandons undelivered events so teardown cannot wait on a client.
+func (a *adapter) deliverEvents() {
+	defer close(a.events)
+	for {
+		a.mu.Lock()
+		if len(a.queue) == 0 {
+			a.mu.Unlock()
+			select {
+			case <-a.wake:
+				continue
+			case <-a.deliveryStop:
+				return
+			}
+		}
+		e := a.queue[0]
+		a.mu.Unlock()
+		select {
+		case a.events <- e:
+			a.mu.Lock()
+			a.queue[0] = event.Event{}
+			a.queue = a.queue[1:]
+			if len(a.queue) == 0 {
+				a.queue = nil
+			}
+			a.mu.Unlock()
+		case <-a.deliveryStop:
+			return
+		}
 	}
 }
 
@@ -463,7 +527,13 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.TrimSpace(string(b.text))
+	// CLI diagnostics are plain text; strip terminal/control characters.
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\t' || r == 127 {
+			return -1
+		}
+		return r
+	}, string(b.text)))
 }
 
 var _ provider.Adapter = (*adapter)(nil)

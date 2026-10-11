@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -90,6 +91,21 @@ func TestCLIHelper(t *testing.T) {
 		}
 	}
 finish:
+	if prompt == "burst" {
+		for range 1024 {
+			_ = enc.Encode(map[string]any{"event": "step_update", "step_update": map[string]any{"conversation_id": id, "step_index": 2, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "x"}})
+		}
+	}
+	if prompt == "native-denial" {
+		fmt.Fprintln(os.Stderr, "\x00Action denied by native permission policy; configure agy permissions")
+	}
+	if prompt == "descendant" {
+		child := exec.Command("/bin/sleep", "30")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(5)
+		}
+	}
 	for i, text := range []string{"hello", " world"} {
 		state := "ACTIVE"
 		if i == 1 {
@@ -238,6 +254,113 @@ func TestStreamResumeAndCumulativeUsage(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "--conversation") || !strings.Contains(lines[1], "conversation-one") || strings.Contains(lines[1], "--continue") {
 		t.Fatalf("unsafe resume args: %s", lines[1])
+	}
+}
+
+func TestSlowConsumerKeepsCompletionAndEveryDelta(t *testing.T) {
+	a := testAdapter(t)
+	start(t, a, "burst")
+	send(t, a, "burst", "turn", "burst")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		a.mu.Lock()
+		done := a.sessions["burst"].active == nil
+		a.mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("producer stalled behind full event channel")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	events := collectUntil(t, a, event.TurnCompleted, "burst")
+	var text string
+	for _, e := range events {
+		if e.Type == event.ContentDelta {
+			text += e.Payload.(*event.ContentDeltaPayload).Text
+		}
+	}
+	if text != strings.Repeat("x", 1024)+"hello world" || completion(t, events).Status != "completed" {
+		t.Fatal("lost stream or completion", len(text))
+	}
+}
+
+func TestDescendantCannotHoldTurnOpen(t *testing.T) {
+	a := testAdapter(t)
+	start(t, a, "child")
+	send(t, a, "child", "turn", "descendant")
+	if got := completion(t, collectUntil(t, a, event.TurnCompleted, "child")); got.Status != "completed" {
+		t.Fatal(got)
+	}
+}
+
+func TestExplicitCLIDefaultClearsPreviousModelAndEffort(t *testing.T) {
+	a := testAdapter(t)
+	cwd := start(t, a, "default")
+	for i, model := range []provider.ModelSelection{
+		{InstanceID: "antigravity:test", Model: "selected", Options: map[string]any{"effort": "high"}},
+		{InstanceID: "antigravity:test"},
+	} {
+		_, err := a.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "default", TurnID: fmt.Sprint(i), Text: "first", Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		collectUntil(t, a, event.TurnCompleted, "default")
+	}
+	data, err := os.ReadFile(filepath.Join(cwd, "commands.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if strings.Contains(lines[1], "--model") || strings.Contains(lines[1], "--effort") {
+		t.Fatal("CLI default inherited previous overrides", lines[1])
+	}
+}
+
+func TestNativeDenialVisibleEvenOnSuccess(t *testing.T) {
+	a := testAdapter(t)
+	start(t, a, "denial")
+	send(t, a, "denial", "turn", "native-denial")
+	events := collectUntil(t, a, event.TurnCompleted, "denial")
+	if completion(t, events).Status != "completed" {
+		t.Fatal("native soft denial must retain native result")
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == event.RuntimeWarning {
+			msg := e.Payload.(*event.WarningPayload).Message
+			found = strings.Contains(msg, "Action denied") && !strings.ContainsRune(msg, 0)
+		}
+	}
+	if !found {
+		t.Fatal("native permission diagnostic missing")
+	}
+}
+
+func TestShutdownDoesNotWaitForEventConsumer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	a := newAdapter(ctx, "test", Config{}, nil)
+	a.mu.Lock()
+	for range 1024 {
+		a.emitLocked(envelope("test", "thread", "turn", event.TurnCompleted))
+	}
+	a.mu.Unlock()
+	cancel()
+	deadline := time.Now().Add(time.Second)
+	for {
+		a.mu.Lock()
+		closed := a.closed
+		a.mu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shutdown blocked on a consumer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for range a.Events() {
 	}
 }
 

@@ -165,6 +165,26 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		if _, exists := s.Threads[cmd.ThreadID]; exists {
 			return nil, fmt.Errorf("thread %s already exists", cmd.ThreadID)
 		}
+		var p struct {
+			InstanceID provider.InstanceID  `json:"instanceId"`
+			Mode       provider.RuntimeMode `json:"mode"`
+		}
+		if len(cmd.Payload) > 0 {
+			if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+				return nil, fmt.Errorf("invalid thread.create payload: %w", err)
+			}
+		}
+		if instanceKind(p.InstanceID) == "antigravity" {
+			if p.Mode != "" && p.Mode != provider.ModeAuto && p.Mode != provider.ModeFullAccess {
+				return nil, errors.New("Antigravity supports Native agy or Full access permissions")
+			}
+			if p.Mode == "" {
+				var payload map[string]any
+				_ = json.Unmarshal(cmd.Payload, &payload)
+				payload["mode"] = provider.ModeAuto
+				return []Event{mk(EvtThreadCreated, payload)}, nil
+			}
+		}
 		return []Event{mk(EvtThreadCreated, json.RawMessage(cmd.Payload))}, nil
 
 	case CmdThreadTurnStart:
@@ -183,10 +203,27 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		if p.Text == "" && len(p.Attachments) == 0 {
 			return nil, errors.New("empty turn")
 		}
-		return []Event{
+		id := t.InstanceID
+		if p.Model.InstanceID != "" {
+			id = p.Model.InstanceID
+		}
+		antigravity := instanceKind(id) == "antigravity"
+		if t.TurnInFlight && (antigravity || instanceKind(t.InstanceID) == "antigravity") {
+			return nil, errors.New("Antigravity cannot accept a second message while working; stop or wait for the current turn")
+		}
+		var events []Event
+		if antigravity {
+			if len(p.Attachments) > 0 {
+				return nil, errors.New("Antigravity headless chat accepts text only; remove attachments")
+			}
+			if id != t.InstanceID && t.Mode != provider.ModeFullAccess && t.Mode != provider.ModeAuto {
+				events = append(events, mk(EvtThreadRuntimeModeSet, RuntimeModeSetPayload{Mode: provider.ModeAuto}))
+			}
+		}
+		return append(events,
 			mk(EvtThreadMessageSent, p),
 			mk(EvtThreadTurnStartRequested, p),
-		}, nil
+		), nil
 
 	case CmdThreadApprovalRespond:
 		t, ok := s.Threads[cmd.ThreadID]
@@ -273,7 +310,8 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 	// thread's own creation is committed would be projected onto nothing
 	// and lost, so it must fail loudly rather than vanish.
 	case CmdThreadRuntimeModeSet:
-		if t, ok := s.Threads[cmd.ThreadID]; !ok || t.Deleted {
+		t, ok := s.Threads[cmd.ThreadID]
+		if !ok || t.Deleted {
 			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
 		}
 		var p RuntimeModeSetPayload
@@ -282,6 +320,9 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		}
 		if !p.Mode.Valid() {
 			return nil, fmt.Errorf("invalid runtime mode %q", p.Mode)
+		}
+		if instanceKind(t.InstanceID) == "antigravity" && p.Mode != provider.ModeAuto && p.Mode != provider.ModeFullAccess {
+			return nil, errors.New("Antigravity supports Native agy or Full access permissions")
 		}
 		return []Event{mk(EvtThreadRuntimeModeSet, p)}, nil
 
@@ -362,6 +403,9 @@ func applyOne(s *State, e Event) {
 		_ = json.Unmarshal(e.Payload, &p)
 		if p.Mode == "" {
 			p.Mode = provider.ModeApprovalRequired
+			if instanceKind(p.InstanceID) == "antigravity" {
+				p.Mode = provider.ModeAuto
+			}
 		}
 		if p.Interact == "" {
 			p.Interact = provider.InteractionDefault
@@ -409,6 +453,13 @@ func applyOne(s *State, e Event) {
 		}
 	case EvtThreadTurnStartRequested:
 		if t, ok := s.Threads[e.ThreadID]; ok {
+			var p TurnStartPayload
+			_ = json.Unmarshal(e.Payload, &p)
+			if p.Model.InstanceID != "" && p.Model.InstanceID != t.InstanceID {
+				t.InstanceID = p.Model.InstanceID
+				// A native conversation belongs to one provider; never resume another CLI's ID.
+				t.ResumeCursor = nil
+			}
 			t.Steered = t.TurnInFlight
 			t.TurnInFlight = true
 			t.Status = ThreadRunning

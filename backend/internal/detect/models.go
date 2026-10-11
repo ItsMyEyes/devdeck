@@ -39,6 +39,7 @@ const modelCacheTTL = 5 * time.Minute
 type modelCacheEntry struct {
 	models []domain.Model
 	readAt time.Time
+	detail string
 }
 
 var (
@@ -81,12 +82,32 @@ func ReadModels(agentID string) []domain.Model {
 	}
 	modelCacheMu.Unlock()
 
-	models := readModelsUncached(agentID)
+	var models []domain.Model
+	var detail string
+	if agentID == "antigravity" {
+		ctx, cancel := context.WithTimeout(context.Background(), modelReadTimeout)
+		var err error
+		models, err = readAntigravityModels(ctx)
+		cancel()
+		if err != nil {
+			detail = "Antigravity model catalog unavailable: " + err.Error()
+		}
+	} else {
+		models = readModelsUncached(agentID)
+	}
 
 	modelCacheMu.Lock()
-	modelCache[agentID] = modelCacheEntry{models: models, readAt: modelNow()}
+	modelCache[agentID] = modelCacheEntry{models: models, readAt: modelNow(), detail: detail}
 	modelCacheMu.Unlock()
 	return models
+}
+
+// ModelCatalogDetail returns the bounded reader's cached failure without spawning again.
+func ModelCatalogDetail(agentID string) string {
+	ReadModels(agentID)
+	modelCacheMu.Lock()
+	defer modelCacheMu.Unlock()
+	return modelCache[agentID].detail
 }
 
 func readModelsUncached(agentID string) []domain.Model {

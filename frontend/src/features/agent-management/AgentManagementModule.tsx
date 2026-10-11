@@ -74,7 +74,7 @@ export function AgentManagementModule() {
     [agentsQuery.data],
   )
   const mcpAgents = useMemo(
-    () => installedAgents.filter((agent) => agent.id === 'claude' || agent.id === 'codex'),
+    () => installedAgents.filter((agent) => ['claude', 'codex', 'antigravity'].includes(agent.id)),
     [installedAgents],
   )
   // Every installed agent has a config file of its own to edit, so all of them
