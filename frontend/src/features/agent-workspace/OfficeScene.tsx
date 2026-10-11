@@ -1,8 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
-import { BoxGeometry, CylinderGeometry, SphereGeometry } from 'three'
-import type { Group } from 'three'
 import {
   ArrowDown,
   ArrowLeft,
@@ -20,9 +18,7 @@ import {
   floorLabels,
   officeLayout,
   deskGroupLabel,
-  childCharacterName,
   statusColor,
-  statusLabel,
 } from '@/features/agent-workspace/model'
 import type {
   DeskPosition,
@@ -32,15 +28,23 @@ import type {
 } from '@/features/agent-workspace/model'
 import type { Project } from '@/store/types'
 import OfficeCamera from '@/features/agent-workspace/OfficeCamera'
+import OfficeActor from '@/features/agent-workspace/OfficeActor'
+import OfficeLounge from '@/features/agent-workspace/OfficeLounge'
+import {
+  Block,
+  box,
+  cylinder,
+} from '@/features/agent-workspace/officePrimitives'
+import {
+  ActivityWorld,
+  actorId,
+  actorIntent,
+  actualSelection,
+  companionHome,
+  floorPlan,
+} from '@/features/agent-workspace/activity'
+import type { FloorPlan } from '@/features/agent-workspace/activity'
 
-const box = new BoxGeometry(1, 1, 1)
-const sphere = new SphereGeometry(1, 12, 10)
-const cylinder = new CylinderGeometry(1, 1, 1, 12)
-const shirts = ['#548d87', '#b77858', '#717bab', '#ab8675', '#64839d']
-const skins = ['#d0a583', '#a87b5f', '#ebc4a2', '#8c624b']
-function hash(text: string) {
-  return [...text].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 0)
-}
 interface Props {
   workspaceId: string
   view: OfficeView
@@ -49,38 +53,13 @@ interface Props {
   allMembers: OfficeMember[]
   projects: Project[]
   selectedKey?: string
+  selectedChild?: string
   focusId: number
   runtimeSummary: string
   visible: boolean
   reset: number
   onSelect: (m: OfficeMember, child?: string) => void
   onModule: (module: string) => void
-}
-function Block({
-  at,
-  size,
-  color,
-  rotation = 0,
-  round = false,
-}: {
-  at: [number, number, number]
-  size: [number, number, number]
-  color: string
-  rotation?: number
-  round?: boolean
-}) {
-  return (
-    <mesh
-      position={at}
-      scale={size}
-      rotation={[0, rotation, 0]}
-      geometry={round ? sphere : box}
-      castShadow
-      receiveShadow
-    >
-      <meshStandardMaterial color={color} roughness={0.85} />
-    </mesh>
-  )
 }
 function Plant({
   x,
@@ -126,108 +105,15 @@ function Chair({ x, z }: { x: number; z: number }) {
     </group>
   )
 }
-function Person({
-  seed,
-  working,
-  color,
-}: {
-  seed: string
-  working: boolean
-  color?: string
-}) {
-  const arms = useRef<Group>(null)
-  const h = hash(seed)
-  useFrame(({ clock }) => {
-    if (arms.current && working)
-      arms.current.rotation.x = Math.sin(clock.elapsedTime * 7 + h) * 0.055
-  })
-  const skin = skins[h % skins.length]
-  return (
-    <group position={[0, 0, 0.48]}>
-      <Block
-        at={[-0.15, 0.4, -0.08]}
-        size={[0.18, 0.43, 0.2]}
-        color="#354454"
-      />
-      <Block at={[0.15, 0.4, -0.08]} size={[0.18, 0.43, 0.2]} color="#354454" />
-      <Block
-        at={[-0.15, 0.17, -0.16]}
-        size={[0.19, 0.13, 0.32]}
-        color="#29343d"
-      />
-      <Block
-        at={[0.15, 0.17, -0.16]}
-        size={[0.19, 0.13, 0.32]}
-        color="#29343d"
-      />
-      <Block
-        at={[0, 0.9, 0.02]}
-        size={[0.49, 0.65, 0.33]}
-        color={color || shirts[h % shirts.length]}
-      />
-      <Block at={[0, 1.4, 0]} size={[0.255, 0.29, 0.23]} color={skin} round />
-      <Block
-        at={[0, 1.56, 0.035]}
-        size={[0.27, 0.18, 0.25]}
-        color="#34302e"
-        round
-      />
-      {h % 3 === 0 && (
-        <Block
-          at={[0.08, 1.61, 0.15]}
-          size={[0.15, 0.16, 0.15]}
-          color="#34302e"
-          round
-        />
-      )}
-      <group ref={arms} position={[0, 1.04, -0.08]}>
-        {[-1, 1].map((n) => (
-          <group
-            key={n}
-            position={[n * 0.3, 0, 0]}
-            rotation={[-0.4, 0, n * 0.08]}
-          >
-            <Block
-              at={[0, -0.13, 0]}
-              size={[0.15, 0.32, 0.17]}
-              color={color || shirts[h % shirts.length]}
-            />
-            <Block
-              at={[0, -0.22, -0.22]}
-              size={[0.12, 0.13, 0.35]}
-              color={skin}
-            />
-          </group>
-        ))}
-      </group>
-      <Block
-        at={[-0.085, 1.43, -0.211]}
-        size={[0.028, 0.035, 0.022]}
-        color="#333638"
-      />
-      <Block
-        at={[0.085, 1.43, -0.211]}
-        size={[0.028, 0.035, 0.022]}
-        color="#333638"
-      />
-    </group>
-  )
-}
 function Desk({
   x,
   z,
   member,
-  selected,
-  animate,
-  compact = false,
   onSelect,
 }: {
   x: number
   z: number
   member?: OfficeMember
-  selected: boolean
-  animate: boolean
-  compact?: boolean
   onSelect: Props['onSelect']
 }) {
   const status = member?.stale ? 'unknown' : (member?.status ?? 'idle')
@@ -252,18 +138,26 @@ function Desk({
             color="#79847e"
           />
         ))}
-        <Block at={[0, 1.08, -0.58]} size={[0.1, 0.3, 0.08]} color="#4e5758" />
-        <Block at={[0, 1.4, -0.61]} size={[0.78, 0.49, 0.06]} color="#3b4548" />
-        <Block
-          at={[0, 1.4, -0.573]}
-          size={[0.7, 0.41, 0.012]}
-          color={member ? statusColor(status) : '#657d81'}
-        />
-        <Block
-          at={[0, 0.982, -0.16]}
-          size={[0.55, 0.025, 0.18]}
-          color="#5c6465"
-        />
+        <group position={[0, 0.982, -0.15]}>
+          <Block at={[0, 0, 0]} size={[0.64, 0.035, 0.42]} color="#4e5758" />
+          <Block
+            at={[0, 0.025, -0.03]}
+            size={[0.53, 0.014, 0.21]}
+            color="#29343d"
+          />
+          <group position={[0, 0, -0.2]} rotation={[-0.14, 0, 0]}>
+            <Block
+              at={[0, 0.23, 0]}
+              size={[0.64, 0.46, 0.04]}
+              color="#3b4548"
+            />
+            <Block
+              at={[0, 0.23, 0.025]}
+              size={[0.56, 0.38, 0.012]}
+              color={member ? statusColor(status) : '#657d81'}
+            />
+          </group>
+        </group>
         <Block
           at={[0.43, 0.982, -0.12]}
           size={[0.1, 0.035, 0.13]}
@@ -281,86 +175,8 @@ function Desk({
         >
           <meshStandardMaterial color="#e6daca" />
         </mesh>
-        <Chair x={0} z={0.67} />
-        {member && (
-          <Person
-            seed={member.key}
-            working={
-              animate &&
-              member.turnInFlight &&
-              member.status === 'running' &&
-              !member.stale
-            }
-          />
-        )}
+        <Chair x={0} z={0.38} />
       </group>
-      {member && (
-        <Html position={[0, 2.03, 0]} center zIndexRange={[10, 0]}>
-          <button
-            className={`office-label ${selected ? 'is-selected' : ''}`}
-            onClick={() => onSelect(member)}
-            aria-label={`${member.title || member.agent} · ${statusLabel(member)}${member.characterName ? ` · ${member.characterName}` : ''}`}
-          >
-            <i style={{ color: statusColor(status) }} />
-            <span
-              style={{
-                maxWidth: selected ? 110 : 58,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {compact && !selected
-                ? (
-                    member.characterName ||
-                    member.title ||
-                    member.agent ||
-                    'Agent'
-                  )
-                    .split(/\s+/)
-                    .slice(0, 1)
-                    .join('')
-                : member.characterName ||
-                  member.title ||
-                  member.agent ||
-                  'Agent'}
-            </span>
-            {selected && (
-              <span style={{ fontSize: 8, opacity: 0.7 }}>
-                {member.stale ? 'Unverified' : statusLabel(member)}
-              </span>
-            )}
-          </button>
-        </Html>
-      )}
-      {member?.subagents
-        .filter((c) => c.status === 'running' || c.status === 'failed')
-        .map((child, i) => (
-          <group
-            key={child.id}
-            position={[0.65 + (i % 2) * 0.55, 0, 1.1 + Math.floor(i / 2) * 0.6]}
-            scale={0.56}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(member, child.id)
-            }}
-          >
-            <Person
-              seed={child.id}
-              working={animate && child.status === 'running' && !member.stale}
-              color="#aa8e71"
-            />
-            <Html position={[0, 2.1, 0]} center zIndexRange={[9, 0]}>
-              <button
-                className="office-label"
-                onClick={() => onSelect(member, child.id)}
-                style={{ fontSize: 8 }}
-              >
-                <i style={{ color: statusColor(child.status) }} />
-                {childCharacterName(member, child.id)}
-              </button>
-            </Html>
-          </group>
-        ))}
     </group>
   )
 }
@@ -369,12 +185,13 @@ function OfficeFloor({
   props,
   division,
   layout,
+  world,
+  plan,
+  reduced,
   dark,
-  animate,
   minX,
   minZ,
   maxX,
-  maxZ,
   width,
   depth,
   center,
@@ -382,12 +199,13 @@ function OfficeFloor({
   props: Props
   division: OfficeDivision
   layout: DeskPosition[]
+  world: ActivityWorld
+  plan: FloorPlan
+  reduced: boolean
   dark: boolean
-  animate: boolean
   minX: number
   minZ: number
   maxX: number
-  maxZ: number
   width: number
   depth: number
   center: [number, number, number]
@@ -508,13 +326,78 @@ function OfficeFloor({
               x={desk.x}
               z={desk.z}
               member={member}
-              selected={member.key === props.selectedKey}
-              animate={animate}
-              compact={props.view === 'building'}
               onSelect={props.onSelect}
             />
           ) : null
         })}
+      <WorldTicker world={world} visible={props.visible} reduced={reduced} />
+      {props.members
+        .filter((m) => divisionOf(m) === division && !m.archivedAt)
+        .map((member) => {
+          const actor = world.actors.get(member.key)
+          const desk = layout.find((d) => d.id === member.key)
+          if (!actor || !desk) return null
+          return (
+            <group key={member.key}>
+              <OfficeActor
+                actor={actor}
+                member={member}
+                reduced={reduced}
+                selected={
+                  member.key === props.selectedKey && !props.selectedChild
+                }
+                compact={props.view === 'building'}
+                onSelect={props.onSelect}
+              />
+              {member.subagents
+                .filter((c) => c.status === 'running' || c.status === 'failed')
+                .map((child, index) => {
+                  const childActor = world.actors.get(actorId(member, child.id))
+                  const [x, z] = companionHome(desk, index)
+                  return childActor ? (
+                    <group key={child.id}>
+                      <group position={[x, 0, z]} scale={0.56}>
+                        <Block
+                          at={[0, 0.9, -0.35]}
+                          size={[0.95, 0.08, 0.55]}
+                          color="#aa8f70"
+                        />
+                        <Block
+                          at={[0, 0.45, -0.35]}
+                          size={[0.08, 0.9, 0.35]}
+                          color="#526368"
+                        />
+                        <Block
+                          at={[0, 0.96, -0.23]}
+                          size={[0.6, 0.03, 0.38]}
+                          color="#3b4548"
+                        />
+                        <Block
+                          at={[0, 1.19, -0.42]}
+                          size={[0.6, 0.45, 0.03]}
+                          color="#637a89"
+                        />
+                        <Chair x={0} z={0} />
+                      </group>
+                      <OfficeActor
+                        actor={childActor}
+                        member={member}
+                        child={child.id}
+                        reduced={reduced}
+                        selected={
+                          member.key === props.selectedKey &&
+                          props.selectedChild === child.id
+                        }
+                        compact={props.view === 'building'}
+                        onSelect={props.onSelect}
+                      />
+                    </group>
+                  ) : null
+                })}
+            </group>
+          )
+        })}
+      <OfficeLounge plan={plan} dark={dark} world={world} />
       {!layout.length &&
         [
           [-5, -3],
@@ -524,19 +407,12 @@ function OfficeFloor({
           [-5, 0],
           [-2, 0],
         ].map(([x, z], i) => (
-          <Desk
-            key={i}
-            x={x}
-            z={z}
-            selected={false}
-            animate={false}
-            onSelect={props.onSelect}
-          />
+          <Desk key={i} x={x} z={z} onSelect={props.onSelect} />
         ))}
       <Plant x={minX + 0.7} z={minZ + 0.7} large />
       <Plant x={maxX} z={minZ + 0.8} large />
-      <Plant x={minX + 0.8} z={maxZ + 2} large />
-      <group position={[center[0] + 2, 0, maxZ + 1.4]}>
+      <Plant x={minX + 0.8} z={plan.maxZ - 12.5 + 2} large />
+      <group position={[center[0] + 2, 0, plan.maxZ - 12.5 + 1.4]}>
         <Block at={[0, 0.77, 0]} size={[4.4, 0.16, 1.4]} color="#aa8f70" />
         {[-1.4, 1.4].map((n) => (
           <Block
@@ -623,7 +499,7 @@ function OfficeFloor({
         division={division}
         dark={dark}
         minX={minX}
-        maxZ={maxZ}
+        maxZ={plan.maxZ - 12.5}
         onModule={props.onModule}
       />
       <Html position={[minX + 1.5, 3, minZ]} center zIndexRange={[4, 0]}>
@@ -773,6 +649,19 @@ function Interior({
   )
 }
 
+function WorldTicker({
+  world,
+  visible,
+  reduced,
+}: {
+  world: ActivityWorld
+  visible: boolean
+  reduced: boolean
+}) {
+  useFrame((_, delta) => world.tick(delta, visible, reduced), -2)
+  return null
+}
+
 export default function OfficeScene(props: Props) {
   const dark = useResolvedTheme() === 'dark'
   const reduced = useReducedMotion()
@@ -796,29 +685,97 @@ export default function OfficeScene(props: Props) {
   }, [props.allMembers])
   const layout = [...layouts.developer, ...layouts.devops]
   const maxX = Math.max(8, ...layout.map((d) => d.x + 2))
-  const maxZ = Math.max(5, ...layout.map((d) => d.z + 3))
+  const deskMaxZ = Math.max(5, ...layout.map((d) => d.z + 3))
+  const maxZ = deskMaxZ + 12.5
   const minX = -9,
     minZ = -7,
     width = maxX - minX + 2,
-    depth = maxZ - minZ + 6
+    depth = maxZ - minZ + 2
   const center: [number, number, number] = [
     (minX + maxX) / 2,
     props.view === 'devops' ? 5 : props.view === 'building' ? 2.5 : 0,
-    (minZ + maxZ) / 2 + 1,
+    (minZ + maxZ) / 2,
   ]
-  const selectedMember = props.members.find((m) => m.key === props.selectedKey)
-  const selected =
-    selectedMember &&
-    (props.view === 'building' || divisionOf(selectedMember) === props.view)
-      ? layout.find((d) => d.id === selectedMember.key)
-      : undefined
-  const animate = !reduced && props.visible
-  const working = props.members.some(
-    (m) =>
-      !m.stale &&
-      ((m.turnInFlight && m.status === 'running') ||
-        m.subagents.some((c) => c.status === 'running')),
+  const worlds = useRef<{ workspace: string; floors: ActivityWorld[] } | null>(
+    null,
   )
+  const plans = (['developer', 'devops'] as const).map((division) => {
+    const companions = props.members
+      .filter((m) => !m.archivedAt && divisionOf(m) === division)
+      .flatMap((member) => {
+        const desk = layouts[division].find((d) => d.id === member.key)
+        return desk
+          ? member.subagents
+              .filter((c) => c.status === 'running' || c.status === 'failed')
+              .map((_, i) => companionHome(desk, i))
+          : []
+      })
+    return floorPlan(
+      layouts[division],
+      minX,
+      maxX,
+      minZ,
+      deskMaxZ,
+      division === 'devops',
+      companions,
+    )
+  })
+  if (!worlds.current || worlds.current.workspace !== props.workspaceId)
+    worlds.current = {
+      workspace: props.workspaceId,
+      floors: plans.map(
+        (plan) =>
+          new ActivityWorld(
+            plan,
+            import.meta.env.DEV
+              ? (event, key, detail) =>
+                  console.debug('[office-animation]', event, key, detail)
+              : undefined,
+          ),
+      ),
+    }
+  worlds.current.floors.forEach((world, i) => {
+    const division = i === 0 ? 'developer' : 'devops'
+    const actors = props.members
+      .filter(
+        (m) =>
+          !m.archivedAt &&
+          divisionOf(m) === division &&
+          (props.view === 'building' || props.view === division),
+      )
+      .flatMap((member) => {
+        const desk = layouts[division].find((d) => d.id === member.key)
+        if (!desk) return []
+        return [
+          {
+            key: member.key,
+            home: [desk.x, desk.z + 0.38] as [number, number],
+            intent: actorIntent(member),
+          },
+          ...member.subagents
+            .filter((c) => c.status === 'running' || c.status === 'failed')
+            .map((child, index) => ({
+              key: actorId(member, child.id),
+              home: companionHome(desk, index),
+              intent: actorIntent(member, child.id),
+            })),
+        ]
+      })
+    world.reconcile(actors, plans[i])
+    if (reduced) world.resetMotion()
+  })
+  const selectedMember = props.members.find((m) => m.key === props.selectedKey)
+  const childKey =
+    selectedMember && props.selectedChild
+      ? actorId(selectedMember, props.selectedChild)
+      : undefined
+  const selected = actualSelection(
+    worlds.current.floors,
+    props.selectedKey,
+    childKey,
+  )
+  const animate = !reduced && props.visible
+  const moving = props.members.some((m) => !m.archivedAt)
   if (lost)
     return (
       <div className="office-empty">
@@ -837,7 +794,7 @@ export default function OfficeScene(props: Props) {
         camera={{ position: [18, 22, 22], fov: 38 }}
         dpr={[1, 1.5]}
         frameloop={
-          !props.visible ? 'never' : animate && working ? 'always' : 'demand'
+          !props.visible ? 'never' : animate && moving ? 'always' : 'demand'
         }
         gl={{ antialias: true, powerPreference: 'low-power' }}
         onCreated={({ gl }) => {
@@ -872,17 +829,7 @@ export default function OfficeScene(props: Props) {
           center={center}
           span={Math.max(width, depth) * 1.45}
           reset={props.reset}
-          selected={
-            selected
-              ? [
-                  selected.x,
-                  selectedMember && divisionOf(selectedMember) === 'devops'
-                    ? 5
-                    : 0,
-                  selected.z,
-                ]
-              : undefined
-          }
+          selected={selected}
           action={action}
           mode={mode}
           focusId={props.focusId}
@@ -897,19 +844,20 @@ export default function OfficeScene(props: Props) {
               props={props}
               division={division}
               layout={layouts[division]}
+              world={worlds.current!.floors[division === 'developer' ? 0 : 1]}
+              plan={plans[division === 'developer' ? 0 : 1]}
+              reduced={!!reduced}
               dark={dark}
-              animate={animate}
               minX={minX}
               minZ={minZ}
               maxX={maxX}
-              maxZ={maxZ}
               width={width}
               depth={depth}
               center={[center[0], 0, center[2]]}
             />
           ))}
         {props.view === 'building' && (
-          <group position={[maxX - 0.1, 0, maxZ - 2]}>
+          <group position={[maxX - 0.1, 0, deskMaxZ - 2]}>
             {Array.from({ length: 16 }, (_, i) => (
               <Block
                 key={i}

@@ -225,10 +225,11 @@ it('resets the active saved camera even while the HTML fallback list is open', a
   expect(localStorage.getItem('devdeck.office-camera.ws.devops')).toBe('{}')
 })
 
-it('removes idle scene previews when the division history is collapsed', async () => {
+it('shows idle scene avatars automatically while roster history remains collapsible', async () => {
   mocks.status = 'idle'
   render(<AgentWorkspace workspace={workspace} />)
   await screen.findByText('Office canvas')
+  expect(mocks.scene.mock.calls.at(-1)?.[0].members).toHaveLength(1)
   const history = screen
     .getByRole('region', { name: '1 · Developer sessions' })
     .querySelector('details')!
@@ -237,7 +238,7 @@ it('removes idle scene previews when the division history is collapsed', async (
   expect(mocks.scene.mock.calls.at(-1)?.[0].members).toHaveLength(1)
   history.open = false
   fireEvent(history, new Event('toggle'))
-  expect(mocks.scene.mock.calls.at(-1)?.[0].members).toHaveLength(0)
+  expect(mocks.scene.mock.calls.at(-1)?.[0].members).toHaveLength(1)
 })
 it('keeps every busy session in the roster but pins selection within twenty scene slots', async () => {
   mocks.count = 35
@@ -289,6 +290,7 @@ it('filters the activity feed by floor and opens a SSH subagent in its parent ch
   fireEvent.click(screen.getByRole('button', { name: /Check deployment/ }))
   await screen.findByText('Existing chat')
   expect(mocks.scene.mock.calls.at(-1)?.[0].view).toBe('devops')
+  expect(mocks.scene.mock.calls.at(-1)?.[0].selectedChild).toBe('child')
   expect(mocks.chat.mock.calls.at(-1)?.[0].threadKey).toBe('thread')
   expect(
     screen.getByText('Continue in the parent conversation below.'),

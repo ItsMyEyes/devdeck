@@ -136,20 +136,10 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
               : m.projectId === projectFilter)) &&
       (agentFilter === 'all' || m.key === agentFilter),
   )
-  const displayed = visibleOfficeSessions(
-    filtered.filter((m) => isActive(m) || history[divisionOf(m)]),
-    view,
-    true,
-  )
-  const allVisible = displayed.length
-    ? displayed
-    : visibleOfficeSessions(
-        filtered.filter((m) => m.limited),
-        view,
-        true,
-      )
+  const allVisible = visibleOfficeSessions(filtered, view, true)
   if (
     selected &&
+    !selected.archivedAt &&
     (view === 'building' || divisionOf(selected) === view) &&
     filtered.some((m) => m.key === selected.key) &&
     !allVisible.some((m) => m.key === selected.key)
@@ -784,6 +774,7 @@ export function AgentWorkspace({ workspace }: { workspace: Workspace }) {
                   allMembers={admitted}
                   projects={projects}
                   selectedKey={selected?.key}
+                  selectedChild={selection?.child}
                   focusId={focusId}
                   runtimeSummary={`${data.sources.length} sources · ${offline} unreachable · ${data.sources.filter((s) => s.limited).length} limited`}
                   visible={data.visible}
