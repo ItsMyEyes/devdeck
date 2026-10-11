@@ -71,4 +71,4 @@ session may already have the answer. If those tools are not available, do
 nothing differently — the automatic capture still applies.
 
 Worked examples and the longer version of all of this:
-`.claude/skills/devops-ssh/SKILL.md`.
+`.agents/skills/devops-ssh/SKILL.md`.
