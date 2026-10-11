@@ -227,15 +227,17 @@ func (st *parseState) text(id string, typ event.ItemType, text string) []event.E
 }
 
 func (st *parseState) step(s wireStep) ([]event.Event, error) {
-	if s.Index < 0 || (s.State != "ACTIVE" && s.State != "DONE") {
-		return nil, fmt.Errorf("invalid step state/index")
+	if s.Index < 0 || (s.State != "ACTIVE" && s.State != "DONE" && s.State != "ERROR") {
+		return nil, fmt.Errorf("invalid step state/index: state %q, index %d", s.State, s.Index)
 	}
+	// agy emits ERROR for a failed tool while the surrounding turn can continue.
+	terminal := s.State == "DONE" || s.State == "ERROR"
 	if s.Usage != nil && (s.Usage.Input < 0 || s.Usage.Output < 0 || s.Usage.Cache < 0) {
 		return nil, fmt.Errorf("negative step token usage")
 	}
 	var events []event.Event
 	id := fmt.Sprintf("%s:step:%d", st.turnID, s.Index)
-	if s.Usage != nil && s.State == "DONE" && !st.steps[s.Index] {
+	if s.Usage != nil && terminal && !st.steps[s.Index] {
 		st.gotStepUsage = true
 		st.stepUsage.Input += s.Usage.Input
 		st.stepUsage.Output += s.Usage.Output
@@ -269,9 +271,12 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 			e.ItemID = id
 			events = append(events, e)
 		}
-		if s.State == "DONE" && !st.items[id].done {
+		if terminal && !st.items[id].done {
 			st.items[id].done = true
 			status := "completed"
+			if s.State == "ERROR" {
+				status = "failed"
+			}
 			var detail json.RawMessage
 			if s.Tool != nil {
 				detail = s.Tool.Output
@@ -291,16 +296,20 @@ func (st *parseState) step(s wireStep) ([]event.Event, error) {
 			st.subagentWarning = true
 			events = append(events, st.event(event.RuntimeWarning, &event.WarningPayload{Message: "Antigravity reports subagent identities only; child activity and status are unavailable."}))
 		}
-	case "user_input", "checkpoint":
+	case "user_input", "checkpoint", "system_message":
 	default:
 		e := st.event(event.RuntimeWarning, &event.WarningPayload{Message: "antigravity: unsupported step type " + s.Type})
 		raw, _ := json.Marshal(s)
 		e.Raw = &event.Raw{Source: "antigravity.stream-json", Method: "step_update", Payload: raw}
 		events = append(events, e)
 	}
-	if s.State == "DONE" && st.items[id] != nil && !st.items[id].done {
+	if terminal && st.items[id] != nil && !st.items[id].done {
 		st.items[id].done = true
-		e := st.event(event.ItemCompleted, &event.ItemCompletedPayload{ItemType: st.items[id].typeName, Status: "completed"})
+		status := "completed"
+		if s.State == "ERROR" {
+			status = "failed"
+		}
+		e := st.event(event.ItemCompleted, &event.ItemCompletedPayload{ItemType: st.items[id].typeName, Status: status})
 		e.ItemID = id
 		events = append(events, e)
 	}

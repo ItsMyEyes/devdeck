@@ -61,6 +61,30 @@ func parseFixture(t *testing.T, st *parseState, raw string) []event.Event {
 	}
 	return events
 }
+
+// Captured from agy 1.3.3 with a read-only fetch denied by native permissions.
+func TestLiveToolErrorFixture(t *testing.T) {
+	raw, err := os.ReadFile("testdata/live-tool-error.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := newParseState("test", "thread", "turn", cursor{})
+	var failedTools int
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		for _, e := range parseFixture(t, st, line) {
+			if e.Type == event.ItemCompleted {
+				p := e.Payload.(*event.ItemCompletedPayload)
+				if p.ItemType == event.ItemToolCall && p.Status == "failed" && strings.Contains(string(p.Detail), "permission") {
+					failedTools++
+				}
+			}
+		}
+	}
+	if st.status != "completed" || failedTools != 1 {
+		t.Fatalf("native denial interrupted turn or lost tool error: %s %d", st.status, failedTools)
+	}
+}
+
 func TestToolsAndSubagentMetadata(t *testing.T) {
 	st := newParseState("test", "thread", "turn", cursor{})
 	parseFixture(t, st, `{"event":"init","conversation_id":"parent","init":{}}`)
@@ -97,6 +121,24 @@ func TestToolsAndSubagentMetadata(t *testing.T) {
 	}
 	if end := st.finishItems("failed"); len(end) != 0 {
 		t.Fatalf("completed tool got duplicate end: %+v", end)
+	}
+}
+
+func TestErrorStepUsageAndValidation(t *testing.T) {
+	st := newParseState("test", "thread", "turn", cursor{})
+	parseFixture(t, st, `{"event":"init","conversation_id":"parent","init":{}}`)
+	raw := `{"event":"step_update","step_update":{"step_index":1,"state":"ERROR","step_type":"tool","tool_name":"read_url_content","usage":{"input_tokens":5,"output_tokens":2}}}`
+	events := parseFixture(t, st, raw)
+	if len(events) != 2 || events[1].Payload.(*event.ItemCompletedPayload).Status != "failed" {
+		t.Fatalf("ERROR without tool_info was not marked failed: %+v", events)
+	}
+	if len(parseFixture(t, st, raw)) != 0 || st.stepUsage.Input != 5 || st.stepUsage.Output != 2 {
+		t.Fatal("duplicate error completion or usage")
+	}
+	for _, s := range []wireStep{{Index: -1, State: "ERROR"}, {Index: 1, State: "FUTURE"}, {Index: 1}} {
+		if _, err := st.step(s); err == nil {
+			t.Fatalf("invalid step accepted: %+v", s)
+		}
 	}
 }
 

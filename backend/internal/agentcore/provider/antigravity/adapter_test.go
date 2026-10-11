@@ -71,6 +71,16 @@ func TestCLIHelper(t *testing.T) {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	_ = enc.Encode(map[string]any{"event": "init", "conversation_id": id, "init": map[string]any{"cwd": "fixture"}})
+	if prompt == "failed-tool" {
+		_ = enc.Encode(map[string]any{"event": "step_update", "step_update": map[string]any{"conversation_id": id, "step_index": 0, "state": "DONE", "step_type": "system_message"}})
+		for _, state := range []string{"ACTIVE", "ERROR"} {
+			tool := map[string]any{"name": "read_url_content"}
+			if state == "ERROR" {
+				tool["error"] = map[string]string{"type": "TOOL_ERROR", "message": "status code 404"}
+			}
+			_ = enc.Encode(map[string]any{"event": "step_update", "step_update": map[string]any{"conversation_id": id, "step_index": 1, "state": state, "step_type": "tool", "tool_name": "read_url_content", "tool_info": tool}})
+		}
+	}
 	if prompt == "wait" || prompt == "ignore" {
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt)
@@ -197,6 +207,38 @@ func completion(t *testing.T, events []event.Event) *event.TurnCompletedPayload 
 	}
 	t.Fatal("missing completion")
 	return nil
+}
+
+// agy 1.3.3 emits ERROR for failed tools, then continues to a SUCCESS result.
+func TestFailedToolDoesNotInterruptTurn(t *testing.T) {
+	a := testAdapter(t)
+	start(t, a, "tool-error")
+	send(t, a, "tool-error", "turn", "failed-tool")
+	events := collectUntil(t, a, event.TurnCompleted, "tool-error")
+	if got := completion(t, events); got.Status != "completed" {
+		t.Fatalf("recoverable tool error interrupted turn: %+v", events)
+	}
+	var failedTools int
+	var text string
+	for _, e := range events {
+		switch e.Type {
+		case event.RuntimeError, event.RuntimeWarning:
+			t.Fatalf("valid CLI step produced runtime error/warning: %+v", e.Payload)
+		case event.ItemCompleted:
+			p := e.Payload.(*event.ItemCompletedPayload)
+			if p.ItemType == event.ItemToolCall {
+				if p.Status != "failed" || !strings.Contains(string(p.Detail), "status code 404") {
+					t.Fatalf("lost tool failure: %+v", p)
+				}
+				failedTools++
+			}
+		case event.ContentDelta:
+			text += e.Payload.(*event.ContentDeltaPayload).Text
+		}
+	}
+	if failedTools != 1 || text != "hello world" || a.ListSessions()[0].ProviderSessionID != "conversation-tool-error" {
+		t.Fatalf("lost/duplicated failure, recovery text, or cursor: %d %q", failedTools, text)
+	}
 }
 
 func TestStreamResumeAndCumulativeUsage(t *testing.T) {
