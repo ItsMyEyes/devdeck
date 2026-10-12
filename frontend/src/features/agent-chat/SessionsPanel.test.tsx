@@ -303,3 +303,11 @@ describe('filterSessions', () => {
     expect(filterSessions(rows, 'nonexistent')).toHaveLength(0)
   })
 })
+
+it('finds a retained session by character name without replacing its title', () => {
+  const named=thread({characterName:'Arka Wijaya',title:'Review tests',archivedAt:100})
+  expect(filterSessions([named],'arka')).toEqual([named])
+  mockUseAgentThreads.mockReturnValue({data:[named],isLoading:false,error:null})
+  render(<SessionsPanel machine={machine} worktreeId="wt-1" />)
+  expect(screen.getByRole('button',{name:/Arka Wijaya.*Review tests.*Diakhiri/})).toBeInTheDocument()
+})

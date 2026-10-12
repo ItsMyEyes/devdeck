@@ -8,6 +8,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CircleStop, PackageX, ServerCog, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import type { LucideIcon } from 'lucide-react'
@@ -100,6 +101,7 @@ export interface AgentChatPaneProps {
    *  session-history and new-session pair here; every worktree call site
    *  leaves it unset and the header renders exactly as before. */
   headerActions?: ReactNode
+  archived?: boolean
 }
 
 /**
@@ -129,7 +131,7 @@ export function turnModel(model: ModelChoice | null, effort: string, contextWind
   // thread's first turn, just to pass the CLI the value it already uses.
   const options: Record<string, unknown> = {}
   if (effort !== DEFAULT_EFFORT) options.effort = effort === 'ultrathink' ? 'max' : effort
-  if (contextWindow !== DEFAULT_CONTEXT_WINDOW) options.contextWindow = contextWindow
+  if (model?.agentId !== 'antigravity' && contextWindow !== DEFAULT_CONTEXT_WINDOW) options.contextWindow = contextWindow
   const hasOptions = Object.keys(options).length > 0
 
   if (!model) return hasOptions ? { options } : undefined
@@ -211,6 +213,7 @@ export function AgentChatPane({
   mentionSource,
   connectEnabled = true,
   headerActions,
+  archived = false,
 }: AgentChatPaneProps) {
   // Draft-thread connect gate (design spec §4, plan Task 10). `threadExists`
   // reads the same sidebar-backing query `SessionsPanel` already populates
@@ -245,7 +248,9 @@ export function AgentChatPane({
   // block a working older runtime that reports no capability list — read that
   // module's doc comment before changing the rule.
   const targetMachine = target.kind === 'machine' ? target.machine : undefined
-  const capabilities = useMachineCapabilities(targetMachine)
+  const capabilities = useMachineCapabilities(targetMachine ?? machine)
+  const lifecycleSupported = capabilities.data?.includes('agent-session-lifecycle') ?? false
+  const queryClient = useQueryClient()
   const chatSupport = agentChatSupport({ machine: targetMachine, capabilities: capabilities.data })
 
   const connect =
@@ -259,6 +264,8 @@ export function AgentChatPane({
     view,
     status,
     sendTurn,
+    archiveSession,
+    resumeSession,
     abortTurn,
     setRuntimeMode,
     setInteractionMode,
@@ -335,11 +342,13 @@ export function AgentChatPane({
           // mean a second query that can lag or fail, and `modelPillLabel`
           // renders an id perfectly well. What matters is that the pill names
           // the model the conversation is actually on.
-          { agentId: resumedModel.agentId, modelId: resumedModel.modelId, modelName: resumedModel.modelId }
+          { agentId: resumedModel.agentId, modelId: resumedModel.modelId, modelName: resumedModel.modelId || 'CLI default' }
         : defaultModel),
     [pickedHere, resumedModel, defaultModel],
   )
   const setModel = useCallback((choice: ModelChoice | null) => setPicked({ threadKey, choice }), [threadKey])
+  const effectiveAgentId = model?.agentId ?? agentId
+  const chatCapabilities = agents.data?.find((agent) => agent.id === effectiveAgentId)?.chatCapabilities
 
   // Effort and context window also ride the next turn, but unlike the model
   // the thread's own history cannot answer for them — nothing on the wire
@@ -349,7 +358,8 @@ export function AgentChatPane({
   // session keeps running under something else.
   const turnOptions = useDevDeckStore((s) => s.composerTurnOptions[threadKey])
   const setComposerTurnOptions = useDevDeckStore((s) => s.setComposerTurnOptions)
-  const effort = turnOptions?.effort ?? DEFAULT_EFFORT
+  const storedEffort = turnOptions?.effort ?? DEFAULT_EFFORT
+  const effort = effectiveAgentId === 'antigravity' && storedEffort === 'ultrathink' ? 'max' : storedEffort
   const contextWindow = turnOptions?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const setEffort = useCallback((value: string) => setComposerTurnOptions(threadKey, { effort: value }), [setComposerTurnOptions, threadKey])
   const setContextWindow = useCallback(
@@ -398,6 +408,7 @@ export function AgentChatPane({
   const controls = useMemo(
     () => ({
       model,
+      chatCapabilities,
       onModelChange: setModel,
       machine,
       worktreeAgentId: agentId,
@@ -414,6 +425,7 @@ export function AgentChatPane({
     }),
     [
       model,
+      chatCapabilities,
       setModel,
       effort,
       setEffort,
@@ -505,7 +517,15 @@ export function AgentChatPane({
   // `attachments` is whatever `ChatComposer`'s own `ComposerAttachments`
   // finished uploading before submit — forwarded straight through, this pane
   // has no opinion about it beyond passing it on to `sendTurn`.
+  const ended = archived || !!view.archivedAt || !!threadsQuery.data?.find((t) => t.id === threadKey)?.archivedAt
+  const ending = !!view.archiving
+  useEffect(() => {
+    void queryClient.invalidateQueries({
+      predicate: (q) => q.queryKey[0] === 'agent-workspace-overview' || q.queryKey.includes('agent-threads'),
+    })
+  }, [view.archivedAt, view.archiving, queryClient])
   function handleSend(text: string, attachments: AgentAttachmentRef[]) {
+    if (ended || ending) return
     // Refuse rather than queue. `sendTurn` parks a frame in the socket's
     // outbox when nothing is connected, which is exactly right for a draft
     // thread (the outbox flushes the moment it connects) and exactly wrong
@@ -544,9 +564,19 @@ export function AgentChatPane({
     handleSend(submission.text, [])
   }
 
-  const composer = (
+  const composer = ended || ending ? (
+    <div className="p-4 text-sm text-devdeck-fg-2" role="status">
+      {ending ? 'Mengakhiri sesi…' : 'Sesi diakhiri. Riwayat tetap tersimpan.'}
+      {ended && !ending && (
+        <button className="ml-3 text-devdeck-accent" disabled={!lifecycleSupported || status !== 'open'} onClick={resumeSession}>
+          Lanjutkan sesi
+        </button>
+      )}
+    </div>
+  ) : (
     <ChatComposer
       status={view.status}
+      runningAgentId={view.turnAgent ?? resumedModel?.agentId ?? agentId}
       onSend={handleSend}
       onAbort={abortTurn}
       controls={controls}
@@ -579,7 +609,16 @@ export function AgentChatPane({
         socketStatus={status}
         threadStatus={view.status}
         subjectLabel={worktreeId ? undefined : worktreeLabel}
-        actions={headerActions}
+        actions={<>
+          {headerActions}
+          <button
+            type="button"
+            className="px-2 text-[11px] text-devdeck-fg-2 disabled:opacity-50"
+            disabled={!lifecycleSupported || status !== 'open' || ended || ending}
+            title={lifecycleSupported ? 'Hentikan sesi dan simpan riwayat' : 'Update backend untuk mengakhiri sesi secara persisten'}
+            onClick={archiveSession}
+          >Akhiri sesi</button>
+        </>}
       />
 
       {isEmpty ? (

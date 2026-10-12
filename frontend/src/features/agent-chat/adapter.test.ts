@@ -358,6 +358,10 @@ describe('lastTurnModel', () => {
     })
   })
 
+  it('retains Antigravity when the CLI chooses its own model', () => {
+    expect(lastTurnModel([stamped('a', 'claude', 'old-model'), stamped('b', 'antigravity')])).toEqual({ agentId: 'antigravity', modelId: '' })
+  })
+
   // A thread whose model was switched partway through resumes on the model it
   // is on NOW, not the one it started on.
   it('takes the newest stamp, not the oldest', () => {

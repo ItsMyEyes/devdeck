@@ -68,6 +68,7 @@ beforeAll(async () => {
 // decide whether a draft thread should open its socket. A `vi.fn()`, not a
 // static stub, so each connect-gate test can configure its own
 // data/isLoading/isError shape.
+let lifecycleCaps: string[] | null = null
 const mockAgentThreads = vi.fn()
 // `vi.fn()`-backed (not a static stub) so the fallback-default tests below can
 // populate a real catalog without touching every other test in this file,
@@ -84,7 +85,7 @@ vi.mock('@/features/data/queries', () => ({
   // `agentChatSupport` maps to 'unknown' — i.e. connect and find out, today's
   // behaviour for every test in this file. Returning 'unsupported' here would
   // instead black the pane out behind an update-your-runtime banner.
-  useMachineCapabilities: () => ({ data: null, isError: false }),
+  useMachineCapabilities: () => ({ data: lifecycleCaps, isError: false }),
   // `ChatHeader` mounts the real `TelegramPublishButton`, which reads the
   // catalog to find which project a thread belongs to (so it can offer
   // publishing the whole project). No workspaces means no project, which is
@@ -137,6 +138,7 @@ function render(ui: ReactElement) {
 }
 
 beforeEach(() => {
+ lifecycleCaps=null
   // Default: no thread yet, query settled, no error — every pre-existing
   // test in this file (which predates the connect gate) never inspects
   // `capturedSocketOpts.connect`, so this default only needs to not throw.
@@ -1123,4 +1125,18 @@ describe('AgentChatPane / no update-depth loop (#185) under churn', () => {
     // Reaching here without RTL surfacing a thrown #185 is the assertion.
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
+})
+
+it('reads archived chat without a composer and resumes without submitting a turn', async()=>{
+ lifecycleCaps=['agent-chat','agent-session-lifecycle'];const resume=vi.fn(),send=vi.fn()
+ mockSocket.mockReturnValue({view:{...emptyThreadView(),archivedAt:100},status:'open',sendTurn:send,archiveSession:vi.fn(),resumeSession:resume,clearError:vi.fn()})
+ render(<AgentChatPane target={{kind:'machine',machine}} machine={machine} worktreeId="w-abc" threadKey="w-abc" />)
+ expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button',{name:'Lanjutkan sesi'}))
+ expect(resume).toHaveBeenCalledOnce();expect(send).not.toHaveBeenCalled()
+})
+it('disables end-session persistence on an older runtime',()=>{
+ mockSocket.mockReturnValue({view:emptyThreadView(),status:'open',sendTurn:vi.fn(),abortTurn:vi.fn(),clearError:vi.fn()})
+ render(<AgentChatPane target={{kind:'machine',machine}} machine={machine} worktreeId="w-abc" threadKey="w-abc" />)
+ expect(screen.getByRole('button',{name:'Akhiri sesi'})).toBeDisabled()
 })

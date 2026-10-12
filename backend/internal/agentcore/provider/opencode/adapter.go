@@ -41,6 +41,7 @@ type session struct {
 	startedAt int64
 	model     string
 	cancel    context.CancelFunc // stops this session's SSE subscription
+	done      chan struct{}
 }
 
 type adapter struct {
@@ -310,6 +311,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		startedAt: time.Now().UnixMilli(),
 		model:     in.Model.Model,
 		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 	a.mu.Lock()
 	a.sessions[in.ThreadID] = s
@@ -325,7 +327,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 	})
 
 	a.readers.Add(1)
-	go func() { defer a.readers.Done(); a.subscribe(sctx, s) }()
+	go func() { defer a.readers.Done(); defer close(s.done); a.subscribe(sctx, s) }()
 
 	e := s.state.envelope(event.SessionStarted)
 	e.Payload = &event.SessionStartedPayload{Resume: mustJSON(map[string]string{"opencodeSessionId": created.ID})}
@@ -341,6 +343,14 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 // live (2026-08-18): permission.v2.asked never appeared here in a capture
 // where it fired on /api/event for the same session in the same turn. See
 // subscribeGlobal for the one thing this deliberately does not cover.
+func (a *adapter) emitSession(s *session, e event.Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.byOpencode[s.sessionID] == s {
+		a.emit(e)
+	}
+}
+
 func (a *adapter) subscribe(ctx context.Context, s *session) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/api/session/"+s.sessionID+"/event", nil)
 	if err != nil {
@@ -368,7 +378,7 @@ func (a *adapter) subscribe(ctx context.Context, s *session) {
 			continue
 		}
 		for _, e := range parseEvent([]byte(payload), s.state) {
-			a.emit(e)
+			a.emitSession(s, e)
 		}
 	}
 
@@ -377,7 +387,7 @@ func (a *adapter) subscribe(ctx context.Context, s *session) {
 	if ctx.Err() == nil {
 		e := s.state.envelope(event.SessionExited)
 		e.Payload = &event.SessionExitedPayload{Reason: "opencode event stream closed"}
-		a.emit(e)
+		a.emitSession(s, e)
 	}
 }
 
@@ -458,7 +468,9 @@ func (a *adapter) dispatchGlobalEvent(payload []byte) {
 			if sp := parent.state.bindChildSession(ids.Info.ID); sp != nil {
 				child := newChildParseState(parent.state, ids.Info.ID, sp)
 				a.mu.Lock()
-				a.childStates[ids.Info.ID] = child
+				if a.byOpencode[parent.sessionID] == parent {
+					a.childStates[ids.Info.ID] = child
+				}
 				a.mu.Unlock()
 			}
 		}
@@ -472,6 +484,10 @@ func (a *adapter) dispatchGlobalEvent(payload []byte) {
 	a.mu.Lock()
 	s := a.byOpencode[ids.SessionID]
 	child := a.childStates[ids.SessionID]
+	var parent *session
+	if child != nil {
+		parent = a.sessions[child.threadID]
+	}
 	a.mu.Unlock()
 
 	// A child session's frames are the subagent's own work: parsed with its
@@ -479,9 +495,9 @@ func (a *adapter) dispatchGlobalEvent(payload []byte) {
 	// through parseChildEvent, which drops the child's turn lifecycle so a
 	// finishing subagent cannot settle the parent thread to idle underneath a
 	// turn that is still running.
-	if s == nil && child != nil {
+	if s == nil && child != nil && parent != nil {
 		for _, e := range parseChildEvent(probe.Data, child) {
-			a.emit(e)
+			a.emitSession(parent, e)
 		}
 		return
 	}
@@ -490,7 +506,7 @@ func (a *adapter) dispatchGlobalEvent(payload []byte) {
 	}
 
 	for _, e := range parseGlobalEvent(payload, s.state) {
-		a.emit(e)
+		a.emitSession(s, e)
 	}
 }
 
@@ -619,16 +635,28 @@ func (a *adapter) SetRuntimeMode(context.Context, string, provider.RuntimeMode) 
 func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	a.mu.Lock()
 	s := a.sessions[threadID]
-	delete(a.sessions, threadID)
-	if s != nil {
-		delete(a.byOpencode, s.sessionID)
-	}
 	a.mu.Unlock()
 	if s == nil {
 		return nil
 	}
 	s.cancel()
-	return nil
+	select {
+	case <-s.done:
+		a.mu.Lock()
+		if a.sessions[threadID] == s {
+			delete(a.sessions, threadID)
+			delete(a.byOpencode, s.sessionID)
+			for id, child := range a.childStates {
+				if child.threadID == threadID {
+					delete(a.childStates, id)
+				}
+			}
+		}
+		a.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (a *adapter) StopAll(context.Context) error {

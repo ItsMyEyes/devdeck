@@ -61,6 +61,8 @@ func (h *AgentThreadHandler) withLiveStatus(threads []domain.AgentThread) []doma
 	for i, t := range threads {
 		if live, ok := state.Thread(t.ID); ok {
 			threads[i].Status = string(live.Status)
+			threads[i].Archiving = live.Archiving
+			threads[i].ArchivedAt = live.ArchivedAt
 			// PlanReady, same overlay: read from the engine, never stored.
 			threads[i].PlanReady = live.ProposedPlan != nil
 		}

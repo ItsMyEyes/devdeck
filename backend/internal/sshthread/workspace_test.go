@@ -19,7 +19,7 @@ func TestSeedWritesWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	for _, rel := range []string{"AGENTS.md", "CLAUDE.md", ".claude/skills/devops-ssh/SKILL.md", ".devdeck/session.json"} {
+	for _, rel := range []string{"AGENTS.md", "CLAUDE.md", ".claude/skills/devops-ssh/SKILL.md", ".agents/skills/devops-ssh/SKILL.md", ".devdeck/session.json"} {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
 		}
@@ -42,6 +42,11 @@ func TestSeedWritesWorkspace(t *testing.T) {
 	agents, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if strings.Contains(string(agents), "secret-token") {
 		t.Fatal("token leaked into AGENTS.md")
+	}
+	claudeSkill, _ := os.ReadFile(filepath.Join(dir, ".claude/skills/devops-ssh/SKILL.md"))
+	agySkill, err := os.ReadFile(filepath.Join(dir, ".agents/skills/devops-ssh/SKILL.md"))
+	if err != nil || string(agySkill) != string(claudeSkill) {
+		t.Fatal("Antigravity and Claude must discover the same SSH instructions")
 	}
 }
 

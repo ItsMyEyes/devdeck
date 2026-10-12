@@ -32,6 +32,8 @@ export function emptyThreadView(): AgentThreadView {
     items: [],
     subagents: [],
     status: 'idle',
+    archivedAt: 0,
+    archiving: false,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     lastSeq: 0,
@@ -832,6 +834,8 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
   let lastSeq = view.lastSeq
   let hasGap = view.hasGap
   let status = view.status
+  let archivedAt = view.archivedAt || 0
+  let archiving = view.archiving || false
   let contextTokens = view.contextTokens
   let pendingUserInputs = view.pendingUserInputs
   // The agent/model the CURRENT turn is running on, carried from its
@@ -862,8 +866,29 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
     // makes the thread running, and `thread.session-set` carries every later
     // transition (running / waiting / idle / stopped). Neither produces a chat
     // item — they only move the status.
-    if (event.type === 'thread.turn-start-requested') {
+    if (event.type === 'thread.archive-requested') {
+      archiving = true
+    } else if (event.type === 'thread.archive-failed') {
+      archiving = false
+    } else if (event.type === 'thread.archived') {
+      archiving = false
+      archivedAt = event.createdAt
+      status = 'stopped'
+      pendingApprovals = []
+      pendingUserInputs = []
+      subagents = subagents.map((c) => c.status === 'running' ? { ...c, status: 'stopped', updatedAt: event.createdAt } : c)
+    } else if (event.type === 'thread.resumed') {
+      archivedAt = 0
+      status = 'idle'
+    } else if (archivedAt && (event.type === 'thread.session-set' || event.type === 'thread.turn-start-requested' || isForwardedProviderEvent(event.payload))) {
+      // Late provider state cannot reactivate a retained, read-only transcript.
+    } else if (event.type === 'thread.turn-start-requested') {
       status = 'running'
+      const model = (event.payload as { model?: { instanceId?: unknown; model?: unknown } } | null)?.model
+      if (typeof model?.instanceId === 'string' && model.instanceId) {
+        turnAgent = model.instanceId.split(':')[0]
+        turnModel = typeof model.model === 'string' ? model.model : undefined
+      }
     } else if (event.type === 'thread.created') {
       // The projector's `EvtThreadCreated` case: the two modes start from the
       // creation payload, or from the same defaults it applies. Nothing else
@@ -938,11 +963,11 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
           },
         ]
       }
-      // Cleared whatever the status, not just on idle: the next turn brings its
-      // own `turn.started`, and carrying these across would label it with the
-      // model that ran the previous one.
-      turnAgent = undefined
-      turnModel = undefined
+      // Native init/cursor updates keep working; clear the identity only when settled.
+      if (status === 'idle' || status === 'stopped') {
+        turnAgent = undefined
+        turnModel = undefined
+      }
     } else if (event.type === 'thread.message-sent' && isMessageSentPayload(event.payload)) {
       // The user's own message. Keyed by eventId, not itemId — it has no
       // provider item and never accumulates deltas.
@@ -985,7 +1010,7 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
           lastSequence: 0,
         },
       ]
-      if (status === 'running') status = 'idle'
+      if (status === 'running' && !archiving) status = 'idle'
     } else if (isForwardedProviderEvent(event.payload) && TASK_EVENT_TYPES.has(event.payload.type)) {
       // A subagent's lifecycle. It moves the roster and produces NO chat item
       // of its own: the agent renders as one folded row anchored on the tool
@@ -994,8 +1019,7 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
       subagents = foldSubagent(subagents, event.payload, event.createdAt)
     } else if (isForwardedProviderEvent(event.payload) && event.payload.type === 'turn.started') {
       // Remembered, not rendered: `turn.started` has nothing to show on its
-      // own. It is the only place the turn's agent and model appear, and they
-      // are needed later, when the turn settles.
+      // own. Confirm the native agent/model for the stamp when the turn settles.
       turnAgent = event.payload.provider || undefined
       turnModel = event.payload.payload?.model || undefined
     } else if (isForwardedProviderEvent(event.payload) && event.payload.type === 'user-input.requested') {
@@ -1032,6 +1056,8 @@ export function reduceAgentEvents(view: AgentThreadView, events: AgentEvent[]): 
     ...view,
     items,
     status,
+    archivedAt,
+    archiving,
     lastSeq,
     hasGap,
     contextTokens,

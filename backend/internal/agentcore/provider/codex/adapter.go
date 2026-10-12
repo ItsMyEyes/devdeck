@@ -389,6 +389,14 @@ func (a *adapter) resolve(id int64, result, rpcErr json.RawMessage) {
 // dispatchNotification routes a notification to the session it names. Every
 // notification carries `threadId` (directly or inside `thread`), which is the
 // only way to tell whose events these are on a shared process.
+func (a *adapter) emitSession(s *session, e event.Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.byCodex[s.codexID] == s {
+		a.emit(e)
+	}
+}
+
 func (a *adapter) dispatchNotification(line []byte, method string) {
 	var ids struct {
 		ThreadID string `json:"threadId"`
@@ -450,7 +458,7 @@ func (a *adapter) dispatchNotification(line []byte, method string) {
 		if agentID != "" && e.AgentID == "" {
 			e.AgentID = agentID
 		}
-		a.emit(e)
+		a.emitSession(s, e)
 	}
 }
 
@@ -484,7 +492,7 @@ func (a *adapter) dispatchServerRequest(line []byte, rpcID json.RawMessage, meth
 
 	evts, needsAutoDecline := parseServerRequest(rpcID, method, wrapper.Params, s.state)
 	for _, e := range evts {
-		a.emit(e)
+		a.emitSession(s, e)
 	}
 	if needsAutoDecline {
 		a.replyDecline(rpcID, fmt.Sprintf("codex: DevDeck cannot answer %q yet", method))
@@ -765,16 +773,25 @@ func (a *adapter) SetRuntimeMode(context.Context, string, provider.RuntimeMode) 
 func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	a.mu.Lock()
 	s := a.sessions[threadID]
-	delete(a.sessions, threadID)
-	if s != nil {
-		delete(a.byCodex, s.codexID)
-	}
 	a.mu.Unlock()
 	if s == nil {
 		return nil
 	}
-	_, err := a.call(ctx, "thread/unsubscribe", map[string]any{"threadId": s.codexID})
-	return err
+	if _, err := a.call(ctx, "thread/unsubscribe", map[string]any{"threadId": s.codexID}); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.sessions[threadID] == s {
+		delete(a.sessions, threadID)
+		delete(a.byCodex, s.codexID)
+		for id, parent := range a.childThreads {
+			if parent == s {
+				delete(a.childThreads, id)
+			}
+		}
+	}
+	a.mu.Unlock()
+	return nil
 }
 
 func (a *adapter) StopAll(context.Context) error {

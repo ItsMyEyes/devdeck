@@ -92,6 +92,15 @@ func TestCreateDefaultsModelOnlyForBranchMode(t *testing.T) {
 	if branch.Model != "claude-sonnet-5" {
 		t.Errorf("branch mode Model = %q, want default %q", branch.Model, "claude-sonnet-5")
 	}
+	for _, model := range []string{"", "agy-model"} {
+		wt, err := svc.Create(proj.ID, repoPath, "branch", "", "", model, "antigravity", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wt.Agent != "antigravity" || wt.Model != model {
+			t.Fatalf("Antigravity selection changed: %+v", wt)
+		}
+	}
 }
 
 func TestCreateBranchModeMakesRealWorktree(t *testing.T) {

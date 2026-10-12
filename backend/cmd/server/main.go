@@ -26,6 +26,7 @@ import (
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/orchestration"
 	"devdeck/backend/internal/agentcore/provider"
+	"devdeck/backend/internal/agentcore/provider/antigravity"
 	"devdeck/backend/internal/agentcore/provider/claude"
 	"devdeck/backend/internal/agentcore/provider/codex"
 	"devdeck/backend/internal/agentcore/provider/opencode"
@@ -395,7 +396,7 @@ func main() {
 	// next to the handler, so the list stays visibly tied to what this
 	// process actually registers below rather than drifting into a constant
 	// nobody re-checks.
-	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapTelegram)
+	whoamiH.SetCapabilities(handler.CapSSHChat, handler.CapAgentChat, handler.CapAgentWorkspaceOverview, handler.CapAgentSessionLifecycle, handler.CapSSHParentProject, handler.CapTelegram)
 	// Exposure is runtime state, not a launch-time decision: the controller
 	// owns the serve child so it can be started and stopped while the hub
 	// runs. --enable-tailscale-serve only chooses the STARTING state below.
@@ -528,7 +529,7 @@ func main() {
 	// Agent chat harness. Runs on every role, but only a runtime ever has
 	// worktrees to chat about; the hub simply proxies the WebSocket like it
 	// does for /ws/terminal and /ws/ssh.
-	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver(), codex.NewDriver(), opencode.NewDriver())
+	agentRegistry := provider.NewRegistry(claude.NewDriver(), pi.NewDriver(), codex.NewDriver(), opencode.NewDriver(), antigravity.NewDriver())
 	// The engine's State is DERIVED from the event log, never stored — so it
 	// has to be rebuilt from that log on every boot. Skipping this was a real
 	// bug, not a theoretical one: the events survived the restart, so the
@@ -1552,6 +1553,7 @@ func main() {
 	mux.Handle("GET /api/agent-tools/ssh/files", handler.RequireThreadToken(tokenStore)(toolMux))
 	mux.Handle("GET /api/agent-tools/ssh/grep", handler.RequireThreadToken(tokenStore)(toolMux))
 	mux.HandleFunc("GET /api/agent/threads", agentThreadH.GetThreads)
+	mux.HandleFunc("GET /api/agent/workspace-overview", agentThreadH.GetWorkspaceOverview)
 	mux.HandleFunc("DELETE /api/agent/threads/{threadId}", agentThreadH.DeleteThread)
 	// Composer image attachments (Composer — Context Attachments, C1). Every
 	// role: chat, and therefore its attachments, run on runtimes too.

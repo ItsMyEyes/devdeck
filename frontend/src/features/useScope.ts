@@ -43,7 +43,8 @@ export function useScope(): Scope {
     return leaf?.type === 'leaf' ? leaf.tabs.find((t) => t.id === leaf.activeTabId)?.kind : undefined
   })
   let view: ModuleView = 'agents'
-  if (pathname.includes('/management')) view = 'management'
+  if (pathname.includes('/agent-workspace')) view = 'agent-workspace'
+  else if (pathname.includes('/management')) view = 'management'
   else if (pathname.includes('/news')) view = 'news'
   else if (pathname.includes('/todos')) view = 'todos'
   else if (pathname.includes('/invoices')) view = 'invoices'

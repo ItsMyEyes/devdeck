@@ -101,7 +101,7 @@ export function MCPManagement({
             MCP servers
           </div>
           <p className="mt-1 max-w-[56ch] text-[11.5px] leading-relaxed text-devdeck-fg-2">
-            Configure tools once and install them in Claude Code, Codex, or both.
+            Configure tools once for Claude Code, Codex, and Antigravity.
           </p>
         </div>
         <div className="border-r border-devdeck-border px-3 py-3 sm:px-4">

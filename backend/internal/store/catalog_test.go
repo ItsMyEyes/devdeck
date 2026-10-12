@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"devdeck/backend/internal/domain"
+	"devdeck/backend/internal/port"
 )
 
 func TestApplyCatalogSnapshotPreservesLocalProjectsAndWorktrees(t *testing.T) {
@@ -216,5 +217,39 @@ func TestApplyCatalogSnapshotAppliedTwiceInARowIsIdempotent(t *testing.T) {
 	}
 	if err := s.ApplyCatalogSnapshot(snap, time.Unix(1_700_000_030, 0)); err != nil {
 		t.Fatalf("applying the identical snapshot a second time failed: %v, want a clean no-op", err)
+	}
+}
+
+func TestCatalogPreservesSSHParentProject(t *testing.T) {
+	s := newTestStore(t)
+	m, err := s.CreateMachine("runtime", "http://example.test", "test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.CreateSSHConnection("vm", "prod", "example.test", 22, "user", "password", nil, &m.ID, "AIGN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := s.CatalogForMachine(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := newTestStore(t)
+	if err = replica.ApplyCatalogSnapshot(snap, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := replica.SSHConnectionByID(c.ID)
+	if err != nil || got.ParentProject != "AIGN" || got.Group != "prod" {
+		t.Fatalf("replica lost parent: %+v %v", got, err)
+	}
+	blank := ""
+	s.UpdateSSHConnection(c.ID, port.SSHConnectionPatch{ParentProject: &blank})
+	snap, _ = s.CatalogForMachine(m.ID)
+	if err = replica.ApplyCatalogSnapshot(snap, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = replica.SSHConnectionByID(c.ID)
+	if got.ParentProject != "" {
+		t.Fatal("cannot clear parent")
 	}
 }

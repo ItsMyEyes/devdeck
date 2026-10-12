@@ -35,9 +35,11 @@ const (
 	shimMode os.FileMode = 0o700
 )
 
-// skillDir is where the agent looks for locally installed skills, in the layout
-// detect.ReadSkills parses.
-var skillDir = filepath.Join(".claude", "skills", "devops-ssh")
+// Claude and Antigravity discover workspace skills in different directories.
+var skillDirs = []string{
+	filepath.Join(".claude", "skills", "devops-ssh"),
+	filepath.Join(".agents", "skills", "devops-ssh"),
+}
 
 // binSubdir holds the devdeck-ssh shim and nothing else. It is what main.go
 // prepends to the spawned agent's PATH; see BinDir.
@@ -87,7 +89,7 @@ func Seed(root string, b Binding, hostExe string) (string, error) {
 	}
 	dir := filepath.Join(root, slug)
 
-	for _, sub := range []string{".", ".devdeck", skillDir, binSubdir} {
+	for _, sub := range []string{".", ".devdeck", binSubdir} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), dirMode); err != nil {
 			return "", err
 		}
@@ -109,8 +111,13 @@ func Seed(root string, b Binding, hostExe string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := writeFile(filepath.Join(dir, skillDir, "SKILL.md"), skill); err != nil {
-		return "", err
+	for _, skillDir := range skillDirs {
+		if err := os.MkdirAll(filepath.Join(dir, skillDir), dirMode); err != nil {
+			return "", err
+		}
+		if err := writeFile(filepath.Join(dir, skillDir, "SKILL.md"), skill); err != nil {
+			return "", err
+		}
 	}
 
 	session, err := json.MarshalIndent(b, "", "  ")

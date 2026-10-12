@@ -81,6 +81,11 @@ export default defineConfig({
         ws: true,
         rewriteWsOrigin: true,
       },
+      '/ws/agent': {
+        target: `ws://localhost:${API_PORT}`,
+        ws: true,
+        rewriteWsOrigin: true,
+      },
       // Go + SQLite REST backend
       '/api': {
         target: `http://localhost:${API_PORT}`,
@@ -99,6 +104,7 @@ export default defineConfig({
     // on all of them. They are tracked as explicit debt in COMMANDS.md; add
     // each one here as it gets migrated.
     include: [
+      'src/features/agent-workspace/**/*.test.{ts,tsx}',
       'src/styles/globals.tokens.test.ts',
       'src/features/useReducedTransparency.test.ts',
       'src/features/useScope.test.tsx',
@@ -209,6 +215,7 @@ export default defineConfig({
       'src/features/stats/StatsPane.tokens.test.ts',
       'src/features/ssh/SSHForwardsPanel.test.tsx',
       'src/features/ssh/SSHRightSidebar.test.tsx',
+      'src/features/ssh/SSHConnectionDialog.test.tsx',
       'src/features/ssh/SSHAgentChatPanel.test.tsx',
       'src/features/agent-chat/ComposerChip.test.tsx',
       'src/features/agent-chat/ComposerAttachments.test.tsx',

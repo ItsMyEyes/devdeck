@@ -6,8 +6,8 @@ import type { SSHRightSidebarPanel } from '@/store/useDevDeckStore'
 import { SSH_RIGHT_SIDEBAR_MAX_WIDTH, SSH_RIGHT_SIDEBAR_MIN_WIDTH, sshRightSidebarState, useDevDeckStore } from '@/store/useDevDeckStore'
 import { StatsPane } from '@/features/stats/StatsPane'
 import { tourAnchor, type TourAnchor } from '@/features/tour/tourAnchors'
-import { useAgentThreads } from '@/features/data/queries'
-import { HUB_MACHINE, SSHAgentChatPanel } from './SSHAgentChatPanel'
+import { useAgentThreads, useSSHConnections, useMachines } from '@/features/data/queries'
+import { SSHAgentChatPanel } from './SSHAgentChatPanel'
 import { SSHForwardsPanel } from './SSHForwardsPanel'
 
 /** Width the drag strip's dblclick restores — mirrors the store's own
@@ -61,7 +61,11 @@ export function SSHRightSidebar({ shellKey, connectionId }: { shellKey: string; 
   // only while `sessions` is still loading or genuinely empty (a brand-new
   // connection with no history yet).
   const sessionsWorktreeId = `ssh:${connectionId}`
-  const sessions = useAgentThreads(HUB_MACHINE, sessionsWorktreeId)
+  const connections = useSSHConnections()
+  const machines = useMachines()
+  const executorId = connections.data?.find((c) => c.id === connectionId)?.executorMachineId
+  const executor = machines.data?.find((m) => m.id === executorId)
+  const sessions = useAgentThreads(executor, sessionsWorktreeId)
   const [pickedThreadKey, setPickedThreadKey] = useState<string | undefined>(undefined)
   const threadKey = pickedThreadKey ?? sessions.data?.[0]?.id ?? sessionsWorktreeId
 

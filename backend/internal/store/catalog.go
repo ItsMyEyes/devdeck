@@ -154,10 +154,10 @@ func (s *Store) ApplyCatalogSnapshot(snap domain.CatalogSnapshot, syncedAt time.
 	for _, c := range snap.SSHConnections {
 		if _, err := tx.Exec(
 			`INSERT INTO ssh_connections
-			 (id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id, parent_project)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.Name, c.Group, c.Host, c.Port, c.Username, c.AuthType,
-			c.JumpConnectionID, c.ExecutorMachineID); err != nil {
+			c.JumpConnectionID, c.ExecutorMachineID, c.ParentProject); err != nil {
 			return err
 		}
 	}

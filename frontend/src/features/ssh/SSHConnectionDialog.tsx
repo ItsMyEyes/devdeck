@@ -11,6 +11,7 @@ import {
   useMachines,
   useMachinesHealth,
   useSSHConnections,
+  useWhoami,
   useUpdateSSHConnection,
 } from '@/features/data/queries'
 import type { CreateSSHConnectionBody, UpdateSSHConnectionBody } from '@/lib/api'
@@ -49,6 +50,8 @@ export function SSHConnectionDialog() {
     }
   }, [dialog.open])
 
+  const parentSupported = useWhoami().data?.capabilities?.includes('ssh-parent-project') ?? false
+  const parentOptions = [...new Set(connections.map((c) => c.parentProject || '').filter(Boolean))].sort()
   const groupOptions = useMemo(
     () => Array.from(new Set(connections.map((c) => c.group.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [connections],
@@ -171,6 +174,7 @@ export function SSHConnectionDialog() {
     const base: CreateSSHConnectionBody = {
       name: dialog.name.trim(),
       group: dialog.group.trim(),
+      ...(parentSupported ? { parentProject: dialog.parentProject.trim() } : {}),
       host: dialog.host.trim(),
       port: portNum,
       username: dialog.username.trim(),
@@ -274,6 +278,16 @@ export function SSHConnectionDialog() {
           className="mb-3 font-mono"
         />
 
+        <Label htmlFor="ssh-parent-project">Parent project</Label>
+        <Combobox
+          id="ssh-parent-project"
+          value={dialog.parentProject}
+          onChange={(parentProject) => setDialog({ parentProject })}
+          options={parentOptions}
+          disabled={busy || !parentSupported}
+          placeholder={parentSupported ? 'AIGN' : 'Update backend untuk Parent project'}
+          className="mb-3"
+        />
         <Label>Group</Label>
         <Combobox
           value={dialog.group}

@@ -64,16 +64,25 @@ func (s *Store) CommitAgentEvents(commandID string, evts []orchestration.Event) 
 			instanceID := threadCreatedInstanceID(e.Payload)
 			if _, err := tx.Exec(
 				`INSERT OR IGNORE INTO agent_thread
-					(id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at)
-				 VALUES (?, ?, ?, '', ?, '', ?, ?, ?)`,
+					(id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at, character_name)
+				 VALUES (?, ?, ?, '', ?, '', ?, ?, ?, ?)`,
 				e.ThreadID, worktreeIDFromThreadID(e.ThreadID), instanceID,
 				agentIDFromInstanceID(instanceID), string(orchestration.ThreadIdle),
-				e.CreatedAt, e.CreatedAt,
+				e.CreatedAt, e.CreatedAt, newCharacterName(),
 			); err != nil {
 				return nil, fmt.Errorf("insert agent thread %s: %w", e.ThreadID, err)
 			}
 		}
 
+		if e.Type == orchestration.EvtThreadArchived || e.Type == orchestration.EvtThreadResumed {
+			at := int64(0)
+			if e.Type == orchestration.EvtThreadArchived {
+				at = e.CreatedAt
+			}
+			if _, err := tx.Exec(`UPDATE agent_thread SET archived_at=? WHERE id=?`, at, e.ThreadID); err != nil {
+				return nil, err
+			}
+		}
 		// The thread's name, projected from the LATEST thing the user actually
 		// said. `EvtThreadCreated` has nothing to name a thread WITH — it
 		// carries only an instance id, and it is committed on the WebSocket's
@@ -311,7 +320,7 @@ func (s *Store) DeleteAgentThread(threadID string) error {
 // appears — the row is written on EvtThreadCreated, not on first message.
 func (s *Store) AgentThreads(worktreeID string) ([]domain.AgentThread, error) {
 	rows, err := s.db.Query(
-		`SELECT id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at
+		`SELECT id, worktree_id, instance_id, title, agent_id, model, status, created_at, updated_at, character_name, archived_at
 		 FROM agent_thread WHERE worktree_id = ? ORDER BY updated_at DESC`, worktreeID,
 	)
 	if err != nil {
@@ -324,7 +333,7 @@ func (s *Store) AgentThreads(worktreeID string) ([]domain.AgentThread, error) {
 		var t domain.AgentThread
 		if err := rows.Scan(
 			&t.ID, &t.WorktreeID, &t.InstanceID, &t.Title, &t.AgentID, &t.Model,
-			&t.Status, &t.CreatedAt, &t.UpdatedAt,
+			&t.Status, &t.CreatedAt, &t.UpdatedAt, &t.CharacterName, &t.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}

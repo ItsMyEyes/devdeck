@@ -276,6 +276,7 @@ export interface Bookmark {
  *  requests and never serialize back, unlike Machine.key which clients need
  *  for direct-first connections. */
 export interface SSHConnection {
+  parentProject?: string
   id: string
   name: string
   group: string
@@ -411,7 +412,7 @@ export interface CatalogSnapshot {
   sshConnections: SSHConnection[]
 }
 
-export type ModuleView = 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database' | 'memory'
+export type ModuleView = 'agent-workspace' | 'agents' | 'management' | 'news' | 'todos' | 'invoices' | 'tools' | 'browser' | 'machines' | 'ssh' | 'database' | 'memory'
 
 // Agent types — fetched dynamically from the backend.
 export interface AgentSummary {
@@ -422,6 +423,18 @@ export interface AgentSummary {
   installed: boolean
   modelCount: number
   skillCount: number
+  version?: string
+  binaryPath?: string
+  detail?: string
+  chatCapabilities?: AgentChatCapabilities
+}
+
+export interface AgentChatCapabilities {
+  runtimeModes: string[]
+  attachments: boolean
+  nativeApprovals: boolean
+  contextWindow: boolean
+  optionsApplyNextTurn: boolean
 }
 
 export interface AgentModel {
@@ -530,6 +543,7 @@ export interface User {
 /** GET /api/whoami — an authenticated liveness probe that also reports this
  * process's role, so the SPA can tell a hub apart from a runtime. */
 export interface Whoami {
+  capabilities?: string[]
   status: string
   role: 'hub' | 'runtime'
   machineName: string
@@ -559,3 +573,46 @@ export interface OverlayBlockerRect {
  *  backdrop, the mobile sidebar drawer. Anything smaller reports its own
  *  `OverlayBlockerRect` instead. See `useNativeOverlayBlocker.ts`. */
 export type OverlayBlockerRegion = OverlayBlockerRect | 'viewport'
+
+/** Mirrors the Office DTOs in backend/internal/domain/models.go. */
+export interface OfficeSubagent {
+  id: string
+  title: string
+  role: string
+  status: string
+  activity: string
+  tokens?: number
+  updatedAt: number
+}
+export interface OfficeActivity {
+  id: string
+  agentId?: string
+  text: string
+  createdAt: number
+}
+export interface OfficeSession {
+  characterName?: string
+  archivedAt?: number
+  archiving?: boolean
+  id: string
+  worktreeId?: string
+  projectId?: string
+  connectionId?: string
+  title: string
+  agent: string
+  model: string
+  status: string
+  turnInFlight: boolean
+  approvals: number
+  questions: number
+  planReady: boolean
+  activity: string
+  updatedAt: number
+  subagents: OfficeSubagent[]
+  recent: OfficeActivity[]
+}
+export interface OfficeOverview {
+  workspaceId: string
+  sampledAt: number
+  sessions: OfficeSession[]
+}

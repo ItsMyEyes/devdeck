@@ -43,6 +43,7 @@ type session struct {
 	// that died on its own — never for a stop (or an in-place restart for new
 	// start-time flags) that orchestration asked for and settles itself.
 	stopped atomic.Bool
+	done    chan struct{}
 }
 
 const stderrCaptureBytes = 8 << 10
@@ -279,6 +280,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 		stdinEnc:  json.NewEncoder(stdin),
 		state:     newParseState(in.ThreadID, a.instanceID),
 		cancel:    cancel,
+		done:      make(chan struct{}),
 		startedAt: time.Now().UnixMilli(),
 		model:     in.Model.Model,
 	}
@@ -301,6 +303,7 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 
 func (a *adapter) readLoop(sess *session, stdout io.Reader) {
 	defer a.readers.Done()
+	defer close(sess.done)
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)
 
@@ -487,15 +490,23 @@ func (a *adapter) SetRuntimeMode(ctx context.Context, threadID string, mode prov
 func (a *adapter) StopSession(ctx context.Context, threadID string) error {
 	a.mu.Lock()
 	sess, ok := a.sessions[threadID]
-	delete(a.sessions, threadID)
 	a.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	// Before cancel, so readLoop can never observe the exit first.
 	sess.stopped.Store(true)
 	sess.cancel()
-	return nil
+	select {
+	case <-sess.done:
+		a.mu.Lock()
+		if a.sessions[threadID] == sess {
+			delete(a.sessions, threadID)
+		}
+		a.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (a *adapter) StopAll(ctx context.Context) error {

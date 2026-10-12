@@ -32,6 +32,8 @@ const (
 	CmdThreadApprovalRespond    CommandType = "thread.approval.respond"
 	CmdThreadUserInputRespond   CommandType = "thread.user-input.respond"
 	CmdThreadSessionStop        CommandType = "thread.session.stop"
+	CmdThreadArchive            CommandType = "thread.archive"
+	CmdThreadResume             CommandType = "thread.resume"
 	CmdThreadRuntimeModeSet     CommandType = "thread.runtime-mode.set"
 	CmdThreadInteractionModeSet CommandType = "thread.interaction-mode.set"
 	CmdThreadDelete             CommandType = "thread.delete"
@@ -42,6 +44,8 @@ const (
 	CmdThreadAssistantDelta    CommandType = "thread.message.assistant.delta"
 	CmdThreadAssistantComplete CommandType = "thread.message.assistant.complete"
 	CmdThreadSessionSet        CommandType = "thread.session.set"
+	CmdThreadArchiveComplete   CommandType = "thread.archive.complete"
+	CmdThreadArchiveFailed     CommandType = "thread.archive.failed"
 	CmdThreadActivityAppend    CommandType = "thread.activity.append"
 	CmdThreadTurnDiffComplete  CommandType = "thread.turn.diff.complete"
 	// CmdThreadPlanPropose carries a plan the agent proposed (ExitPlanMode) —
@@ -59,6 +63,8 @@ var ClientDispatchable = map[CommandType]bool{
 	CmdThreadApprovalRespond:    true,
 	CmdThreadUserInputRespond:   true,
 	CmdThreadSessionStop:        true,
+	CmdThreadArchive:            true,
+	CmdThreadResume:             true,
 	CmdThreadRuntimeModeSet:     true,
 	CmdThreadInteractionModeSet: true,
 	CmdThreadDelete:             true,
@@ -67,6 +73,7 @@ var ClientDispatchable = map[CommandType]bool{
 // Command is an intent. It has not necessarily happened yet — the decider
 // may reject it.
 type Command struct {
+	providerEventAt int64 // Local producer timestamp, never accepted from clients.
 	// CommandID doubles as a correlation id. The engine uses it for
 	// idempotency: a retry with the same CommandID does not produce a second
 	// event. This is what saves you when a WebSocket drops and the client
@@ -152,6 +159,11 @@ const (
 	EvtThreadApprovalResponseRequested  EventType = "thread.approval-response-requested"
 	EvtThreadUserInputResponseRequested EventType = "thread.user-input-response-requested"
 	EvtThreadSessionStopRequested       EventType = "thread.session-stop-requested"
+	EvtThreadLifecycleUnchanged         EventType = "thread.lifecycle-unchanged"
+	EvtThreadArchiveRequested           EventType = "thread.archive-requested"
+	EvtThreadArchived                   EventType = "thread.archived"
+	EvtThreadArchiveFailed              EventType = "thread.archive-failed"
+	EvtThreadResumed                    EventType = "thread.resumed"
 	EvtThreadRuntimeModeSet             EventType = "thread.runtime-mode-set"
 	EvtThreadInteractionModeSet         EventType = "thread.interaction-mode-set"
 	EvtThreadSessionSet                 EventType = "thread.session-set"
@@ -175,6 +187,7 @@ var IntentEvents = map[EventType]bool{
 	EvtThreadApprovalResponseRequested:  true,
 	EvtThreadUserInputResponseRequested: true,
 	EvtThreadSessionStopRequested:       true,
+	EvtThreadArchiveRequested:           true,
 	EvtThreadRuntimeModeSet:             true,
 	EvtThreadInteractionModeSet:         true,
 }

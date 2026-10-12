@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"devdeck/backend/internal/agentcore/event"
 	"devdeck/backend/internal/agentcore/provider"
@@ -146,3 +147,54 @@ func TestDispatchServerRequestDeclinesWhenNoSessionMatches(t *testing.T) {
 }
 
 var _ provider.Adapter = (*adapter)(nil)
+
+func TestStopSessionKeepsBindingWhenUnsubscribeFails(t *testing.T) {
+	var buf bytes.Buffer
+	a := newTestAdapter(&buf)
+	s := newTestSession("w-1", "cx-1")
+	a.sessions["w-1"] = s
+	a.byCodex["cx-1"] = s
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := a.StopSession(ctx, "w-1"); err == nil {
+		t.Fatal("expected failed unsubscribe")
+	}
+	if a.sessions["w-1"] != s || a.byCodex["cx-1"] != s {
+		t.Fatal("failed unsubscribe lost retry binding")
+	}
+	if err := a.StopSession(ctx, "w-1"); err == nil {
+		t.Fatal("retry falsely succeeded")
+	}
+}
+
+func TestStopSessionDropsChildRoutingOnlyAfterAcknowledgement(t *testing.T) {
+	var buf bytes.Buffer
+	a := newTestAdapter(&buf)
+	s := newTestSession("w-1", "cx-1")
+	a.sessions["w-1"] = s
+	a.byCodex["cx-1"] = s
+	a.childThreads = map[string]*session{"child": s}
+	result := make(chan error, 1)
+	go func() { result <- a.StopSession(context.Background(), "w-1") }()
+	deadline := time.Now().Add(time.Second)
+	var id int64
+	for time.Now().Before(deadline) {
+		a.mu.Lock()
+		id = a.nextID
+		a.mu.Unlock()
+		if id > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if id == 0 {
+		t.Fatal("no unsubscribe request")
+	}
+	a.resolve(id, json.RawMessage(`{}`), nil)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if a.childThreads["child"] != nil {
+		t.Fatal("archived subagent routing retained")
+	}
+}

@@ -131,6 +131,7 @@ const ROOT_PLACEHOLDER = 'Search tabs, worktrees, hosts - or type ssh / agent-ne
  * mapping is spelled out and the union of literals is what gets passed.
  */
 const PAGE_ROUTES = {
+  'agent-workspace': '/w/$wsId/agent-workspace',
   '': '/w/$wsId',
   machines: '/w/$wsId/machines',
   database: '/w/$wsId/database',

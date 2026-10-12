@@ -25,12 +25,16 @@ const (
 )
 
 type Thread struct {
-	ID          string
-	InstanceID  provider.InstanceID
-	Status      ThreadStatus
-	Mode        provider.RuntimeMode
-	Interact    provider.InteractionMode
-	CurrentTurn string
+	ArchivedAt          int64
+	ProviderEventCutoff int64
+	Archiving           bool
+	Overview            OfficeProjection
+	ID                  string
+	InstanceID          provider.InstanceID
+	Status              ThreadStatus
+	Mode                provider.RuntimeMode
+	Interact            provider.InteractionMode
+	CurrentTurn         string
 	// ResumeCursor: an opaque value from the adapter. The engine stores it,
 	// never reads it.
 	ResumeCursor    json.RawMessage
@@ -104,6 +108,7 @@ func (s *State) clone() *State {
 	n := &State{Threads: make(map[string]*Thread, len(s.Threads))}
 	for k, v := range s.Threads {
 		c := *v
+		c.Overview = cloneOffice(v.Overview)
 		c.PendingRequests = make(map[string]bool, len(v.PendingRequests))
 		for r := range v.PendingRequests {
 			c.PendingRequests[r] = true
@@ -146,10 +151,39 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		}
 	}
 
+	if t, ok := s.Thread(cmd.ThreadID); ok && cmd.providerEventAt != 0 && (t.Archiving || t.ArchivedAt > 0 || cmd.providerEventAt <= t.ProviderEventCutoff) {
+		return nil, nil
+	}
+	if t, ok := s.Thread(cmd.ThreadID); ok && (t.Archiving || t.ArchivedAt > 0) {
+		switch cmd.Type {
+		case CmdThreadTurnStart, CmdThreadApprovalRespond, CmdThreadUserInputRespond, CmdThreadRuntimeModeSet, CmdThreadInteractionModeSet, CmdThreadSessionStop, CmdThreadTurnInterrupt:
+			return nil, errors.New("session is ending or archived; resume it first")
+		}
+	}
 	switch cmd.Type {
 	case CmdThreadCreate:
 		if _, exists := s.Threads[cmd.ThreadID]; exists {
 			return nil, fmt.Errorf("thread %s already exists", cmd.ThreadID)
+		}
+		var p struct {
+			InstanceID provider.InstanceID  `json:"instanceId"`
+			Mode       provider.RuntimeMode `json:"mode"`
+		}
+		if len(cmd.Payload) > 0 {
+			if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+				return nil, fmt.Errorf("invalid thread.create payload: %w", err)
+			}
+		}
+		if instanceKind(p.InstanceID) == "antigravity" {
+			if p.Mode != "" && p.Mode != provider.ModeAuto && p.Mode != provider.ModeFullAccess {
+				return nil, errors.New("Antigravity supports Native agy or Full access permissions")
+			}
+			if p.Mode == "" {
+				var payload map[string]any
+				_ = json.Unmarshal(cmd.Payload, &payload)
+				payload["mode"] = provider.ModeAuto
+				return []Event{mk(EvtThreadCreated, payload)}, nil
+			}
 		}
 		return []Event{mk(EvtThreadCreated, json.RawMessage(cmd.Payload))}, nil
 
@@ -169,10 +203,27 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		if p.Text == "" && len(p.Attachments) == 0 {
 			return nil, errors.New("empty turn")
 		}
-		return []Event{
+		id := t.InstanceID
+		if p.Model.InstanceID != "" {
+			id = p.Model.InstanceID
+		}
+		antigravity := instanceKind(id) == "antigravity"
+		if t.TurnInFlight && (antigravity || instanceKind(t.InstanceID) == "antigravity") {
+			return nil, errors.New("Antigravity cannot accept a second message while working; stop or wait for the current turn")
+		}
+		var events []Event
+		if antigravity {
+			if len(p.Attachments) > 0 {
+				return nil, errors.New("Antigravity headless chat accepts text only; remove attachments")
+			}
+			if id != t.InstanceID && t.Mode != provider.ModeFullAccess && t.Mode != provider.ModeAuto {
+				events = append(events, mk(EvtThreadRuntimeModeSet, RuntimeModeSetPayload{Mode: provider.ModeAuto}))
+			}
+		}
+		return append(events,
 			mk(EvtThreadMessageSent, p),
 			mk(EvtThreadTurnStartRequested, p),
-		}, nil
+		), nil
 
 	case CmdThreadApprovalRespond:
 		t, ok := s.Threads[cmd.ThreadID]
@@ -213,6 +264,37 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 	case CmdThreadTurnInterrupt:
 		return []Event{mk(EvtThreadTurnInterruptRequested, nil)}, nil
 
+	case CmdThreadArchive, CmdThreadResume, CmdThreadArchiveComplete, CmdThreadArchiveFailed:
+		t, ok := s.Thread(cmd.ThreadID)
+		if !ok || t.Deleted {
+			return nil, errors.New("session does not exist")
+		}
+		switch cmd.Type {
+		case CmdThreadArchive:
+			if t.Archiving || t.ArchivedAt > 0 {
+				return []Event{mk(EvtThreadLifecycleUnchanged, nil)}, nil
+			}
+			return []Event{mk(EvtThreadArchiveRequested, nil)}, nil
+		case CmdThreadArchiveComplete:
+			if t.ArchivedAt > 0 {
+				return nil, nil
+			}
+			if !t.Archiving {
+				return nil, errors.New("archive not pending")
+			}
+			return []Event{mk(EvtThreadArchived, json.RawMessage(cmd.Payload))}, nil
+		case CmdThreadArchiveFailed:
+			return []Event{mk(EvtThreadArchiveFailed, nil)}, nil
+		case CmdThreadResume:
+			if t.Archiving {
+				return nil, errors.New("session is still ending")
+			}
+			if t.ArchivedAt == 0 {
+				return []Event{mk(EvtThreadLifecycleUnchanged, nil)}, nil
+			}
+			return []Event{mk(EvtThreadResumed, nil)}, nil
+		}
+		return nil, errors.New("invalid lifecycle command")
 	case CmdThreadSessionStop:
 		return []Event{mk(EvtThreadSessionStopRequested, nil)}, nil
 
@@ -228,7 +310,8 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 	// thread's own creation is committed would be projected onto nothing
 	// and lost, so it must fail loudly rather than vanish.
 	case CmdThreadRuntimeModeSet:
-		if t, ok := s.Threads[cmd.ThreadID]; !ok || t.Deleted {
+		t, ok := s.Threads[cmd.ThreadID]
+		if !ok || t.Deleted {
 			return nil, fmt.Errorf("thread %s does not exist", cmd.ThreadID)
 		}
 		var p RuntimeModeSetPayload
@@ -237,6 +320,9 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 		}
 		if !p.Mode.Valid() {
 			return nil, fmt.Errorf("invalid runtime mode %q", p.Mode)
+		}
+		if instanceKind(t.InstanceID) == "antigravity" && p.Mode != provider.ModeAuto && p.Mode != provider.ModeFullAccess {
+			return nil, errors.New("Antigravity supports Native agy or Full access permissions")
 		}
 		return []Event{mk(EvtThreadRuntimeModeSet, p)}, nil
 
@@ -298,6 +384,15 @@ func Apply(s *State, evts []Event) *State {
 }
 
 func applyOne(s *State, e Event) {
+	if t, ok := s.Thread(e.ThreadID); ok && t.ArchivedAt > 0 {
+		switch e.Type {
+		case EvtThreadSessionSet, EvtThreadActivityAppended, EvtThreadTurnStartRequested, EvtThreadPlanProposed:
+			return
+		}
+	}
+	if t, ok := s.Threads[e.ThreadID]; ok {
+		projectOffice(t, e)
+	}
 	switch e.Type {
 	case EvtThreadCreated:
 		var p struct {
@@ -308,6 +403,9 @@ func applyOne(s *State, e Event) {
 		_ = json.Unmarshal(e.Payload, &p)
 		if p.Mode == "" {
 			p.Mode = provider.ModeApprovalRequired
+			if instanceKind(p.InstanceID) == "antigravity" {
+				p.Mode = provider.ModeAuto
+			}
 		}
 		if p.Interact == "" {
 			p.Interact = provider.InteractionDefault
@@ -318,8 +416,50 @@ func applyOne(s *State, e Event) {
 			PendingRequests: map[string]bool{}, UpdatedAt: e.CreatedAt,
 		}
 
+	case EvtThreadArchiveRequested:
+		if t, ok := s.Thread(e.ThreadID); ok {
+			t.Archiving = true
+			t.UpdatedAt = e.CreatedAt
+		}
+	case EvtThreadArchiveFailed:
+		if t, ok := s.Thread(e.ThreadID); ok {
+			t.Archiving = false
+			t.UpdatedAt = e.CreatedAt
+		}
+	case EvtThreadArchived:
+		if t, ok := s.Thread(e.ThreadID); ok {
+			t.Archiving = false
+			t.ArchivedAt = e.CreatedAt
+			var fence struct {
+				ProviderEventCutoff int64 `json:"providerEventCutoff"`
+			}
+			_ = json.Unmarshal(e.Payload, &fence)
+			t.ProviderEventCutoff = fence.ProviderEventCutoff
+			if t.ProviderEventCutoff == 0 {
+				t.ProviderEventCutoff = e.CreatedAt * 1_000_000
+			}
+			t.Status = ThreadStopped
+			t.TurnInFlight = false
+			t.PendingRequests = map[string]bool{}
+			t.ProposedPlan = nil
+			t.UpdatedAt = e.CreatedAt
+			projectOffice(t, Event{Type: EvtThreadSessionSet, CreatedAt: e.CreatedAt, Payload: mustJSON(map[string]any{"status": "stopped", "clearPending": true})})
+		}
+	case EvtThreadResumed:
+		if t, ok := s.Thread(e.ThreadID); ok {
+			t.ArchivedAt = 0
+			t.Status = ThreadIdle
+			t.UpdatedAt = e.CreatedAt
+		}
 	case EvtThreadTurnStartRequested:
 		if t, ok := s.Threads[e.ThreadID]; ok {
+			var p TurnStartPayload
+			_ = json.Unmarshal(e.Payload, &p)
+			if p.Model.InstanceID != "" && p.Model.InstanceID != t.InstanceID {
+				t.InstanceID = p.Model.InstanceID
+				// A native conversation belongs to one provider; never resume another CLI's ID.
+				t.ResumeCursor = nil
+			}
 			t.Steered = t.TurnInFlight
 			t.TurnInFlight = true
 			t.Status = ThreadRunning

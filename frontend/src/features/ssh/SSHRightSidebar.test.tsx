@@ -37,6 +37,7 @@ vi.mock('@/features/agent-chat/AgentChatPane', () => ({
   AgentChatPane: (props: { threadKey: string }) => <div data-testid="mock-agent-chat-pane">{props.threadKey}</div>,
 }))
 
+const catalog = vi.hoisted(() => ({ connections: [] as Array<{id:string;executorMachineId:string}>, machines: [] as Array<{id:string;name:string;url:string}> }))
 const mockUseAgentThreads = vi.fn((_machine: unknown, _worktreeId: unknown) => ({
   data: [] as unknown[],
   isLoading: false,
@@ -50,11 +51,11 @@ vi.mock('@/features/data/queries', () => ({
   // no connection to resolve, SSHAgentChatPanel sits in its `loading` state —
   // mounted, with its socket gated off — which is exactly what "keeps the chat
   // panel mounted" asserts.
-  useSSHConnections: () => ({ data: [] }),
+  useSSHConnections: () => ({ data: catalog.connections }),
   // Both are read by SSHAgentChatPanel to resolve the connection's executor
   // runtime (sshChatAvailability.ts). Present and empty rather than absent: a
   // missing export throws on render, which is not the state under test.
-  useMachines: () => ({ data: [] }),
+  useMachines: () => ({ data: catalog.machines }),
   useMachineCapabilities: () => ({ data: undefined, isError: false }),
   // SessionsPanel fetches its own data; the sidebar mounts it for the SSH
   // connection's own thread namespace.
@@ -79,6 +80,8 @@ Element.prototype.hasPointerCapture = vi.fn(() => false)
 
 afterEach(() => {
   cleanup()
+  catalog.connections = []
+  catalog.machines = []
   forwardsMounts = 0
   useDevDeckStore.setState({ sshRightSidebars: {} })
   // A couple of "session history" tests below override this per-test — reset
@@ -220,4 +223,11 @@ describe('SSHRightSidebar — session history', () => {
 
     expect(screen.getByTestId('mock-agent-chat-pane').textContent).toBe('ssh:conn-1')
   })
+})
+
+it('loads SSH history from its executor, preserving the source of archive/resume', () => {
+  catalog.connections = [{id:'conn-1',executorMachineId:'runtime-1'}]
+  catalog.machines = [{id:'runtime-1',name:'Executor',url:'http://localhost:8983'}]
+  render(<SSHRightSidebar shellKey="ssh:conn-1" connectionId="conn-1" />)
+  expect(mockUseAgentThreads).toHaveBeenCalledWith(catalog.machines[0], 'ssh:conn-1')
 })

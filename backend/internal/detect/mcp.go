@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +27,8 @@ func ReadMCPServers(agentID string) ([]domain.MCPServer, error) {
 		return nil, fmt.Errorf("%s is not installed: %w", agentID, port.ErrAgentManagementUnsupported)
 	}
 	switch agentID {
+	case "antigravity":
+		return readAntigravityMCPServers(binary)
 	case "codex":
 		return readCodexMCPServers(binary)
 	case "claude":
@@ -49,6 +53,18 @@ func AddMCPServer(agentID string, input port.MCPServerInput) error {
 
 	var args []string
 	switch agentID {
+	case "antigravity":
+		args = []string{"mcp", "add", "--type", input.Transport}
+		for _, key := range envKeys {
+			args = append(args, "--env", key+"="+input.Env[key])
+		}
+		args = append(args, input.Name)
+		if input.Transport == "stdio" {
+			args = append(args, "--", input.Command)
+			args = append(args, input.Args...)
+		} else {
+			args = append(args, input.URL)
+		}
 	case "claude":
 		args = []string{"mcp", "add", "--scope", "user", "--transport", input.Transport}
 		for _, key := range envKeys {
@@ -75,6 +91,9 @@ func AddMCPServer(agentID string, input port.MCPServerInput) error {
 	default:
 		return fmt.Errorf("%s does not expose managed MCP configuration: %w", agentID, port.ErrAgentManagementUnsupported)
 	}
+	if agentID == "antigravity" {
+		return runAntigravityMCPCommand(binary, args...)
+	}
 	return runMCPCommand(binary, args...)
 }
 
@@ -86,6 +105,8 @@ func RemoveMCPServer(agentID, serverName string) error {
 	}
 	var args []string
 	switch agentID {
+	case "antigravity":
+		args = []string{"mcp", "remove", serverName}
 	case "claude":
 		args = []string{"mcp", "remove", "--scope", "user", serverName}
 	case "codex":
@@ -93,7 +114,84 @@ func RemoveMCPServer(agentID, serverName string) error {
 	default:
 		return fmt.Errorf("%s does not expose managed MCP configuration: %w", agentID, port.ErrAgentManagementUnsupported)
 	}
+	if agentID == "antigravity" {
+		return runAntigravityMCPCommand(binary, args...)
+	}
 	return runMCPCommand(binary, args...)
+}
+
+func runAntigravityMCPCommand(binary string, args ...string) error {
+	if err := runMCPCommand(binary, args...); err != nil {
+		// CLI diagnostics can echo secret env values and URL credentials.
+		return fmt.Errorf("agy mcp command failed; check the CLI and server configuration")
+	}
+	return nil
+}
+
+func readAntigravityMCPServers(binary string) ([]domain.MCPServer, error) {
+	out, err := commandOutput(binary, "mcp", "list")
+	if err != nil {
+		return nil, fmt.Errorf("agy mcp list failed; check the CLI configuration")
+	}
+	servers, err := parseAntigravityMCPServers(string(out))
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return servers, nil
+	}
+	// shortcut: JSONC lists omit env-key enrichment until agy provides structured output.
+	raw, err := os.ReadFile(filepath.Join(home, ".gemini", "config", "mcp_config.json"))
+	if err != nil || len(raw) > 2<<20 {
+		return servers, nil
+	}
+	var config struct {
+		Servers map[string]struct {
+			Command string                     `json:"command"`
+			Args    []string                   `json:"args"`
+			Env     map[string]json.RawMessage `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if json.Unmarshal(raw, &config) == nil {
+		for i := range servers {
+			if server, ok := config.Servers[servers[i].Name]; ok {
+				if servers[i].Transport == "stdio" {
+					servers[i].Target = server.Command
+					servers[i].ArgCount = len(server.Args)
+				}
+				for key := range server.Env {
+					servers[i].EnvKeys = append(servers[i].EnvKeys, key)
+				}
+				sort.Strings(servers[i].EnvKeys)
+			}
+		}
+	}
+	return servers, nil
+}
+
+func parseAntigravityMCPServers(out string) ([]domain.MCPServer, error) {
+	servers := []domain.MCPServer{}
+	for _, line := range strings.Split(stripANSI(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "NAME ") || line == "No MCP servers configured." {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 || (fields[1] != "stdio" && fields[1] != "http") || (fields[2] != "enabled" && fields[2] != "disabled") {
+			return nil, fmt.Errorf("unrecognized agy mcp list output")
+		}
+		target := safeTarget(fields[3])
+		if fields[1] == "http" {
+			parsed, err := url.Parse(fields[3])
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				target = "Invalid MCP URL"
+			}
+		}
+		servers = append(servers, domain.MCPServer{Name: fields[0], AgentID: "antigravity", Transport: fields[1], Target: target, EnvKeys: []string{}, Enabled: fields[2] == "enabled", Status: fields[2]})
+	}
+	sortMCPServers(servers)
+	return servers, nil
 }
 
 func readCodexMCPServers(binary string) ([]domain.MCPServer, error) {

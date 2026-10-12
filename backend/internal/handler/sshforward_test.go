@@ -26,7 +26,7 @@ func newTestSSHForwardHandler(t *testing.T) (*SSHForwardHandler, string) {
 	}
 	t.Cleanup(func() { db.Close() })
 	st := store.New(db)
-	conn, err := st.CreateSSHConnection("web", "", "example.com", 22, "root", "password", nil, nil)
+	conn, err := st.CreateSSHConnection("web", "", "example.com", 22, "root", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

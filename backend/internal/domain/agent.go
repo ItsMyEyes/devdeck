@@ -50,16 +50,26 @@ type MCPServer struct {
 // browser talks to, so this must reflect the runtime's own probe, never a
 // cached hub-side assumption.
 type AgentSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-	Installed   bool   `json:"installed"`
-	ModelCount  int    `json:"modelCount"`
-	SkillCount  int    `json:"skillCount"`
-	Version     string `json:"version,omitempty"`
-	BinaryPath  string `json:"binaryPath,omitempty"`
-	Detail      string `json:"detail,omitempty"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description"`
+	Icon             string                `json:"icon"`
+	Installed        bool                  `json:"installed"`
+	ModelCount       int                   `json:"modelCount"`
+	SkillCount       int                   `json:"skillCount"`
+	Version          string                `json:"version,omitempty"`
+	BinaryPath       string                `json:"binaryPath,omitempty"`
+	Detail           string                `json:"detail,omitempty"`
+	ChatCapabilities AgentChatCapabilities `json:"chatCapabilities,omitzero"`
+}
+
+// AgentChatCapabilities describes restrictions beyond the existing chat defaults.
+type AgentChatCapabilities struct {
+	RuntimeModes         []string `json:"runtimeModes"`
+	Attachments          bool     `json:"attachments"`
+	NativeApprovals      bool     `json:"nativeApprovals"`
+	ContextWindow        bool     `json:"contextWindow"`
+	OptionsApplyNextTurn bool     `json:"optionsApplyNextTurn"`
 }
 
 // EnvProfile is a saved LLM-provider profile: the `env` block of an agent's
@@ -96,13 +106,13 @@ type EnvProfile struct {
 // values are returned in full so the operator can edit them — they are the
 // operator's own local provider config, not credentials.
 type EnvProfileSummary struct {
-	ID        string            `json:"id"`
-	AgentID   string            `json:"agentId"`
-	Name      string            `json:"name"`
-	BaseURL   string            `json:"baseUrl"`
-	HasToken  bool              `json:"hasToken"`
-	Models    map[string]string `json:"models"`
-	ExtraEnv  map[string]string `json:"extraEnv"`
+	ID       string            `json:"id"`
+	AgentID  string            `json:"agentId"`
+	Name     string            `json:"name"`
+	BaseURL  string            `json:"baseUrl"`
+	HasToken bool              `json:"hasToken"`
+	Models   map[string]string `json:"models"`
+	ExtraEnv map[string]string `json:"extraEnv"`
 
 	// Codex-specific (see EnvProfile for docs)
 	CodexProviderName  string `json:"codexProviderName,omitempty"`
@@ -141,15 +151,18 @@ type AgentSettingsFile struct {
 // thread. CreatedAt/UpdatedAt are epoch milliseconds, matching
 // orchestration.Event.CreatedAt — the source these are derived from.
 type AgentThread struct {
-	ID         string `json:"id"`
-	WorktreeID string `json:"worktreeId"`
-	InstanceID string `json:"instanceId"`
-	Title      string `json:"title"`
-	AgentID    string `json:"agentId"`
-	Model      string `json:"model"`
-	Status     string `json:"status"`
-	CreatedAt  int64  `json:"createdAt"`
-	UpdatedAt  int64  `json:"updatedAt"`
+	CharacterName string `json:"characterName"`
+	ArchivedAt    int64  `json:"archivedAt"`
+	Archiving     bool   `json:"archiving"`
+	ID            string `json:"id"`
+	WorktreeID    string `json:"worktreeId"`
+	InstanceID    string `json:"instanceId"`
+	Title         string `json:"title"`
+	AgentID       string `json:"agentId"`
+	Model         string `json:"model"`
+	Status        string `json:"status"`
+	CreatedAt     int64  `json:"createdAt"`
+	UpdatedAt     int64  `json:"updatedAt"`
 	// PlanReady mirrors the engine's live Thread.ProposedPlan != nil, the
 	// same overlay pattern Status already gets from withLiveStatus. There is
 	// no SQL column behind it — a stored copy of a rule the projector owns

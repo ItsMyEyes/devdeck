@@ -315,6 +315,9 @@ export function ModelPicker({ machine, worktreeAgentId, value, onChange, variant
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
+                {activeAgentId === 'antigravity' && agents.data?.find((agent) => agent.id === activeAgentId)?.detail && (
+                  <PickerNote tone="error">{agents.data.find((agent) => agent.id === activeAgentId)?.detail}</PickerNote>
+                )}
                 {agents.isLoading || models.isLoading ? (
                   <PickerNote>Loading models…</PickerNote>
                 ) : agents.error || models.error ? (

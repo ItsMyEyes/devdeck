@@ -59,7 +59,7 @@ func deleteConnectionRequest(id string) *http.Request {
 // left to stop them.
 func TestDeleteSSHConnectionStopsForwardsAndEvictsPool(t *testing.T) {
 	h, fwd, pool := newTestSSHHandlerWithFakes(t)
-	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestDeleteSSHConnectionUnknownIDIsHarmless(t *testing.T) {
 // both without DeleteConnection panicking.
 func TestDeleteSSHConnectionNilForwarderAndPoolDoesNotPanic(t *testing.T) {
 	h := newTestSSHHandler(t) // forwarder=nil, pool=nil
-	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestDeleteSSHConnectionNilForwarderAndPoolDoesNotPanic(t *testing.T) {
 // waiting out the pool's 10-minute idle TTL.
 func TestPatchSSHConnectionEvictsPool(t *testing.T) {
 	h, _, pool := newTestSSHHandlerWithFakes(t)
-	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestPatchSSHConnectionEvictsPool(t *testing.T) {
 // pooled transport dialed under the old pin must go too.
 func TestPostAcceptHostKeyEvictsPool(t *testing.T) {
 	h, _, pool := newTestSSHHandlerWithFakes(t)
-	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil)
+	conn, err := h.st.CreateSSHConnection("web", "", "h", 22, "u", "password", nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

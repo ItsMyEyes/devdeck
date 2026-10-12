@@ -119,7 +119,7 @@ export function filterSessions(threads: readonly AgentThread[], query: string): 
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return [...threads]
   return threads.filter((thread) => {
-    const haystack = (thread.title.trim() || UNTITLED_LABEL).toLowerCase()
+    const haystack = `${thread.characterName || ''} ${thread.title.trim() || UNTITLED_LABEL}`.toLowerCase()
     return terms.every((term) => haystack.includes(term))
   })
 }
@@ -137,7 +137,7 @@ function SessionRow({
   onDelete: () => void
   deleting: boolean
 }) {
-  const label = THREAD_STATUS_LABEL[thread.status] ?? thread.status
+  const label = thread.archivedAt ? 'Diakhiri' : thread.archiving ? 'Mengakhiri…' : THREAD_STATUS_LABEL[thread.status] ?? thread.status
   const color = THREAD_STATUS_COLOR[thread.status] ?? 'var(--devdeck-fg-2)'
   const title = thread.title.trim() || UNTITLED_LABEL
 
@@ -156,7 +156,7 @@ function SessionRow({
         title={title}
         className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 py-2 pr-8 pl-3 text-left"
       >
-        <span className="truncate text-[12.5px]">{title}</span>
+        <span className="truncate text-[12.5px]">{thread.characterName ? `${thread.characterName} · ${title}` : title}</span>
         <span className="flex items-center gap-1.5 text-[11px] text-devdeck-fg-2">
           <StatusDot color={color} size={6} />
           {label}

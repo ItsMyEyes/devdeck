@@ -1,0 +1,6 @@
+{"event":"init","conversation_id":"fixture-conversation","init":{"cwd":"/fixture/workspace","tools":["ask_permission","invoke_subagent","view_file"],"permission_mode":"request-review","expanded_commands":[{"name":"plan","type":"system"}]}}
+{"event":"step_update","step_update":{"conversation_id":"fixture-conversation","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"fixture-conversation","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"DEVDECK_ANTIG"}}
+{"event":"step_update","step_update":{"conversation_id":"fixture-conversation","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"RAVITY_OK"}}
+{"event":"step_update","step_update":{"conversation_id":"fixture-conversation","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"\n","duration_seconds":3.927545,"usage":{"input_tokens":12688,"output_tokens":173,"thinking_tokens":163,"cache_read_tokens":0,"total_tokens":12861}}}
+{"event":"result","result":{"conversation_id":"fixture-conversation","status":"SUCCESS","response":"DEVDECK_ANTIGRAVITY_OK\n","duration_seconds":4.250884,"num_turns":1,"usage":{"input_tokens":12688,"output_tokens":173,"thinking_tokens":163,"cache_read_tokens":0,"total_tokens":12861}}}

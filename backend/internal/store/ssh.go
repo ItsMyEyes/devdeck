@@ -7,12 +7,12 @@ import (
 	"devdeck/backend/internal/port"
 )
 
-const sshConnCols = `id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id, host_key_fingerprint`
+const sshConnCols = `id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id, host_key_fingerprint, parent_project`
 
 func scanSSHConnection(sc scanner) (domain.SSHConnection, error) {
 	var c domain.SSHConnection
 	var jump, executor, fingerprint sql.NullString
-	err := sc.Scan(&c.ID, &c.Name, &c.Group, &c.Host, &c.Port, &c.Username, &c.AuthType, &jump, &executor, &fingerprint)
+	err := sc.Scan(&c.ID, &c.Name, &c.Group, &c.Host, &c.Port, &c.Username, &c.AuthType, &jump, &executor, &fingerprint, &c.ParentProject)
 	if err != nil {
 		return c, err
 	}
@@ -60,10 +60,10 @@ func (s *Store) SSHConnectionByID(id string) (domain.SSHConnection, error) {
 
 // CreateSSHConnection saves a new SSH connection (secrets are stored
 // separately via UpsertSSHSecret).
-func (s *Store) CreateSSHConnection(name, group, host string, portNum int, username, authType string, jumpConnectionID, executorMachineID *string) (domain.SSHConnection, error) {
+func (s *Store) CreateSSHConnection(name, group, host string, portNum int, username, authType string, jumpConnectionID, executorMachineID *string, parentProject string) (domain.SSHConnection, error) {
 	id := idGen("sc-")
-	if _, err := s.db.Exec(`INSERT INTO ssh_connections (id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, name, group, host, portNum, username, authType, jumpConnectionID, executorMachineID); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO ssh_connections (id, name, group_name, host, port, username, auth_type, jump_connection_id, executor_machine_id, parent_project) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, name, group, host, portNum, username, authType, jumpConnectionID, executorMachineID, parentProject); err != nil {
 		return domain.SSHConnection{}, err
 	}
 	return s.SSHConnectionByID(id)
@@ -84,6 +84,7 @@ func (s *Store) UpdateSSHConnection(id string, p port.SSHConnectionPatch) (domai
 	if err := firstErr(
 		setStr(s.db, "ssh_connections", "name", id, p.Name),
 		setStr(s.db, "ssh_connections", "group_name", id, p.Group),
+		setStr(s.db, "ssh_connections", "parent_project", id, p.ParentProject),
 		setStr(s.db, "ssh_connections", "host", id, p.Host),
 		setInt(s.db, "ssh_connections", "port", id, p.Port),
 		setStr(s.db, "ssh_connections", "username", id, p.Username),

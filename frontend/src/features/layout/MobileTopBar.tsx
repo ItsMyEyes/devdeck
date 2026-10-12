@@ -7,6 +7,7 @@ import type { ModuleView } from '@/store/types'
 
 const VIEW_TITLE: Record<ModuleView, string> = {
   agents: 'Agents',
+  'agent-workspace': 'Agent Workspace 3D',
   ssh: 'SSH',
   machines: 'Runtimes',
   tools: 'Tools',

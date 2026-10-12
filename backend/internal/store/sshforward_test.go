@@ -8,7 +8,7 @@ import (
 
 func newForwardTestConnection(t *testing.T, s *Store) string {
 	t.Helper()
-	conn, err := s.CreateSSHConnection("web", "", "example.com", 22, "root", "password", nil, nil)
+	conn, err := s.CreateSSHConnection("web", "", "example.com", 22, "root", "password", nil, nil, "")
 	if err != nil {
 		t.Fatalf("CreateSSHConnection: %v", err)
 	}

@@ -1,4 +1,5 @@
 import {
+  Box,
   Cable,
   Database,
   Folder,
@@ -28,6 +29,7 @@ import type { TileTab } from '@/features/tabs/tileTree'
  */
 export const MODULE_ICON = {
   agents: LayoutGrid,
+  'agent-workspace': Box,
   machines: Server,
   ssh: Cable,
   browser: Globe,

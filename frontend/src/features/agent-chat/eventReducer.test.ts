@@ -15,6 +15,23 @@ function delta(seq: number, itemId: string, text: string, sequence: number, stre
 }
 
 describe('reduceAgentEvents', () => {
+  it('tracks the requested provider before native turn startup so switching cannot lose a draft', () => {
+    const view = reduceAgentEvents(emptyThreadView(), [{ seq:1, eventId:'request', type:'thread.turn-start-requested', threadId:'chat', commandId:'send', createdAt:1000, payload:{text:'hello',model:{instanceId:'antigravity:default',model:''}} }])
+    expect(view.status).toBe('running')
+    expect(view.turnAgent).toBe('antigravity')
+  })
+  it('retains the active provider through native init and resume cursor updates', () => {
+    const ev = (seq: number, type: string, payload: unknown): AgentEvent => ({seq, eventId:`event-${seq}`, type, threadId:'chat', commandId:`command-${seq}`, createdAt:1000, payload})
+    let view = emptyThreadView()
+    for (const event of [
+      ev(1,'thread.turn-start-requested',{model:{instanceId:'antigravity:default',model:''}}),
+      ev(2,'thread.activity-appended',{type:'turn.started',provider:'antigravity',payload:{model:''}}),
+      ev(3,'thread.session-set',{status:'running',resumeCursor:{conversationId:'agy'}}),
+    ]) view = reduceAgentEvents(view,[event])
+    expect(view.turnAgent).toBe('antigravity')
+    view = reduceAgentEvents(view,[ev(4,'thread.session-set',{status:'idle'})])
+    expect(view.turnAgent).toBeUndefined()
+  })
   it('appends deltas into a single assistant item', () => {
     const view = reduceAgentEvents(emptyThreadView(), [
       delta(1, 'i1', 'Hello ', 1),
@@ -1421,4 +1438,26 @@ describe('reduceAgentEvents — thread modes', () => {
     const again = reduceAgentEvents(first, [modeEvent(1, 'thread.runtime-mode-set', { mode: 'full-access' })])
     expect(again).toBe(first)
   })
+})
+
+it('archives only after confirmation, preserves messages, and resumes without a turn', () => {
+  const event = (seq: number, type: string): AgentEvent => ({ seq, type, threadId: "w-test", commandId: `c${seq}`, eventId: `e${seq}`, createdAt: seq * 1000 })
+  const original = reduceAgentEvents(emptyThreadView(), [delta(1, 'item', 'Retained answer', 1)])
+  const pending = reduceAgentEvents(original, [event(2, 'thread.archive-requested')])
+  expect(pending).toMatchObject({ archiving: true, archivedAt: 0 })
+  const ended = reduceAgentEvents(pending, [event(3, 'thread.archived')])
+  expect(ended).toMatchObject({ archiving: false, archivedAt: 3000, status: 'stopped', pendingApprovals: [], pendingUserInputs: [] })
+  expect(ended.items[0].text).toBe('Retained answer')
+  const late = reduceAgentEvents(ended, [{...event(4, 'thread.session-set'), payload: {status: 'running'}}])
+  expect(late.status).toBe('stopped')
+  const resumed = reduceAgentEvents(late, [event(5, 'thread.resumed')])
+  expect(resumed).toMatchObject({ archivedAt: 0, status: 'idle' })
+  expect(resumed.items).toEqual(ended.items)
+})
+
+it('retains Stop and turn status when ending a session fails', () => {
+ const event = (seq:number,type:string,payload?:unknown):AgentEvent=>({seq,type,payload,threadId:'w-test',commandId:`c${seq}`,eventId:`e${seq}`,createdAt:seq*1000})
+ const view=reduceAgentEvents(emptyThreadView(),[event(1,'thread.turn-start-requested'),event(2,'thread.archive-requested'),event(3,'thread.activity-appended',{kind:'runtime.error',message:'interrupt failed'}),event(4,'thread.archive-failed')])
+ expect(view).toMatchObject({status:'running',archivedAt:0,archiving:false})
+ expect(view.items.at(-1)?.text).toBe('interrupt failed')
 })

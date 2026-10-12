@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { useNativeOverlayBlocker } from '@/features/browser/useNativeOverlayBlocker'
 
 interface ComboboxProps {
+  id?: string
   value: string
   onChange: (value: string) => void
   options: string[]
@@ -17,7 +18,7 @@ interface ComboboxProps {
  *  is already a valid value, same as the plain `<Input>` this replaces. The
  *  dropdown is purely for discoverability (pick an existing group instead of
  *  retyping it and risking a typo-forked duplicate). */
-export function Combobox({ value, onChange, options, placeholder, disabled, className }: ComboboxProps) {
+export function Combobox({ id, value, onChange, options, placeholder, disabled, className }: ComboboxProps) {
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -67,6 +68,7 @@ export function Combobox({ value, onChange, options, placeholder, disabled, clas
   return (
     <div ref={rootRef} className={cn('relative', className)}>
       <Input
+        id={id}
         value={value}
         disabled={disabled}
         onChange={(e) => {

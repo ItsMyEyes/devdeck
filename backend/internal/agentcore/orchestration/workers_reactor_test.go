@@ -92,6 +92,7 @@ type fakeAdapter struct {
 
 	mu                   sync.Mutex
 	failSendTurn         bool
+	failStopSession      bool
 	sessionDead          bool
 	startSessionInputs   []provider.SessionStartInput
 	sendTurnCalls        []provider.SendTurnInput
@@ -220,6 +221,9 @@ func (a *fakeAdapter) StopSession(context.Context, string) error {
 	a.rec.record("StopSession")
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.failStopSession {
+		return errors.New("provider stop failed")
+	}
 	a.sessionDead = true
 	return nil
 }
@@ -972,5 +976,90 @@ func TestReactorReassertsRuntimeModeWhenLeavingPlanMode(t *testing.T) {
 	}
 	if calls[1].threadID != "w-abc" || calls[1].mode != provider.ModeFullAccess {
 		t.Fatalf("call = %+v, want {threadID: w-abc, mode: full-access}", calls[1])
+	}
+}
+
+func TestReactorArchiveStopsAndResumeDoesNotProvision(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustJSON(map[string]any{"instanceId": "fake:default"}))
+	waitFor(t, func() bool { return len(h.adapter.startInputs()) > 0 })
+	h.dispatch(t, "w-abc", CmdThreadArchive, nil)
+	waitFor(t, func() bool { return h.engine.State().Threads["w-abc"].ArchivedAt > 0 })
+	starts := len(h.adapter.startInputs())
+	h.dispatch(t, "w-abc", CmdThreadResume, nil)
+	if h.engine.State().Threads["w-abc"].TurnInFlight || len(h.adapter.startInputs()) != starts {
+		t.Fatal("resume started provider")
+	}
+	found := false
+	for _, call := range h.rec.snapshot() {
+		if call == "StopSession" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("archive did not stop provider")
+	}
+}
+func TestArchiveOnRestartWithoutProviderAndPendingArchiveRecovery(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		events := []Event{officeEvent(1, EvtThreadCreated, `{}`)}
+		if pending {
+			events = append(events, officeEvent(2, EvtThreadArchiveRequested, `{}`))
+		}
+		h := newReactorHarnessWithState(t, noopBrokerFn, Apply(NewState(), events))
+		defer h.cancel()
+		if pending {
+			if _, err := ReconcileOrphanedThreads(context.Background(), h.engine, func() string { return "recover" }); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			h.dispatch(t, "w-1", CmdThreadArchive, nil)
+		}
+		waitFor(t, func() bool { return h.engine.State().Threads["w-1"].ArchivedAt > 0 })
+		if len(h.rec.snapshot()) > 0 {
+			t.Fatal("archive without provider started work")
+		}
+	}
+}
+
+func TestReactorArchiveStopFailureKeepsSession(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustJSON(map[string]any{"instanceId": "fake:default"}))
+	waitFor(t, func() bool { return len(h.adapter.startInputs()) > 0 })
+	h.adapter.mu.Lock()
+	h.adapter.failStopSession = true
+	h.adapter.mu.Unlock()
+	h.dispatch(t, "w-abc", CmdThreadArchive, nil)
+	waitFor(t, func() bool {
+		return !h.engine.State().Threads["w-abc"].Archiving
+	})
+	if h.engine.State().Threads["w-abc"].ArchivedAt != 0 || !h.adapter.HasSession("w-abc") {
+		t.Fatal("failed stop archived a live provider")
+	}
+}
+
+func TestReactorArchiveInterruptsWorkBeforeStoppingSession(t *testing.T) {
+	h := newReactorHarness(t, noopBrokerFn)
+	defer h.cancel()
+	h.dispatch(t, "w-abc", CmdThreadCreate, mustJSON(map[string]any{"instanceId": "fake:default"}))
+	waitFor(t, func() bool { return len(h.adapter.startInputs()) > 0 })
+	h.dispatch(t, "w-abc", CmdThreadTurnStart, mustJSON(map[string]any{"text": "work"}))
+	waitFor(t, func() bool { return len(h.adapter.turnCalls()) > 0 })
+	h.dispatch(t, "w-abc", CmdThreadArchive, nil)
+	waitFor(t, func() bool { return h.engine.State().Threads["w-abc"].ArchivedAt > 0 })
+	calls := h.rec.snapshot()
+	interrupt, stop := -1, -1
+	for i, call := range calls {
+		if call == "InterruptTurn" {
+			interrupt = i
+		}
+		if call == "StopSession" {
+			stop = i
+		}
+	}
+	if interrupt < 0 || stop <= interrupt {
+		t.Fatalf("archive must interrupt remote work before unsubscribing: %v", calls)
 	}
 }

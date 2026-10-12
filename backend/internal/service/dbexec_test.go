@@ -29,7 +29,7 @@ func TestDescriptorIncludesTunnelCredentialsWithFingerprint(t *testing.T) {
 	secrets := NewDBSecretService(st, testMasterKey(t))
 	svc := NewDBExecService(st, secrets)
 
-	ssh, _ := st.CreateSSHConnection("bastion", "", "b.example.com", 22, "u", "password", nil, nil)
+	ssh, _ := st.CreateSSHConnection("bastion", "", "b.example.com", 22, "u", "password", nil, nil, "")
 	pinned := "SHA256:pinned"
 	_ = st.SetSSHHostKey(ssh.ID, &pinned)
 	tunnelID := ssh.ID
@@ -53,7 +53,7 @@ func TestDescriptorRejectsTunnelWithoutPinnedHostKey(t *testing.T) {
 	st := newTestStore(t)
 	svc := NewDBExecService(st, NewDBSecretService(st, testMasterKey(t)))
 
-	ssh, _ := st.CreateSSHConnection("bastion", "", "b.example.com", 22, "u", "password", nil, nil)
+	ssh, _ := st.CreateSSHConnection("bastion", "", "b.example.com", 22, "u", "password", nil, nil, "")
 	tunnelID := ssh.ID
 	c, _ := st.CreateDBConnection("c", "", "postgres", "h", 5432, "u", "d", "verify-full", nil, &tunnelID, false)
 

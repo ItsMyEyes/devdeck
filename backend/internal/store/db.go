@@ -756,6 +756,8 @@ func migrateAgentThreadColumns(db *sql.DB) error {
 		"model TEXT NOT NULL DEFAULT ''",
 		"updated_at INTEGER NOT NULL DEFAULT 0",
 		"status TEXT NOT NULL DEFAULT ''",
+		"character_name TEXT NOT NULL DEFAULT ''",
+		"archived_at INTEGER NOT NULL DEFAULT 0",
 	}
 	for _, col := range cols {
 		if _, err := db.Exec("ALTER TABLE agent_thread ADD COLUMN " + col); err != nil {
@@ -767,7 +769,7 @@ func migrateAgentThreadColumns(db *sql.DB) error {
 	if _, err := db.Exec("UPDATE agent_thread SET updated_at = created_at WHERE updated_at = 0"); err != nil {
 		return err
 	}
-	return nil
+	return backfillCharacterNames(db)
 }
 
 // migrateInvoiceColumns adds columns introduced after the initial invoices
@@ -856,6 +858,9 @@ func migrateMachineColumns(db *sql.DB) error {
 // migrateSSHConnectionColumns adds group_name (introduced when the SSH page
 // gained host grouping) to pre-existing databases.
 func migrateSSHConnectionColumns(db *sql.DB) error {
+	if _, err := db.Exec("ALTER TABLE ssh_connections ADD COLUMN parent_project TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
 	if _, err := db.Exec("ALTER TABLE ssh_connections ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return err

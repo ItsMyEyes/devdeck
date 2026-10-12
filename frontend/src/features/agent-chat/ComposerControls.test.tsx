@@ -58,6 +58,24 @@ function baseProps(overrides: Partial<ComposerControlsProps> = {}): ComposerCont
 }
 
 describe('ComposerControls — wired to real commands', () => {
+  it('offers native agy permissions and effort without unsupported context controls', async () => {
+    const setRuntimeMode = vi.fn()
+    render(<ComposerControls {...baseProps({
+      model: { agentId: 'antigravity', modelId: '', modelName: 'CLI default' },
+      runtimeMode: 'auto', setRuntimeMode,
+      chatCapabilities: { runtimeModes: ['auto', 'full-access'], attachments: false, nativeApprovals: false, contextWindow: false, optionsApplyNextTurn: true },
+    })} />)
+    expect(screen.getByRole('button', { name: 'Native agy' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Context window:/ })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Native agy' }))
+    expect(screen.queryByRole('button', { name: /^Approval required/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Auto-accept edits/ })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^Full access/ }))
+    expect(setRuntimeMode).toHaveBeenCalledWith('full-access')
+    await userEvent.click(screen.getByRole('button', { name: 'High' }))
+    expect(screen.queryByText('Context Window')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ultrathink' })).not.toBeInTheDocument()
+  })
   it('renders every control with its current label', () => {
     render(<ComposerControls {...baseProps()} />)
     expect(screen.getByRole('button', { name: 'Sonnet 5' })).toBeInTheDocument()

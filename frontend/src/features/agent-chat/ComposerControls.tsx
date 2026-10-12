@@ -49,7 +49,7 @@ import { ModelPicker } from '@/features/agent-chat/ModelPicker'
 import type { ModelChoice } from '@/features/agent-chat/ModelPicker'
 import type { InteractionMode, RuntimeMode } from '@/features/agent-chat/useAgentChatSocket'
 import { tourAnchor, type TourAnchor } from '@/features/tour/tourAnchors'
-import type { Machine } from '@/store/types'
+import type { AgentChatCapabilities, Machine } from '@/store/types'
 
 /** Keeps a pill's tour anchor on the row that is really on screen. This row
  *  renders twice — once inline, once inside the "More controls" popup below
@@ -93,6 +93,11 @@ export const PERMISSION_OPTIONS: PermissionOption[] = [
   { value: 'auto-accept-edits', label: 'Auto-accept edits', description: 'Auto-approve edits, ask before other actions.', icon: Pencil },
   { value: 'auto', label: 'Auto', description: 'Supported providers approve routine actions; others still ask.', icon: Sparkles },
   { value: 'full-access', label: 'Full access', description: 'Allow commands and edits without prompts.', icon: LockOpen },
+]
+
+const ANTIGRAVITY_PERMISSIONS: PermissionOption[] = [
+  { value: 'auto', label: 'Native agy', description: 'Use agy permissions. Actions requiring native approval are denied with a message.', icon: Lock },
+  PERMISSION_OPTIONS[3],
 ]
 
 /** Kept for the one caller still importing the flat option list directly
@@ -180,6 +185,7 @@ export function formatTokenCount(tokens: number): string {
 }
 
 export interface ComposerControlsProps {
+  chatCapabilities?: AgentChatCapabilities
   /** The picked agent + model, or null to run the worktree's own default.
    *  Replaces the old `model: string` over a hardcoded four-id list, which
    *  never reached the backend at all. */
@@ -354,17 +360,19 @@ function PermissionPicker({
   dispatch,
   error,
   variant,
+  options = PERMISSION_OPTIONS,
 }: {
   value: RuntimeMode
   dispatch: (mode: RuntimeMode) => void
   error: string | null
   variant: 'inline' | 'menu'
+  options?: PermissionOption[]
 }) {
   const { open, setOpen, displayed, choose } = usePillState(value, dispatch, error)
   const popupRef = useRef<HTMLDivElement>(null)
   useNativeOverlayBlocker(open, popupRef)
 
-  const active = PERMISSION_OPTIONS.find((option) => option.value === displayed) ?? PERMISSION_OPTIONS[0]
+  const active = options.find((option) => option.value === displayed) ?? options[0]
 
   return (
     <PillWrap variant={variant} anchor={inlineOnly(variant, tourAnchor('chat-permission'))}>
@@ -377,7 +385,7 @@ function PermissionPicker({
         <Popover.Portal>
           <Popover.Positioner side="bottom" align="start" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
             <Popover.Popup ref={popupRef} className={cn('flex w-72 flex-col gap-0.5 p-1.5', POPUP_SURFACE)}>
-              {PERMISSION_OPTIONS.map((option) => (
+              {options.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -415,12 +423,16 @@ function EffortContextPicker({
   contextWindow,
   onContextWindowChange,
   variant,
+  supportsContextWindow = true,
+  antigravity = false,
 }: {
   effort: string
   onEffortChange: (effort: string) => void
   contextWindow: string
   onContextWindowChange: (contextWindow: string) => void
   variant: 'inline' | 'menu'
+  supportsContextWindow?: boolean
+  antigravity?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const popupRef = useRef<HTMLDivElement>(null)
@@ -448,14 +460,14 @@ function EffortContextPicker({
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger render={<ComposerControl className={variant === 'menu' ? 'w-full justify-start' : undefined} />}>
           <ComposerControlIcon icon={Gauge} />
-          {effortLabel} · {windowLabel}
+          {effortLabel}{supportsContextWindow ? ` · ${windowLabel}` : ''}
           <ComposerControlChevron />
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Positioner side="bottom" align="start" sideOffset={6} style={{ zIndex: 60 }} className="outline-none">
             <Popover.Popup ref={popupRef} className={cn('w-60 p-1.5', POPUP_SURFACE)}>
               <div className="px-2.5 pt-1.5 pb-1 text-[11px] tracking-wide text-devdeck-fg-2 uppercase">Reasoning</div>
-              {REASONING_OPTIONS.map((option) => (
+              {REASONING_OPTIONS.filter((option) => !antigravity || option.value !== 'ultrathink').map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -475,6 +487,7 @@ function EffortContextPicker({
                 </button>
               ))}
 
+              {supportsContextWindow && <>
               <div aria-hidden="true" className="my-1.5 h-px bg-devdeck-hairline" />
 
               <div className="px-2.5 pt-1 pb-1 text-[11px] tracking-wide text-devdeck-fg-2 uppercase">Context Window</div>
@@ -533,6 +546,7 @@ function EffortContextPicker({
                 </span>
                 <Check aria-hidden="true" className={cn('size-3.5 flex-none', isCustomWindow ? 'opacity-100' : 'opacity-0')} />
               </label>
+              </>}
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>
@@ -648,8 +662,11 @@ export function ComposerControls({
   runtimeMode,
   setRuntimeMode,
   error,
+  chatCapabilities,
   variant = 'inline',
 }: ComposerControlsProps) {
+  const antigravity = (model?.agentId ?? worktreeAgentId) === 'antigravity'
+  const supportsContextWindow = chatCapabilities?.contextWindow ?? !antigravity
   return (
     <>
       <PillWrap variant={variant} first shrink anchor={inlineOnly(variant, tourAnchor('chat-model'))}>
@@ -667,9 +684,11 @@ export function ComposerControls({
         contextWindow={contextWindow}
         onContextWindowChange={onContextWindowChange}
         variant={variant}
+        supportsContextWindow={supportsContextWindow}
+        antigravity={antigravity}
       />
-      <PermissionPicker value={runtimeMode} dispatch={setRuntimeMode} error={error} variant={variant} />
-      <ContextWindowIndicator contextTokens={contextTokens} contextWindow={contextWindow} variant={variant} />
+      <PermissionPicker value={runtimeMode} dispatch={setRuntimeMode} error={error} variant={variant} options={antigravity ? ANTIGRAVITY_PERMISSIONS : PERMISSION_OPTIONS} />
+      {supportsContextWindow && <ContextWindowIndicator contextTokens={contextTokens} contextWindow={contextWindow} variant={variant} />}
     </>
   )
 }
