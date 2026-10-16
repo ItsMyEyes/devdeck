@@ -1,3 +1,4 @@
+import OfficeFace from '@/features/agent-workspace/OfficeFace'
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { MathUtils, Quaternion, Vector3 } from 'three'
@@ -161,6 +162,8 @@ export default function OfficeCharacter({
                 at={[0, -0.005, -0.08]}
                 size={[0.19, 0.13, 0.32]}
                 color="#29343d"
+                soft
+                shadow
               />
             </group>
           </group>
@@ -176,7 +179,14 @@ export default function OfficeCharacter({
           soft
         />
         <group ref={ref('head')} position={[0, 0.75, 0]}>
-          <Block at={[0, 0, 0]} size={[0.25, 0.29, 0.23]} color={skin} round />
+          <Block
+            at={[0, 0, 0]}
+            size={[0.27, 0.3, 0.25]}
+            color={skin}
+            soft
+            shadow
+          />
+          <OfficeFace actor={actor} seed={h} reduced={reduced} />
           <Block
             at={[0, 0.16, 0.035]}
             size={[0.27, 0.18, 0.25]}
@@ -186,13 +196,13 @@ export default function OfficeCharacter({
           {profile.accessory === 1 && (
             <>
               <Block
-                at={[-0.08, 0.025, -0.22]}
-                size={[0.13, 0.085, 0.025]}
+                at={[-0.08, 0.025, -0.135]}
+                size={[0.095, 0.065, 0.014]}
                 color="#59656b"
               />
               <Block
-                at={[0.08, 0.025, -0.22]}
-                size={[0.13, 0.085, 0.025]}
+                at={[0.08, 0.025, -0.135]}
+                size={[0.095, 0.065, 0.014]}
                 color="#59656b"
               />
             </>
@@ -205,14 +215,6 @@ export default function OfficeCharacter({
               round
             />
           )}
-          {[-1, 1].map((n) => (
-            <Block
-              key={n}
-              at={[n * 0.083, 0.02, -0.215]}
-              size={[0.028, 0.035, 0.022]}
-              color="#333638"
-            />
-          ))}
         </group>
         {[0, 1].map((i) => (
           <group

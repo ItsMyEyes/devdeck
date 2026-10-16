@@ -803,6 +803,12 @@
 .office-child-compact-name {
   display: none;
 }
+.office-label.is-dot {
+  padding: 2px;
+  gap: 0;
+  border-radius: 50%;
+  min-width: 0;
+}
 .office-label:hover .office-child-compact-name,
 .office-label:focus-visible .office-child-compact-name {
   display: inline;
