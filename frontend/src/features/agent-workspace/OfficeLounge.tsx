@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
+import Html from '@/features/agent-workspace/OfficeHtml'
 import type { Group } from 'three'
 import {
   Block,
@@ -100,19 +100,19 @@ export default function OfficeLounge({
               <Block
                 at={[0, 0.42, -0.22]}
                 size={[3, 0.36, 1.2]}
-                color={accent}
+                color={accent} surface="fabric" soft
               />
               <Block
                 at={[0, 0.86, -0.73]}
                 size={[3, 0.65, 0.2]}
-                color={accent}
+                color={accent} surface="fabric" soft
               />
               {[-1.4, 1.4].map((x) => (
                 <Block
                   key={x}
                   at={[x, 0.7, -0.22]}
                   size={[0.2, 0.65, 1.2]}
-                  color={accent}
+                  color={accent} surface="fabric" soft
                 />
               ))}
               <Block
@@ -141,7 +141,7 @@ export default function OfficeLounge({
               <Block
                 at={[0, 0.44, -0.85]}
                 size={[1.5, 0.88, 0.7]}
-                color="#aa8f70"
+                color="#aa8f70" surface="wood" soft
               />
               <Block
                 at={[0, 0.9, -0.85]}
@@ -208,12 +208,12 @@ export default function OfficeLounge({
               <Block
                 at={[0, 0.48, 0]}
                 size={[0.75, 0.12, 0.7]}
-                color={accent}
+                color={accent} surface="fabric" soft
               />
               <Block
                 at={[0, 0.9, 0.3]}
                 size={[0.75, 0.7, 0.12]}
-                color={accent}
+                color={accent} surface="fabric" soft
               />
               <Block
                 at={[0, 0.24, 0]}
@@ -223,7 +223,7 @@ export default function OfficeLounge({
               <Block
                 at={[0.55, 0.9, -0.35]}
                 size={[0.7, 0.06, 0.65]}
-                color="#aa8f70"
+                color="#aa8f70" surface="wood" soft
               />
               <RestingProp slot={slot} world={world} />
             </>
