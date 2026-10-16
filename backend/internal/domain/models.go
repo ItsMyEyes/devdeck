@@ -710,14 +710,20 @@ type TelegramBinding struct {
 }
 
 // Office DTOs mirror frontend/src/store/types.ts. No transcripts or credentials.
+type OfficeWork struct {
+	Kind        string `json:"kind"`
+	ActiveCount int    `json:"activeCount"`
+	Coverage    string `json:"coverage"`
+}
 type OfficeSubagent struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Role      string `json:"role"`
-	Status    string `json:"status"`
-	Activity  string `json:"activity"`
-	Tokens    *int64 `json:"tokens,omitempty"`
-	UpdatedAt int64  `json:"updatedAt"`
+	Work      OfficeWork `json:"work,omitzero"`
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	Role      string     `json:"role"`
+	Status    string     `json:"status"`
+	Activity  string     `json:"activity"`
+	Tokens    *int64     `json:"tokens,omitempty"`
+	UpdatedAt int64      `json:"updatedAt"`
 }
 type OfficeActivity struct {
 	ID        string `json:"id"`
@@ -726,6 +732,7 @@ type OfficeActivity struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 type OfficeSession struct {
+	Work          OfficeWork       `json:"work,omitzero"`
 	CharacterName string           `json:"characterName"`
 	ArchivedAt    int64            `json:"archivedAt"`
 	Archiving     bool             `json:"archiving"`

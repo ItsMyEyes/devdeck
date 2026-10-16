@@ -575,7 +575,13 @@ export interface OverlayBlockerRect {
 export type OverlayBlockerRegion = OverlayBlockerRect | 'viewport'
 
 /** Mirrors the Office DTOs in backend/internal/domain/models.go. */
+export interface OfficeWork {
+  kind: 'generic' | 'tool' | 'command' | 'file_change'
+  activeCount: number
+  coverage: 'turn_only' | 'item_lifecycle'
+}
 export interface OfficeSubagent {
+  work?: OfficeWork
   id: string
   title: string
   role: string
@@ -591,6 +597,7 @@ export interface OfficeActivity {
   createdAt: number
 }
 export interface OfficeSession {
+  work?: OfficeWork
   characterName?: string
   archivedAt?: number
   archiving?: boolean

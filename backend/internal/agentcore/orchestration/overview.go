@@ -9,14 +9,16 @@ import (
 
 // OfficeProjection retains metadata only; the durable event log remains the source.
 type OfficeProjection struct {
-	Agent     string
-	Model     string
-	Failed    bool
-	Activity  string
-	UpdatedAt int64
-	Pending   map[string]string
-	Subagents map[string]domain.OfficeSubagent
-	Recent    []domain.OfficeActivity
+	Work       domain.OfficeWork
+	operations map[string]*officeOperations
+	Agent      string
+	Model      string
+	Failed     bool
+	Activity   string
+	UpdatedAt  int64
+	Pending    map[string]string
+	Subagents  map[string]domain.OfficeSubagent
+	Recent     []domain.OfficeActivity
 }
 
 func (t *Thread) OfficeStatus() string {
@@ -37,6 +39,7 @@ func (t *Thread) OfficeStatus() string {
 
 func cloneOffice(p OfficeProjection) OfficeProjection {
 	out := p
+	out.operations = cloneOperations(p.operations)
 	if p.Pending != nil {
 		out.Pending = make(map[string]string, len(p.Pending))
 	}
@@ -63,6 +66,7 @@ func officeLabel(s string) string {
 
 func projectOffice(t *Thread, e Event) {
 	p := &t.Overview
+	projectOfficeWork(t, e)
 	activity := ""
 	agentID := ""
 	switch e.Type {

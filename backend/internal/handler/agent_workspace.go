@@ -56,6 +56,7 @@ func (h *AgentThreadHandler) GetWorkspaceOverview(w http.ResponseWriter, r *http
 				item.Archiving = t.Archiving
 				item.TurnInFlight = t.TurnInFlight
 				item.PlanReady = t.ProposedPlan != nil
+				item.Work = t.Overview.Work
 				item.Activity = t.Overview.Activity
 				if t.Overview.Agent != "" {
 					item.Agent = t.Overview.Agent
