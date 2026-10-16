@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { ComponentRef } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { Vector3, MOUSE, TOUCH } from 'three'
-import { applyCameraAction } from '@/features/agent-workspace/camera'
+import { Vector3, MOUSE, TOUCH, PerspectiveCamera } from 'three'
+import {
+  applyCameraAction,
+  officeCameraOffset,
+} from '@/features/agent-workspace/camera'
 import type { OfficeView } from '@/features/agent-workspace/model'
 
 const noop = () => {}
@@ -12,6 +15,7 @@ export default function OfficeCamera({
   view,
   center,
   span,
+  bounds,
   far,
   reset,
   selected,
@@ -29,6 +33,7 @@ export default function OfficeCamera({
   view: OfficeView
   center: [number, number, number]
   span: number
+  bounds?: [number, number, number]
   far?: number
   reset: number
   selected?: [number, number, number]
@@ -107,8 +112,8 @@ export default function OfficeCamera({
       /* Optional preference. */
     }
   }, [camera, workspaceId, view])
-  const defaults = useRef({ center, span })
-  defaults.current = { center, span }
+  const defaults = useRef({ center, span, bounds })
+  defaults.current = { center, span, bounds }
   const lastReset = useRef(reset)
   useEffect(() => {
     const resetting = lastReset.current !== reset
@@ -116,13 +121,17 @@ export default function OfficeCamera({
     if (resetting) onFollowChange(false)
     const c = controls.current
     if (!c) return
-    const { center, span } = defaults.current
+    const { center, span, bounds } = defaults.current
     const target = new Vector3(...center)
     camera.position.set(
       target.x + span * 0.8,
       target.y + span * 0.9,
       target.z + span * 0.8,
     )
+    if (bounds && camera instanceof PerspectiveCamera)
+      camera.position
+        .copy(target)
+        .add(officeCameraOffset(bounds, camera.fov, camera.aspect))
     c.target.copy(target)
     try {
       const saved = JSON.parse(
@@ -181,7 +190,7 @@ export default function OfficeCamera({
     lastAction.current = action.id
     onFollowChange(false)
     if (['overview', 'desk', 'lounge'].includes(action.type)) {
-      const { center, span } = defaults.current
+      const { center, span, bounds } = defaults.current
       const point =
         action.type === 'desk'
           ? getSelected
@@ -199,6 +208,14 @@ export default function OfficeCamera({
           point[1] + distance * 0.9,
           point[2] + distance * 0.8,
         )
+        if (
+          action.type === 'overview' &&
+          bounds &&
+          camera instanceof PerspectiveCamera
+        )
+          camera.position
+            .fromArray(point)
+            .add(officeCameraOffset(bounds, camera.fov, camera.aspect))
       }
     } else applyCameraAction(camera, c.target, action.type)
     c.update()

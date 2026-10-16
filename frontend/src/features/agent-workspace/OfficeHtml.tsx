@@ -40,9 +40,13 @@ type Entry = {
   leader?: HTMLElement
 }
 const registries = new WeakMap<HTMLElement, Set<Entry>>()
+export function officeLabelsFor(host: HTMLElement) {
+  if (!registries.has(host)) registries.set(host, new Set())
+  return registries.get(host)!
+}
 let nextId = 0
 export function OfficeLabelManager({ view }: { view: OfficeView }) {
-  const { gl, camera, size, scene } = useThree()
+  const { gl, camera, size, scene, frameloop } = useThree()
   const time = useRef(1),
     structures = useRef<Object3D[]>([]),
     refresh = useRef(1)
@@ -55,7 +59,7 @@ export function OfficeLabelManager({ view }: { view: OfficeView }) {
   useFrame((_, delta) => {
     time.current += Math.min(delta, 0.1)
     refresh.current += Math.min(delta, 0.1)
-    if (time.current < 0.08) return
+    if (frameloop === 'always' && time.current < 0.08) return
     time.current = 0
     const host = gl.domElement.parentElement
     const entries = host && registries.get(host)
@@ -75,7 +79,7 @@ export function OfficeLabelManager({ view }: { view: OfficeView }) {
       const { element, group, priority, kind } = entry
       group.getWorldPosition(v.point)
       const distance = v.origin.distanceTo(v.point)
-      let hidden = view === 'building' && kind === 'zone'
+      let hidden = view === 'building' && kind === 'zone' && priority < 2
       if (!hidden && priority === 0 && structures.current.length) {
         v.direction.subVectors(v.point, v.origin).normalize()
         v.ray.set(v.origin, v.direction)
@@ -170,7 +174,7 @@ export default function OfficeHtml({
       center,
     }
     entry.current = item
-    registries.get(host)!.add(item)
+    officeLabelsFor(host).add(item)
     invalidate()
     return () => {
       registries.get(host)?.delete(item)

@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { PerspectiveCamera, Vector3 } from 'three'
-import { applyCameraAction } from '@/features/agent-workspace/camera'
+import {
+  applyCameraAction,
+  officeCameraOffset,
+} from '@/features/agent-workspace/camera'
 
 describe('office camera movement', () => {
+  it('frames both floors and lounge without clipping corners in a narrow workspace viewport', () => {
+    const camera = new PerspectiveCamera(38, 1.27, 0.1, 1000)
+    camera.position.copy(
+      officeCameraOffset([21, 8.5, 29], camera.fov, camera.aspect),
+    )
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
+    for (const x of [-10.5, 10.5])
+      for (const y of [-4.25, 4.25])
+        for (const z of [-14.5, 14.5]) {
+          const point = new Vector3(x, y, z).project(camera)
+          expect(Math.abs(point.x)).toBeLessThanOrEqual(0.91)
+          expect(Math.abs(point.y)).toBeLessThanOrEqual(0.91)
+        }
+  })
   it('slides right without changing camera height, viewing angle or zoom', () => {
     const camera = new PerspectiveCamera()
     camera.position.set(0, 6, 8)

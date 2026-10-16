@@ -173,6 +173,7 @@ export function Desk({
           <meshStandardMaterial color="#e6daca" />
         </mesh>
         <Chair x={0} z={deskShape.seatZ} />
+        <Block at={[0.34, 0.989, -0.38]} size={[0.018, 0.012, 0.28]} color="#35424b" />
         {profile.desk === 1 && (
           <Block
             at={[-0.7, 1.02, -0.3]}

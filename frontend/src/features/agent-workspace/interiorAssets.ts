@@ -21,7 +21,7 @@ export const furnitureAnchors = {
   },
   chair: {
     sourceHeight: 0.6076,
-    sourceSeat: 0.329,
+    sourceSeat: 0.2335,
     targetSeat: chairShape.seatHeight + 0.07,
     rotation: Math.PI,
   },

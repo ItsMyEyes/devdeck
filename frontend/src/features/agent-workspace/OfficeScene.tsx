@@ -634,7 +634,7 @@ function Interior({
         >
           <Block
             at={[0, 0.5, 0]}
-            size={[0.9, 1, 2.4]}
+            size={[0.9, 1, 1.5]}
             color={dark ? '#69736e' : '#c1b7a3'}
           />
         </FurnitureModel>
@@ -753,7 +753,7 @@ export default function OfficeScene(props: Props) {
     depth = maxZ - minZ + 2
   const center: [number, number, number] = [
     (minX + maxX) / 2,
-    props.view === 'devops' ? 5 : props.view === 'building' ? 2.5 : 0,
+    props.view === 'devops' ? 6.2 : props.view === 'building' ? 3.6 : 1.2,
     (minZ + maxZ) / 2,
   ]
   const worlds = useRef<{ workspace: string; floors: ActivityWorld[] } | null>(
@@ -910,6 +910,7 @@ export default function OfficeScene(props: Props) {
           span={
             Math.max(width, depth) * (props.view === 'building' ? 0.92 : 0.78)
           }
+          bounds={[width, props.view === 'building' ? 8.5 : 3.4, depth]}
           reset={props.reset}
           selected={selected}
           action={action}

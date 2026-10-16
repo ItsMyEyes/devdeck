@@ -130,6 +130,7 @@ export class FurnitureRegistry {
           geometry.applyMatrix4(object.matrixWorld)
           if (id === 'chair' || id === 'sofa') {
             const positions = geometry.getAttribute('position')
+            const sourceNormals = geometry.getAttribute('normal').clone()
             const contact = furnitureAnchors[id]
             const seat =
               (contact.sourceSeat / contact.sourceHeight) * first.size[1]
@@ -146,6 +147,24 @@ export class FurnitureRegistry {
               )
             }
             geometry.computeVertexNormals()
+            const normals = geometry.getAttribute('normal')
+            for (let i = 0; i < normals.count; i++) {
+              // Thin source seams can collapse during seat fitting. Preserve
+              // their valid source normal instead of sending normalize(0) to
+              // hemisphere lighting, whose NaN output spreads through bloom.
+              if (
+                normals.getX(i) ** 2 +
+                  normals.getY(i) ** 2 +
+                  normals.getZ(i) ** 2 <
+                1e-12
+              )
+                normals.setXYZ(
+                  i,
+                  sourceNormals.getX(i),
+                  sourceNormals.getY(i),
+                  sourceNormals.getZ(i),
+                )
+            }
           }
           const sourceMaterial = object.material as MeshStandardMaterial
           const color = sourceMaterial.color.clone()
