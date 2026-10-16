@@ -171,3 +171,36 @@ Final-source capacity runs on Developer, Garden/day/light, Auto: each used 20 pa
 | Mixed parents + running children | 45.57–57.54 | 46.16–58.91 | 49.75–56.15 |
 
 All 36 additional five-second windows passed 30 FPS, including zoom/rotation during the mixed run; Auto used Low/Balanced/High as recorded. Together with the original controlled runs, all 90 windows passed. The final source was verified again with the complete frontend suite: **208 files / 2,323 tests**, plus typecheck and production build.
+
+
+## Kantor AI city exterior — 2026-10-16
+
+Both previous Garden/City variants are replaced with a direct procedural port from [kangkungmozzarella/kantor-ai](https://github.com/kangkungmozzarella/kantor-ai), pinned to `1bc084b682519c8a436ac255b205d77e6618e696`, exterior/traffic in `public/office.js`. The MIT notice is included in root `THIRD_PARTY_NOTICES.md` and `frontend/public/third-party-notices.txt`, which ships with the SPA. The installed Three.js is used without a CDN or new dependency.
+
+The source circular base, lawn, crossing streets, sidewalks, driveway, lane marks, crossings, pastel buildings, layered trees, cars/buses/bikes, clouds and birds retain their dimensions, palette and seeded construction. Independently executing the pinned source generator and comparing JSON confirmed identical data for all 64 buildings, 292 trees, 20 vehicles and eight birds. Twelve clouds retain their seeded four-puff models and movement. Shared instanced geometries and consolidated outline buffers replace the reference's separate draw calls.
+
+The complete floor/lounge bounds determine one uniform transform with four units of clearance inside the source office envelope. A 90-degree rotation is selected when it aligns the long footprint with a smaller scale; there is no nonuniform stretching. Every view uses the same combined bounds; additions, removals or changed session admission can refit the exterior. Circular terrain underlays the office slab; buildings, trees and traffic remain outside agent navigation. Camera focus and saved views remain centered on the office, with an extended far plane.
+
+All three views retain the city. High/Balanced show 20 moving vehicles; Low shows two per lane (eight), while clouds/birds hold their poses. Vehicle phases continue across quality changes. Hidden pages and reduced motion freeze all environmental progression; oversized resume deltas are ignored. Empty offices animate traffic without simulated agents. Warm daylight palettes follow the existing device-local periods, independent of UI theme. Old `devdeck.office-environment.*` preferences are ignored and the chooser is removed.
+
+Validation and measured native evidence follow below. The fixture uses a real isolated backend/catalog plus synthetic overview states; it sends no provider prompts or SSH instructions and does not write production data. Visual comparison uses the pinned static reference in daylight, with a 1400×900 reference viewport and native 1400×900 DevDeck content. The native harness is WKWebView; release packaging and other operating systems are not asserted.
+
+Independent fresh-context review found that updated Canvas camera options do not update an already-created camera in the installed R3F runtime. A regression test retained the old far distance (RED); the camera now explicitly applies the fitted distance and updates its projection matrix (GREEN). No other code finding remained. The source-generator comparison also confirmed all twelve clouds, including initial positions, puff radii/translations and drift speeds.
+
+Native checks observed moving traffic with no agents (20 vehicles on High and eight on Low). Reduced-motion records with 20 parents + 20 children held the first vehicle at exactly the same position over successive five-second windows, with 0.4–0.6 frames/second from data invalidation. The normal animated scene emitted zero frames while hidden, and its overview counter stayed at 474 after the in-flight request settled. Screenshots cover day/light/Gedung, night/dark/Developer, morning/light/DevOps and evening/dark/Gedung. These exercise every view, period and theme without claiming exhaustive coverage of every combination or camera angle.
+
+### Final verification and controlled hardware measurements
+
+Final frontend suite: **209 files / 2,332 tests passed** (Node24, one worker,30-second test timeout,165.95s). Focused workspace: **12 files / 113 tests passed**. Typecheck and production build passed; the built notice matches the complete source notice byte-for-byte. Backend code, APIs and dependencies are unchanged. No measurement probes or test clock/preference overrides are in tracked product source.
+
+Hardware: **Apple M3,8GB RAM,macOS26.6.2**, native WKWebView viewport **1400×900**. Tests/builds had exited before measurement. One native client, Gedung, daylight/light UI, Auto quality; five-second warmup per scenario, followed by three consecutive30-second runs. Each run contains six five-second foreground windows, all with **20 parent actors +20 child actors +20 vehicles**. Idle parents retain failed children for a true full-capacity idle test; mixed parents alternate working/idle while children run. Zoom, pan and rotation occurred during working/mixed measurements.
+
+| Scenario | Run1 FPS | Run2 FPS | Run3 FPS |
+| --- | --- | --- | --- |
+| Working | 52.56–58.48 | 57.88–58.59 | 49.59–58.74 |
+| Idle parents + failed children | 52.36–59.38 | 53.38–57.93 | 51.94–57.99 |
+| Mixed | 54.95–59.55 | 53.90–59.54 | 43.76–58.48 |
+
+All **54 five-second windows** exceeded30FPS: **43.76–59.55FPS** overall. Auto selected Balanced/High in these runs; Low's8movingvehicles were checked separately in the empty-office smoke. Raw measurements include exploratory/resource-contended samples under different labels; do not count those as controlled acceptance measurements.
+
+Evidence, source-generator comparison, screenshots and logs are local/untracked in `output/kantor-city/`; `final-city.png` was captured after measurements with a wider camera. The test harness and isolated servers are stopped after validation. Installer packaging, Windows/Linux, physical touch, arbitrary layouts/viewpoints and live-provider parity remain unverified. Rulings: preserve one uniform transform while optionally rotating90degrees to fit the long footprint (orientation differs, geometry does not); primary native evidence supplies FPS/visual gates that the read-only reviewer deliberately did not execute; production-build/notice checks establish SPA output, not release-installer packaging.
