@@ -1,5 +1,14 @@
+vi.mock('@/features/agent-workspace/OfficeInterior', () => ({
+  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+  FurnitureModel: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ContactShade: () => null,
+}))
+vi.mock('@/features/agent-workspace/OfficeEffects', () => ({
+  default: () => null,
+}))
 vi.mock('@/features/agent-workspace/OfficeHtml', () => ({
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
+  OfficeLabelManager: () => null,
 }))
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'

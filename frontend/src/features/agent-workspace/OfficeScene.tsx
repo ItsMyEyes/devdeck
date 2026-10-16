@@ -1,3 +1,8 @@
+import OfficeInterior, {
+  ContactShade,
+  FurnitureModel,
+} from '@/features/agent-workspace/OfficeInterior'
+import OfficeEffects from '@/features/agent-workspace/OfficeEffects'
 import { fitCity } from '@/features/agent-workspace/city'
 import { Plant, Chair, Desk } from '@/features/agent-workspace/OfficeFurniture'
 import OfficeEnvironment, {
@@ -19,9 +24,9 @@ import {
 import { useOfficeCollaboration } from '@/features/agent-workspace/useOfficeCollaboration'
 import { collaborationKey } from '@/features/agent-workspace/collaboration'
 import type { OfficeSubagent } from '@/store/types'
-import { useMemo, useRef, useState } from 'react'
+import { useContext, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import Html from '@/features/agent-workspace/OfficeHtml'
+import Html, { OfficeLabelManager } from '@/features/agent-workspace/OfficeHtml'
 import {
   ArrowDown,
   ArrowLeft,
@@ -33,7 +38,6 @@ import {
   RotateCw,
 } from 'lucide-react'
 import { useReducedMotion } from 'motion/react'
-import { useResolvedTheme } from '@/features/theme/useTheme'
 import {
   divisionOf,
   floorLabels,
@@ -50,7 +54,11 @@ import type { Project } from '@/store/types'
 import OfficeCamera from '@/features/agent-workspace/OfficeCamera'
 import OfficeActor from '@/features/agent-workspace/OfficeActor'
 import OfficeLounge from '@/features/agent-workspace/OfficeLounge'
-import { Block, box } from '@/features/agent-workspace/officePrimitives'
+import {
+  Block,
+  box,
+  InteriorQuality,
+} from '@/features/agent-workspace/officePrimitives'
 import {
   ActivityWorld,
   actorId,
@@ -112,8 +120,9 @@ function OfficeFloor({
   depth: number
   center: [number, number, number]
 }) {
-  const wall = dark ? '#3d4a50' : '#e3dfd3',
-    floor = dark ? '#454c4b' : '#ded6c1'
+  const tier = useContext(InteriorQuality)
+  const wall = '#efe4d3',
+    floor = '#b58050'
   return (
     <group
       position={[0, division === 'devops' ? 5 : 0, 0]}
@@ -125,37 +134,34 @@ function OfficeFloor({
       }}
     >
       <Block
+        structure
         at={[center[0], -0.22, center[2]]}
         size={[width, 0.44, depth]}
-        color={dark ? '#303d42' : '#c4c7bc'}
+        color="#7d827c"
       />
       <Block
         at={[center[0], 0.005, center[2]]}
         size={[width - 0.12, 0.06, depth - 0.12]}
         color={floor}
+        surface="wood"
       />
-      {Array.from({ length: Math.ceil(depth) }, (_, i) => (
-        <Block
-          key={i}
-          at={[center[0], 0.044, minZ - 1 + i]}
-          size={[width - 0.2, 0.006, 0.025]}
-          color={dark ? '#394544' : '#cec7b3'}
-        />
-      ))}
       <Block
         at={[center[0], 0.46, minZ]}
         size={[width, 0.92, 0.13]}
         color={wall}
+        surface="plaster"
       />
       <Block
         at={[center[0], 2.55, minZ]}
         size={[width, 0.3, 0.13]}
         color={wall}
+        surface="plaster"
       />
       <Block
         at={[minX, 1.35, center[2]]}
         size={[0.13, 2.7, depth]}
         color={wall}
+        surface="plaster"
       />
       {Array.from({ length: Math.floor(width / 3) }, (_, i) => (
         <group key={i} position={[minX + 1.3 + i * 3, 1.7, minZ + 0.085]}>
@@ -202,15 +208,8 @@ function OfficeFloor({
                 0.035,
                 Math.max(...zs) - Math.min(...zs) + 2.9,
               ]}
-              color={
-                division === 'devops'
-                  ? dark
-                    ? '#405a6b'
-                    : '#bfd0da'
-                  : dark
-                    ? '#3c5c5a'
-                    : '#b6c9bf'
-              }
+              surface="fabric"
+              color={division === 'devops' ? '#426a91' : '#397e78'}
             />
             <Html
               position={[x, 0.12, Math.min(...zs) - 1.25]}
@@ -315,7 +314,25 @@ function OfficeFloor({
             </group>
           )
         })}
-      <OfficeLounge plan={plan} dark={dark} world={world} />
+      <OfficeLounge plan={plan} dark={false} world={world} />
+      {qualitySettings[tier].localLights && night && (
+        <>
+          <pointLight
+            position={[minX + 2, 2.4, plan.maxZ - 14]}
+            color="#ffce91"
+            intensity={9}
+            distance={9}
+            decay={2}
+          />
+          <pointLight
+            position={[center[0] + 2, 2.4, plan.maxZ - 5]}
+            color="#ffd7a1"
+            intensity={8}
+            distance={9}
+            decay={2}
+          />
+        </>
+      )}
       {props.members
         .filter(
           (m) =>
@@ -335,6 +352,7 @@ function OfficeFloor({
             position={[maxX - 0.5, 2.5, 3]}
             center
             zIndexRange={[3, 0]}
+            priority={3}
           >
             <div className="office-task-board">
               <strong>Task board · {m.characterName || m.title}</strong>
@@ -402,15 +420,21 @@ function OfficeFloor({
         </Html>
       </group>
       <group position={[minX + 0.7, 0, 1]}>
-        <Block at={[0, 1, 0]} size={[0.8, 2, 2]} color="#ad9277" />
-        {[0.4, 1, 1.6].map((y) => (
-          <Block
-            key={y}
-            at={[0.43, y, 0]}
-            size={[0.06, 0.45, 1.65]}
-            color={dark ? '#51686b' : '#9caead'}
-          />
-        ))}
+        <FurnitureModel
+          id="bookshelf"
+          size={[2, 2, 0.8]}
+          rotation={Math.PI / 2}
+        >
+          <Block at={[0, 1, 0]} size={[0.8, 2, 2]} color="#ad9277" />
+          {[0.4, 1, 1.6].map((y) => (
+            <Block
+              key={y}
+              at={[0.43, y, 0]}
+              size={[0.06, 0.45, 1.65]}
+              color={dark ? '#51686b' : '#9caead'}
+            />
+          ))}
+        </FurnitureModel>
         <Html position={[0, 2.4, 0]} center zIndexRange={[3, 0]}>
           <button
             className="office-object-label"
@@ -457,12 +481,18 @@ function OfficeFloor({
       </group>
       <Interior
         division={division}
-        dark={dark}
+        dark={false}
         minX={minX}
         maxZ={plan.maxZ - 12.5}
         onModule={props.onModule}
       />
-      <Html position={[minX + 1.5, 3, minZ]} center zIndexRange={[4, 0]}>
+      <Html
+        position={[minX + 1.5, 3, minZ]}
+        center
+        kind="floor"
+        priority={1}
+        zIndexRange={[4, 0]}
+      >
         <button
           className={`office-object-label is-${division}`}
           onClick={() => props.onViewChange(division)}
@@ -518,32 +548,56 @@ function Interior({
       <group position={[minX + 3.4, 0, maxZ + 1.6]}>
         {developer ? (
           <>
-            <Block
-              at={[0, 0.35, 0]}
-              size={[3, 0.6, 1.2]}
-              color={accent}
-              surface="fabric"
-              soft
-            />
-            <Block
-              at={[0, 0.8, -0.5]}
-              size={[3, 0.6, 0.25]}
-              color={accent}
-              surface="fabric"
-              soft
-            />
-            {[-1.4, 1.4].map((x) => (
+            <FurnitureModel id="sofa" size={[3, 1.1, 1.2]} tint={accent}>
               <Block
-                key={x}
-                at={[x, 0.65, 0]}
-                size={[0.25, 0.65, 1.2]}
+                at={[0, 0.35, 0]}
+                size={[3, 0.6, 1.2]}
                 color={accent}
                 surface="fabric"
                 soft
               />
-            ))}
-            <Block at={[0, 0.4, 1.2]} size={[1.5, 0.16, 0.7]} color="#bca082" />
-            <Block at={[0, 0.2, 1.2]} size={[0.7, 0.4, 0.35]} color="#687b7c" />
+              <Block
+                at={[0, 0.8, -0.5]}
+                size={[3, 0.6, 0.25]}
+                color={accent}
+                surface="fabric"
+                soft
+              />
+              {[-1.4, 1.4].map((x) => (
+                <Block
+                  key={x}
+                  at={[x, 0.65, 0]}
+                  size={[0.25, 0.65, 1.2]}
+                  color={accent}
+                  surface="fabric"
+                  soft
+                />
+              ))}
+            </FurnitureModel>
+            <FurnitureModel
+              id="coffeeTable"
+              size={[1.5, 0.48, 0.7]}
+              position={[0, 0, 1.2]}
+            >
+              <Block
+                at={[0, 0.4, 0]}
+                size={[1.5, 0.16, 0.7]}
+                color="#b58050"
+                surface="wood"
+              />
+            </FurnitureModel>
+            <ContactShade size={[2.8, 1.1]} />
+            <FurnitureModel
+              id="lamp"
+              size={[0.3, 1.5, 0.3]}
+              position={[1.2, 0, -0.3]}
+            >
+              <Block
+                at={[0, 0.75, 0]}
+                size={[0.04, 1.5, 0.04]}
+                color="#35424b"
+              />
+            </FurnitureModel>
           </>
         ) : (
           <>
@@ -573,13 +627,32 @@ function Interior({
         )}
       </group>
       <group position={[minX + 0.6, 0, maxZ - 1.6]}>
-        <Block
-          at={[0, 0.5, 0]}
-          size={[0.9, 1, 2.4]}
-          color={dark ? '#69736e' : '#c1b7a3'}
-        />
+        <FurnitureModel
+          id="cabinet"
+          size={[0.9, 1, 1.5]}
+          position={[0, 0, -0.45]}
+        >
+          <Block
+            at={[0, 0.5, 0]}
+            size={[0.9, 1, 2.4]}
+            color={dark ? '#69736e' : '#c1b7a3'}
+          />
+        </FurnitureModel>
         <Block at={[0, 1.05, 0]} size={[1.1, 0.1, 2.5]} color="#b89a78" />
-        <Block at={[0, 1.3, -0.7]} size={[0.5, 0.5, 0.5]} color="#425254" />
+        <FurnitureModel
+          id="coffee"
+          size={[0.5, 0.5, 0.5]}
+          position={[0, 1.1, -0.7]}
+        >
+          <Block at={[0, 0.2, 0]} size={[0.5, 0.5, 0.5]} color="#425254" />
+        </FurnitureModel>
+        <FurnitureModel
+          id="fridge"
+          size={[0.65, 0.9, 0.65]}
+          position={[0, 0, 0.7]}
+        >
+          <Block at={[0, 0.45, 0]} size={[0.65, 0.9, 0.65]} color="#d9d4c9" />
+        </FurnitureModel>
         <Plant x={0} z={0.8} />
         <Html position={[0, 1.9, 0]} center zIndexRange={[2, 0]}>
           <span className="office-room-label">
@@ -637,7 +710,6 @@ function WorldTicker({
 }
 
 export default function OfficeScene(props: Props) {
-  const dark = useResolvedTheme() === 'dark'
   const reduced = useReducedMotion()
   const [lost, setLost] = useState(false)
   const [action, setAction] = useState({ id: 0, type: '' })
@@ -797,7 +869,7 @@ export default function OfficeScene(props: Props) {
         camera={{ position: [18, 22, 22], fov: 38, far: exteriorFit.far }}
         dpr={[1, qualitySettings[tier].dpr]}
         frameloop={!props.visible ? 'never' : animate ? 'always' : 'demand'}
-        gl={{ antialias: true, powerPreference: 'low-power' }}
+        gl={{ antialias: true, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.toneMappingExposure = 1.05
           gl.domElement.addEventListener(
@@ -835,7 +907,9 @@ export default function OfficeScene(props: Props) {
           workspaceId={props.workspaceId}
           view={props.view}
           center={center}
-          span={Math.max(width, depth) * 1.45}
+          span={
+            Math.max(width, depth) * (props.view === 'building' ? 0.92 : 0.78)
+          }
           reset={props.reset}
           selected={selected}
           action={action}
@@ -850,43 +924,49 @@ export default function OfficeScene(props: Props) {
             actualSelection(worlds.current!.floors, props.selectedKey, childKey)
           }
         />
-        {(['developer', 'devops'] as const)
-          .filter(
-            (division) => props.view === 'building' || props.view === division,
-          )
-          .map((division) => (
-            <OfficeFloor
-              key={division}
-              props={props}
-              childrenByParent={childrenByParent}
-              completed={collaboration.completed}
-              night={period === 'night'}
-              division={division}
-              layout={layouts[division]}
-              world={worlds.current!.floors[division === 'developer' ? 0 : 1]}
-              plan={plans[division === 'developer' ? 0 : 1]}
-              reduced={!!reduced}
-              dark={dark}
-              minX={minX}
-              minZ={minZ}
-              maxX={maxX}
-              width={width}
-              depth={depth}
-              center={[center[0], 0, center[2]]}
-            />
-          ))}
-        {props.view === 'building' && (
-          <group position={[maxX - 0.1, 0, deskMaxZ - 2]}>
-            {Array.from({ length: 16 }, (_, i) => (
-              <Block
-                key={i}
-                at={[0, ((i + 1) * 5) / 16 / 2, i * 0.23]}
-                size={[1.3, ((i + 1) * 5) / 16, 0.24]}
-                color={dark ? '#7e8884' : '#c6b89f'}
+        <OfficeEffects tier={tier} night={period === 'night'} />
+        <OfficeInterior tier={tier}>
+          {(['developer', 'devops'] as const)
+            .filter(
+              (division) =>
+                props.view === 'building' || props.view === division,
+            )
+            .map((division) => (
+              <OfficeFloor
+                key={division}
+                props={props}
+                childrenByParent={childrenByParent}
+                completed={collaboration.completed}
+                night={period === 'night'}
+                division={division}
+                layout={layouts[division]}
+                world={worlds.current!.floors[division === 'developer' ? 0 : 1]}
+                plan={plans[division === 'developer' ? 0 : 1]}
+                reduced={!!reduced}
+                dark={false}
+                minX={minX}
+                minZ={minZ}
+                maxX={maxX}
+                width={width}
+                depth={depth}
+                center={[center[0], 0, center[2]]}
               />
             ))}
-          </group>
-        )}
+          {props.view === 'building' && (
+            <group position={[maxX - 0.1, 0, deskMaxZ - 2]}>
+              {Array.from({ length: 16 }, (_, i) => (
+                <Block
+                  key={i}
+                  at={[0, ((i + 1) * 5) / 16 / 2, i * 0.23]}
+                  size={[1.3, ((i + 1) * 5) / 16, 0.24]}
+                  color="#b58050"
+                  surface="wood"
+                />
+              ))}
+            </group>
+          )}
+        </OfficeInterior>
+        <OfficeLabelManager view={props.view} />
       </Canvas>
       <div
         className="office-camera-controls"
