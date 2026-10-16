@@ -1,3 +1,7 @@
+import {
+  ContactShade,
+  FurnitureModel,
+} from '@/features/agent-workspace/OfficeInterior'
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import Html from '@/features/agent-workspace/OfficeHtml'
@@ -78,7 +82,8 @@ export default function OfficeLounge({
   dark: boolean
   world: ActivityWorld
 }) {
-  const accent = dark ? '#547570' : '#81a795'
+  const accent = '#397e78'
+  void dark
   return (
     <group>
       {plan.slots.map((slot) => (
@@ -93,34 +98,48 @@ export default function OfficeLounge({
           <Block
             at={[0, 0.05, -0.3]}
             size={[3.6, 0.025, 2.1]}
-            color={dark ? '#3e5352' : '#c4d4c8'}
+            color="#d6c6ac"
+            surface="fabric"
           />
           {slot.activity === 'sofa' ? (
-            <>
-              <Block
-                at={[0, 0.42, -0.22]}
-                size={[3, 0.36, 1.2]}
-                color={accent} surface="fabric" soft
-              />
-              <Block
-                at={[0, 0.86, -0.73]}
-                size={[3, 0.65, 0.2]}
-                color={accent} surface="fabric" soft
-              />
-              {[-1.4, 1.4].map((x) => (
+            <FurnitureModel
+              id="sofa"
+              size={[3, 1.18, 1.4]}
+              position={[0, 0, -0.22]}
+              tint={accent}
+            >
+              <group position={[0, 0, 0.22]}>
                 <Block
-                  key={x}
-                  at={[x, 0.7, -0.22]}
-                  size={[0.2, 0.65, 1.2]}
-                  color={accent} surface="fabric" soft
+                  at={[0, 0.42, -0.22]}
+                  size={[3, 0.36, 1.2]}
+                  color={accent}
+                  surface="fabric"
+                  soft
                 />
-              ))}
-              <Block
-                at={[0.7, 0.66, -0.1]}
-                size={[0.55, 0.12, 0.6]}
-                color="#d9be9a"
-              />
-            </>
+                <Block
+                  at={[0, 0.86, -0.73]}
+                  size={[3, 0.65, 0.2]}
+                  color={accent}
+                  surface="fabric"
+                  soft
+                />
+                {[-1.4, 1.4].map((x) => (
+                  <Block
+                    key={x}
+                    at={[x, 0.7, -0.22]}
+                    size={[0.2, 0.65, 1.2]}
+                    color={accent}
+                    surface="fabric"
+                    soft
+                  />
+                ))}
+                <Block
+                  at={[0.7, 0.66, -0.1]}
+                  size={[0.55, 0.12, 0.6]}
+                  color="#d9be9a"
+                />
+              </group>
+            </FurnitureModel>
           ) : slot.activity === 'beanbag' ? (
             <>
               <Block
@@ -141,7 +160,9 @@ export default function OfficeLounge({
               <Block
                 at={[0, 0.44, -0.85]}
                 size={[1.5, 0.88, 0.7]}
-                color="#aa8f70" surface="wood" soft
+                color="#aa8f70"
+                surface="wood"
+                soft
               />
               <Block
                 at={[0, 0.9, -0.85]}
@@ -208,12 +229,16 @@ export default function OfficeLounge({
               <Block
                 at={[0, 0.48, 0]}
                 size={[0.75, 0.12, 0.7]}
-                color={accent} surface="fabric" soft
+                color={accent}
+                surface="fabric"
+                soft
               />
               <Block
                 at={[0, 0.9, 0.3]}
                 size={[0.75, 0.7, 0.12]}
-                color={accent} surface="fabric" soft
+                color={accent}
+                surface="fabric"
+                soft
               />
               <Block
                 at={[0, 0.24, 0]}
@@ -223,11 +248,14 @@ export default function OfficeLounge({
               <Block
                 at={[0.55, 0.9, -0.35]}
                 size={[0.7, 0.06, 0.65]}
-                color="#aa8f70" surface="wood" soft
+                color="#aa8f70"
+                surface="wood"
+                soft
               />
               <RestingProp slot={slot} world={world} />
             </>
           )}
+          <ContactShade size={[1.8, 1.1]} />
           <Html position={[0, 1.9, -0.85]} center zIndexRange={[1, 0]}>
             <span className="office-room-label">
               {

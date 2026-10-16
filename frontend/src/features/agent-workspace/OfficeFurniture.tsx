@@ -1,11 +1,13 @@
-import Html from '@/features/agent-workspace/OfficeHtml'
+import {
+  ContactShade,
+  FurnitureModel,
+} from '@/features/agent-workspace/OfficeInterior'
 import { Block, cylinder } from '@/features/agent-workspace/officePrimitives'
 import { deskShape } from '@/features/agent-workspace/furniture'
 import { statusColor } from '@/features/agent-workspace/model'
 import type { OfficeMember } from '@/features/agent-workspace/model'
 import {
   characterProfile,
-  workPresentation,
   visualStatus,
 } from '@/features/agent-workspace/presentation'
 export function Plant({
@@ -19,48 +21,58 @@ export function Plant({
 }) {
   return (
     <group position={[x, 0, z]} scale={large ? 1.3 : 0.7}>
-      <mesh
-        position={[0, 0.22, 0]}
-        scale={[0.25, 0.44, 0.25]}
-        geometry={cylinder}
-        castShadow
-      >
-        <meshStandardMaterial color="#b59e88" />
-      </mesh>
-      <Block at={[0, 0.6, 0]} size={[0.04, 0.6, 0.04]} color="#67775b" />
-      {[-1, 1].map((n) => (
-        <group key={n} rotation={[0, n * 0.8, n * 0.25]}>
-          <Block
-            at={[n * 0.12, 0.86, 0]}
-            size={[0.15, 0.34, 0.09]}
-            color={n === 1 ? '#5f8267' : '#7d9873'}
-            round
-          />
-        </group>
-      ))}
+      <FurnitureModel id="plant" size={[0.5, 1.05, 0.5]}>
+        <mesh
+          position={[0, 0.22, 0]}
+          scale={[0.25, 0.44, 0.25]}
+          geometry={cylinder}
+          castShadow
+        >
+          <meshStandardMaterial color="#b59e88" />
+        </mesh>
+        <Block at={[0, 0.6, 0]} size={[0.04, 0.6, 0.04]} color="#67775b" />
+        {[-1, 1].map((n) => (
+          <group key={n} rotation={[0, n * 0.8, n * 0.25]}>
+            <Block
+              at={[n * 0.12, 0.86, 0]}
+              size={[0.15, 0.34, 0.09]}
+              color={n === 1 ? '#5f8267' : '#7d9873'}
+              round
+            />
+          </group>
+        ))}
+      </FurnitureModel>
     </group>
   )
 }
 export function Chair({ x, z }: { x: number; z: number }) {
   return (
     <group position={[x, 0, z]}>
-      <Block
-        at={[0, 0.48, 0]}
-        size={[0.66, 0.14, 0.64]}
-        color="#424e53"
-        surface="fabric"
-        soft
-      />
-      <Block
-        at={[0, 0.86, 0.29]}
-        size={[0.63, 0.68, 0.13]}
-        color="#45555a"
-        surface="fabric"
-        soft
-      />
-      <Block at={[0, 0.22, 0]} size={[0.08, 0.4, 0.08]} color="#333e40" />
-      <Block at={[0, 0.07, 0]} size={[0.62, 0.07, 0.12]} color="#333e40" />
-      <Block at={[0, 0.07, 0]} size={[0.12, 0.07, 0.6]} color="#333e40" />
+      <FurnitureModel
+        id="chair"
+        size={[0.66, 1.2, 0.64]}
+        rotation={Math.PI}
+        tint="#466d79"
+      >
+        <Block
+          at={[0, 0.48, 0]}
+          size={[0.66, 0.14, 0.64]}
+          color="#424e53"
+          surface="fabric"
+          soft
+        />
+        <Block
+          at={[0, 0.86, 0.29]}
+          size={[0.63, 0.68, 0.13]}
+          color="#45555a"
+          surface="fabric"
+          soft
+        />
+        <Block at={[0, 0.22, 0]} size={[0.08, 0.4, 0.08]} color="#333e40" />
+        <Block at={[0, 0.07, 0]} size={[0.62, 0.07, 0.12]} color="#333e40" />
+        <Block at={[0, 0.07, 0]} size={[0.12, 0.07, 0.6]} color="#333e40" />
+      </FurnitureModel>
+      <ContactShade size={[0.6, 0.6]} />
     </group>
   )
 }
@@ -79,8 +91,8 @@ export function Desk({
   member?: OfficeMember
   onSelect: (member: OfficeMember, child?: string) => void
 }) {
+  void compact
   const profile = characterProfile(member?.key || `${x}:${z}`)
-  const work = member ? workPresentation(member) : undefined
   const status = member ? visualStatus(member) : 'idle'
   return (
     <group position={[x, 0, z]}>
@@ -94,22 +106,34 @@ export function Desk({
             : undefined
         }
       >
-        <Block
-          at={[0, 0.9, deskShape.centerZ]}
-          size={[deskShape.width, 0.13, deskShape.depth]}
-          color="#c8ac85"
-          surface="wood"
-          soft
-          shadow
+        <FurnitureModel
+          id="desk"
+          size={[deskShape.width, deskShape.top, deskShape.depth]}
+          position={[0, 0, deskShape.centerZ]}
+        >
+          <group position={[0, 0, -deskShape.centerZ]}>
+            <Block
+              at={[0, 0.9, deskShape.centerZ]}
+              size={[deskShape.width, 0.13, deskShape.depth]}
+              color="#b58050"
+              surface="wood"
+              soft
+              shadow
+            />
+            {[-0.85, 0.85].map((n) => (
+              <Block
+                key={n}
+                at={[n, 0.43, -0.35]}
+                size={[0.065, 0.86, 0.6]}
+                color="#79847e"
+              />
+            ))}
+          </group>
+        </FurnitureModel>
+        <ContactShade
+          position={[0, 0.05, deskShape.centerZ]}
+          size={[1.9, 0.85]}
         />
-        {[-0.85, 0.85].map((n) => (
-          <Block
-            key={n}
-            at={[n, 0.43, -0.35]}
-            size={[0.065, 0.86, 0.6]}
-            color="#79847e"
-          />
-        ))}
         <group position={[0, 0.982, -0.15]}>
           <Block at={[0, 0, 0]} size={[0.64, 0.035, 0.42]} color="#4e5758" />
           <Block
@@ -186,27 +210,6 @@ export function Desk({
           surface={night ? 'screen' : 'metal'}
           soft
         />
-        {work && !compact && (
-          <Html position={[0, 1.62, -0.45]} center zIndexRange={[2, 0]}>
-            <span className="office-work-label" title={work.label}>
-              {work.kind === 'command'
-                ? '›_'
-                : work.kind === 'file_change'
-                  ? '✎'
-                  : work.kind === 'tool'
-                    ? '⚙'
-                    : '·'}{' '}
-              {work.kind === 'command'
-                ? 'Command'
-                : work.kind === 'file_change'
-                  ? 'Files'
-                  : work.kind === 'tool'
-                    ? 'Tool'
-                    : work.label}
-              {work.count > 1 ? ` · ${work.count}` : ''}
-            </span>
-          </Html>
-        )}
       </group>
     </group>
   )
