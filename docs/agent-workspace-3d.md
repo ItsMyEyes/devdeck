@@ -115,3 +115,59 @@ Native Tauri preview used a copied SQLite fixture and local overview proxy, with
 On the existing Apple M3/8 GB/macOS test device, controlled five-second foreground samples measured **55.44–60.45 FPS** for mixed 20 parents + 20 children (10 samples), **56.82–60.23 FPS** for working 20 parents + 20 children (11 samples), and **56.43–60.21 FPS** for idle 20 parents (16 samples). Measurements include close zoom; these are device-specific development-preview results. Temporary instrumentation lives outside tracked source. Screenshots and controlled samples are retained untracked in `output/agent-workspace-3d/natural-*-desktop.png` and `natural-animation-performance.json`.
 
 The installed production application was not replaced. Windows/Linux hardware, screen-reader interaction and exhaustive clipping across every possible layout remain unverified.
+
+
+## Realistic workspace update — 2026-10-16
+
+The office now supports Garden and City environments, saved locally per workspace, with lighting driven by the device-local clock (morning 06–11, day 11–15, evening 15–18, night 18–06). Theme remains independent. Procedural, instanced scenery sits outside navigable floors; windows use glass, and wood/fabric/metal/screens have shared material profiles. Desk variation, hair, accessories, posture, stride and preferred leisure activity derive from persistent composite session identity. No asset downloads or new dependencies are required.
+
+### Operational truth and compatibility
+
+The existing overview adds optional `work: {kind, activeCount, coverage}` on sessions and children. Go/TypeScript DTOs remain mirrored. Kind is generic/tool/command/file_change; coverage is turn_only/item_lifecycle. Only Codex, Pi and OpenCode execution item contracts admit active operations; Pi children remain generic. Claude argument-stream completion, Antigravity and unknown adapters never imply tool execution completion. Missing metadata falls back to generic verified work, never invented idle or inferred command success. No endpoint, socket protocol or database migration is added.
+
+Operations are keyed per actor, provider turn and item, with idempotent start/end, completed-item tombstones and retired turns. New actual provider turns, settled turns, stops, archives and boot reconciliation clear work; steering does not. Priority is file change, command, tool. Attention/error/freshness override work presentation; stale, legacy and archiving indicators remain neutral. Monitors show canonical labels and concurrent operation counts without exposing arguments, output or reasoning.
+
+### Movement, collaboration and controls
+
+Gait follows distance actually travelled, with eased speed/yaw and grounded legs. Blocked actors stop stepping. Desk/keyboard/chair anchors and navigation share dimensions. Standing/sitting blend into existing leisure setup/cleanup; existing arm IK and prop handoffs are retained. Navigation caches checked grid edges, invalidates on furniture changes, and retries congested routes at bounded intervals. After a prolonged jam, checked retreat candidates expand without teleporting actors.
+
+The scene caps parents and children independently at 20 each. A selected child ranks first, then failures and running tasks; its parent uses existing selected-session admission. All tasks remain in the HTML roster. Task boards expose actual child titles/roles/status. Observed delegation produces a short head orientation, and observed running-to-completed transitions retain a result marker for six seconds. Initial, stale and hidden-page history never plays as a fresh result. On resume, client receipt time gates the first fresh observation.
+
+Camera presets are Overview, Selected desk and Lounge. Follow is opt-in, reads live actor positions, and stops on manual pan/orbit, floor change, disappearance, reset or another preset. Existing per-floor saved cameras and parent-chat routing remain. HTML labels project into owned DOM roots whose teardown is deferred past React commit; repeated synchronous-unmount warnings were reproduced in the full app and corrected.
+
+Auto quality starts Balanced. High caps DPR at 1.5 with 2048 shadows, Balanced at 1.25/1024, Low at 1 with dynamic shadows and environmental motion disabled. One-second FPS averages must remain below 35 for five seconds or above 50 for fifteen; changes have a ten-second cooldown. Status and selected actors are never reduced to save frames. Hidden pages stop rendering/polling; reduced motion uses static desk poses and demand rendering.
+
+### Validation and limits
+
+The final frontend typecheck and production build passed. The full frontend run passed **208 files / 2,323 tests**, using Node 24, one worker and a 30-second test timeout; **104 workspace tests** passed separately. Backend orchestration/handler tests and `go vet ./...` passed. Tests cover operation overlap/identity, duplicate and late boundaries, child settlement, replay/clone, provider limitations, admission, semantic poses, blocked gait, congested return, navigation invalidation, camera reset/follow, FPS averaging, preferences and result suppression across stale/hidden snapshots.
+
+An independent fresh-context review found reset leaving Follow enabled; the regression was observed failing, fixed and verified. Full-app smoke uses a fresh SQLite fixture and a loopback overview simulator over a real isolated backend. No real agent prompt, production DB write, SSH execution or paid-provider call was made. The native preview is an isolated WKWebView harness, not a packaged Tauri release. The renderer warning fix was observed in the full application; upstream Three.Clock/CommonJS deprecation notices remain.
+
+An initial concurrent full-suite attempt timed out in unchanged chat suites; the controlled one-worker full run above passed. Initial hardware samples exposed low-FPS congested navigation; those samples are retained as failed measurements and prompted the grid-cache/retry optimization. Controlled post-optimization measurements are recorded separately below. Installer packaging, physical touch, Windows/Linux hardware and real-provider parity remain unverified.
+
+### Hardware evidence — 2026-10-16
+
+Device: Apple M3, 8 GB RAM, macOS; isolated native WKWebView, actual content viewport **1400×900**, Garden/Gedung, Auto quality. After a five-second warmup per scenario, three consecutive 30-second measurements per scenario produced six five-second windows each:
+
+| Scenario | Visible parents + children | Run 1 FPS | Run 2 FPS | Run 3 FPS |
+| --- | --- | --- | --- | --- |
+| Working | 20 + 20 | 57.58–59.15 | 55.69–59.34 | 53.72–59.18 |
+| Idle | 20 + 0 | 58.74–59.94 | 59.22–60.00 | 58.56–59.88 |
+| Mixed | 20 + 15 | 49.75–59.93 | 39.52–57.75 | 37.17–42.57 |
+
+All 54 measured windows exceeded 30 FPS. Zoom and rotate interaction occurred during the mixed runs. Idle tasks have no admitted idle children; the counts above describe actual rendered actors, not configured fixture totals. Initial failed measurements are retained alongside these runs. These measurements preceded final label-density and night-fill adjustments; geometry and navigation were unchanged by those adjustments.
+
+A native visibility interval from 09:34:20.790 to 09:34:44.375 UTC recorded **zero frames** between hide and resume. After the in-flight request settled, the overview counter remained **35** until resume. Reduced motion on Developer with 20 parents + 20 children measured 0.4–0.8 frames/second from data invalidation, with static poses. Visual smoke covered Garden/City, morning/day/evening/night, light/dark UI and Gedung/Developer/DevOps; selection opened the existing chat, Follow enabled, and Reset cancelled Follow. Dense scenes retain status dots while names reveal on hover/focus/selection; monitor labels are abbreviated with the full semantic label available on hover. Task boards display the selected parent's tasks.
+
+Local screenshots, raw samples (including failed runs), run metadata and summaries are retained under untracked `output/agent-workspace-realism/`. No probes or fixture overrides are included in product source. The full time/theme/view Cartesian matrix, arbitrary clipping in every generated layout, packaged Tauri, physical touch, other operating systems and live-provider parity were not exhaustively tested.
+
+Implementation rulings: the requested branch uses the existing clean checkout rather than a second worktree (no parallel file writers; filesystem isolation is therefore not claimed). A local WKWebView harness supplies renderer evidence while leaving the installed app untouched (packaging remains unverified). Checked radial retreat expands after two seconds of congestion, backed by crowded-return tests (every possible furniture arrangement is not proven). Navigation caches preserve collision-clearance checks and invalidate on furniture mutation; blocked replanning is bounded to avoid repeated grid construction.
+
+Final-source capacity runs on Developer, Garden/day/light, Auto: each used 20 parents + 20 children, five-second warmup and three 30-second runs. Parent-idle runs retained failed children (an honest visible idle-capacity fixture); mixed runs retained running children while parent states alternated.
+
+| Final-source capacity | Run 1 FPS | Run 2 FPS | Run 3 FPS |
+| --- | --- | --- | --- |
+| Idle parents + failed children | 43.69–54.57 | 46.14–56.34 | 38.98–55.72 |
+| Mixed parents + running children | 45.57–57.54 | 46.16–58.91 | 49.75–56.15 |
+
+All 36 additional five-second windows passed 30 FPS, including zoom/rotation during the mixed run; Auto used Low/Balanced/High as recorded. Together with the original controlled runs, all 90 windows passed. The final source was verified again with the complete frontend suite: **208 files / 2,323 tests**, plus typecheck and production build.
