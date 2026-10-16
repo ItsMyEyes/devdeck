@@ -1,14 +1,42 @@
 export type QualityTier = 'high' | 'balanced' | 'low'
 export type QualityPreference = 'auto' | QualityTier
 export const qualitySettings = {
-  high: { dpr: 1.5, shadows: true, shadowSize: 2048, decorativeMotion: true },
+  high: {
+    dpr: 1.5,
+    shadows: true,
+    shadowSize: 2048,
+    decorativeMotion: true,
+    textureSize: 1024,
+    normalMaps: true,
+    environment: true,
+    localLights: true,
+    ao: true,
+    bloom: true,
+  },
   balanced: {
     dpr: 1.25,
     shadows: true,
     shadowSize: 1024,
     decorativeMotion: true,
+    textureSize: 512,
+    normalMaps: true,
+    environment: true,
+    localLights: true,
+    ao: false,
+    bloom: false,
   },
-  low: { dpr: 1, shadows: false, shadowSize: 512, decorativeMotion: false },
+  low: {
+    dpr: 1,
+    shadows: false,
+    shadowSize: 512,
+    decorativeMotion: false,
+    textureSize: 256,
+    normalMaps: false,
+    environment: false,
+    localLights: false,
+    ao: false,
+    bloom: false,
+  },
 }
 export function readQuality(workspace: string): QualityPreference {
   try {

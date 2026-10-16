@@ -1,0 +1,81 @@
+[
+  {
+    "file": "office-assets/furniture/desk.glb",
+    "sha256": "0164fe828f028b321730fb8c74502e353583f751be74da1682d42fff7d3c5a42",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/chairDesk.glb",
+    "sha256": "46406619186034cbe92b19b79a5f1a8e3f442a17a70a7524ef2c0ad0f35095c6",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/loungeSofa.glb",
+    "sha256": "1886b811c0d3ad0d8525a4fd43adf4112c497c8e0ed906f06877ca3517f4c7dd",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/tableCoffee.glb",
+    "sha256": "e38bea760fbd514efbb75528d09b4752c91af44677bbb97e6d4386c263525179",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/kitchenCabinet.glb",
+    "sha256": "7238c57778935ae25db5e57e9f7af3ba7068c71b005ff7cfbff3b6f3b1a13200",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/kitchenCoffeeMachine.glb",
+    "sha256": "063f582c6fa0f00a9f24e3393dac2295491c4becdaf5513c893ab1a2826b6ec3",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/kitchenFridgeSmall.glb",
+    "sha256": "35dab7f63711623be321bfd82072f4ab29fe8006aac9371c6e6b78df2e02f5ed",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/bookcaseClosed.glb",
+    "sha256": "9d210448de5e1179541da895450bbc7a39f4cd673d677654cd6b134e4ea0e047",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/pottedPlant.glb",
+    "sha256": "5b760eda2766f75fda36b2c5df652a1662f82981ef64cd8fa7fe7bcd386b3a15",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/furniture/lampRoundFloor.glb",
+    "sha256": "50fe1b5b588edf15bfa9cc880f71a02a4fda6036350b24733d0ef4de5cc5e908",
+    "source": "https://kenney.nl/assets/furniture-kit",
+    "version": "2.0",
+    "license": "CC0-1.0"
+  },
+  {
+    "file": "office-assets/env/studio_small_09_1k.hdr",
+    "sha256": "e7cfda5f4e98e623db12b8bfd0184e048488e4855d9c83e2751fb44a32e80c45",
+    "source": "https://polyhaven.com/a/studio_small_09",
+    "download": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
+    "version": "1K HDR downloaded 2026-10-16",
+    "author": "Sergej Majboroda",
+    "license": "CC0-1.0"
+  }
+]

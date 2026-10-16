@@ -25,3 +25,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## Interior assets
+
+Furniture: Kenney Furniture Kit 2.0, https://kenney.nl/assets/furniture-kit
+Created/distributed by Kenney (www.kenney.nl). Creative Commons Zero (CC0 1.0),
+https://creativecommons.org/publicdomain/zero/1.0/ . Included license:
+frontend/public/office-assets/KENNEY-LICENSE.txt .
+
+Environment lighting: Studio Small 09 (1K HDR), Sergej Majboroda / Poly Haven,
+https://polyhaven.com/a/studio_small_09 . CC0 1.0; https://polyhaven.com/license .
+The HDR is used only for lighting, not as the exterior background.
+
+Source URLs, downloaded versions and SHA-256 hashes are recorded in
+frontend/public/office-assets/manifest.json . Hermes3D (Luke The Dev, MIT,
+commit beb76292747b816ef317aa6f9a3992e0014f81d9) is a visual reference; its
+unattributed model/HDR bytes are not redistributed. Interior texture and face
+implementations are authored for DevDeck.
