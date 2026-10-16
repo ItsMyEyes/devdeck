@@ -1,6 +1,28 @@
+import { Plant, Chair, Desk } from '@/features/agent-workspace/OfficeFurniture'
+import OfficeEnvironment, {
+  OfficeLighting,
+  QualityMonitor,
+} from '@/features/agent-workspace/OfficeEnvironment'
+import {
+  qualitySettings,
+  readEnvironment,
+  readQuality,
+} from '@/features/agent-workspace/sceneSettings'
+import type {
+  OfficeEnvironment as Environment,
+  QualityPreference,
+  QualityTier,
+} from '@/features/agent-workspace/sceneSettings'
+import {
+  visibleOfficeChildren,
+  actorWork,
+} from '@/features/agent-workspace/presentation'
+import { useOfficeCollaboration } from '@/features/agent-workspace/useOfficeCollaboration'
+import { collaborationKey } from '@/features/agent-workspace/collaboration'
+import type { OfficeSubagent } from '@/store/types'
 import { useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
+import Html from '@/features/agent-workspace/OfficeHtml'
 import {
   ArrowDown,
   ArrowLeft,
@@ -18,7 +40,6 @@ import {
   floorLabels,
   officeLayout,
   deskGroupLabel,
-  statusColor,
 } from '@/features/agent-workspace/model'
 import type {
   DeskPosition,
@@ -30,11 +51,7 @@ import type { Project } from '@/store/types'
 import OfficeCamera from '@/features/agent-workspace/OfficeCamera'
 import OfficeActor from '@/features/agent-workspace/OfficeActor'
 import OfficeLounge from '@/features/agent-workspace/OfficeLounge'
-import {
-  Block,
-  box,
-  cylinder,
-} from '@/features/agent-workspace/officePrimitives'
+import { Block, box } from '@/features/agent-workspace/officePrimitives'
 import {
   ActivityWorld,
   actorId,
@@ -61,128 +78,11 @@ interface Props {
   onSelect: (m: OfficeMember, child?: string) => void
   onModule: (module: string) => void
 }
-function Plant({
-  x,
-  z,
-  large = false,
-}: {
-  x: number
-  z: number
-  large?: boolean
-}) {
-  return (
-    <group position={[x, 0, z]} scale={large ? 1.3 : 0.7}>
-      <mesh
-        position={[0, 0.22, 0]}
-        scale={[0.25, 0.44, 0.25]}
-        geometry={cylinder}
-        castShadow
-      >
-        <meshStandardMaterial color="#b59e88" />
-      </mesh>
-      <Block at={[0, 0.6, 0]} size={[0.04, 0.6, 0.04]} color="#67775b" />
-      {[-1, 1].map((n) => (
-        <group key={n} rotation={[0, n * 0.8, n * 0.25]}>
-          <Block
-            at={[n * 0.12, 0.86, 0]}
-            size={[0.15, 0.34, 0.09]}
-            color={n === 1 ? '#5f8267' : '#7d9873'}
-            round
-          />
-        </group>
-      ))}
-    </group>
-  )
-}
-function Chair({ x, z }: { x: number; z: number }) {
-  return (
-    <group position={[x, 0, z]}>
-      <Block at={[0, 0.48, 0]} size={[0.66, 0.14, 0.64]} color="#424e53" />
-      <Block at={[0, 0.86, 0.29]} size={[0.63, 0.68, 0.13]} color="#45555a" />
-      <Block at={[0, 0.22, 0]} size={[0.08, 0.4, 0.08]} color="#333e40" />
-      <Block at={[0, 0.07, 0]} size={[0.62, 0.07, 0.12]} color="#333e40" />
-      <Block at={[0, 0.07, 0]} size={[0.12, 0.07, 0.6]} color="#333e40" />
-    </group>
-  )
-}
-function Desk({
-  x,
-  z,
-  member,
-  onSelect,
-}: {
-  x: number
-  z: number
-  member?: OfficeMember
-  onSelect: Props['onSelect']
-}) {
-  const status = member?.stale ? 'unknown' : (member?.status ?? 'idle')
-  return (
-    <group position={[x, 0, z]}>
-      <group
-        onClick={
-          member
-            ? (e) => {
-                e.stopPropagation()
-                onSelect(member)
-              }
-            : undefined
-        }
-      >
-        <Block at={[0, 0.9, -0.35]} size={[2.05, 0.13, 0.92]} color="#c8ac85" />
-        {[-0.85, 0.85].map((n) => (
-          <Block
-            key={n}
-            at={[n, 0.43, -0.35]}
-            size={[0.065, 0.86, 0.6]}
-            color="#79847e"
-          />
-        ))}
-        <group position={[0, 0.982, -0.15]}>
-          <Block at={[0, 0, 0]} size={[0.64, 0.035, 0.42]} color="#4e5758" />
-          <Block
-            at={[0, 0.025, -0.03]}
-            size={[0.53, 0.014, 0.21]}
-            color="#29343d"
-          />
-          <group position={[0, 0, -0.2]} rotation={[-0.14, 0, 0]}>
-            <Block
-              at={[0, 0.23, 0]}
-              size={[0.64, 0.46, 0.04]}
-              color="#3b4548"
-            />
-            <Block
-              at={[0, 0.23, 0.025]}
-              size={[0.56, 0.38, 0.012]}
-              color={member ? statusColor(status) : '#657d81'}
-            />
-          </group>
-        </group>
-        <Block
-          at={[0.43, 0.982, -0.12]}
-          size={[0.1, 0.035, 0.13]}
-          color="#48585a"
-        />
-        <Block
-          at={[-0.65, 0.99, -0.25]}
-          size={[0.32, 0.04, 0.36]}
-          color="#e7e4d8"
-        />
-        <mesh
-          position={[0.74, 1.06, -0.44]}
-          scale={[0.065, 0.16, 0.065]}
-          geometry={cylinder}
-        >
-          <meshStandardMaterial color="#e6daca" />
-        </mesh>
-        <Chair x={0} z={0.38} />
-      </group>
-    </group>
-  )
-}
-
 function OfficeFloor({
   props,
+  childrenByParent,
+  completed,
+  night,
   division,
   layout,
   world,
@@ -197,6 +97,9 @@ function OfficeFloor({
   center,
 }: {
   props: Props
+  childrenByParent: Map<string, OfficeSubagent[]>
+  completed: Set<string>
+  night: boolean
   division: OfficeDivision
   layout: DeskPosition[]
   world: ActivityWorld
@@ -241,8 +144,13 @@ function OfficeFloor({
         />
       ))}
       <Block
-        at={[center[0], 1.35, minZ]}
-        size={[width, 2.7, 0.13]}
+        at={[center[0], 0.46, minZ]}
+        size={[width, 0.92, 0.13]}
+        color={wall}
+      />
+      <Block
+        at={[center[0], 2.55, minZ]}
+        size={[width, 0.3, 0.13]}
         color={wall}
       />
       <Block
@@ -253,9 +161,15 @@ function OfficeFloor({
       {Array.from({ length: Math.floor(width / 3) }, (_, i) => (
         <group key={i} position={[minX + 1.3 + i * 3, 1.7, minZ + 0.085]}>
           <Block
+            at={[1.5, -0.05, -0.08]}
+            size={[0.8, 1.65, 0.13]}
+            color={wall}
+          />
+          <Block
             at={[0, 0, 0]}
             size={[2.2, 1.25, 0.04]}
-            color={dark ? '#516c80' : '#afcbd2'}
+            color="#b7d6d8"
+            surface="glass"
           />
           <Block
             at={[0, 0, 0.03]}
@@ -326,6 +240,8 @@ function OfficeFloor({
               x={desk.x}
               z={desk.z}
               member={member}
+              night={night}
+              compact={props.view === 'building'}
               onSelect={props.onSelect}
             />
           ) : null
@@ -346,58 +262,97 @@ function OfficeFloor({
                 selected={
                   member.key === props.selectedKey && !props.selectedChild
                 }
-                compact={props.view === 'building'}
+                compact={props.view === 'building' || props.members.length > 10}
                 onSelect={props.onSelect}
               />
-              {member.subagents
-                .filter((c) => c.status === 'running' || c.status === 'failed')
-                .map((child, index) => {
-                  const childActor = world.actors.get(actorId(member, child.id))
-                  const [x, z] = companionHome(desk, index)
-                  return childActor ? (
-                    <group key={child.id}>
-                      <group position={[x, 0, z]} scale={0.56}>
-                        <Block
-                          at={[0, 0.9, -0.35]}
-                          size={[0.95, 0.08, 0.55]}
-                          color="#aa8f70"
-                        />
-                        <Block
-                          at={[0, 0.45, -0.35]}
-                          size={[0.08, 0.9, 0.35]}
-                          color="#526368"
-                        />
-                        <Block
-                          at={[0, 0.96, -0.23]}
-                          size={[0.6, 0.03, 0.38]}
-                          color="#3b4548"
-                        />
-                        <Block
-                          at={[0, 1.19, -0.42]}
-                          size={[0.6, 0.45, 0.03]}
-                          color="#637a89"
-                        />
-                        <Chair x={0} z={0} />
-                      </group>
-                      <OfficeActor
-                        actor={childActor}
-                        member={member}
-                        child={child.id}
-                        reduced={reduced}
-                        selected={
-                          member.key === props.selectedKey &&
-                          props.selectedChild === child.id
-                        }
-                        compact={props.view === 'building'}
-                        onSelect={props.onSelect}
+              {(childrenByParent.get(member.key) || []).map((child, index) => {
+                const childActor = world.actors.get(actorId(member, child.id))
+                const [x, z] = companionHome(desk, index)
+                return childActor ? (
+                  <group key={child.id}>
+                    <group position={[x, 0, z]} scale={0.56}>
+                      <Block
+                        at={[0, 0.9, -0.35]}
+                        size={[0.95, 0.08, 0.55]}
+                        color="#aa8f70"
+                        surface="wood"
+                        soft
                       />
+                      <Block
+                        at={[0, 0.45, -0.35]}
+                        size={[0.08, 0.9, 0.35]}
+                        color="#526368"
+                      />
+                      <Block
+                        at={[0, 0.96, -0.23]}
+                        size={[0.6, 0.03, 0.38]}
+                        color="#3b4548"
+                      />
+                      <Block
+                        at={[0, 1.19, -0.42]}
+                        size={[0.6, 0.45, 0.03]}
+                        color="#637a89"
+                      />
+                      <Chair x={0} z={0} />
                     </group>
-                  ) : null
-                })}
+                    <OfficeActor
+                      actor={childActor}
+                      member={member}
+                      child={child.id}
+                      completed={completed.has(
+                        collaborationKey(member.key, child.id),
+                      )}
+                      reduced={reduced}
+                      selected={
+                        member.key === props.selectedKey &&
+                        props.selectedChild === child.id
+                      }
+                      compact={props.view === 'building'}
+                      onSelect={props.onSelect}
+                    />
+                  </group>
+                ) : null
+              })}
             </group>
           )
         })}
       <OfficeLounge plan={plan} dark={dark} world={world} />
+      {props.members
+        .filter(
+          (m) =>
+            divisionOf(m) === division &&
+            m.subagents.length > 0 &&
+            m.key === props.selectedKey,
+        )
+        .sort(
+          (a, b) =>
+            Number(b.key === props.selectedKey) -
+            Number(a.key === props.selectedKey),
+        )
+        .slice(0, 1)
+        .map((m) => (
+          <Html
+            key={m.key}
+            position={[maxX - 0.5, 2.5, 3]}
+            center
+            zIndexRange={[3, 0]}
+          >
+            <div className="office-task-board">
+              <strong>Task board · {m.characterName || m.title}</strong>
+              {m.subagents.slice(0, 3).map((c) => (
+                <button key={c.id} onClick={() => props.onSelect(m, c.id)}>
+                  <span>{c.title || c.role || 'Subagent'}</span>
+                  <small>
+                    {c.role} · {m.stale ? 'Unverified' : c.status}
+                  </small>
+                </button>
+              ))}
+              {m.subagents.length > 3 && (
+                <small>+{m.subagents.length - 3} in roster</small>
+              )}
+            </div>
+          </Html>
+        ))}
       {!layout.length &&
         [
           [-5, -3],
@@ -413,7 +368,13 @@ function OfficeFloor({
       <Plant x={maxX} z={minZ + 0.8} large />
       <Plant x={minX + 0.8} z={plan.maxZ - 12.5 + 2} large />
       <group position={[center[0] + 2, 0, plan.maxZ - 12.5 + 1.4]}>
-        <Block at={[0, 0.77, 0]} size={[4.4, 0.16, 1.4]} color="#aa8f70" />
+        <Block
+          at={[0, 0.77, 0]}
+          size={[4.4, 0.16, 1.4]}
+          color="#aa8f70"
+          surface="wood"
+          soft
+        />
         {[-1.4, 1.4].map((n) => (
           <Block
             key={n}
@@ -558,14 +519,28 @@ function Interior({
       <group position={[minX + 3.4, 0, maxZ + 1.6]}>
         {developer ? (
           <>
-            <Block at={[0, 0.35, 0]} size={[3, 0.6, 1.2]} color={accent} />
-            <Block at={[0, 0.8, -0.5]} size={[3, 0.6, 0.25]} color={accent} />
+            <Block
+              at={[0, 0.35, 0]}
+              size={[3, 0.6, 1.2]}
+              color={accent}
+              surface="fabric"
+              soft
+            />
+            <Block
+              at={[0, 0.8, -0.5]}
+              size={[3, 0.6, 0.25]}
+              color={accent}
+              surface="fabric"
+              soft
+            />
             {[-1.4, 1.4].map((x) => (
               <Block
                 key={x}
                 at={[x, 0.65, 0]}
                 size={[0.25, 0.65, 1.2]}
                 color={accent}
+                surface="fabric"
+                soft
               />
             ))}
             <Block at={[0, 0.4, 1.2]} size={[1.5, 0.16, 0.7]} color="#bca082" />
@@ -667,6 +642,23 @@ export default function OfficeScene(props: Props) {
   const reduced = useReducedMotion()
   const [lost, setLost] = useState(false)
   const [action, setAction] = useState({ id: 0, type: '' })
+  const [environment, setEnvironment] = useState<Environment>(() =>
+    readEnvironment(props.workspaceId),
+  )
+  const [quality, setQuality] = useState<QualityPreference>(() =>
+    readQuality(props.workspaceId),
+  )
+  const [autoTier, setAutoTier] = useState<QualityTier>('balanced')
+  const [period, setPeriod] = useState('day')
+  const [follow, setFollow] = useState(false)
+  const tier = quality === 'auto' ? autoTier : quality
+  const collaboration = useOfficeCollaboration(props.allMembers, props.visible)
+  const childrenByParent = visibleOfficeChildren(
+    props.members,
+    props.selectedKey,
+    props.selectedChild,
+    collaboration.completed,
+  )
   const [mode, setMode] = useState<'pan' | 'rotate'>('pan')
   const slots = useRef<Record<OfficeDivision, DeskPosition[]>>({
     developer: [],
@@ -705,9 +697,9 @@ export default function OfficeScene(props: Props) {
       .flatMap((member) => {
         const desk = layouts[division].find((d) => d.id === member.key)
         return desk
-          ? member.subagents
-              .filter((c) => c.status === 'running' || c.status === 'failed')
-              .map((_, i) => companionHome(desk, i))
+          ? (childrenByParent.get(member.key) || []).map((_, i) =>
+              companionHome(desk, i),
+            )
           : []
       })
     return floorPlan(
@@ -751,17 +743,26 @@ export default function OfficeScene(props: Props) {
             key: member.key,
             home: [desk.x, desk.z + 0.38] as [number, number],
             intent: actorIntent(member),
+            workKind: actorWork(member),
           },
-          ...member.subagents
-            .filter((c) => c.status === 'running' || c.status === 'failed')
-            .map((child, index) => ({
-              key: actorId(member, child.id),
-              home: companionHome(desk, index),
-              intent: actorIntent(member, child.id),
-            })),
+          ...(childrenByParent.get(member.key) || []).map((child, index) => ({
+            key: actorId(member, child.id),
+            home: companionHome(desk, index),
+            intent: actorIntent(member, child.id),
+            workKind: actorWork(member, child.id),
+          })),
         ]
       })
     world.reconcile(actors, plans[i])
+    for (const member of props.members) {
+      const actor = world.actors.get(member.key)
+      if (actor)
+        actor.lookYaw = member.subagents.some((c) =>
+          collaboration.delegated.has(collaborationKey(member.key, c.id)),
+        )
+          ? -0.65
+          : 0
+    }
     if (reduced) world.resetMotion()
   })
   const selectedMember = props.members.find((m) => m.key === props.selectedKey)
@@ -790,9 +791,9 @@ export default function OfficeScene(props: Props) {
     <>
       <Canvas
         className="office-renderer"
-        shadows="percentage"
+        shadows={qualitySettings[tier].shadows ? 'percentage' : false}
         camera={{ position: [18, 22, 22], fov: 38 }}
-        dpr={[1, 1.5]}
+        dpr={[1, qualitySettings[tier].dpr]}
         frameloop={
           !props.visible ? 'never' : animate && moving ? 'always' : 'demand'
         }
@@ -810,18 +811,27 @@ export default function OfficeScene(props: Props) {
           </div>
         }
       >
-        <color attach="background" args={[dark ? '#192127' : '#e9eeeb']} />
-        <ambientLight intensity={dark ? 1.2 : 1.8} />
-        <directionalLight
-          position={[2, 18, 10]}
-          intensity={dark ? 2 : 3}
-          castShadow
-          shadow-mapSize={[1024, 1024]}
-          shadow-camera-left={-25}
-          shadow-camera-right={25}
-          shadow-camera-top={25}
-          shadow-camera-bottom={-25}
-          shadow-bias={-0.001}
+        <OfficeLighting
+          visible={props.visible}
+          reduced={!!reduced}
+          tier={tier}
+          onPeriod={setPeriod}
+        />
+        <OfficeEnvironment
+          kind={environment}
+          visible={props.visible}
+          reduced={!!reduced}
+          decorativeMotion={qualitySettings[tier].decorativeMotion}
+          minX={minX}
+          maxX={maxX}
+          minZ={minZ}
+          night={period === 'night'}
+        />
+        <QualityMonitor
+          preference={quality}
+          visible={props.visible}
+          reduced={!!reduced}
+          onTier={setAutoTier}
         />
         <OfficeCamera
           workspaceId={props.workspaceId}
@@ -833,6 +843,14 @@ export default function OfficeScene(props: Props) {
           action={action}
           mode={mode}
           focusId={props.focusId}
+          follow={follow}
+          onFollowChange={setFollow}
+          visible={props.visible}
+          reduced={!!reduced}
+          lounge={[center[0], center[1], deskMaxZ + 8]}
+          getSelected={() =>
+            actualSelection(worlds.current!.floors, props.selectedKey, childKey)
+          }
         />
         {(['developer', 'devops'] as const)
           .filter(
@@ -842,6 +860,9 @@ export default function OfficeScene(props: Props) {
             <OfficeFloor
               key={division}
               props={props}
+              childrenByParent={childrenByParent}
+              completed={collaboration.completed}
+              night={period === 'night'}
               division={division}
               layout={layouts[division]}
               world={worlds.current!.floors[division === 'developer' ? 0 : 1]}
@@ -874,6 +895,93 @@ export default function OfficeScene(props: Props) {
         role="group"
         aria-label="Camera controls"
       >
+        <div className="office-scene-options">
+          <label>
+            View{' '}
+            <select
+              aria-label="Office environment"
+              value={environment}
+              onChange={(e) => {
+                const v = e.target.value as Environment
+                setEnvironment(v)
+                try {
+                  localStorage.setItem(
+                    `devdeck.office-environment.${props.workspaceId}`,
+                    v,
+                  )
+                } catch {
+                  /* Optional. */
+                }
+              }}
+            >
+              <option value="garden">Taman</option>
+              <option value="city">Kota</option>
+            </select>
+          </label>
+          <label>
+            Quality{' '}
+            <select
+              aria-label="Office quality"
+              value={quality}
+              onChange={(e) => {
+                const v = e.target.value as QualityPreference
+                setQuality(v)
+                try {
+                  localStorage.setItem(
+                    `devdeck.office-quality.${props.workspaceId}`,
+                    v,
+                  )
+                } catch {
+                  /* Optional. */
+                }
+              }}
+            >
+              {['auto', 'high', 'balanced', 'low'].map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span aria-label="Local office time">
+            {period} · {quality === 'auto' ? tier : quality}
+          </span>
+        </div>
+        <div className="office-camera-presets">
+          <button
+            className="office-button"
+            onClick={() => {
+              setFollow(false)
+              setAction((a) => ({ id: a.id + 1, type: 'overview' }))
+            }}
+          >
+            Overview
+          </button>
+          <button
+            className="office-button"
+            disabled={!selected}
+            onClick={() => setAction((a) => ({ id: a.id + 1, type: 'desk' }))}
+          >
+            Meja Terpilih
+          </button>
+          <button
+            className="office-button"
+            onClick={() => {
+              setFollow(false)
+              setAction((a) => ({ id: a.id + 1, type: 'lounge' }))
+            }}
+          >
+            Lounge
+          </button>
+          <button
+            className="office-button"
+            disabled={!selected}
+            aria-pressed={follow}
+            onClick={() => setFollow((v) => !v)}
+          >
+            Follow
+          </button>
+        </div>
         <div
           className="office-camera-modes"
           role="group"

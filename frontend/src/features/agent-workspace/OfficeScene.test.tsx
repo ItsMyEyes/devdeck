@@ -1,8 +1,14 @@
+vi.mock('@/features/agent-workspace/OfficeHtml',()=>({default:({children}:{children:ReactNode})=><>{children}</>}))
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import OfficeScene from '@/features/agent-workspace/OfficeScene'
 import type { OfficeMember } from '@/features/agent-workspace/model'
+vi.mock('@/features/agent-workspace/OfficeEnvironment', () => ({
+  default: () => null,
+  OfficeLighting: () => null,
+  QualityMonitor: () => null,
+}))
 const settings = vi.hoisted(() => ({ reduced: false, frameloop: '' }))
 vi.mock('motion/react', () => ({ useReducedMotion: () => settings.reduced }))
 vi.mock('@react-three/fiber', () => ({

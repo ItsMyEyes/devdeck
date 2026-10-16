@@ -6,6 +6,7 @@ import type {
 } from '@/store/types'
 
 export interface OfficeMember extends OfficeSession {
+  receivedAt?: number
   parentProject?: string
   hostName?: string
   lifecycle?: boolean

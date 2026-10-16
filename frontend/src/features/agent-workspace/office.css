@@ -369,7 +369,7 @@
 .office-canvas-toolbar {
   position: absolute;
   inset: 14px 14px auto;
-  z-index: 2;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -397,6 +397,11 @@
   position: absolute;
   bottom: 38px;
   right: 12px;
+  z-index: 20;
+  padding: 8px;
+  border: 1px solid var(--color-devdeck-border);
+  border-radius: 8px;
+  background: var(--color-devdeck-glass-solid);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -692,9 +697,113 @@
   color: #638ba6;
 }
 
-.office-runtime-summary { display: block; font-size: 9px; color: var(--color-devdeck-fg-2); margin-top: 3px; }
-.office-history-panel { padding: 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; overflow: auto; }
-.office-history-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
-.office-history-panel input, .office-history-panel select { padding: 8px; border: 1px solid var(--devdeck-line); border-radius: 8px; background: var(--devdeck-pane); color: var(--devdeck-fg); }
-.office-history-panel .office-roster { overflow: auto; flex: 1; }
-.office-host-title { font-size: 11px; padding: 8px 12px 4px; color: var(--devdeck-fg-2); }
+.office-runtime-summary {
+  display: block;
+  font-size: 9px;
+  color: var(--color-devdeck-fg-2);
+  margin-top: 3px;
+}
+.office-history-panel {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow: auto;
+}
+.office-history-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.office-history-panel input,
+.office-history-panel select {
+  padding: 8px;
+  border: 1px solid var(--devdeck-line);
+  border-radius: 8px;
+  background: var(--devdeck-pane);
+  color: var(--devdeck-fg);
+}
+.office-history-panel .office-roster {
+  overflow: auto;
+  flex: 1;
+}
+.office-host-title {
+  font-size: 11px;
+  padding: 8px 12px 4px;
+  color: var(--devdeck-fg-2);
+}
+
+.office-scene-options,
+.office-camera-presets {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.office-scene-options {
+  font-size: 10px;
+  color: var(--color-devdeck-fg-2);
+}
+.office-scene-options select {
+  color: var(--color-devdeck-fg);
+  background: var(--color-devdeck-glass-solid);
+  border: 1px solid var(--color-devdeck-border);
+  border-radius: 5px;
+  padding: 3px;
+}
+.office-camera-presets .office-button {
+  font-size: 10px;
+  padding: 4px 6px;
+}
+.office-work-label {
+  display: block;
+  white-space: nowrap;
+  font-size: 8px;
+  color: var(--color-devdeck-fg);
+  background: var(--color-devdeck-glass-solid);
+  border: 1px solid var(--color-devdeck-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  opacity: 0.9;
+}
+.office-task-board {
+  width: 145px;
+  padding: 8px;
+  border: 1px solid var(--color-devdeck-border);
+  border-radius: 6px;
+  background: var(--color-devdeck-glass-solid);
+  color: var(--color-devdeck-fg);
+  font-size: 9px;
+}
+.office-task-board button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--color-devdeck-border);
+}
+.office-task-board button span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.office-task-board small {
+  display: block;
+  color: var(--color-devdeck-fg-2);
+  font-size: 8px;
+}
+.office-result-marker {
+  color: var(--color-devdeck-fg);
+  font-size: 9px;
+}
+
+.office-child-compact-name {
+  display: none;
+}
+.office-label:hover .office-child-compact-name,
+.office-label:focus-visible .office-child-compact-name {
+  display: inline;
+}

@@ -171,6 +171,7 @@ export function useOfficeOverview(workspace: Workspace) {
         continue
       members.push({
         ...session,
+        receivedAt: query.dataUpdatedAt,
         parentProject: connections.data?.find(
           (c) => c.id === session.connectionId,
         )?.parentProject,
