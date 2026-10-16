@@ -6,14 +6,20 @@ const mocks = vi.hoisted(() => ({
   camera: null as unknown as PerspectiveCamera,
   controls: null as unknown as { target: Vector3; update: () => void },
   invalidate: vi.fn(),
+  frame: null as null | (() => void),
+  onStart: null as null | (() => void),
 }))
 vi.mock('@react-three/fiber', () => ({
+  useFrame: (callback: () => void) => {
+    mocks.frame = callback
+  },
   useThree: () => ({ camera: mocks.camera, invalidate: mocks.invalidate }),
 }))
 vi.mock('@react-three/drei', async () => {
   const { forwardRef, useImperativeHandle } = await import('react')
   return {
-    OrbitControls: forwardRef((_: unknown, ref) => {
+    OrbitControls: forwardRef((props: { onStart?: () => void }, ref) => {
+      mocks.onStart = props.onStart || null
       useImperativeHandle(ref, () => mocks.controls)
       return null
     }),
@@ -130,4 +136,41 @@ it('saves a newly focused session as the floor camera preference', () => {
   expect(
     JSON.parse(localStorage.getItem('devdeck.office-camera.ws.devops')!),
   ).toMatchObject({ target: [2, 5, 3] })
+})
+
+it('follows the live selected position and cancels for manual navigation', () => {
+  const onFollowChange = vi.fn()
+  let position: [number, number, number] = [1, 0, 1]
+  render(
+    <OfficeCamera
+      {...props}
+      follow
+      visible
+      onFollowChange={onFollowChange}
+      getSelected={() => position}
+    />,
+  )
+  mocks.frame?.()
+  const before = mocks.controls.target.clone()
+  position = [5, 0, 5]
+  mocks.frame?.()
+  expect(mocks.controls.target.x).toBeGreaterThan(before.x)
+  mocks.onStart?.()
+  expect(onFollowChange).toHaveBeenCalledWith(false)
+})
+it('cancels follow when reset is requested', () => {
+  const onFollowChange = vi.fn()
+  const { rerender } = render(
+    <OfficeCamera {...props} follow onFollowChange={onFollowChange} />,
+  )
+  onFollowChange.mockClear()
+  rerender(
+    <OfficeCamera
+      {...props}
+      reset={1}
+      follow
+      onFollowChange={onFollowChange}
+    />,
+  )
+  expect(onFollowChange).toHaveBeenCalledWith(false)
 })

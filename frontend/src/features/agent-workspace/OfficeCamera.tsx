@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { ComponentRef } from 'react'
-import { useThree } from '@react-three/fiber'
+import { useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Vector3, MOUSE, TOUCH } from 'three'
 import { applyCameraAction } from '@/features/agent-workspace/camera'
 import type { OfficeView } from '@/features/agent-workspace/model'
 
+const noop = () => {}
 export default function OfficeCamera({
   workspaceId,
   view,
@@ -16,6 +17,12 @@ export default function OfficeCamera({
   action,
   mode,
   focusId,
+  follow = false,
+  onFollowChange = noop,
+  getSelected,
+  visible = true,
+  reduced = false,
+  lounge,
 }: {
   workspaceId: string
   view: OfficeView
@@ -26,9 +33,57 @@ export default function OfficeCamera({
   action: { id: number; type: string }
   mode: 'pan' | 'rotate'
   focusId: number
+  follow?: boolean
+  onFollowChange?: (follow: boolean) => void
+  getSelected?: () => [number, number, number] | undefined
+  visible?: boolean
+  reduced?: boolean
+  lounge?: [number, number, number]
 }) {
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null)
   const { camera, invalidate } = useThree()
+  const live = useRef({
+    getSelected,
+    selected,
+    follow,
+    visible,
+    onFollowChange,
+    reduced,
+  })
+  live.current = {
+    getSelected,
+    selected,
+    follow,
+    visible,
+    onFollowChange,
+    reduced,
+  }
+  const vectors = useRef({ next: new Vector3(), delta: new Vector3() })
+  useFrame((_, dt) => {
+    const current = live.current,
+      c = controls.current
+    if (!current.follow || !current.visible || !c) return
+    const point = current.getSelected ? current.getSelected() : current.selected
+    if (!point) {
+      current.onFollowChange(false)
+      return
+    }
+    const v = vectors.current
+    v.next.fromArray(point)
+    v.delta
+      .subVectors(v.next, c.target)
+      .multiplyScalar(current.reduced ? 1 : 1 - Math.exp(-(dt || 1 / 60) * 8))
+    camera.position.add(v.delta)
+    c.target.add(v.delta)
+    c.update()
+  })
+  const previousView = useRef(view)
+  useEffect(() => {
+    if (previousView.current !== view) {
+      previousView.current = view
+      onFollowChange(false)
+    }
+  }, [view, onFollowChange])
   const saveCamera = useCallback(() => {
     const c = controls.current
     if (!c) return
@@ -50,6 +105,7 @@ export default function OfficeCamera({
   useEffect(() => {
     const resetting = lastReset.current !== reset
     lastReset.current = reset
+    if (resetting) onFollowChange(false)
     const c = controls.current
     if (!c) return
     const { center, span } = defaults.current
@@ -115,7 +171,28 @@ export default function OfficeCamera({
     const c = controls.current
     if (!c || !action.id || lastAction.current === action.id) return
     lastAction.current = action.id
-    applyCameraAction(camera, c.target, action.type)
+    onFollowChange(false)
+    if (['overview', 'desk', 'lounge'].includes(action.type)) {
+      const { center, span } = defaults.current
+      const point =
+        action.type === 'desk'
+          ? getSelected
+            ? getSelected()
+            : selected
+          : action.type === 'lounge'
+            ? lounge
+            : center
+      if (point) {
+        c.target.fromArray(point)
+        const distance =
+          action.type === 'overview' ? span : action.type === 'desk' ? 5 : 12
+        camera.position.set(
+          point[0] + distance * 0.8,
+          point[1] + distance * 0.9,
+          point[2] + distance * 0.8,
+        )
+      }
+    } else applyCameraAction(camera, c.target, action.type)
     c.update()
     saveCamera()
     invalidate()
@@ -140,6 +217,7 @@ export default function OfficeCamera({
         ONE: mode === 'pan' ? TOUCH.PAN : TOUCH.ROTATE,
         TWO: TOUCH.DOLLY_PAN,
       }}
+      onStart={() => onFollowChange(false)}
       onEnd={saveCamera}
     />
   )
