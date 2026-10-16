@@ -1,5 +1,8 @@
+import { characterProfile } from '@/features/agent-workspace/identity'
+import { bodyShape, deskShape } from '@/features/agent-workspace/furniture'
 import type { Actor } from '@/features/agent-workspace/activity'
 export interface Pose {
+  ankles: [number, number]
   propMix: number
   height: number
   roll: number
@@ -17,6 +20,7 @@ export interface Pose {
 }
 export function makePose(): Pose {
   return {
+    ankles: [0, 0],
     propMix: 1,
     height: 0.57,
     roll: 0,
@@ -40,39 +44,70 @@ export function characterPose(
   const t = reduced ? 0 : actor.time,
     seed = actor.random % 97
   const walking = actor.phase === 'approach' || actor.phase === 'return'
-  pose.height = actor.seated ? 0.57 : 0.9
+  const profile = characterProfile(actor.key)
+  pose.height =
+    bodyShape.standingHip +
+    (bodyShape.seatedHip - bodyShape.standingHip) *
+      (reduced ? 1 : actor.seatBlend)
   pose.propMix = Math.max(0, Math.min(1, (actor.interaction - 0.45) / 0.55))
   pose.roll = 0
   pose.targets = undefined
   pose.torso = 0
   pose.head = 0
-  pose.headYaw = 0
+  pose.headYaw = actor.lookYaw || 0
   pose.prop = 'none'
   for (let side = 0; side < 2; side++) {
     pose.shoulders[side] = 0.1
     pose.elbows[side] = 0.15
     pose.spread[side] = side ? -0.05 : 0.05
     pose.hand[side] = 0
+    pose.ankles[side] = 0
     pose.hips[side] = actor.seated ? 1.45 : 0
     pose.knees[side] = actor.seated ? -1.45 : 0.05
   }
   if (walking) {
-    const gait = Math.sin(t * (actor.phase === 'return' ? 10 : 6)) * 0.42
-    pose.hips[0] = gait
-    pose.hips[1] = -gait
-    pose.knees[0] = Math.min(0, -gait) * 0.8
-    pose.knees[1] = Math.min(0, gait) * 0.8
-    pose.shoulders[0] = -gait * 0.65
-    pose.shoulders[1] = gait * 0.65
-    pose.height += Math.abs(gait) * 0.035
+    const cycle = (actor.travel / (0.95 * profile.stride)) * Math.PI * 2
+    const amplitude = Math.min(1, actor.speed / 0.8)
+    for (let side = 0; side < 2; side++) {
+      const phase = cycle + side * Math.PI
+      const lift = Math.max(0, Math.sin(phase)) * 0.12 * amplitude
+      const z = Math.cos(phase) * 0.23 * amplitude - 0.04
+      const y = bodyShape.ankle + lift - pose.height
+      const length = Math.min(0.829, Math.hypot(y, z))
+      const hip =
+        Math.atan2(-z, -y) +
+        Math.acos(
+          Math.max(
+            -1,
+            Math.min(
+              1,
+              (bodyShape.thigh ** 2 + length ** 2 - bodyShape.shin ** 2) /
+                (2 * bodyShape.thigh * length),
+            ),
+          ),
+        )
+      const knee = -Math.acos(
+        Math.max(
+          -1,
+          Math.min(
+            1,
+            (length ** 2 - bodyShape.thigh ** 2 - bodyShape.shin ** 2) /
+              (2 * bodyShape.thigh * bodyShape.shin),
+          ),
+        ),
+      )
+      pose.hips[side] = hip
+      pose.knees[side] = knee
+      pose.ankles[side] = -(hip + knee)
+      pose.shoulders[side] = Math.sin(phase) * 0.22 * amplitude
+    }
     return pose
   }
   if (actor.phase === 'dwell') {
     if (actor.intent === 'work') {
-      const cycle = (t + seed) % 13
-      const reading = cycle > 9.5,
-        trackpad = cycle > 7 && cycle < 9.5
-      pose.torso = -0.13
+      const reading = actor.workKind === 'command' || actor.workKind === 'tool',
+        trackpad = actor.workKind === 'tool'
+      pose.torso = -0.08 + profile.posture
       pose.head = -0.12
       pose.shoulders[0] = 0.56
       pose.shoulders[1] = trackpad ? 0.7 : 0.56
@@ -86,8 +121,16 @@ export function characterPose(
       }
       if (trackpad) pose.spread[1] = -0.3
       pose.targets = [
-        [-0.19, 0.48 + pose.hand[0], -0.48],
-        [trackpad ? 0.21 : 0.19, 0.48 + pose.hand[1], trackpad ? -0.3 : -0.48],
+        [
+          -0.19,
+          deskShape.keyboardY - bodyShape.seatedHip + pose.hand[0],
+          deskShape.keyboardZ - deskShape.seatZ,
+        ],
+        [
+          trackpad ? 0.21 : 0.19,
+          deskShape.keyboardY - bodyShape.seatedHip + pose.hand[1],
+          trackpad ? -0.3 : deskShape.keyboardZ - deskShape.seatZ,
+        ],
       ]
     } else if (actor.intent === 'attention') {
       pose.head = 0.16
@@ -198,6 +241,7 @@ export function characterPose(
     ]
   }
   if (activity === 'stretch') {
+    pose.height = bodyShape.standingHip
     pose.shoulders[0] = 2.9 + motion * 0.1
     pose.shoulders[1] = 2.9 - motion * 0.1
     pose.elbows[0] = 0.2

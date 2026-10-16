@@ -442,3 +442,23 @@ describe('navigation and selection', () => {
     expect(actualSelection(floors, 'absent')).toBeUndefined()
   })
 })
+
+it('invalidates cached navigation when furniture changes in the same plan object', () => {
+  const dynamic: FloorPlan = {
+    minX: -5,
+    maxX: 5,
+    minZ: -5,
+    maxZ: 5,
+    slots: [],
+    obstacles: [{ x: 0, z: 0, halfX: 1, halfZ: 1 }],
+  }
+  findPath([-3, 0], [3, 0], dynamic)
+  dynamic.obstacles.push({ x: 0, z: -2, halfX: 1.2, halfZ: 1.2 })
+  const path = findPath([-3, 0], [3, 0], dynamic)
+  expect(path.length).toBeGreaterThan(0)
+  let previous: [number, number] = [-3, 0]
+  for (const point of path) {
+    expect(clearSegment(previous, point, dynamic)).toBe(true)
+    previous = point
+  }
+})

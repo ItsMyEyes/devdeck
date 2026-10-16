@@ -1,3 +1,7 @@
+import { seedFor, characterProfile } from '@/features/agent-workspace/identity'
+import { deskShape, chairShape } from '@/features/agent-workspace/furniture'
+import type { OfficeWork } from '@/store/types'
+export { seedFor } from '@/features/agent-workspace/identity'
 import { avatarKey, needsAttention } from '@/features/agent-workspace/model'
 import type {
   DeskPosition,
@@ -42,6 +46,14 @@ export interface FloorPlan {
   slots: Slot[]
 }
 export interface Actor {
+  lookYaw?: number
+  workKind: OfficeWork['kind']
+  travel: number
+  speed: number
+  replanAfter: number
+  blockedTime: number
+  velocity: number
+  seatBlend: number
   key: string
   home: Point
   position: Point
@@ -61,11 +73,6 @@ export interface Actor {
   random: number
   time: number
   seated: boolean
-}
-export function seedFor(key: string) {
-  let seed = 2166136261
-  for (const c of key) seed = Math.imul(seed ^ c.charCodeAt(0), 16777619)
-  return seed >>> 0 || 1
 }
 function random(actor: Actor) {
   actor.random = (Math.imul(actor.random, 1664525) + 1013904223) >>> 0
@@ -102,6 +109,13 @@ export function actorIntent(member: OfficeMember, child?: string): Intent {
 }
 export function makeActor(key: string, home: Point, intent: Intent): Actor {
   const actor: Actor = {
+    workKind: 'generic',
+    travel: 0,
+    speed: 0,
+    velocity: 0,
+    replanAfter: 0,
+    blockedTime: 0,
+    seatBlend: 1,
     key,
     home: [...home],
     position: [...home],
@@ -153,9 +167,9 @@ export function floorPlan(
     if (slot.seated) slot.seat = [slot.point[0], slot.point[1] - 0.45]
   const obstacles: Obstacle[] = desks.map((d) => ({
     x: d.x,
-    z: d.z - 0.35,
-    halfX: 1.16,
-    halfZ: 0.65,
+    z: d.z + deskShape.centerZ,
+    halfX: deskShape.width / 2 + 0.135,
+    halfZ: deskShape.depth / 2 + 0.19,
   }))
   obstacles.push(
     ...companions.flatMap(([x, z]) => [
@@ -164,7 +178,12 @@ export function floorPlan(
     ]),
   )
   obstacles.push(
-    ...desks.map((d) => ({ x: d.x, z: d.z + 0.78, halfX: 0.43, halfZ: 0.15 })),
+    ...desks.map((d) => ({
+      x: d.x,
+      z: d.z + 0.78,
+      halfX: chairShape.width / 2 + 0.1,
+      halfZ: 0.15,
+    })),
   )
   obstacles.push(
     { x: minX + 0.7, z: 1, halfX: 0.65, halfZ: 1.2 },
@@ -241,24 +260,53 @@ export function clearSegment(a: Point, b: Point, plan: FloorPlan) {
     return enter < exit
   })
 }
+const navigationGrids = new WeakMap<
+  FloorPlan,
+  {
+    signature: string
+    nodes: Point[]
+    indices: Map<string, number>
+    neighbors: Map<number, number[]>
+  }
+>()
 // Half-unit aisle grid is derived from furniture; routes never teleport across a desk.
 export function findPath(start: Point, end: Point, plan: FloorPlan): Point[] {
   if (clearSegment(start, end, plan)) return [[...end]]
-  const nodes: Point[] = []
-  const indices = new Map<string, number>()
-  for (let x = Math.ceil(plan.minX * 2); x <= plan.maxX * 2; x++)
-    for (let z = Math.ceil(plan.minZ * 2); z <= plan.maxZ * 2; z++) {
-      const point: Point = [x / 2, z / 2]
-      if (walkable(point, plan)) {
-        indices.set(`${x},${z}`, nodes.length)
-        nodes.push(point)
+  const signature = JSON.stringify([
+    plan.minX,
+    plan.maxX,
+    plan.minZ,
+    plan.maxZ,
+    plan.obstacles,
+  ])
+  let grid = navigationGrids.get(plan)
+  if (!grid || grid.signature !== signature) {
+    const nodes: Point[] = [],
+      indices = new Map<string, number>()
+    for (let x = Math.ceil(plan.minX * 2); x <= plan.maxX * 2; x++)
+      for (let z = Math.ceil(plan.minZ * 2); z <= plan.maxZ * 2; z++) {
+        const point: Point = [x / 2, z / 2]
+        if (walkable(point, plan)) {
+          indices.set(`${x},${z}`, nodes.length)
+          nodes.push(point)
+        }
       }
-    }
-  const nearest = (point: Point) =>
-    nodes
-      .map((p, i) => ({ i, d: distance(point, p) }))
-      .sort((a, b) => a.d - b.d)
-      .find(({ i }) => clearSegment(point, nodes[i], plan))?.i
+    grid = { signature, nodes, indices, neighbors: new Map() }
+    navigationGrids.set(plan, grid)
+  }
+  const { nodes, indices, neighbors } = grid
+  const nearest = (point: Point) => {
+    let best: number | undefined,
+      closest = Infinity
+    nodes.forEach((node, i) => {
+      const d = distance(point, node)
+      if (d < closest && clearSegment(point, node, plan)) {
+        best = i
+        closest = d
+      }
+    })
+    return best
+  }
   const first = nearest(start),
     last = nearest(end)
   if (first === undefined || last === undefined) return []
@@ -267,24 +315,28 @@ export function findPath(start: Point, end: Point, plan: FloorPlan): Point[] {
   for (let head = 0; head < queue.length; head++) {
     const i = queue[head]
     if (i === last) break
-    for (const [dx, dz] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ]) {
-      const next = indices.get(
-        `${nodes[i][0] * 2 + dx},${nodes[i][1] * 2 + dz}`,
-      )
-      if (
-        next !== undefined &&
-        !previous.has(next) &&
-        clearSegment(nodes[i], nodes[next], plan)
-      ) {
+    let adjacent = neighbors.get(i)
+    if (!adjacent) {
+      adjacent = []
+      for (const [dx, dz] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const next = indices.get(
+          `${nodes[i][0] * 2 + dx},${nodes[i][1] * 2 + dz}`,
+        )
+        if (next !== undefined && clearSegment(nodes[i], nodes[next], plan))
+          adjacent.push(next)
+      }
+      neighbors.set(i, adjacent)
+    }
+    for (const next of adjacent)
+      if (!previous.has(next)) {
         previous.set(next, i)
         queue.push(next)
       }
-    }
   }
   if (!previous.has(last)) return []
   const route: Point[] = [[...end]]
@@ -315,7 +367,12 @@ export class ActivityWorld {
     this.diagnostic = diagnostic
   }
   reconcile(
-    members: { key: string; home: Point; intent: Intent }[],
+    members: {
+      key: string
+      home: Point
+      intent: Intent
+      workKind?: OfficeWork['kind']
+    }[],
     plan: FloorPlan = this.plan,
   ) {
     const obstaclesChanged =
@@ -335,7 +392,7 @@ export class ActivityWorld {
         this.plan.maxZ,
         this.plan.slots,
       ])
-    this.plan = plan
+    if (obstaclesChanged || layoutChanged) this.plan = plan
     const keys = new Set(members.map((m) => m.key))
     for (const [key, actor] of this.actors)
       if (!keys.has(key)) {
@@ -393,6 +450,7 @@ export class ActivityWorld {
           }
         }
       }
+      actor.workKind = member.workKind || 'generic'
       actor.intent = member.intent
       if (member.intent !== 'idle') actor.idleTime = 0
       if (
@@ -432,6 +490,9 @@ export class ActivityWorld {
       actor.interaction = 0
       actor.seated = true
       actor.yaw = 0
+      actor.travel = 0
+      actor.speed = actor.velocity = 0
+      actor.seatBlend = 1
       actor.time = 0
       actor.idleTime = 0
     }
@@ -445,6 +506,9 @@ export class ActivityWorld {
         a.key.localeCompare(b.key),
     )
     for (const actor of moving) {
+      actor.speed = 0
+      actor.seatBlend +=
+        ((actor.seated ? 1 : 0) - actor.seatBlend) * Math.min(1, dt * 12)
       actor.time += dt
       actor.elapsed += dt
       if (actor.phase === 'dwell') {
@@ -455,7 +519,13 @@ export class ActivityWorld {
         const available = this.plan.slots.filter(
           (s) => s.activity !== actor.last && !this.reservations.has(s.id),
         )
-        const offset = Math.floor(random(actor) * available.length)
+        const preferred = available.findIndex(
+          (s) => s.activity === characterProfile(actor.key).preference,
+        )
+        const offset =
+          preferred >= 0 && random(actor) < 0.6
+            ? preferred
+            : Math.floor(random(actor) * available.length)
         let slot: Slot | undefined,
           path: Point[] = []
         for (let i = 0; i < available.length; i++) {
@@ -494,6 +564,7 @@ export class ActivityWorld {
         }
       } else if (actor.phase === 'approach' || actor.phase === 'return') {
         actor.seated = false
+        if (actor.seatBlend > 0.05) continue
         const target = actor.path[0]
         if (!target) {
           const goal =
@@ -501,6 +572,8 @@ export class ActivityWorld {
               ? actor.home
               : this.plan.slots.find((s) => s.id === actor.slot)?.point
           if (goal && distance(actor.position, goal) > 0.05) {
+            if (actor.time < actor.replanAfter) continue
+            actor.replanAfter = actor.time + 0.35
             actor.path = findPath(actor.position, goal, this.plan)
             continue
           }
@@ -510,6 +583,8 @@ export class ActivityWorld {
               ? Math.PI
               : 0
           if (actor.phase === 'return') {
+            actor.position = [...actor.home]
+            actor.velocity = 0
             actor.activity = undefined
             actor.idleTime = 0
             actor.dwell = 8 + random(actor) * 7
@@ -517,8 +592,17 @@ export class ActivityWorld {
           } else this.phase(actor, 'setup')
           continue
         }
-        const d = distance(actor.position, target),
-          step = Math.min(d, dt * (actor.phase === 'return' ? 4.2 : 1.65))
+        const d = distance(actor.position, target)
+        const remaining = distance(
+          actor.position,
+          actor.path[actor.path.length - 1],
+        )
+        const desired = Math.min(
+          actor.phase === 'return' ? 4.2 : 1.65,
+          Math.sqrt(8 * remaining),
+        )
+        actor.velocity = Math.min(desired, actor.velocity + dt * 4)
+        const step = Math.min(d, dt * actor.velocity)
         const next: Point =
           d > 0
             ? [
@@ -555,6 +639,10 @@ export class ActivityWorld {
           continue
         }
         if (blocker) {
+          actor.velocity = 0
+          actor.blockedTime += dt
+          if (actor.time < actor.replanAfter) continue
+          actor.replanAfter = actor.time + 0.35
           const goal =
             actor.phase === 'return'
               ? actor.home
@@ -583,7 +671,11 @@ export class ActivityWorld {
               continue
             }
           }
-          if (stationary || moving.indexOf(blocker) < moving.indexOf(actor)) {
+          if (
+            stationary ||
+            moving.indexOf(blocker) < moving.indexOf(actor) ||
+            actor.blockedTime > 2
+          ) {
             // Keep a passing waypoint until reached; try both sides of a narrow aisle.
             const dx = target[0] - actor.position[0],
               dz = target[1] - actor.position[1]
@@ -615,6 +707,13 @@ export class ActivityWorld {
                 actor.position[1] - (dz / (d || 1)) * 1.5,
               ],
             ]
+            if (actor.blockedTime > 2)
+              for (const radius of [0.8, 1.5, 2])
+                for (let i = 0; i < 12; i++)
+                  exits.push([
+                    actor.position[0] + Math.cos((i * Math.PI) / 6) * radius,
+                    actor.position[1] + Math.sin((i * Math.PI) / 6) * radius,
+                  ])
             for (const side of exits) {
               if (!clearSegment(actor.position, side, this.plan)) continue
               const safe = moving.every(
@@ -635,10 +734,16 @@ export class ActivityWorld {
           }
           continue
         }
-        actor.yaw = Math.atan2(
+        const heading = Math.atan2(
           -(target[0] - actor.position[0]),
           -(target[1] - actor.position[1]),
         )
+        const turn = heading - actor.yaw
+        actor.yaw +=
+          Math.atan2(Math.sin(turn), Math.cos(turn)) * Math.min(1, dt * 10)
+        actor.blockedTime = 0
+        actor.travel += step
+        actor.speed = step / dt
         actor.position = next
         if (d <= step + 0.001) actor.path.shift()
       } else if (actor.phase === 'setup') {

@@ -1,6 +1,7 @@
+import { visualStatus } from '@/features/agent-workspace/presentation'
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
+import Html from '@/features/agent-workspace/OfficeHtml'
 import type { Group } from 'three'
 import OfficeCharacter from '@/features/agent-workspace/OfficeCharacter'
 import {
@@ -18,6 +19,7 @@ export default function OfficeActor({
   reduced,
   selected,
   compact,
+  completed = false,
   onSelect,
 }: {
   actor: Actor
@@ -26,16 +28,12 @@ export default function OfficeActor({
   reduced: boolean
   selected: boolean
   compact: boolean
+  completed?: boolean
   onSelect: (member: OfficeMember, child?: string) => void
 }) {
   const root = useRef<Group>(null)
   const sub = member.subagents.find((c) => c.id === child)
-  const status =
-    member.stale || member.limited
-      ? 'unknown'
-      : child
-        ? sub?.status || 'unknown'
-        : member.status
+  const status = visualStatus(member, child)
   const name = child
     ? childCharacterName(member, child)
     : member.characterName || member.title || member.agent
@@ -74,15 +72,19 @@ export default function OfficeActor({
             onSelect(member, child)
           }}
         >
+          {completed && <span className="office-result-marker">✓ Result</span>}
           <i style={{ color: statusColor(status) }} />
           <span
+            className={
+              (child || compact) && !selected ? 'office-child-compact-name' : undefined
+            }
             style={{
-              maxWidth: selected ? 110 : 68,
+              maxWidth: selected ? 110 : compact ? 50 : 68,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
             }}
           >
-            {compact && !selected ? name.split(/\s+/)[0] : name}
+            {!selected ? name.split(/\s+/)[0] : name}
           </span>
           {selected && (
             <span style={{ fontSize: 8, opacity: 0.7 }}>

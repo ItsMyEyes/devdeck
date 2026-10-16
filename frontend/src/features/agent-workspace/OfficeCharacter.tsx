@@ -11,10 +11,8 @@ import {
   characterPose,
   makePose,
 } from '@/features/agent-workspace/characterPose'
-import { seedFor } from '@/features/agent-workspace/activity'
+import { characterProfile } from '@/features/agent-workspace/identity'
 import type { Actor } from '@/features/agent-workspace/activity'
-const shirts = ['#548d87', '#b77858', '#717bab', '#ab8675', '#64839d']
-const skins = ['#d0a583', '#a87b5f', '#ebc4a2', '#8c624b']
 export default function OfficeCharacter({
   actor,
   reduced,
@@ -26,9 +24,10 @@ export default function OfficeCharacter({
 }) {
   const joints = useRef<Record<string, Group | null>>({})
   const pose = useRef(makePose())
-  const h = seedFor(actor.key),
-    skin = skins[h % skins.length],
-    shirt = color || shirts[h % shirts.length]
+  const profile = characterProfile(actor.key),
+    h = profile.seed,
+    skin = profile.skin,
+    shirt = color || profile.shirt
   const ref = (name: string) => (group: Group | null) => {
     joints.current[name] = group
   }
@@ -109,6 +108,7 @@ export default function OfficeCharacter({
       } else if (j[`hand${i}`]) j[`hand${i}`]!.rotation.x = p.hand[i]
       if (j[`hip${i}`]) j[`hip${i}`]!.rotation.x = p.hips[i]
       if (j[`knee${i}`]) j[`knee${i}`]!.rotation.x = p.knees[i]
+      if (j[`ankle${i}`]) j[`ankle${i}`]!.rotation.x = p.ankles[i]
     }
     if (j.book)
       j.book.position.set(
@@ -156,29 +156,52 @@ export default function OfficeCharacter({
               size={[0.16, 0.45, 0.17]}
               color="#354454"
             />
-            <Block
-              at={[0, -0.455, -0.08]}
-              size={[0.19, 0.13, 0.32]}
-              color="#29343d"
-            />
+            <group ref={ref(`ankle${i}`)} position={[0, -0.45, 0]}>
+              <Block
+                at={[0, -0.005, -0.08]}
+                size={[0.19, 0.13, 0.32]}
+                color="#29343d"
+              />
+            </group>
           </group>
         </group>
       ))}
       <group ref={ref('torso')}>
-        <Block at={[0, 0.29, 0]} size={[0.48, 0.58, 0.32]} color={shirt} />
+        <Block
+          at={[0, 0.29, 0]}
+          size={[0.48, 0.58, 0.32]}
+          color={shirt}
+          surface="fabric"
+          shadow
+          soft
+        />
         <group ref={ref('head')} position={[0, 0.75, 0]}>
           <Block at={[0, 0, 0]} size={[0.25, 0.29, 0.23]} color={skin} round />
           <Block
             at={[0, 0.16, 0.035]}
             size={[0.27, 0.18, 0.25]}
-            color="#34302e"
+            color={profile.hair}
             round
           />
+          {profile.accessory === 1 && (
+            <>
+              <Block
+                at={[-0.08, 0.025, -0.22]}
+                size={[0.13, 0.085, 0.025]}
+                color="#59656b"
+              />
+              <Block
+                at={[0.08, 0.025, -0.22]}
+                size={[0.13, 0.085, 0.025]}
+                color="#59656b"
+              />
+            </>
+          )}
           {h % 3 === 0 && (
             <Block
               at={[0.08, 0.22, 0.13]}
               size={[0.15, 0.15, 0.15]}
-              color="#34302e"
+              color={profile.hair}
               round
             />
           )}

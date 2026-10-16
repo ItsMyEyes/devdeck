@@ -5,6 +5,29 @@ import {
   makePose,
 } from '@/features/agent-workspace/characterPose'
 
+it('does not cycle semantic command poses on a decorative timer', () => {
+  const actor = makeActor('command', [0, 0], 'work')
+  actor.workKind = 'command'
+  const start = characterPose(actor, false, makePose())
+  actor.time = 8
+  const later = characterPose(actor, false, makePose())
+  expect(later.targets).toEqual(start.targets)
+  expect(later.hand).toEqual([0, 0])
+})
+it('plants feet while blocked and advances gait with travelled distance', () => {
+  const actor = makeActor('walking', [0, 0], 'idle')
+  actor.phase = 'approach'
+  actor.seated = false
+  actor.travel = 0
+  actor.speed = 0
+  const blocked = characterPose(actor, false, makePose())
+  actor.time = 20
+  expect(characterPose(actor, false, makePose()).hips).toEqual(blocked.hips)
+  actor.travel = 0.3
+  actor.speed = 1
+  expect(characterPose(actor, false, makePose()).hips).not.toEqual(blocked.hips)
+})
+
 it('types with independently moving hands and holds still for reduced motion', () => {
   const actor = makeActor('typing', [0, 0], 'work')
   actor.random = 0
