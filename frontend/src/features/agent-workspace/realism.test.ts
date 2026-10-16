@@ -6,7 +6,6 @@ import {
 } from '@/features/agent-workspace/presentation'
 import {
   daylightAt,
-  readEnvironment,
   QualityController,
   qualitySettings,
 } from '@/features/agent-workspace/sceneSettings'
@@ -67,7 +66,7 @@ it('keeps cosmetics deterministic', () => {
   expect(characterProfile('same')).toEqual(characterProfile('same'))
   expect(characterProfile('same')).not.toEqual(characterProfile('different'))
 })
-it('uses device-local clock periods and a safe environment default', () => {
+it('uses device-local clock periods', () => {
   for (const [hour, period] of [
     [0, 'night'],
     [6, 'morning'],
@@ -79,8 +78,6 @@ it('uses device-local clock periods and a safe environment default', () => {
   expect(daylightAt(new Date(2026, 9, 16, 12)).sun).toBeGreaterThan(
     daylightAt(new Date(2026, 9, 16, 23)).sun,
   )
-  localStorage.setItem('devdeck.office-environment.ws', 'broken')
-  expect(readEnvironment('ws')).toBe('garden')
 })
 it('adapts quality after sustained thresholds and resets hidden samples', () => {
   const q = new QualityController()

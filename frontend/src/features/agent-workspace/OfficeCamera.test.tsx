@@ -174,3 +174,13 @@ it('cancels follow when reset is requested', () => {
   )
   expect(onFollowChange).toHaveBeenCalledWith(false)
 })
+
+it('extends the existing projection when a growing office enlarges its exterior', () => {
+  mocks.camera.far = 500
+  mocks.camera.updateProjectionMatrix()
+  const { rerender } = render(<OfficeCamera {...props} far={500} />)
+  const before = mocks.camera.projectionMatrix.elements.slice()
+  rerender(<OfficeCamera {...props} far={1200} />)
+  expect(mocks.camera.far).toBe(1200)
+  expect(mocks.camera.projectionMatrix.elements).not.toEqual(before)
+})

@@ -12,6 +12,7 @@ export default function OfficeCamera({
   view,
   center,
   span,
+  far,
   reset,
   selected,
   action,
@@ -28,6 +29,7 @@ export default function OfficeCamera({
   view: OfficeView
   center: [number, number, number]
   span: number
+  far?: number
   reset: number
   selected?: [number, number, number]
   action: { id: number; type: string }
@@ -42,6 +44,12 @@ export default function OfficeCamera({
 }) {
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null)
   const { camera, invalidate } = useThree()
+  useEffect(() => {
+    if (far === undefined) return
+    camera.far = far
+    camera.updateProjectionMatrix()
+    invalidate()
+  }, [camera, far, invalidate])
   const live = useRef({
     getSelected,
     selected,

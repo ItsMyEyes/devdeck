@@ -1,3 +1,4 @@
+import { fitCity } from '@/features/agent-workspace/city'
 import { Plant, Chair, Desk } from '@/features/agent-workspace/OfficeFurniture'
 import OfficeEnvironment, {
   OfficeLighting,
@@ -5,11 +6,9 @@ import OfficeEnvironment, {
 } from '@/features/agent-workspace/OfficeEnvironment'
 import {
   qualitySettings,
-  readEnvironment,
   readQuality,
 } from '@/features/agent-workspace/sceneSettings'
 import type {
-  OfficeEnvironment as Environment,
   QualityPreference,
   QualityTier,
 } from '@/features/agent-workspace/sceneSettings'
@@ -642,9 +641,6 @@ export default function OfficeScene(props: Props) {
   const reduced = useReducedMotion()
   const [lost, setLost] = useState(false)
   const [action, setAction] = useState({ id: 0, type: '' })
-  const [environment, setEnvironment] = useState<Environment>(() =>
-    readEnvironment(props.workspaceId),
-  )
   const [quality, setQuality] = useState<QualityPreference>(() =>
     readQuality(props.workspaceId),
   )
@@ -776,7 +772,13 @@ export default function OfficeScene(props: Props) {
     childKey,
   )
   const animate = !reduced && props.visible
-  const moving = props.members.some((m) => !m.archivedAt)
+  const exteriorBounds = {
+    minX: minX - 1,
+    maxX: maxX + 1,
+    minZ: minZ - 1,
+    maxZ: maxZ + 1,
+  }
+  const exteriorFit = fitCity(exteriorBounds)
   if (lost)
     return (
       <div className="office-empty">
@@ -792,13 +794,12 @@ export default function OfficeScene(props: Props) {
       <Canvas
         className="office-renderer"
         shadows={qualitySettings[tier].shadows ? 'percentage' : false}
-        camera={{ position: [18, 22, 22], fov: 38 }}
+        camera={{ position: [18, 22, 22], fov: 38, far: exteriorFit.far }}
         dpr={[1, qualitySettings[tier].dpr]}
-        frameloop={
-          !props.visible ? 'never' : animate && moving ? 'always' : 'demand'
-        }
+        frameloop={!props.visible ? 'never' : animate ? 'always' : 'demand'}
         gl={{ antialias: true, powerPreference: 'low-power' }}
         onCreated={({ gl }) => {
+          gl.toneMappingExposure = 1.05
           gl.domElement.addEventListener(
             'webglcontextlost',
             () => setLost(true),
@@ -818,14 +819,10 @@ export default function OfficeScene(props: Props) {
           onPeriod={setPeriod}
         />
         <OfficeEnvironment
-          kind={environment}
+          bounds={exteriorBounds}
           visible={props.visible}
           reduced={!!reduced}
-          decorativeMotion={qualitySettings[tier].decorativeMotion}
-          minX={minX}
-          maxX={maxX}
-          minZ={minZ}
-          night={period === 'night'}
+          tier={tier}
         />
         <QualityMonitor
           preference={quality}
@@ -834,6 +831,7 @@ export default function OfficeScene(props: Props) {
           onTier={setAutoTier}
         />
         <OfficeCamera
+          far={exteriorFit.far}
           workspaceId={props.workspaceId}
           view={props.view}
           center={center}
@@ -896,28 +894,6 @@ export default function OfficeScene(props: Props) {
         aria-label="Camera controls"
       >
         <div className="office-scene-options">
-          <label>
-            View{' '}
-            <select
-              aria-label="Office environment"
-              value={environment}
-              onChange={(e) => {
-                const v = e.target.value as Environment
-                setEnvironment(v)
-                try {
-                  localStorage.setItem(
-                    `devdeck.office-environment.${props.workspaceId}`,
-                    v,
-                  )
-                } catch {
-                  /* Optional. */
-                }
-              }}
-            >
-              <option value="garden">Taman</option>
-              <option value="city">Kota</option>
-            </select>
-          </label>
           <label>
             Quality{' '}
             <select

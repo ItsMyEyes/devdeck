@@ -1,4 +1,6 @@
-vi.mock('@/features/agent-workspace/OfficeHtml',()=>({default:({children}:{children:ReactNode})=><>{children}</>}))
+vi.mock('@/features/agent-workspace/OfficeHtml', () => ({
+  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+}))
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -98,6 +100,11 @@ it('stops hidden rendering and uses static demand rendering with reduced motion'
   }
   const scene = render(<OfficeScene {...props} />)
   expect(settings.frameloop).toBe('never')
+  scene.rerender(<OfficeScene {...props} visible />)
+  expect(settings.frameloop).toBe('always')
+  expect(
+    screen.queryByRole('combobox', { name: 'Office environment' }),
+  ).not.toBeInTheDocument()
   settings.reduced = true
   scene.rerender(<OfficeScene {...props} visible />)
   expect(settings.frameloop).toBe('demand')

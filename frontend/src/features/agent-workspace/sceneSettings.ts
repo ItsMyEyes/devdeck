@@ -1,4 +1,3 @@
-export type OfficeEnvironment = 'garden' | 'city'
 export type QualityTier = 'high' | 'balanced' | 'low'
 export type QualityPreference = 'auto' | QualityTier
 export const qualitySettings = {
@@ -10,16 +9,6 @@ export const qualitySettings = {
     decorativeMotion: true,
   },
   low: { dpr: 1, shadows: false, shadowSize: 512, decorativeMotion: false },
-}
-export function readEnvironment(workspace: string): OfficeEnvironment {
-  try {
-    return localStorage.getItem(`devdeck.office-environment.${workspace}`) ===
-      'city'
-      ? 'city'
-      : 'garden'
-  } catch {
-    return 'garden'
-  }
 }
 export function readQuality(workspace: string): QualityPreference {
   try {
