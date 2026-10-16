@@ -21,10 +21,10 @@ import type {
 
 // Reference palette; intensity compensates for the installed Three.js physical lights.
 const moods = {
-  morning: { sky: '#ece9df', sun: '#ffeed5', fill: 0.8, direct: 0.85 },
-  day: { sky: '#ebe5d8', sun: '#fff4dd', fill: 0.85, direct: 1 },
-  evening: { sky: '#e0c6ae', sun: '#ffc185', fill: 0.6, direct: 0.55 },
-  night: { sky: '#28374a', sun: '#aec6ed', fill: 0.48, direct: 0.24 },
+  morning: { sky: '#ece9df', sun: '#ffeed5', fill: 0.38, direct: 0.85 },
+  day: { sky: '#ebe5d8', sun: '#fff4dd', fill: 0.4, direct: 1 },
+  evening: { sky: '#e0c6ae', sun: '#ffc185', fill: 0.3, direct: 0.55 },
+  night: { sky: '#28374a', sun: '#aec6ed', fill: 0.3, direct: 0.24 },
 }
 export function OfficeLighting({
   visible,
@@ -81,11 +81,16 @@ export function OfficeLighting({
       />
       <hemisphereLight
         ref={fill}
-        args={['#ffffff', '#d9d2c3', 0.85 * Math.PI]}
+        args={['#dce9f1', '#a58360', 0.4 * Math.PI]}
+      />
+      <directionalLight
+        position={[18, 14, -15]}
+        color="#b9d2e9"
+        intensity={clock.period === 'night' ? 0.25 : 0.5}
       />
       <directionalLight
         ref={sun}
-        position={[-12, 55, 25]}
+        position={[-12, 28, 25]}
         intensity={Math.PI}
         castShadow={qualitySettings[tier].shadows}
         shadow-mapSize={[
