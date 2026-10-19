@@ -212,13 +212,8 @@ func Decide(s *State, cmd Command, now int64, newID func() string) ([]Event, err
 			return nil, errors.New("Antigravity cannot accept a second message while working; stop or wait for the current turn")
 		}
 		var events []Event
-		if antigravity {
-			if len(p.Attachments) > 0 {
-				return nil, errors.New("Antigravity headless chat accepts text only; remove attachments")
-			}
-			if id != t.InstanceID && t.Mode != provider.ModeFullAccess && t.Mode != provider.ModeAuto {
-				events = append(events, mk(EvtThreadRuntimeModeSet, RuntimeModeSetPayload{Mode: provider.ModeAuto}))
-			}
+		if antigravity && id != t.InstanceID && t.Mode != provider.ModeFullAccess && t.Mode != provider.ModeAuto {
+			events = append(events, mk(EvtThreadRuntimeModeSet, RuntimeModeSetPayload{Mode: provider.ModeAuto}))
 		}
 		return append(events,
 			mk(EvtThreadMessageSent, p),

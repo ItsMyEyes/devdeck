@@ -45,21 +45,25 @@ export function toolDisplayName(toolName: string | undefined): string {
  */
 const SUMMARY_KEYS = [
   'file_path',
+  'AbsolutePath',
+  'TargetFile',
   'path',
   'command',
+  'CommandLine',
   'pattern',
   'url',
+  'Url',
   'query',
   'description',
   'name',
   'prompt',
 ] as const
 
-/** The two keys whose value is a FILE PATH, and therefore the two that get
+/** The keys whose value is a FILE PATH, and therefore the ones that get
  *  shortened from the left (see `shortenPath`). `command`, `pattern` and the
  *  rest are prose or code — their information is at the front, and cutting
  *  their head off would be a lie about what ran. */
-const PATH_KEYS: ReadonlySet<string> = new Set(['file_path', 'path'])
+const PATH_KEYS: ReadonlySet<string> = new Set(['file_path', 'path', 'AbsolutePath', 'TargetFile'])
 
 /** How much of a summary survives before the row would stop being one line.
  *  Generous, because CSS truncation does the real work — this only stops a

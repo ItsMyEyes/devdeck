@@ -117,11 +117,11 @@ describe('ChatComposer — t3code layout', () => {
     expect(onAbort).toHaveBeenCalledOnce()
     expect(screen.getByRole('textbox')).toHaveTextContent('keep this draft')
   })
-  it('blocks Antigravity uploads through picker, paste and drop while keeping Stop available', async () => {
+  it('blocks uploads when provider capabilities disable attachments while keeping Stop available', async () => {
     uploadAgentAttachmentMock.mockReset()
     const onSend = vi.fn()
     const onAbort = vi.fn()
-    const { container } = render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={{ ...controls, model: { agentId: 'antigravity', modelId: '', modelName: 'CLI default' }, runtimeMode: 'auto' }} />)
+    const { container } = render(<ChatComposer status="running" onSend={onSend} onAbort={onAbort} controls={{ ...controls, model: { agentId: 'antigravity', modelId: '', modelName: 'CLI default' }, chatCapabilities: { attachments: false, nativeApprovals: false, contextWindow: false, runtimeModes: ['auto', 'full-access'], optionsApplyNextTurn: true }, runtimeMode: 'auto' }} />)
     expect(screen.getByRole('button', { name: /attach image/i })).toBeDisabled()
     const surface = container.querySelector('[data-tour="chat-attach"]')?.closest('form')
     const box = screen.getByRole('textbox')
@@ -1009,6 +1009,21 @@ describe('ChatComposer — image attachments', () => {
     await screen.findByAltText('shot.png')
     pressEnter(screen.getByRole('textbox'))
 
+    expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1', kind: 'image', mime: 'image/png', name: 'shot.png' }])
+  })
+
+  it.each(['picker', 'paste', 'drop'])('sends an Antigravity image without a caption via %s', async (entry) => {
+    stubObjectUrls()
+    uploadAgentAttachmentMock.mockResolvedValue(uploadedAttachment())
+    const onSend = vi.fn()
+    render(<ChatComposer status="idle" onSend={onSend} onAbort={vi.fn()} controls={{ ...controls, model: { agentId: 'antigravity', modelId: '', modelName: 'CLI default' } }} />)
+    expect(screen.getByRole('button', { name: /attach image/i })).toBeEnabled()
+    const box = screen.getByRole('textbox')
+    if (entry === 'picker') await userEvent.upload(fileInput(), pngFile())
+    if (entry === 'paste') fireEvent.paste(box, { clipboardData: { files: [pngFile()], getData: () => '' } })
+    if (entry === 'drop') fireEvent.drop(box, { dataTransfer: { files: [pngFile()], types: ['Files'] } })
+    await screen.findByAltText('shot.png')
+    pressEnter(box)
     expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1', kind: 'image', mime: 'image/png', name: 'shot.png' }])
   })
 

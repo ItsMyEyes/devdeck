@@ -611,10 +611,6 @@ export function ChatComposer({
       toast.error('Wait for Antigravity to finish, or stop the current turn first.')
       return
     }
-    if (antigravity && attachments.length > 0) {
-      toast.error('Antigravity headless chat accepts text only. Remove attachments before sending.')
-      return
-    }
     // A message needs either words or a picture — but not both: an image
     // with no caption is still a real send (design spec's C2 section never
     // requires text alongside an attachment), so the empty-draft guard only
@@ -650,7 +646,7 @@ export function ChatComposer({
   // already uses above — pi cannot carry attachments (provider/pi/adapter.go's
   // explicit error, T5), so the button is disabled before the user discovers
   // that at send time (design spec's Risks section, "Pi divergence").
-  const attachmentsDisabled = controls.chatCapabilities?.attachments === false || agentId === 'pi' || antigravity
+  const attachmentsDisabled = controls.chatCapabilities?.attachments === false || agentId === 'pi'
 
   function handleAttachmentFilesSelected(event: ChangeEvent<HTMLInputElement>) {
     if (!attachmentsDisabled && event.currentTarget.files) attachmentsRef.current?.addFiles(event.currentTarget.files)
@@ -824,10 +820,6 @@ export function ChatComposer({
             {/* A sibling of `composer-panels`, never nested inside it — A's
                 slot stays reserved (design spec §"Where they render"). */}
             <ComposerAttachments ref={attachmentsRef} machine={machine ?? NO_MACHINE} threadId={threadKey ?? ''} />
-
-            {antigravity && <p className="text-[11px] leading-snug text-devdeck-fg-2">
-              Text only · Native approvals cannot be answered here. Model, effort, Plan and permission changes apply to the next turn.
-            </p>}
 
             <ComposerPromptEditor
               ref={editorRef}

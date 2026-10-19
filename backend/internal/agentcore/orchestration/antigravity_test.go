@@ -52,8 +52,8 @@ func TestAntigravitySwitchClearsForeignResumeCursor(t *testing.T) {
 	}
 	thread.TurnInFlight = false
 	p := TurnStartPayload{Text: "image", Attachments: []provider.Attachment{{ID: "a"}}}
-	if _, err := Decide(s, Command{Type: CmdThreadTurnStart, ThreadID: "chat", Payload: mustJSON(p)}, 3, func() string { return "evt" }); err == nil {
-		t.Fatal("attachments must be rejected before committing a turn")
+	if _, err := Decide(s, Command{Type: CmdThreadTurnStart, ThreadID: "chat", Payload: mustJSON(p)}, 3, func() string { return "evt" }); err != nil {
+		t.Fatalf("image attachment rejected: %v", err)
 	}
 }
 

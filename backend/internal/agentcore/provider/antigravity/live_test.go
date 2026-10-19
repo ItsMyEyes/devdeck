@@ -97,3 +97,54 @@ func TestLiveAntigravityChat(t *testing.T) {
 	}
 	t.Log("streaming, selected model, Plan, explicit resume and Stop passed")
 }
+
+func TestLiveAntigravityImageAndProgress(t *testing.T) {
+	if os.Getenv("DEVDECK_AGY_LIVE") != "1" {
+		t.Skip("set DEVDECK_AGY_LIVE=1 to use the current agy account")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	a := newAdapter(ctx, "antigravity:live", Config{BinaryName: "agy"}, nil)
+	defer a.StopAll(context.Background())
+	cwd := t.TempDir()
+	if _, err := a.StartSession(ctx, provider.SessionStartInput{ThreadID: "image", Cwd: cwd, Mode: provider.ModeAuto}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/image.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.SendTurn(ctx, provider.SendTurnInput{
+		ThreadID: "image", TurnID: "image-turn",
+		Text:        "Inspect the uploaded image. How many colored panels are there, and what are their colors from left to right? Do not run shell commands or modify files.",
+		Attachments: []provider.Attachment{{Kind: "image", MIME: "image/png", Name: "panels.png", Data: data}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	var viewed, narratedBeforeTool bool
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case e := <-a.Events():
+			switch p := e.Payload.(type) {
+			case *event.ContentDeltaPayload:
+				text.WriteString(p.Text)
+			case *event.ItemStartedPayload:
+				if p.Title == "view_file" {
+					viewed = true
+					narratedBeforeTool = text.Len() > 0
+				}
+			case *event.TurnCompletedPayload:
+				answer := strings.ToLower(text.String())
+				if p.Status != "completed" || !viewed || !narratedBeforeTool || !strings.Contains(answer, "red") || !strings.Contains(answer, "blue") || !strings.Contains(answer, "yellow") {
+					t.Fatalf("image/progress failed: status=%s viewed=%v narrated=%v text=%q", p.Status, viewed, narratedBeforeTool, text.String())
+				}
+				t.Log("uploaded image viewed correctly; progress text arrived before view_file")
+				return
+			}
+		}
+	}
+}

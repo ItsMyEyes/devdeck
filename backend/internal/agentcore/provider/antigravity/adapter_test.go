@@ -50,6 +50,8 @@ func TestCLIHelper(t *testing.T) {
 	var prompt string
 	if i := slices.Index(args, "-p"); i >= 0 {
 		prompt = args[i+1]
+		prompt, _, _ = strings.Cut(prompt, "\n\n<devdeck_chat_instructions>")
+		prompt, _, _ = strings.Cut(prompt, "\n\n<devdeck_image_attachments>")
 	}
 	log, _ := os.OpenFile("commands.ndjson", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	_ = json.NewEncoder(log).Encode(map[string]any{"args": args, "home": os.Getenv("HOME"), "override": os.Getenv("AGY_OVERRIDE")})
@@ -617,6 +619,144 @@ func TestValidationHasNoTurnSideEffects(t *testing.T) {
 		if _, err := a.StartSession(context.Background(), provider.SessionStartInput{ThreadID: "bad", Mode: mode}); err == nil {
 			t.Error("accepted session mode", mode)
 		}
+	}
+}
+
+func TestImageUploadLifecycle(t *testing.T) {
+	a := testAdapter(t)
+	cwd := start(t, a, "image")
+	<-a.Events()
+	data, err := os.ReadFile("testdata/image.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.SendTurn(context.Background(), provider.SendTurnInput{
+		ThreadID: "image", TurnID: "image-turn", Text: "wait",
+		Attachments: []provider.Attachment{{Kind: "image", Name: "../../outside.png", MIME: "image/png", Data: data}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectUntil(t, a, event.ItemStarted, "image")
+	dirs, _ := filepath.Glob(filepath.Join(cwd, ".devdeck-images-*"))
+	if len(dirs) != 1 {
+		t.Fatalf("upload directories: %v", dirs)
+	}
+	files, _ := os.ReadDir(dirs[0])
+	if len(files) != 1 {
+		t.Fatalf("upload files: %v", files)
+	}
+	path := filepath.Join(dirs[0], files[0].Name())
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(data) {
+		t.Fatalf("image bytes changed: %v", err)
+	}
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("image mode: %v", info.Mode())
+	}
+	log, _ := os.ReadFile(filepath.Join(cwd, "commands.ndjson"))
+	var call struct {
+		Args []string `json:"args"`
+	}
+	if err := json.Unmarshal(log, &call); err != nil {
+		t.Fatal(err)
+	}
+	prompt := call.Args[slices.Index(call.Args, "-p")+1]
+	if !strings.Contains(prompt, path) || !strings.Contains(prompt, "view_file") || strings.Contains(prompt, "../../outside.png") {
+		t.Fatalf("image not safely passed to CLI: %s", prompt)
+	}
+	a.mu.Lock()
+	done := a.sessions["image"].active.done
+	a.mu.Unlock()
+	if err := a.InterruptTurn(context.Background(), "image", "image-turn"); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if _, err := os.Stat(dirs[0]); !os.IsNotExist(err) {
+		t.Fatalf("image files survived interrupt: %v", err)
+	}
+}
+
+func TestImagesWithoutCaptionAndCleanupAfterExit(t *testing.T) {
+	data, err := os.ReadFile("testdata/image.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"", "auth"} {
+		t.Run(text, func(t *testing.T) {
+			a := testAdapter(t)
+			cwd := start(t, a, "images")
+			_, err := a.SendTurn(context.Background(), provider.SendTurnInput{
+				ThreadID: "images", TurnID: "turn", Text: text,
+				Attachments: []provider.Attachment{
+					{Kind: "image", Data: data}, {Kind: "image", Data: data},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := completion(t, collectUntil(t, a, event.TurnCompleted, "images"))
+			want := "completed"
+			if text == "auth" {
+				want = "failed"
+			}
+			if p.Status != want {
+				t.Fatalf("status = %s, want %s", p.Status, want)
+			}
+			a.readers.Wait()
+			dirs, _ := filepath.Glob(filepath.Join(cwd, ".devdeck-images-*"))
+			if len(dirs) != 0 {
+				t.Fatalf("images survived process exit: %v", dirs)
+			}
+		})
+	}
+}
+
+func TestInvalidImageDoesNotStartTurn(t *testing.T) {
+	a := testAdapter(t)
+	cwd := start(t, a, "invalid-image")
+	<-a.Events()
+	for _, att := range []provider.Attachment{
+		{Kind: "image", MIME: "image/png", Data: []byte("not an image")},
+		{Kind: "file", Data: []byte("not an image")},
+	} {
+		if _, err := a.SendTurn(context.Background(), provider.SendTurnInput{ThreadID: "invalid-image", TurnID: "turn", Attachments: []provider.Attachment{att}}); err == nil {
+			t.Fatal("invalid image accepted")
+		}
+	}
+	files, _ := os.ReadDir(cwd)
+	if len(files) != 0 {
+		t.Fatalf("invalid image wrote files or started CLI: %v", files)
+	}
+	select {
+	case e := <-a.Events():
+		t.Fatalf("invalid image emitted %s", e.Type)
+	default:
+	}
+}
+
+func TestImageCleanupWhenCLIStartFails(t *testing.T) {
+	a := testAdapter(t)
+	cwd := start(t, a, "start-failure")
+	data, err := os.ReadFile("testdata/image.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(t.TempDir(), "broken-agy")
+	if err := os.WriteFile(broken, []byte("#!/nonexistent/devdeck-agy\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.cfg.BinaryName = broken
+	_, err = a.SendTurn(context.Background(), provider.SendTurnInput{
+		ThreadID: "start-failure", TurnID: "turn", Attachments: []provider.Attachment{{Kind: "image", Data: data}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "start CLI") {
+		t.Fatalf("expected CLI start failure: %v", err)
+	}
+	files, _ := os.ReadDir(cwd)
+	if len(files) != 0 {
+		t.Fatalf("images survived CLI start failure: %v", files)
 	}
 }
 

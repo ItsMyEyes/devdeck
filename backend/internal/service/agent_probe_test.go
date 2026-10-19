@@ -31,6 +31,9 @@ func TestListAgentsIncludesUninstalledWithReason(t *testing.T) {
 
 	var sawUnavailable bool
 	for _, a := range agents {
+		if a.ID == "antigravity" && !a.ChatCapabilities.Attachments {
+			t.Error("Antigravity must advertise image uploads to the composer")
+		}
 		if !a.Installed {
 			sawUnavailable = true
 			if a.Detail == "" {

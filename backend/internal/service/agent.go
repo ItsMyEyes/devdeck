@@ -75,7 +75,7 @@ func (svc *AgentService) ListAgents() ([]domain.AgentSummary, error) {
 	for i := range agents {
 		if agents[i].ID == "antigravity" {
 			agents[i].ChatCapabilities = domain.AgentChatCapabilities{
-				RuntimeModes: []string{"auto", "full-access"}, OptionsApplyNextTurn: true,
+				RuntimeModes: []string{"auto", "full-access"}, Attachments: true, OptionsApplyNextTurn: true,
 			}
 		}
 		p, ok := svc.probe(agents[i].ID)

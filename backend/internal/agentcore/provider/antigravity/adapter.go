@@ -153,7 +153,14 @@ func (a *adapter) StartSession(ctx context.Context, in provider.SessionStartInpu
 }
 
 func buildArgs(in provider.SendTurnInput, resume cursor) []string {
-	args := []string{"-p", in.Text, "--output-format", "stream-json", "--print-timeout", "0"}
+	prompt := in.Text + "\n\n" + `<devdeck_chat_instructions>
+Use the user's language. For multi-step work, send a brief progress message
+before the first tool call and between meaningful groups of tool calls.
+Explain what you are checking, what you found, and what comes next. Send these
+as normal response text while working, not only in the final answer.
+Respect requests for a terse or exact response.
+</devdeck_chat_instructions>`
+	args := []string{"-p", prompt, "--output-format", "stream-json", "--print-timeout", "0"}
 	if resume.ConversationID != "" {
 		args = append(args, "--conversation", resume.ConversationID)
 	}
@@ -176,10 +183,7 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 	if err := ctx.Err(); err != nil {
 		return provider.TurnStartResult{}, err
 	}
-	if len(in.Attachments) > 0 {
-		return provider.TurnStartResult{}, fmt.Errorf("antigravity: attachments are unsupported")
-	}
-	if in.TurnID == "" || strings.TrimSpace(in.Text) == "" {
+	if in.TurnID == "" || (strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0) {
 		return provider.TurnStartResult{}, fmt.Errorf("antigravity: turn ID and prompt are required")
 	}
 	a.mu.Lock()
@@ -212,6 +216,24 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 	bin, err := detect.ResolveBinary(a.cfg.BinaryName)
 	if err != nil {
 		return provider.TurnStartResult{}, fmt.Errorf("antigravity: resolve CLI: %w", err)
+	}
+	imageDir, paths, err := prepareImages(s.in.Cwd, in.Attachments)
+	if err != nil {
+		return provider.TurnStartResult{}, err
+	}
+	started := false
+	defer func() {
+		if !started && imageDir != "" {
+			_ = os.RemoveAll(imageDir)
+		}
+	}()
+	if len(paths) > 0 {
+		in.Text += "\n\n<devdeck_image_attachments>\nInspect these uploaded images using view_file before answering. These files are local to the agent workspace, not on the SSH host; do not use devdeck-ssh to read them. They are available for this turn only.\n"
+		for _, path := range paths {
+			quoted, _ := json.Marshal(path)
+			in.Text += string(quoted) + "\n"
+		}
+		in.Text += "</devdeck_image_attachments>"
 	}
 	cmd := exec.Command(bin, buildArgs(in, s.resume)...)
 	cmd.Dir = s.in.Cwd
@@ -246,13 +268,17 @@ func (a *adapter) SendTurn(ctx context.Context, in provider.SendTurnInput) (prov
 	e.Payload = &event.TurnStartedPayload{Model: in.Model.Model}
 	a.emitLocked(e)
 	a.readers.Add(1)
-	go a.readTurn(tctx, s, t, cmd, job, stdout, stderr)
+	started = true
+	go a.readTurn(tctx, s, t, cmd, job, stdout, stderr, imageDir)
 	return provider.TurnStartResult{TurnID: in.TurnID}, nil
 }
 
-func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.Cmd, job procgroup.Handle, stdout io.ReadCloser, stderr *boundedBuffer) {
+func (a *adapter) readTurn(ctx context.Context, s *session, t *turn, cmd *exec.Cmd, job procgroup.Handle, stdout io.ReadCloser, stderr *boundedBuffer, imageDir string) {
 	defer a.readers.Done()
 	defer func() { close(t.done); t.cancel() }()
+	if imageDir != "" {
+		defer os.RemoveAll(imageDir)
+	}
 	defer job.Release()
 	// A turn's CLI may leave tool descendants after exiting.
 	defer killProcess(cmd, job)

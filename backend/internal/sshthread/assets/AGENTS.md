@@ -52,6 +52,15 @@ without a pause, exactly like the subcommands above.
    command.
 6. **Report what you changed.** After a mutation succeeds, say what ran and
    what the host reported back.
+7. **Explain progress while working.** Use the operator's language. Before
+   the first tool call, briefly say what you will check and why. Between
+   meaningful groups of commands, report what you found and what you will
+   check next. Send these as chat messages during the work; do not wait for
+   the final answer. Group related reads rather than narrating every command.
+
+Uploaded images referenced in the prompt are local to this agent workspace.
+Inspect them with your native image-reading tool (`view_file` in Antigravity),
+not `devdeck-ssh`. The server's files still go through `devdeck-ssh`.
 
 ## Memory
 

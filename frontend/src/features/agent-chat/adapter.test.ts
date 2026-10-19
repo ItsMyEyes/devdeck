@@ -90,6 +90,13 @@ describe('toolSummary', () => {
     expect(toolSummary({ command: 'go test ./...' })).toBe('go test ./...')
   })
 
+  it('shows Antigravity command and file arguments', () => {
+    expect(toolSummary({ CommandLine: 'devdeck-ssh exec systemctl status nginx' })).toBe('devdeck-ssh exec systemctl status nginx')
+    expect(toolSummary({ AbsolutePath: '/etc/nginx/nginx.conf' })).toBe('/etc/nginx/nginx.conf')
+    expect(toolSummary({ TargetFile: '/etc/nginx/nginx.conf' })).toBe('/etc/nginx/nginx.conf')
+    expect(toolSummary({ Url: 'https://example.com' })).toBe('https://example.com')
+  })
+
   it('flattens a multi-line command onto one line', () => {
     expect(toolSummary({ command: 'set -e\n\n  go build ./...' })).toBe('set -e go build ./...')
   })
