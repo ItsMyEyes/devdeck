@@ -491,6 +491,55 @@ func TestParseEmptyDocumentIsAllDefaults(t *testing.T) {
 	}
 }
 
+// The Windows crash came from a defaults file generated before tools became pure Go.
+func TestResolveLegacyToolsConfigWithoutRewriting(t *testing.T) {
+	raw, err := os.ReadFile("testdata/legacy-defaults.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "ADMIN IAT", "DevDeck")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, resolvedPath, err := Resolve(path)
+	if err != nil {
+		t.Fatalf("previously generated config must still load: %v", err)
+	}
+	if resolvedPath != path || cfg.Role != "hub" || cfg.Addr != "127.0.0.1:8989" || cfg.Open == nil || !*cfg.Open || cfg.Auth.TwoFA == nil || !*cfg.Auth.TwoFA {
+		t.Fatalf("legacy settings changed: path=%s config=%+v", resolvedPath, cfg)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(raw) {
+		t.Fatalf("loading rewrote the user's configuration: %v", err)
+	}
+}
+
+func TestParseLegacyToolsPreservesCurrentSettings(t *testing.T) {
+	for _, tools := range []string{
+		"tools: null\n", "tools: {}\n",
+		"tools:\n  python_bin: 'C:\\Program Files\\Python\\python.exe'\n  pandoc_bin: custom-pandoc\n  mmdc_bin: custom-mmdc\n",
+	} {
+		cfg, err := Parse([]byte("role: runtime\nkey: example-key\nauth:\n  two_fa: false\n" + tools))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Role != "runtime" || cfg.Key != "example-key" || cfg.Auth.TwoFA == nil || *cfg.Auth.TwoFA {
+			t.Fatalf("current settings lost while accepting legacy tools: %+v", cfg)
+		}
+		raw, err := Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "tools:") {
+			t.Fatal("writing current settings restored retired tools settings")
+		}
+	}
+}
+
 // TestParseRejectsUnknownKey is the whole point of strict decoding: a typo'd
 // key must fail loudly, naming the key and its line.
 func TestParseRejectsUnknownKey(t *testing.T) {
@@ -517,6 +566,16 @@ func TestParseRejectsUnknownKey(t *testing.T) {
 			doc:      "auth:\n  turnstile:\n    sitekey: x\n",
 			wantKey:  "sitekey",
 			wantLine: "line 3",
+		},
+		{
+			name:    "current typo beside legacy tools",
+			doc:     "tools:\n  pandoc_bin: pandoc\nadrr: oops\n",
+			wantKey: "adrr", wantLine: "line 3",
+		},
+		{
+			name:    "unknown legacy tool setting",
+			doc:     "tools:\n  pandoc_bni: pandoc\n",
+			wantKey: "pandoc_bni", wantLine: "line 2",
 		},
 	}
 	for _, tc := range cases {
@@ -547,6 +606,7 @@ func TestParseRejectsDuplicateKey(t *testing.T) {
 	}{
 		{"top level", "addr: 1.1.1.1:1\naddr: 2.2.2.2:2\n", "addr"},
 		{"nested", "auth:\n  two_fa: true\n  two_fa: false\n", "two_fa"},
+		{"legacy tools", "tools: {}\ntools: {}\n", "tools"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

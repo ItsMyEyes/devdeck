@@ -134,21 +134,30 @@ func JoinList(values []string) string {
 }
 
 // Parse decodes a devdeck.yaml document strictly: an unknown key is a hard
-// error naming the key and its line. A typo'd key that silently does nothing
+// error naming the key and its line. Retired tools settings remain readable
+// for upgrades from older releases. A typo'd key that silently does nothing
 // is the worst failure mode for a config file — it looks configured and
 // behaves as if it were not. An empty document is valid and yields the zero
 // Config.
 func Parse(data []byte) (*Config, error) {
-	var cfg Config
+	var decoded struct {
+		Config `yaml:",inline"`
+		// Accept old generated configs without restoring retired runtime options.
+		Tools struct {
+			PythonBin string `yaml:"python_bin"`
+			PandocBin string `yaml:"pandoc_bin"`
+			MmdcBin   string `yaml:"mmdc_bin"`
+		} `yaml:"tools"`
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&decoded); err != nil {
 		if errors.Is(err, io.EOF) {
-			return &cfg, nil // empty or comments-only file
+			return &decoded.Config, nil // empty or comments-only file
 		}
 		return nil, err
 	}
-	return &cfg, nil
+	return &decoded.Config, nil
 }
 
 // Load reads and strictly parses the config file at path. A missing file is an
