@@ -18,6 +18,7 @@ import {
   startMemoryLocal,
   stopMemoryLocal,
   testMemoryConnection,
+  testMemoryLLMConnection,
   updateMemoryConfig,
   type MemoryConfigPatch,
   type MemoryImportMode,
@@ -46,6 +47,10 @@ export function useTestMemoryConnection() {
   return useMutation({
     mutationFn: (args: { baseUrl: string; apiKey: string }) => testMemoryConnection(args.baseUrl, args.apiKey),
   })
+}
+
+export function useTestMemoryLLMConnection() {
+  return useMutation({ mutationFn: testMemoryLLMConnection })
 }
 
 // ---- Local hosting lifecycle ("container" / "baremetal") ----

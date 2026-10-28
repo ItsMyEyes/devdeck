@@ -163,6 +163,47 @@ describe('SSHRightSidebar', () => {
 // a thread's worktree_id by cutting at `::`, so `ssh:<id>` and
 // `ssh:<id>::chat-N` have always listed together.
 describe('SSHRightSidebar — session history', () => {
+  it('opens new sessions as separate tabs and preserves them across remounts', async () => {
+    useDevDeckStore.setState({ sshRightSidebars: { [shellKey]: { open: true, panel: 'chat', width: 300 } } })
+    const view = render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'New session' }))
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Untitled session')
+    view.unmount()
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getByRole('tab', { selected: true })).toHaveAttribute('data-thread-key', 'ssh:conn-1::chat-1')
+  })
+
+  it('expands and restores the chat panel', async () => {
+    useDevDeckStore.setState({ sshRightSidebars: { [shellKey]: { open: true, panel: 'chat', width: 300 } } })
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Expand agent' }))
+    expect(screen.getByRole('button', { name: 'Restore agent' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Restore agent' }))
+    expect(screen.getByRole('button', { name: 'Expand agent' })).toBeInTheDocument()
+  })
+
+  it('resizes the agent panel with the keyboard beyond the old width limit', async () => {
+    useDevDeckStore.setState({ sshRightSidebars: { [shellKey]: { open: true, panel: 'chat', width: 480 } } })
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    screen.getByRole('separator', { name: 'Resize sidebar' }).focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(useDevDeckStore.getState().sshRightSidebars[shellKey].width).toBe(496)
+  })
+
+  it('switches tabs with the keyboard and closes a tab without deleting the session', async () => {
+    useDevDeckStore.setState({ sshRightSidebars: { [shellKey]: { open: true, panel: 'chat', width: 300 } } })
+    render(<SSHRightSidebar shellKey={shellKey} connectionId="conn-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'New session' }))
+    const tabs = screen.getAllByRole('tab')
+    tabs[1].focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Close Untitled session' })[0])
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(useDevDeckStore.getState().sshRightSidebars[shellKey].activeChatTab).toBe('ssh:conn-1::chat-1')
+  })
   // The rail's Sessions button opened a full-height list in place of the
   // conversation. The chat header's own history popover
   // (`SSHAgentChatPanel.test.tsx`) reaches the same `SessionsPanel` without

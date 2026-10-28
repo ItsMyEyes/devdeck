@@ -839,3 +839,24 @@ export function clearLspTrace(machine: Machine): Promise<{ entries: TraceEntry[]
 export function fetchMachineStats(machine: Machine): Promise<HostStats> {
   return machineRequest<HostStats>(machine, 'GET', '/system/stats')
 }
+
+export type AgentUsageProvider = 'claude' | 'codex' | 'antigravity'
+
+export interface AgentUsageWindow {
+  name: string
+  usedPercent: number
+  durationMinutes?: number
+  resetsAt?: number
+  resetDescription?: string
+}
+
+export interface AgentUsageResult {
+  provider: AgentUsageProvider
+  status: 'available' | 'unavailable' | 'not_installed' | 'not_logged_in' | 'error'
+  fetchedAt: string
+  windows: AgentUsageWindow[]
+}
+
+export function fetchAgentUsage(machine: Machine, agentId: AgentUsageProvider): Promise<AgentUsageResult> {
+  return machineRequest<AgentUsageResult>(machine, 'GET', `/agents/${agentId}/usage`)
+}

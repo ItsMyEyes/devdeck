@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -35,7 +35,7 @@ import { useVsCodeMode } from '@/features/editor/useVsCodeMode'
 import { useAutoSaveSetting } from '@/features/editor/useAutoSaveSetting'
 import { KeybindingsSection } from '@/features/keybindings/KeybindingsSection'
 import { MemoryLocalPanel } from '@/features/memory/MemoryLocalPanel'
-import { useMemoryConfig, useTestMemoryConnection, useUpdateMemoryConfig } from '@/features/memory/useMemory'
+import { useMemoryConfig, useTestMemoryConnection, useTestMemoryLLMConnection, useUpdateMemoryConfig } from '@/features/memory/useMemory'
 import { AppearanceSetting } from '@/features/theme/AppearanceSetting'
 import type { MemoryConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -216,6 +216,10 @@ export function DesktopSettingsDialog() {
   const testMemory = useTestMemoryConnection()
   const [memoryApiKeyDraft, setMemoryApiKeyDraft] = useState('')
   const [memoryLlmApiKeyDraft, setMemoryLlmApiKeyDraft] = useState('')
+  const testMemoryLLM = useTestMemoryLLMConnection()
+  const llmProviderRef = useRef<HTMLSelectElement>(null)
+  const llmModelRef = useRef<HTMLInputElement>(null)
+  const llmBaseURLRef = useRef<HTMLInputElement>(null)
 
   function closeDialog() {
     setConfirmingSwitch(false)
@@ -868,8 +872,9 @@ export function DesktopSettingsDialog() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Provider</span>
                       <select
+                        ref={llmProviderRef}
                         value={memoryConfig?.llmProvider ?? 'openai'}
-                        onChange={(e) => updateMemory.mutate({ llmProvider: e.target.value as MemoryConfig['llmProvider'] })}
+                        onChange={(e) => { testMemoryLLM.reset(); updateMemory.mutate({ llmProvider: e.target.value as MemoryConfig['llmProvider'] }) }}
                         className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
                       >
                         <option value="openai">OpenAI</option>
@@ -883,7 +888,9 @@ export function DesktopSettingsDialog() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-devdeck-fg-2">Model</span>
                       <input
+                        ref={llmModelRef}
                         defaultValue={memoryConfig?.llmModel ?? ''}
+                        onChange={() => testMemoryLLM.reset()}
                         onBlur={(e) => updateMemory.mutate({ llmModel: e.target.value })}
                         placeholder="e.g. gpt-5-mini, llama3.1"
                         className="rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
@@ -894,7 +901,9 @@ export function DesktopSettingsDialog() {
                         Base URL
                       </span>
                       <input
+                        ref={llmBaseURLRef}
                         defaultValue={memoryConfig?.llmBaseUrl ?? ''}
+                        onChange={() => testMemoryLLM.reset()}
                         onBlur={(e) => updateMemory.mutate({ llmBaseUrl: e.target.value })}
                         placeholder={
                           memoryConfig?.llmProvider === 'ollama'
@@ -914,7 +923,7 @@ export function DesktopSettingsDialog() {
                         <input
                           type="password"
                           value={memoryLlmApiKeyDraft}
-                          onChange={(e) => setMemoryLlmApiKeyDraft(e.target.value)}
+                          onChange={(e) => { testMemoryLLM.reset(); setMemoryLlmApiKeyDraft(e.target.value) }}
                           placeholder="Not needed for ollama/lmstudio"
                           className="min-w-0 flex-1 rounded-md bg-devdeck-card-wash px-2.5 py-1.5 font-mono text-[11px] text-devdeck-fg"
                         />
@@ -931,6 +940,20 @@ export function DesktopSettingsDialog() {
                         </Button>
                       </div>
                     </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="secondary" size="sm" disabled={testMemoryLLM.isPending || !memoryConfig} onClick={() => testMemoryLLM.mutate({
+                        provider: (llmProviderRef.current?.value ?? memoryConfig?.llmProvider ?? 'openai') as MemoryConfig['llmProvider'],
+                        model: llmModelRef.current?.value ?? '',
+                        baseUrl: llmBaseURLRef.current?.value ?? '',
+                        apiKey: memoryLlmApiKeyDraft,
+                      })}>
+                        {testMemoryLLM.isPending ? 'Testing…' : 'Test LLM connection'}
+                      </Button>
+                      <span role="status" className={cn('text-[10.5px]', testMemoryLLM.isError ? 'text-devdeck-err' : testMemoryLLM.isSuccess ? 'text-devdeck-run' : 'text-devdeck-fg-2')}>
+                        {testMemoryLLM.isPending ? 'Contacting provider…' : testMemoryLLM.isSuccess ? 'Connected — model responded' : testMemoryLLM.isError ? (testMemoryLLM.error instanceof Error ? testMemoryLLM.error.message : 'Connection failed') : 'Tests the selected model directly; may use API credits.'}
+                      </span>
+                    </div>
+                    <p className="text-[10.5px] text-devdeck-fg-2">Uses the saved key when the key field is empty. Tests from the DevDeck hub; Hindsight may use a different network.</p>
                   </div>
                 </InsetPanel>
               </>

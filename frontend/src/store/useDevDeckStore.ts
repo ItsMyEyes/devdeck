@@ -276,10 +276,13 @@ export interface SSHRightSidebarState {
   open: boolean
   panel: SSHRightSidebarPanel
   width: number
+  chatTabs?: string[]
+  activeChatTab?: string
+  expanded?: boolean
 }
 
 export const SSH_RIGHT_SIDEBAR_MIN_WIDTH = 240
-export const SSH_RIGHT_SIDEBAR_MAX_WIDTH = 480
+export const SSH_RIGHT_SIDEBAR_MAX_WIDTH = 10000
 // Closed by default so existing SSH tabs don't suddenly lose horizontal
 // space on first load after this ships.
 const DEFAULT_SSH_RIGHT_SIDEBAR: SSHRightSidebarState = { open: false, panel: 'stats', width: 300 }
@@ -468,6 +471,7 @@ interface DevDeckState {
   setSSHRightSidebarOpen: (shellKey: string, open: boolean) => void
   setSSHRightSidebarPanel: (shellKey: string, panel: SSHRightSidebarPanel) => void
   setSSHRightSidebarWidth: (shellKey: string, width: number) => void
+  setSSHRightSidebarChat: (shellKey: string, patch: Partial<SSHRightSidebarState>) => void
   setGitDiff: (shellKey: string, target: GitDiffTarget) => void
   clearGitDiff: (shellKey: string) => void
   openWorktreeTab: (wsId: string, projectId: string, wtId: string) => void
@@ -844,6 +848,11 @@ export const useDevDeckStore = create<DevDeckState>()(
               panel,
             }),
         ),
+      setSSHRightSidebarChat: (shellKey, patch) =>
+        set((s) => void (s.sshRightSidebars[shellKey] = {
+          ...(s.sshRightSidebars[shellKey] ?? DEFAULT_SSH_RIGHT_SIDEBAR),
+          ...patch,
+        })),
       setSSHRightSidebarWidth: (shellKey, width) =>
         set(
           (s) =>

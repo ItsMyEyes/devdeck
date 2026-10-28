@@ -52,6 +52,8 @@ export interface SessionsPanelProps {
   /** Design spec: "Selecting a row opens that thread in a chat pane." Also
    *  how a NEW session is started — see this file's doc comment. */
   onSelectThread?: (threadKey: string) => void
+  onDeleteThread?: (threadKey: string) => void
+  openThreadKeys?: readonly string[]
 }
 
 /** How many sessions show before folding the rest behind `Show more` — no
@@ -185,7 +187,7 @@ function SessionRow({
   )
 }
 
-export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectThread }: SessionsPanelProps) {
+export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectThread, onDeleteThread, openThreadKeys = [] }: SessionsPanelProps) {
   const [showAll, setShowAll] = useState(false)
   const [query, setQuery] = useState('')
   const sessions = useAgentThreads(machine, worktreeId)
@@ -194,7 +196,7 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
   const all = sessions.data ?? []
 
   function handleNew() {
-    onSelectThread?.(nextFreeThreadKey(worktreeId, all.map((t) => t.id)))
+    onSelectThread?.(nextFreeThreadKey(worktreeId, [...all.map((t) => t.id), ...openThreadKeys]))
   }
 
   // The thread awaiting confirmation, or null. An in-app dialog rather than
@@ -213,6 +215,7 @@ export function SessionsPanel({ worktreeId, machine, activeThreadKey, onSelectTh
     if (!thread) return
     deleteThread.mutate(thread.id, {
       onError: (error) => toast.error(errMessage(error)),
+      onSuccess: () => onDeleteThread?.(thread.id),
     })
     setPendingDelete(null)
   }
