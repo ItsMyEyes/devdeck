@@ -1247,6 +1247,7 @@ func main() {
 	mux.HandleFunc("GET /api/agents", agentH.ListAgents)
 	mux.HandleFunc("GET /api/agents/{agentId}", agentH.GetAgent)
 	mux.HandleFunc("GET /api/agents/{agentId}/models", agentH.ListModels)
+	mux.HandleFunc("GET /api/agents/{agentId}/usage", agentH.GetUsage)
 	mux.HandleFunc("GET /api/agents/{agentId}/skills", agentH.ListSkills)
 	mux.HandleFunc("POST /api/agents/{agentId}/skills/{skillName}", agentH.InstallSkill)
 	mux.HandleFunc("DELETE /api/agents/{agentId}/skills/{skillName}", agentH.RemoveSkill)

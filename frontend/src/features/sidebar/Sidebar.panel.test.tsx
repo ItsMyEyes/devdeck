@@ -22,6 +22,8 @@ vi.mock('@/features/data/queries', () => ({
   useSSHConnections: () => ({ data: [] }),
 }))
 
+vi.mock('@/features/sidebar/AgentUsage', () => ({ AgentUsage: () => null }))
+
 // Pulls xterm in transitively for one boolean; jsdom has no canvas.
 vi.mock('@/features/terminal/ExpandedTerminal', () => ({ useIsDesktop: () => true }))
 

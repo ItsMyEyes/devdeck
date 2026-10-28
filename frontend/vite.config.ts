@@ -109,6 +109,7 @@ export default defineConfig({
       'src/features/useReducedTransparency.test.ts',
       'src/features/useScope.test.tsx',
       'src/features/sidebar/SidebarNav.test.tsx',
+      'src/features/sidebar/AgentUsage.test.tsx',
       'src/features/sidebar/Sidebar.panel.test.tsx',
       'src/features/palette/**/*.test.{ts,tsx}',
       'src/features/keybindings/**/*.test.{ts,tsx}',

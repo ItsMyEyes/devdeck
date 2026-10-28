@@ -10,6 +10,7 @@ import { useDevDeckStore } from '@/store/useDevDeckStore'
 import { Tooltip } from '@/components/ui/tooltip'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { SidebarNav } from './SidebarNav'
+import { AgentUsage } from './AgentUsage'
 import { ProjectTree } from './ProjectTree'
 import { SSHGroupTree } from './SSHGroupTree'
 
@@ -116,6 +117,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
             ) : (
               <div className="flex-1" />
             )}
+            <AgentUsage compact={false} />
             {isRuntimeUI || showDesktopSettings ? (
               <div className="flex flex-none flex-col gap-1 border-t border-devdeck-border p-2">
                 {isRuntimeUI ? (
@@ -148,6 +150,7 @@ export function Sidebar({ mobileDrawer = true }: SidebarProps = {}) {
           {railDivider}
           <SidebarNav compact />
           <div className="flex-1" />
+          <AgentUsage />
           {isRuntimeUI || showDesktopSettings ? railDivider : null}
           {isRuntimeUI ? (
             <Tooltip label="Sign-in PIN" side="right">
