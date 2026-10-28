@@ -113,6 +113,12 @@ function resetStore() {
   useDevDeckStore.setState({ sshTileLayouts: {}, shellSidebars: {} })
 }
 
+it('allows the SSH workspace to shrink within its parent when the agent panel grows', () => {
+  render(<SSHShellPane connectionId="conn-1" isFocused />)
+  const workspace = screen.getByTestId('ssh-right-sidebar-stub').parentElement
+  expect(workspace).toHaveClass('min-w-0')
+})
+
 beforeEach(() => {
   resetStore()
   shellSidebarCalls = []

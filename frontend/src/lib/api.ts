@@ -434,6 +434,10 @@ export function testMemoryConnection(baseUrl: string, apiKey: string): Promise<{
   return request<{ ok: boolean }>('POST', '/memory/test', { baseUrl, apiKey })
 }
 
+export function testMemoryLLMConnection(args: { provider: MemoryConfig['llmProvider']; model: string; baseUrl: string; apiKey: string }): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('POST', '/memory/test-llm', args)
+}
+
 export interface MemoryBankStats {
   bank_id: string
   total_nodes: number

@@ -137,6 +137,20 @@ func (h *MemoryHandler) PostTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// PostTestLLM checks the selected extraction model without changing its settings.
+func (h *MemoryHandler) PostTestLLM(w http.ResponseWriter, r *http.Request) {
+	var body service.MemoryLLMTest
+	if _, err := decodeBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.TestLLMConnection(r.Context(), body); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // ---------------------------------------------------------------------------
 // Browse — the Memory page. Every handler here returns the server's own JSON
 // shape untouched (memory.Client already does for the untyped ones), so the

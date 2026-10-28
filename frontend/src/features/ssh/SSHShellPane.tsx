@@ -635,7 +635,7 @@ export function SSHShellPane({
   const firstPaneId = firstLeafId(layout.root)
 
   return (
-    <div ref={containerRef} className="relative flex min-h-0 flex-1 bg-devdeck-pane">
+    <div ref={containerRef} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-devdeck-pane">
       <ShellSidebar
         shellKey={shellKey}
         inline={isDesktop}

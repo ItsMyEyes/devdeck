@@ -1464,6 +1464,7 @@ func main() {
 		mux.HandleFunc("GET /api/memory/config", memoryH.GetConfig)
 		mux.HandleFunc("PUT /api/memory/config", memoryH.PutConfig)
 		mux.HandleFunc("POST /api/memory/test", memoryH.PostTest)
+		mux.HandleFunc("POST /api/memory/test-llm", memoryH.PostTestLLM)
 		mux.HandleFunc("GET /api/memory/stats", memoryH.GetStats)
 		mux.HandleFunc("GET /api/memory/tags", memoryH.GetTags)
 		mux.HandleFunc("GET /api/memory/memories", memoryH.GetMemories)
