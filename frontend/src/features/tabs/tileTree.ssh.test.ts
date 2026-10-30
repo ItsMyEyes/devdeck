@@ -39,3 +39,19 @@ describe('tileTree ssh-shell tab kind', () => {
     expect(after?.type === 'leaf' && !after.tabs.some((t) => t.id === 'ssh-sc-1')).toBe(true)
   })
 })
+
+describe('reordering tabs', () => {
+  it('moves tabs in both directions without changing selection', async () => {
+    const { reorderTileTab } = await import('./tileTree')
+    const root = { type: 'leaf' as const, id: 'leaf', activeTabId: 'b', tabs: [
+      { kind: 'agents' as const, id: 'agents' as const }, { kind: 'browser' as const, id: 'b' }, { kind: 'browser' as const, id: 'c' },
+    ] }
+    const moved = reorderTileTab(root, 'leaf', 'agents', 2)
+    if (moved.type !== 'leaf') throw new Error('expected leaf')
+    expect(moved.tabs.map(t => t.id)).toEqual(['b', 'c', 'agents'])
+    expect(moved.activeTabId).toBe('b')
+    const back = reorderTileTab(moved, 'leaf', 'agents', 0)
+    if (back.type !== 'leaf') throw new Error('expected leaf')
+    expect(back.tabs.map(t => t.id)).toEqual(['agents', 'b', 'c'])
+  })
+})
