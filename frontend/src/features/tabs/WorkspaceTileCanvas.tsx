@@ -8,7 +8,7 @@ import { TabKindIcon } from '@/features/tabs/tabIcons'
 import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
-import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
+import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, reorderTileTab, resizeTileSplit } from './tileTree'
 import { useIsMacTauri } from './useIsTauri'
 import { useMountedTabIds } from './useMountedTabIds'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
@@ -752,6 +752,7 @@ function TileLeafHeader({
   return (
     <div
       ref={setHeaderDropRef}
+      data-tile-header={leaf.id}
       style={headerStyle}
       // The whole top strip is the window's title bar on Windows/Linux, where
       // `decorations: false` means nothing drags the window unless the DOM
@@ -1026,6 +1027,22 @@ export function WorkspaceTileCanvas({
       const sourceLeafId = data?.sourceLeafId
       if (!sourceLeafId) return
       const tabId = data?.tabId ?? String(active.id)
+      const dropData = over.data.current as { leafId?: string; forceCenter?: boolean } | undefined
+      const translated = active.rect.current.translated
+      if (dropData?.forceCenter && dropData.leafId === sourceLeafId && translated) {
+        const header = Array.from(document.querySelectorAll<HTMLElement>('[data-tile-header]'))
+          .find((element) => element.dataset.tileHeader === sourceLeafId)
+        const tabs = Array.from(header?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? [])
+        const center = translated.left + translated.width / 2
+        const sourceIndex = tabs.findIndex((element) => element.dataset.tabId === tabId)
+        if (sourceIndex < 0) return
+        const targetIndex = tabs.findIndex((element) => center < element.getBoundingClientRect().left + element.getBoundingClientRect().width / 2)
+        const insertion = targetIndex < 0 ? tabs.length : targetIndex
+        const index = insertion > sourceIndex ? insertion - 1 : insertion
+        const next = reorderTileTab(root, sourceLeafId, tabId, index)
+        if (next !== root) onTreeChange(next)
+        return
+      }
       const resolved = resolveHover(event)
       if (!resolved) return
       const next = moveTileTab(root, sourceLeafId, resolved.leafId, tabId, resolved.zone)
