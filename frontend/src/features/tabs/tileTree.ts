@@ -16,6 +16,7 @@ export type TileTab =
   | { kind: 'worktree'; id: string; projectId: string; wtId: string }
   | { kind: 'browser'; id: string }
   | { kind: 'ssh-shell'; id: string; connectionId: string }
+  | { kind: 'local-terminal'; id: string }
 
 export interface TileLeaf {
   type: 'leaf'
@@ -80,6 +81,10 @@ export function createWorktreeTab(projectId: string, wtId: string): TileTab {
  *  `browserTiles` slice, keyed by this same generated id. */
 export function createBrowserTab(): TileTab {
   return { kind: 'browser', id: generateTileId() }
+}
+
+export function createLocalTerminalTab(): TileTab {
+  return { kind: 'local-terminal', id: `local-terminal-${generateTileId()}` }
 }
 
 /** An ssh-shell tile's id is derived from its connection id, so opening the
@@ -345,6 +350,20 @@ export function closeTileTab(layout: WorkspaceTileLayout, leafId: string, tabId:
 // ---------------------------------------------------------------------------
 // move a tab between leaves (drag-and-drop commit)
 // ---------------------------------------------------------------------------
+
+export function reorderTileTab(root: TileNode, leafId: string, tabId: string, index: number): TileNode {
+  return mapTree(root, (n) => n.type === 'leaf' && n.id === leafId, (n) => {
+    const leaf = n as TileLeaf
+    const from = leaf.tabs.findIndex((tab) => tab.id === tabId)
+    if (from < 0) return leaf
+    const to = Math.max(0, Math.min(index, leaf.tabs.length - 1))
+    if (from === to) return leaf
+    const tabs = [...leaf.tabs]
+    const [tab] = tabs.splice(from, 1)
+    tabs.splice(to, 0, tab)
+    return { ...leaf, tabs }
+  })
+}
 
 /** Commits a drag-and-drop drop: moves `tabId` out of `sourceLeafId` and
  *  into `targetLeafId` per the 5-zone rule. `center` merges as a new tab

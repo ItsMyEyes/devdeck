@@ -8,7 +8,7 @@ import { TabKindIcon } from '@/features/tabs/tabIcons'
 import { cn } from '@/lib/utils'
 import type { WorktreeTabLabel } from '@/lib/worktreeLabel'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
-import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, resizeTileSplit } from './tileTree'
+import { findTileLeaf, findTileTab, firstLeafId, moveTileTab, reorderTileTab, resizeTileSplit } from './tileTree'
 import { useIsMacTauri } from './useIsTauri'
 import { useMountedTabIds } from './useMountedTabIds'
 import type { TileDropZone, TileLeaf, TileNode, TileSplit, TileTab } from './tileTree'
@@ -29,6 +29,7 @@ const TRAFFIC_LIGHT_GUTTER = 76
 export type WorktreeTileTab = Extract<TileTab, { kind: 'worktree' }>
 export type BrowserTileTab = Extract<TileTab, { kind: 'browser' }>
 export type SSHShellTileTab = Extract<TileTab, { kind: 'ssh-shell' }>
+export type LocalTerminalTileTab = Extract<TileTab, { kind: 'local-terminal' }>
 
 export interface WorkspaceTileCanvasProps {
   root: TileNode
@@ -44,6 +45,7 @@ export interface WorkspaceTileCanvasProps {
      *  native child webview ignores — a Browser tile has to be told to hide
      *  itself, or it keeps painting over whichever tab replaced it. */
     browser: (ctx: { leafId: string; tab: BrowserTileTab; active: boolean }) => ReactNode
+    localTerminal?: (ctx: { leafId: string; tab: LocalTerminalTileTab }) => ReactNode
     sshShell: (ctx: { leafId: string; tab: SSHShellTileTab }) => ReactNode
   }
   /** Fired for every structural change this component makes itself: drag-and-drop commits and divider-resize commits. */
@@ -468,6 +470,27 @@ export function TileTabButton({
     )
   }
 
+  if (tab.kind === 'local-terminal') {
+    return (
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        data-tab-id={tab.id}
+        title={titleWithShortcut('Local Terminal')}
+        className={wrapperClass(isDragging)}
+      >
+        {stateMarkers}
+        <button type="button" onClick={onSelect} className={selectButtonClass}>
+          <TabDot active={active} focused={focused} />
+          <TabKindIcon kind="local-terminal" />
+          <span className="truncate">Local Terminal</span>
+        </button>
+        {trailingAction('Local Terminal')}
+      </div>
+    )
+  }
+
   if (tab.kind === 'ssh-shell') {
     const info = resolveSSHShellTab(tab)
     if (!info) return null
@@ -752,6 +775,7 @@ function TileLeafHeader({
   return (
     <div
       ref={setHeaderDropRef}
+      data-tile-header={leaf.id}
       style={headerStyle}
       // The whole top strip is the window's title bar on Windows/Linux, where
       // `decorations: false` means nothing drags the window unless the DOM
@@ -889,9 +913,11 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
                 ? ctx.renderers.agents({ leafId: leaf.id })
                 : tab.kind === 'worktree'
                   ? ctx.renderers.worktree({ leafId: leaf.id, tab })
-                  : tab.kind === 'ssh-shell'
-                    ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
-                    : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
+                  : tab.kind === 'local-terminal'
+                    ? ctx.renderers.localTerminal?.({ leafId: leaf.id, tab })
+                    : tab.kind === 'ssh-shell'
+                      ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
+                      : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
             </div>
           ))}
         {hoverZone ? (
@@ -1026,6 +1052,22 @@ export function WorkspaceTileCanvas({
       const sourceLeafId = data?.sourceLeafId
       if (!sourceLeafId) return
       const tabId = data?.tabId ?? String(active.id)
+      const dropData = over.data.current as { leafId?: string; forceCenter?: boolean } | undefined
+      const translated = active.rect.current.translated
+      if (dropData?.forceCenter && dropData.leafId === sourceLeafId && translated) {
+        const header = Array.from(document.querySelectorAll<HTMLElement>('[data-tile-header]'))
+          .find((element) => element.dataset.tileHeader === sourceLeafId)
+        const tabs = Array.from(header?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? [])
+        const center = translated.left + translated.width / 2
+        const sourceIndex = tabs.findIndex((element) => element.dataset.tabId === tabId)
+        if (sourceIndex < 0) return
+        const targetIndex = tabs.findIndex((element) => center < element.getBoundingClientRect().left + element.getBoundingClientRect().width / 2)
+        const insertion = targetIndex < 0 ? tabs.length : targetIndex
+        const index = insertion > sourceIndex ? insertion - 1 : insertion
+        const next = reorderTileTab(root, sourceLeafId, tabId, index)
+        if (next !== root) onTreeChange(next)
+        return
+      }
       const resolved = resolveHover(event)
       if (!resolved) return
       const next = moveTileTab(root, sourceLeafId, resolved.leafId, tabId, resolved.zone)
@@ -1088,9 +1130,11 @@ export function WorkspaceTileCanvas({
                 ? 'Agents'
                 : dragTab.kind === 'worktree'
                   ? (resolveWorktreeTab(dragTab)?.name ?? dragTab.wtId)
-                  : dragTab.kind === 'ssh-shell'
-                    ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
-                    : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
+                  : dragTab.kind === 'local-terminal'
+                    ? 'Local Terminal'
+                    : dragTab.kind === 'ssh-shell'
+                      ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
+                      : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
             </span>
           </div>
         ) : null}

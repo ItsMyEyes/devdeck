@@ -6,8 +6,9 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { ChevronDown, ChevronUp, MessageSquarePlus, X } from 'lucide-react'
-import { inputFrame, resizeFrame, terminalWsUrl } from '@/lib/terminalClient'
+import { inputFrame, resizeFrame, terminalWsUrl, localTerminalWsUrl } from '@/lib/terminalClient'
 import { openExternalUrl } from '@/lib/openExternalUrl'
+import { getLocalRuntime } from '@/features/desktop/desktopBridge'
 import { createTerminalWriter } from '@/features/terminal/terminalWriter'
 import { DataLoading } from '@/features/screens/DataLoading'
 import { useResolvedTheme } from '@/features/theme/useTheme'
@@ -123,6 +124,7 @@ export function terminalTheme(resolved: 'light' | 'dark') {
 interface TerminalProps {
   session: string
   machine: Machine
+  directLocal?: boolean
   /** When true, the next single keystroke is sent as its Ctrl+key control code. */
   ctrlArmed?: boolean
   onCtrlConsumed?: () => void
@@ -193,7 +195,7 @@ export function terminalKeyEventHandler(term: XTerm) {
 
 /** xterm.js terminal wired to the devdeck WebSocket gateway for one session. */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
-  { session, machine, ctrlArmed = false, onCtrlConsumed, onExit, onSendToChat },
+  { session, machine, directLocal = false, ctrlArmed = false, onCtrlConsumed, onExit, onSendToChat },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -393,10 +395,25 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
     }
 
-    const connect = () => {
+    const connect = async () => {
       if (disposed || !resolvedUrl) return
       lastConnectAt = Date.now()
-      const ws = new WebSocket(resolvedUrl)
+      let url = resolvedUrl
+      if (directLocal) {
+        try {
+          const local = await getLocalRuntime()
+          url = localTerminalWsUrl(local, session, term.cols, term.rows)
+        } catch {
+          if (!disposed) {
+            stopAttachHint()
+            if (attempts === 0) term.write('\r\n[local runtime unavailable - reconnecting…]\r\n')
+            scheduleReconnect()
+          }
+          return
+        }
+      }
+      if (disposed) return
+      const ws = new WebSocket(url)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
@@ -503,7 +520,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
     window.addEventListener('keydown', onFindShortcut)
 
-    void terminalWsUrl(machine, session, term.cols, term.rows).then((url) => {
+    void (directLocal ? Promise.resolve(localTerminalWsUrl(machine, session, term.cols, term.rows)) : terminalWsUrl(machine, session, term.cols, term.rows)).then((url) => {
       if (disposed) return
       resolvedUrl = url
       connect()
@@ -585,7 +602,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Same reason: the next session starts its own attach from scratch.
       setAttaching(false)
     }
-  }, [session, machine])
+  }, [session, machine, directLocal])
 
   return (
     <div className="relative h-full w-full">
@@ -644,7 +661,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           </button>
         </div>
       ) : null}
-      {hasSelection ? (
+      {hasSelection && onSendToChat ? (
         <button
           type="button"
           onClick={() => {

@@ -456,6 +456,7 @@ export function SSHShellPane({
       // chord stays free for the browser/OS while an SSH shell has focus.
       // TerminalExplorer is told not to advertise it either
       // (contentSearchShortcut is omitted in this file's renderers).
+      if ('__TAURI_INTERNALS__' in window && matchesBinding(event, 'workspace.newTab')) return
       if (matchesBinding(event, 'terminal.newPaneTab')) {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)

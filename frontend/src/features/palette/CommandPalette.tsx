@@ -44,17 +44,18 @@ function HighlightedText({ text, ranges }: { text: string; ranges: HighlightRang
 export function CommandPalette({ wsId, leafId }: CommandPaletteProps) {
   const open = useDevDeckStore((s) => s.palette.open && s.palette.wsId === wsId)
   const paletteLeafId = useDevDeckStore((s) => s.palette.leafId)
+  const mode = useDevDeckStore((s) => s.palette.mode)
   // Same call `FileQuickOpen` makes: a native Browser-tile webview is stacked
   // above the entire app DOM, so no z-index alone can paint over one.
   useNativeOverlayBlocker(open)
 
   if (!open) return null
-  return <CommandPaletteSurface wsId={wsId} leafId={paletteLeafId ?? leafId} />
+  return <CommandPaletteSurface wsId={wsId} leafId={paletteLeafId ?? leafId} mode={mode} />
 }
 
-function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string }) {
+function CommandPaletteSurface({ wsId, leafId, mode }: { wsId: string; leafId: string; mode?: 'command' | 'new-tab' }) {
   const closePalette = useDevDeckStore((s) => s.closePalette)
-  const model = useCommandPalette({ wsId, leafId, open: true })
+  const model = useCommandPalette({ wsId, leafId, open: true, mode })
   const inputRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef<HTMLDivElement>(null)
   const baseId = useId()
@@ -155,13 +156,13 @@ function CommandPaletteSurface({ wsId, leafId }: { wsId: string; leafId: string 
               value={model.query}
               onChange={(event) => model.setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={model.placeholder}
+              placeholder={mode === 'new-tab' ? 'Search Google, enter a URL, or type terminal…' : model.placeholder}
               className="relative w-full bg-transparent font-mono text-[13px] text-devdeck-fg outline-none placeholder:text-devdeck-fg-2"
             />
           </div>
 
           <span className="flex-none rounded border border-devdeck-border-strong bg-devdeck-pane px-1.5 py-0.5 font-mono text-[9.5px] text-devdeck-fg-2">
-            ⌘K
+            {mode === 'new-tab' ? '⌘T' : '⌘K'}
           </span>
         </div>
 

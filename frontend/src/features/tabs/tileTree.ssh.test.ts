@@ -39,3 +39,36 @@ describe('tileTree ssh-shell tab kind', () => {
     expect(after?.type === 'leaf' && !after.tabs.some((t) => t.id === 'ssh-sc-1')).toBe(true)
   })
 })
+
+describe('reordering tabs', () => {
+  it('moves tabs in both directions without changing selection', async () => {
+    const { reorderTileTab } = await import('./tileTree')
+    const root = { type: 'leaf' as const, id: 'leaf', activeTabId: 'b', tabs: [
+      { kind: 'agents' as const, id: 'agents' as const }, { kind: 'browser' as const, id: 'b' }, { kind: 'browser' as const, id: 'c' },
+    ] }
+    const moved = reorderTileTab(root, 'leaf', 'agents', 2)
+    if (moved.type !== 'leaf') throw new Error('expected leaf')
+    expect(moved.tabs.map(t => t.id)).toEqual(['b', 'c', 'agents'])
+    expect(moved.activeTabId).toBe('b')
+    const back = reorderTileTab(moved, 'leaf', 'agents', 0)
+    if (back.type !== 'leaf') throw new Error('expected leaf')
+    expect(back.tabs.map(t => t.id)).toEqual(['agents', 'b', 'c'])
+  })
+})
+
+describe('local terminal tabs', () => {
+  it('allocates independent local shell sessions', async () => {
+    const { createLocalTerminalTab } = await import('@/features/tabs/tileTree')
+    const first = createLocalTerminalTab()
+    const second = createLocalTerminalTab()
+    expect(first.kind).toBe('local-terminal')
+    expect(first.id).not.toBe(second.id)
+    let layout = openTileTab(openTileTab(createDefaultTileLayout(), first), second)
+    const leaf = findTileLeaf(layout.root, layout.focusedLeafId)
+    if (!leaf || leaf.type !== 'leaf') throw new Error('expected leaf')
+    expect(leaf.tabs.filter((tab) => tab.kind === 'local-terminal')).toHaveLength(2)
+    layout = closeTileTab(layout, leaf.id, first.id)
+    const remaining = findTileLeaf(layout.root, layout.focusedLeafId)
+    expect(remaining?.type === 'leaf' && remaining.tabs.some((tab) => tab.id === second.id)).toBe(true)
+  })
+})

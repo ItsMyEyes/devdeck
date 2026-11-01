@@ -80,15 +80,16 @@ export const KEYBINDING_COMMANDS: KeybindingCommand[] = [
   {
     id: 'workspace.newTab',
     label: 'New workspace tab',
-    description: 'Opens the tab chooser in the focused tile. Ignored inside a visible worktree terminal, which claims this chord for its own shell tabs.',
+    description: 'Search Google, open a URL, or type terminal to open a local shell.',
     section: 'Workspace',
     scope: 'workspace',
     defaults: ['mod+t'],
+    escapesTerminal: true,
   },
   {
     id: 'workspace.newTabInTerminal',
     label: 'New workspace tab (inside a terminal)',
-    description: 'The stand-in for the chord above while a worktree terminal is on screen.',
+    description: 'An alternate shortcut for the tab chooser inside a worktree terminal.',
     section: 'Workspace',
     scope: 'workspace',
     defaults: ['mod+o'],
@@ -174,7 +175,8 @@ export const KEYBINDING_COMMANDS: KeybindingCommand[] = [
     description: 'Adds a terminal tab to the focused pane.',
     section: 'Terminal & SSH',
     scope: 'terminal',
-    defaults: ['mod+t'],
+    defaults: ['mod+shift+t'],
+    escapesTerminal: true,
   },
   {
     id: 'terminal.closePaneTab',
