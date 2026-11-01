@@ -11,6 +11,7 @@ import {
   Receipt,
   Server,
   Settings,
+  TerminalSquare,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -52,6 +53,7 @@ export const TAB_KIND_ICON: Record<TileTab['kind'], LucideIcon> = {
   worktree: WORKTREE_ICON,
   browser: MODULE_ICON.browser,
   'ssh-shell': MODULE_ICON.ssh,
+  'local-terminal': TerminalSquare,
 }
 
 /** `TAB_KIND_ICON` rendered at the tab strip's size — the pills, their drag

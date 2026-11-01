@@ -36,9 +36,10 @@ vi.mock('@/features/palette/useCommandPalette', () => ({
 }))
 
 const closePalette = vi.fn()
+const paletteState: { open: boolean; wsId: string; leafId: string; mode?: 'command' | 'new-tab' } = { open: true, wsId: 'ws1', leafId: 'leaf-a' }
 vi.mock('@/store/useDevDeckStore', () => ({
   useDevDeckStore: (selector: (s: unknown) => unknown) =>
-    selector({ palette: { open: true, wsId: 'ws1', leafId: 'leaf-a' }, closePalette, showToast: vi.fn() }),
+    selector({ palette: paletteState, closePalette, showToast: vi.fn() }),
 }))
 
 vi.mock('@/features/browser/useNativeOverlayBlocker', () => ({ useNativeOverlayBlocker: () => {} }))
@@ -48,6 +49,7 @@ describe('CommandPalette keyboard contract', () => {
     vi.clearAllMocks()
     // The model is shared across tests; individual tests mutate the display
     // fields, so every one starts from the same baseline.
+    paletteState.mode = 'command'
     model.query = ''
     model.ghost = ''
     model.breadcrumbs = []
@@ -59,6 +61,14 @@ describe('CommandPalette keyboard contract', () => {
   it('focuses the input on open', async () => {
     render(<CommandPalette wsId="ws1" leafId="leaf-a" />)
     expect(await screen.findByRole('combobox')).toHaveFocus()
+  })
+
+  it('focuses the Google search field for a new tab', async () => {
+    paletteState.mode = 'new-tab'
+    render(<CommandPalette wsId="ws1" leafId="leaf-a" />)
+    const input = await screen.findByRole('combobox')
+    expect(input).toHaveFocus()
+    expect(input).toHaveAttribute('placeholder', expect.stringContaining('Google'))
   })
 
   it('ArrowDown moves the selection forward', async () => {

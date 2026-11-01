@@ -20,6 +20,11 @@ export function terminalWsUrl(machine: Machine, session: string, cols: number, r
   return machineWsUrl(machine, '/terminal', { session, cols: String(cols), rows: String(rows) })
 }
 
+export function localTerminalWsUrl(runtime: { url: string; key: string }, session: string, cols: number, rows: number): string {
+  const query = new URLSearchParams({ session, cols: String(cols), rows: String(rows), key: runtime.key })
+  return `${runtime.url.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/terminal?${query}`
+}
+
 export function inputFrame(d: string): string {
   return JSON.stringify({ t: 'i', d } satisfies InputFrame)
 }

@@ -940,6 +940,7 @@ function TerminalWorkspace({
         setContentSearch(true)
         return
       }
+      if ('__TAURI_INTERNALS__' in window && matchesBinding(event, 'workspace.newTab')) return
       if (matchesBinding(event, 'terminal.newPaneTab')) {
         event.preventDefault()
         handleNewTerminalTab(layout.focusedPaneId)

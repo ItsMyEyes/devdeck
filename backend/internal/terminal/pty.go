@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	crosspty "github.com/aymanbagabas/go-pty"
@@ -51,7 +52,12 @@ func buildSessionCmd(session, agentBin, workDir string, args []string) *exec.Cmd
 	if agentBin != "" {
 		cmd = platformCommand(agentBin, args...)
 	} else {
-		cmd = platformCommand(pickShell())
+		shell := pickShell()
+		if runtime.GOOS == "darwin" && strings.HasPrefix(session, "local-terminal-") && filepath.Base(shell) == "zsh" {
+			cmd = platformCommand(shell, "-l")
+		} else {
+			cmd = platformCommand(shell)
+		}
 	}
 	cmd.Dir = resolveWorkDir(workDir)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "DEVDECK_SESSION="+session)

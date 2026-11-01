@@ -55,3 +55,20 @@ describe('reordering tabs', () => {
     expect(back.tabs.map(t => t.id)).toEqual(['agents', 'b', 'c'])
   })
 })
+
+describe('local terminal tabs', () => {
+  it('allocates independent local shell sessions', async () => {
+    const { createLocalTerminalTab } = await import('@/features/tabs/tileTree')
+    const first = createLocalTerminalTab()
+    const second = createLocalTerminalTab()
+    expect(first.kind).toBe('local-terminal')
+    expect(first.id).not.toBe(second.id)
+    let layout = openTileTab(openTileTab(createDefaultTileLayout(), first), second)
+    const leaf = findTileLeaf(layout.root, layout.focusedLeafId)
+    if (!leaf || leaf.type !== 'leaf') throw new Error('expected leaf')
+    expect(leaf.tabs.filter((tab) => tab.kind === 'local-terminal')).toHaveLength(2)
+    layout = closeTileTab(layout, leaf.id, first.id)
+    const remaining = findTileLeaf(layout.root, layout.focusedLeafId)
+    expect(remaining?.type === 'leaf' && remaining.tabs.some((tab) => tab.id === second.id)).toBe(true)
+  })
+})
