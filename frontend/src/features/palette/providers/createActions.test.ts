@@ -93,3 +93,12 @@ describe('createActionItems', () => {
     expect(openSSHStats).toHaveBeenCalledWith('c1')
   })
 })
+
+
+it('offers local terminal only when a desktop opener is provided', () => {
+  expect(createActionItems(deps()).some((item) => item.id === 'create:local-terminal')).toBe(false)
+  const openLocalTerminal = vi.fn()
+  const row = createActionItems(deps({ openLocalTerminal })).find((item) => item.id === 'create:local-terminal')
+  row?.run?.(ctx)
+  expect(openLocalTerminal).toHaveBeenCalledOnce()
+})

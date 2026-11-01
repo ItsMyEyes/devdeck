@@ -16,6 +16,7 @@ import { closeTab, emptyDBTabState, openTab, reorderTab, setActiveTab, type DBTa
 import {
   closeTileTab,
   createBrowserTab,
+  createLocalTerminalTab,
   createDefaultTileLayout,
   createSSHShellTab,
   createWorktreeTab,
@@ -64,6 +65,7 @@ interface PaletteState {
   open: boolean
   wsId: string | null
   leafId: string | null
+  mode: 'command' | 'new-tab'
 }
 
 /** The SSH quick-add form, reached from the palette's Create group or from a
@@ -477,12 +479,13 @@ interface DevDeckState {
   selectAgentsTab: (wsId: string) => void
 
   // command palette
-  openPalette: (wsId: string, leafId: string) => void
+  openPalette: (wsId: string, leafId: string, mode?: 'command' | 'new-tab') => void
   closePalette: () => void
   openSSHQuickAdd: (wsId: string, leafId: string, prefillRaw: string) => void
   closeSSHQuickAdd: () => void
 
   // browser tile (Tauri only)
+  openLocalTerminalTab: (wsId: string) => void
   openBrowserTab: (wsId: string, machineId?: string, url?: string) => void
   openSSHShellTab: (wsId: string, connectionId: string) => void
   ensureBrowserTile: (tabId: string) => void
@@ -717,7 +720,7 @@ export const useDevDeckStore = create<DevDeckState>()(
       wsMenuOpen: false,
       desktopSettingsOpen: false,
       hubApiKey: null,
-      palette: { open: false, wsId: null, leafId: null },
+      palette: { open: false, wsId: null, leafId: null, mode: 'command' },
       sshQuickAdd: { open: false, wsId: null, leafId: null, prefillRaw: '' },
       spawn: { open: false, projectId: null, chooseProject: false, mode: 'branch', branch: '', base: 'main', model: 'claude-sonnet-5', task: '', existingWtId: '' },
       newProject: { open: false, mode: 'local', name: '', path: '', repo: '', cloneParent: '~', cloneFolder: '', machineId: '' },
@@ -885,12 +888,17 @@ export const useDevDeckStore = create<DevDeckState>()(
           s.workspaceTileLayouts[wsId] = pruneTileTabs(layout, liveWtIds)
         }),
 
-      openPalette: (wsId, leafId) => set((s) => void (s.palette = { open: true, wsId, leafId })),
+      openPalette: (wsId, leafId, mode = 'command') => set((s) => void (s.palette = { open: true, wsId, leafId, mode })),
       closePalette: () => set((s) => void (s.palette.open = false)),
       openSSHQuickAdd: (wsId, leafId, prefillRaw) =>
         set((s) => void (s.sshQuickAdd = { open: true, wsId, leafId, prefillRaw })),
       closeSSHQuickAdd: () => set((s) => void (s.sshQuickAdd.open = false)),
 
+      openLocalTerminalTab: (wsId) =>
+        set((s) => {
+          const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()
+          s.workspaceTileLayouts[wsId] = openTileTab(layout, createLocalTerminalTab())
+        }),
       openBrowserTab: (wsId, machineId, url) =>
         set((s) => {
           const layout = s.workspaceTileLayouts[wsId] ?? createDefaultTileLayout()

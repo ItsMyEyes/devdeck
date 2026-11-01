@@ -16,6 +16,7 @@ export type TileTab =
   | { kind: 'worktree'; id: string; projectId: string; wtId: string }
   | { kind: 'browser'; id: string }
   | { kind: 'ssh-shell'; id: string; connectionId: string }
+  | { kind: 'local-terminal'; id: string }
 
 export interface TileLeaf {
   type: 'leaf'
@@ -80,6 +81,10 @@ export function createWorktreeTab(projectId: string, wtId: string): TileTab {
  *  `browserTiles` slice, keyed by this same generated id. */
 export function createBrowserTab(): TileTab {
   return { kind: 'browser', id: generateTileId() }
+}
+
+export function createLocalTerminalTab(): TileTab {
+  return { kind: 'local-terminal', id: `local-terminal-${generateTileId()}` }
 }
 
 /** An ssh-shell tile's id is derived from its connection id, so opening the

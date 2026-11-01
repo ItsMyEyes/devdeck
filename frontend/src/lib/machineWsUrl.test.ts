@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { localTerminalWsUrl } from '@/lib/terminalClient'
 import { machineWsUrl } from '@/lib/machineClient'
 import { AGENT_WS_PATH } from '@/features/agent-chat/useAgentChatSocket'
 import type { Machine } from '@/store/types'
@@ -65,4 +66,13 @@ describe('machineWsUrl', () => {
     expect(url.startsWith('wss://')).toBe(true)
     expect(url).toContain('key=test-key')
   })
+})
+
+
+it('addresses the desktop runtime directly without a hub proxy', () => {
+  const url = new URL(localTerminalWsUrl({ url: 'http://127.0.0.1:8990/', key: 'local-key' }, 'local-terminal-1', 80, 24))
+  expect(url.origin).toBe('ws://127.0.0.1:8990')
+  expect(url.pathname).toBe('/ws/terminal')
+  expect(url.searchParams.get('session')).toBe('local-terminal-1')
+  expect(url.searchParams.get('key')).toBe('local-key')
 })

@@ -171,7 +171,7 @@ describe('findConflicts', () => {
 
 describe('terminalEscapeChords', () => {
   it('lists the chords xterm must hand back', () => {
-    expect(terminalEscapeChords().sort()).toEqual(['mod+k', 'mod+p'])
+    expect(terminalEscapeChords().sort()).toEqual(['mod+k', 'mod+p', 'mod+shift+t', 'mod+t'])
   })
 
   it('follows a rebind, so a moved palette chord is still not eaten by the shell', () => {

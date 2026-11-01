@@ -40,6 +40,37 @@ struct ShuttingDown(AtomicBool);
 /// reporting a reachable URL has to read this, not the preferred port.
 struct BoundPort(Mutex<Option<u16>>);
 
+#[derive(Clone, serde::Serialize)]
+struct LocalRuntimeInfo {
+    url: String,
+    key: String,
+}
+struct LocalRuntime(Mutex<Option<LocalRuntimeInfo>>);
+
+#[tauri::command]
+fn get_local_runtime(app: AppHandle) -> Result<LocalRuntimeInfo, String> {
+    app.state::<LocalRuntime>().0.lock().unwrap().clone()
+        .ok_or_else(|| "Local runtime is unavailable".to_string())
+}
+
+#[tauri::command]
+async fn stop_local_terminal(app: AppHandle, session: String) -> Result<(), String> {
+    if !session.starts_with("local-terminal-") || !session.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+        return Err("invalid local terminal session".into());
+    }
+    let runtime = app.state::<LocalRuntime>().0.lock().unwrap().clone();
+    let Some(runtime) = runtime else { return Ok(()); };
+    let response = reqwest::Client::new()
+        .delete(format!("{}/api/terminal/sessions/{}", runtime.url, session))
+        .bearer_auth(runtime.key)
+        .timeout(Duration::from_secs(5))
+        .send().await.map_err(|e| format!("stop local terminal: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("stop local terminal: HTTP {}", response.status()));
+    }
+    Ok(())
+}
+
 const MAX_RESPAWNS: u32 = 3;
 const CHANGE_HUB_MENU_ID: &str = "change-hub";
 const RUNTIME_WARNING_MENU_ID: &str = "runtime-warning";
@@ -149,6 +180,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .register_uri_scheme_protocol(APP_SCHEME, serve_bundled_asset)
+        .manage(LocalRuntime(Mutex::new(None)))
         .manage(BrowserTiles::new())
         .manage(open_with::OpenWithTempFiles::new())
         .on_page_load(|webview, payload| {
@@ -191,6 +223,8 @@ pub fn run() {
             choose_hub_mode,
             change_hub,
             get_bind_config,
+            get_local_runtime,
+            stop_local_terminal,
             set_bind_config,
             get_startup_error,
             read_sidecar_log,
@@ -794,6 +828,21 @@ async fn launch_runtime_once(
         return RuntimeLaunchEnd::Failed(msg);
     }
 
+    let local_url = format!("http://{}:{}", reachable_host(bind_host), port);
+    match reqwest::Client::new()
+        .get(format!("{local_url}/api/terminal/sessions"))
+        .bearer_auth(&key)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {}
+        _ => return RuntimeLaunchEnd::Failed("local runtime identity verification failed".into()),
+    }
+    *handle.state::<LocalRuntime>().0.lock().unwrap() = Some(LocalRuntimeInfo {
+        url: local_url,
+        key: key.clone(),
+    });
     // Phase 3: pump output to the log until the process dies.
     while let Some(event) = rx.recv().await {
         match event {
@@ -804,6 +853,7 @@ async fn launch_runtime_once(
             _ => {}
         }
     }
+    *handle.state::<LocalRuntime>().0.lock().unwrap() = None;
     RuntimeLaunchEnd::Crashed
 }
 
@@ -1038,6 +1088,10 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
     if let Err(msg) = hubapi::upsert_local_machine(&host, port, &key, &data_dir).await {
         return LaunchEnd::Failed(msg);
     }
+    *handle.state::<LocalRuntime>().0.lock().unwrap() = Some(LocalRuntimeInfo {
+        url: format!("http://{host}:{port}"),
+        key: key.clone(),
+    });
     if let Some(win) = handle.get_webview_window("main") {
         let url = format!("http://{host}:{port}/?key={key}");
         let Ok(parsed) = url.parse() else {
@@ -1059,6 +1113,7 @@ async fn launch_once(handle: &AppHandle) -> LaunchEnd {
             _ => {}
         }
     }
+    *handle.state::<LocalRuntime>().0.lock().unwrap() = None;
     LaunchEnd::Crashed
 }
 

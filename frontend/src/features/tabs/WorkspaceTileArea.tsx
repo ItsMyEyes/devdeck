@@ -4,6 +4,9 @@ import { BrowserTile } from '@/features/browser/BrowserTile'
 import { closeBrowserTile as closeNativeBrowserTile } from '@/features/browser/browserTilesBridge'
 import { WorktreeCardsGrid } from '@/features/agents/WorktreeCardsGrid'
 import { WorkspaceHostsView } from '@/features/agents/WorkspaceHostsView'
+import { LocalTerminal } from '@/features/terminal/LocalTerminal'
+import { stopLocalTerminal } from '@/features/desktop/desktopBridge'
+import { toast } from 'sonner'
 import { ExpandedTerminal } from '@/features/terminal/ExpandedTerminal'
 import { useMachines, useSSHConnections, useWorkspace } from '@/features/data/queries'
 import { matchesBinding } from '@/features/keybindings/store'
@@ -155,6 +158,13 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
       if (sshLayout) collectTerminalSessionKeys(sshLayout.root).forEach(disposeSSHSession)
     }
     closeWorktreeTab(wsId, tabId)
+    if (tab?.kind === 'local-terminal') {
+      try {
+        await stopLocalTerminal(tab.id)
+      } catch {
+        toast.error('Could not confirm that the local terminal session stopped')
+      }
+    }
     const next = useDevDeckStore.getState().workspaceTileLayouts[wsId]
     if (!next) return
     const leaf = findTileLeaf(next.root, next.focusedLeafId)
@@ -164,9 +174,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
 
   /** The tab strip's `+` button and every palette-opening chord land here, so
    *  the palette always acts on a leaf that is actually focused. */
-  function handleNewTab(leafId: string) {
+  function handleNewTab(leafId: string, mode: 'command' | 'new-tab' = 'command') {
     commit(focusTileLeaf(layout, leafId))
-    openPalette(wsId, leafId)
+    openPalette(wsId, leafId, mode)
   }
 
   // `WorkspaceTileCanvas.onTreeChange` only ever hands back the new `root`
@@ -210,10 +220,8 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
   // The workspace half of the shortcut catalog (`features/keybindings`). The
   // chords themselves live there and are rebindable from Settings ›
   // Keybindings; what stays here is the *context* each one is subject to, which
-  // no binding table can express: `workspace.newTab` is ignored inside a
-  // visible worktree terminal because TerminalWorkspace claims that chord for
-  // its own shell tabs, so `workspace.newTabInTerminal` stands in there; and
-  // `workspace.closeTab` defers to the pane tab strip for the same reason.
+  // no binding table can express: `workspace.closeTab` defers to the pane
+  // tab strip while a worktree terminal is visible.
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
       const leaf = findTileLeaf(layout.root, layout.focusedLeafId)
@@ -222,9 +230,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
       const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId)
       const inTerminalWorkspace = showContent && activeTab?.kind === 'worktree'
 
-      // The one chord with no context rule at all — it opens the palette from
-      // anywhere, including inside a worktree terminal, where xterm is told to
-      // let it through via `isAppShortcut`.
+      // Both palette shortcuts pass through xterm so they work from a shell.
       if (matchesBinding(event, 'workspace.commandPalette')) {
         event.preventDefault()
         handleNewTab(leaf.id)
@@ -240,9 +246,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         return
       }
 
-      if (matchesBinding(event, inTerminalWorkspace ? 'workspace.newTabInTerminal' : 'workspace.newTab')) {
+      if (matchesBinding(event, 'workspace.newTab') || (inTerminalWorkspace && matchesBinding(event, 'workspace.newTabInTerminal'))) {
         event.preventDefault()
-        handleNewTab(leaf.id)
+        handleNewTab(leaf.id, 'new-tab')
         return
       }
 
@@ -296,6 +302,9 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
           browser: ({ leafId, tab, active }) => (
             <BrowserTile tabId={tab.id} isFocused={leafId === layout.focusedLeafId} isActive={active} />
           ),
+          localTerminal: ({ leafId, tab }) => (
+            <LocalTerminal session={tab.id} onExit={() => void handleCloseTab(leafId, tab.id)} />
+          ),
           sshShell: ({ leafId, tab }) => (
             <SSHShellPane connectionId={tab.connectionId} isFocused={leafId === layout.focusedLeafId} />
           ),
@@ -304,7 +313,7 @@ export function WorkspaceTileArea({ wsId, showContent = true }: WorkspaceTileAre
         onFocusLeaf={handleFocusLeaf}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
-        onNewTab={handleNewTab}
+        onNewTab={(leafId) => handleNewTab(leafId)}
         resolveWorktreeTab={resolveWorktreeTab}
         resolveBrowserTab={resolveBrowserTab}
         resolveSSHShellTab={resolveSSHShellTab}

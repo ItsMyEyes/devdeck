@@ -29,6 +29,7 @@ const TRAFFIC_LIGHT_GUTTER = 76
 export type WorktreeTileTab = Extract<TileTab, { kind: 'worktree' }>
 export type BrowserTileTab = Extract<TileTab, { kind: 'browser' }>
 export type SSHShellTileTab = Extract<TileTab, { kind: 'ssh-shell' }>
+export type LocalTerminalTileTab = Extract<TileTab, { kind: 'local-terminal' }>
 
 export interface WorkspaceTileCanvasProps {
   root: TileNode
@@ -44,6 +45,7 @@ export interface WorkspaceTileCanvasProps {
      *  native child webview ignores — a Browser tile has to be told to hide
      *  itself, or it keeps painting over whichever tab replaced it. */
     browser: (ctx: { leafId: string; tab: BrowserTileTab; active: boolean }) => ReactNode
+    localTerminal?: (ctx: { leafId: string; tab: LocalTerminalTileTab }) => ReactNode
     sshShell: (ctx: { leafId: string; tab: SSHShellTileTab }) => ReactNode
   }
   /** Fired for every structural change this component makes itself: drag-and-drop commits and divider-resize commits. */
@@ -464,6 +466,27 @@ export function TileTabButton({
           </span>
         </button>
         {trailingAction(info.name)}
+      </div>
+    )
+  }
+
+  if (tab.kind === 'local-terminal') {
+    return (
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        data-tab-id={tab.id}
+        title={titleWithShortcut('Local Terminal')}
+        className={wrapperClass(isDragging)}
+      >
+        {stateMarkers}
+        <button type="button" onClick={onSelect} className={selectButtonClass}>
+          <TabDot active={active} focused={focused} />
+          <TabKindIcon kind="local-terminal" />
+          <span className="truncate">Local Terminal</span>
+        </button>
+        {trailingAction('Local Terminal')}
       </div>
     )
   }
@@ -890,9 +913,11 @@ function TileLeafView({ leaf, ctx }: { leaf: TileLeaf; ctx: TileRenderContext })
                 ? ctx.renderers.agents({ leafId: leaf.id })
                 : tab.kind === 'worktree'
                   ? ctx.renderers.worktree({ leafId: leaf.id, tab })
-                  : tab.kind === 'ssh-shell'
-                    ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
-                    : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
+                  : tab.kind === 'local-terminal'
+                    ? ctx.renderers.localTerminal?.({ leafId: leaf.id, tab })
+                    : tab.kind === 'ssh-shell'
+                      ? ctx.renderers.sshShell({ leafId: leaf.id, tab })
+                      : ctx.renderers.browser({ leafId: leaf.id, tab, active: tab.id === leaf.activeTabId })}
             </div>
           ))}
         {hoverZone ? (
@@ -1105,9 +1130,11 @@ export function WorkspaceTileCanvas({
                 ? 'Agents'
                 : dragTab.kind === 'worktree'
                   ? (resolveWorktreeTab(dragTab)?.name ?? dragTab.wtId)
-                  : dragTab.kind === 'ssh-shell'
-                    ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
-                    : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
+                  : dragTab.kind === 'local-terminal'
+                    ? 'Local Terminal'
+                    : dragTab.kind === 'ssh-shell'
+                      ? (resolveSSHShellTab(dragTab)?.label ?? 'SSH')
+                      : (resolveBrowserTab(dragTab)?.label ?? 'Browser')}
             </span>
           </div>
         ) : null}

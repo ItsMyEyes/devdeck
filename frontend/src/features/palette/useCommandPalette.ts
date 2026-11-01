@@ -43,6 +43,7 @@ import {
 } from '@/features/palette/paletteFrecency'
 import { MAX_ROWS_PER_GROUP, flattenRanked, rankPaletteItems } from '@/features/palette/paletteRank'
 import { bookmarkItems, normalizeUrl } from '@/features/palette/providers/bookmarks'
+import { resolveNewTabSearch } from '@/features/palette/newTabSearch'
 import { matchVerb, sshCommandPreview, verbHintItems } from '@/features/palette/providers/commands'
 import { agentProjectRows, createActionItems } from '@/features/palette/providers/createActions'
 import { appearanceItems } from '@/features/palette/providers/appearance'
@@ -170,10 +171,12 @@ export function useCommandPalette({
   wsId,
   leafId,
   open,
+  mode = 'command',
 }: {
   wsId: string
   leafId: string
   open: boolean
+  mode?: 'command' | 'new-tab'
 }): CommandPaletteModel {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
@@ -190,6 +193,7 @@ export function useCommandPalette({
   const openWorktreeTab = useDevDeckStore((s) => s.openWorktreeTab)
   const openSSHShell = useOpenSSHShell(wsId)
   const openBrowserTab = useDevDeckStore((s) => s.openBrowserTab)
+  const openLocalTerminalTab = useDevDeckStore((s) => s.openLocalTerminalTab)
   const openSpawn = useDevDeckStore((s) => s.openSpawn)
   const selectAgentsTab = useDevDeckStore((s) => s.selectAgentsTab)
   const setWorkspaceTileLayout = useDevDeckStore((s) => s.setWorkspaceTileLayout)
@@ -345,6 +349,7 @@ export function useCommandPalette({
         const doc = tile?.docs.find((d) => d.id === tile.activeDocId)
         return { title: doc?.title || 'Web', subtitle: doc?.url || undefined }
       }
+      if (tab.kind === 'local-terminal') return { title: 'Local Terminal' }
       const connection = connections.find((c) => c.id === tab.connectionId)
       return {
         title: connection?.name ?? 'SSH',
@@ -498,6 +503,10 @@ export function useCommandPalette({
   const createDeps = useMemo<CreateActionDeps>(
     () => ({
       query: deferredQuery,
+      openLocalTerminal: isTauri ? () => {
+        openLocalTerminalTab(wsId)
+        navigate({ to: '/w/$wsId', params: { wsId } })
+      } : undefined,
       machines: paletteMachines,
       projects: paletteProjects,
       sshConnections: paletteConnections,
@@ -513,6 +522,8 @@ export function useCommandPalette({
     }),
     [
       deferredQuery,
+      isTauri,
+      openLocalTerminalTab,
       paletteMachines,
       paletteProjects,
       paletteConnections,
@@ -635,6 +646,16 @@ export function useCommandPalette({
   const activePage = pages.length > 0 ? pages[pages.length - 1] : null
 
   const items = useMemo(() => {
+    if (mode === 'new-tab' && deferredQuery.trim() && !activePage) {
+      const action = resolveNewTabSearch(deferredQuery)
+      return [{
+        id: 'new-tab:search', kind: 'url' as const, group: 'results' as const,
+        title: deferredQuery.trim(),
+        subtitle: action?.kind === 'terminal' ? 'Open local terminal' : action?.url.startsWith('https://www.google.com/search?') ? 'Search Google' : 'Open website',
+        icon: action?.kind === 'terminal' ? undefined : MODULE_ICON.browser,
+        run: () => {},
+      }]
+    }
     if (activePage) return activePage.items(deferredQuery, runContext)
     if (verbItems) return [...verbItems, ...createActions]
     return assemblePaletteItems({
@@ -649,6 +670,7 @@ export function useCommandPalette({
     })
   }, [
     activePage,
+    mode,
     deferredQuery,
     runContext,
     verbItems,
@@ -757,6 +779,17 @@ export function useCommandPalette({
 
   const run = useCallback(
     (modifiers?: { forceForm?: boolean; index?: number }) => {
+      if (mode === 'new-tab' && !activePage && query.trim()) {
+        const action = resolveNewTabSearch(query)
+        if (action?.kind === 'terminal') {
+          openLocalTerminalTab(wsId)
+          navigate({ to: '/w/$wsId', params: { wsId } })
+        } else if (action?.kind === 'url') {
+          openUrl(action.url)
+        }
+        closePalette()
+        return
+      }
       const index = modifiers?.index ?? clampedIndex
       const row = rows[index]
       if (!row) return
@@ -795,6 +828,12 @@ export function useCommandPalette({
     [
       rows,
       clampedIndex,
+      mode,
+      activePage,
+      query,
+      openLocalTerminalTab,
+      navigate,
+      openUrl,
       showToast,
       verbMatch,
       openQuickAddForm,

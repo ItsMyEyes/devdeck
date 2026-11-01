@@ -1,10 +1,11 @@
-import { Activity } from 'lucide-react'
+import { Activity, TerminalSquare } from 'lucide-react'
 import { MODULE_ICON, PROJECT_ICON } from '@/features/tabs/tabIcons'
 import { projectFacets } from '@/features/palette/providers/projectFacets'
 import type { PaletteItem, PalettePage } from '@/features/palette/paletteTypes'
 
 export interface CreateActionDeps {
   query: string
+  openLocalTerminal?: () => void
   machines: { id: string; name: string }[]
   projects: { id: string; name: string; machineId: string; path: string }[]
   sshConnections: { id: string; name: string; host: string; user: string }[]
@@ -128,6 +129,14 @@ function spawnPage(deps: CreateActionDeps): PalettePage {
  */
 export function createActionItems(deps: CreateActionDeps): PaletteItem[] {
   return [
+    ...(deps.openLocalTerminal ? [{
+      id: 'create:local-terminal',
+      kind: 'create' as const,
+      group: 'create' as const,
+      title: 'New Local Terminal',
+      icon: TerminalSquare,
+      run: deps.openLocalTerminal,
+    }] : []),
     {
       id: 'create:browser',
       kind: 'create',

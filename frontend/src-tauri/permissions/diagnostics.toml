@@ -9,6 +9,8 @@
 identifier = "allow-diagnostics"
 description = "Allows the startup-failure/runtime-warning diagnostics commands (get_startup_error/read_sidecar_log/open_log_file/get_runtime_warning)."
 commands.allow = [
+    "get_local_runtime",
+    "stop_local_terminal",
     "get_startup_error",
     "read_sidecar_log",
     "open_log_file",

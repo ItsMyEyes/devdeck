@@ -5,6 +5,29 @@
 
 import { invoke } from '@tauri-apps/api/core'
 
+function usesLocalDevProxy(): boolean {
+  return import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+}
+
+export async function getLocalRuntime(): Promise<{ url: string; key: string }> {
+  try {
+    return await invoke('get_local_runtime')
+  } catch (error) {
+    // `tauri dev` serves Vite and its loopback-only backend rather than a sidecar.
+    if (usesLocalDevProxy()) return { url: window.location.origin, key: '' }
+    throw error
+  }
+}
+
+export async function stopLocalTerminal(session: string): Promise<void> {
+  if (usesLocalDevProxy()) {
+    const response = await fetch(`/api/terminal/sessions/${encodeURIComponent(session)}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error(`stop local terminal: HTTP ${response.status}`)
+    return
+  }
+  return invoke('stop_local_terminal', { session })
+}
+
 /** Clears the saved hub mode and restarts the app — it comes back up on the
  *  first-run hub-mode picker. See Rust's `change_hub` in `lib.rs`. */
 export function changeHub(): Promise<void> {
