@@ -232,14 +232,12 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
       })
     }
 
-    if (!openedDocsRef.current.has(docId)) {
+    if (!openedDocsRef.current.has(docId) && (!doc.machineId || proxy)) {
       openedDocsRef.current.add(docId)
-      if (proxy) {
-        const rect = el.getBoundingClientRect()
-        void openBrowserTile(tabId, docId, `socks5://${proxy.socks5Addr}`, url).then(() =>
-          setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
-        )
-      }
+      const rect = el.getBoundingClientRect()
+      void openBrowserTile(tabId, docId, proxy ? `socks5://${proxy.socks5Addr}` : null, url).then(() =>
+        setBrowserTileBounds(tabId, docId, { x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
+      )
     }
 
     const observer = new ResizeObserver(sendBounds)
@@ -459,10 +457,13 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
    *  and recreating it against the new proxy, not just updating store state. */
   const selectMachine = async (machineId: string) => {
     const hadNativeWebview = !!doc.url
+    const proxy = machineId ? await ensureProxyForMachine(machineId) : null
+    if (machineId && !proxy) return
     if (hadNativeWebview) await closeNativeBrowserTile(tabId, doc.id)
-    const proxy = await ensureProxyForMachine(machineId)
-    if (hadNativeWebview && proxy && doc.url) {
-      await openBrowserTile(tabId, doc.id, `socks5://${proxy.socks5Addr}`, doc.url)
+    if (!machineId) setBrowserDocState(tabId, doc.id, { machineId: null, proxy: null })
+    if (hadNativeWebview && doc.url) {
+      await openBrowserTile(tabId, doc.id, proxy ? `socks5://${proxy.socks5Addr}` : null, doc.url)
+      openedDocsRef.current.add(doc.id)
       // The recreated webview starts at the same 1x1 placeholder size as a
       // brand-new one — the mount effect won't re-fire here (doc.url/doc.id
       // are unchanged), so this doc's own already-mounted rect has to be
@@ -479,7 +480,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
     if (!url) return
     let proxy = doc.proxy
     if (!proxy && doc.machineId) proxy = await ensureProxyForMachine(doc.machineId)
-    if (!proxy) return
+    if (doc.machineId && !proxy) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]
     initiatedLoadRef.current = true
     setBrowserDocState(tabId, doc.id, { url, title: titleFor(url), loading: true, loadError: null, history, historyIndex: history.length - 1 })
@@ -548,7 +549,7 @@ export function BrowserTile({ tabId, isFocused = false, isActive = true }: Brows
       bookmark.machineId && bookmark.machineId !== doc.machineId
         ? await ensureProxyForMachine(bookmark.machineId)
         : (doc.proxy ?? (doc.machineId ? await ensureProxyForMachine(doc.machineId) : null))
-    if (!proxy) return
+    if ((bookmark.machineId || doc.machineId) && !proxy) return
     const url = normalizeAddress(bookmark.url)
     if (!url) return
     const history = [...doc.history.slice(0, doc.historyIndex + 1), url]

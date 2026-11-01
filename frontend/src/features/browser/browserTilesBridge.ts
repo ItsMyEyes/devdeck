@@ -40,7 +40,7 @@ function tolerateMissingWebview(promise: Promise<void>): Promise<void> {
   })
 }
 
-export function openBrowserTile(tabId: string, docId: string, proxyUrl: string, initialUrl: string): Promise<void> {
+export function openBrowserTile(tabId: string, docId: string, proxyUrl: string | null, initialUrl: string): Promise<void> {
   const key = browserTileLabel(tabId, docId)
   labelRegistry.set(key, { tabId, docId })
   hiddenLabels.delete(key)

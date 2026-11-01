@@ -100,12 +100,12 @@ export function BrowserOmnibox({
     onDraftChange(url)
     onEditingChange(false)
   }
-  const options = machines.map((m) => ({
+  const options = [{ value: '', label: 'Local' }, ...machines.map((m) => ({
     value: m.id,
     label: m.name,
     disabled: machineHealth.get(m.id)?.status === 'offline',
-  }))
-  const machineName = machines.find((m) => m.id === machineId)?.name ?? 'No machine'
+  }))]
+  const machineName = machineId ? (machines.find((m) => m.id === machineId)?.name ?? 'Unknown machine') : 'Local'
 
   return (
     <div

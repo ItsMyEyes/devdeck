@@ -785,7 +785,8 @@ export function useCommandPalette({
           openLocalTerminalTab(wsId)
           navigate({ to: '/w/$wsId', params: { wsId } })
         } else if (action?.kind === 'url') {
-          openUrl(action.url)
+          openBrowserTab(wsId, undefined, action.url)
+          navigate({ to: '/w/$wsId/browser', params: { wsId } })
         }
         closePalette()
         return
@@ -832,8 +833,8 @@ export function useCommandPalette({
       activePage,
       query,
       openLocalTerminalTab,
+      openBrowserTab,
       navigate,
-      openUrl,
       showToast,
       verbMatch,
       openQuickAddForm,

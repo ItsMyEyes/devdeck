@@ -1,8 +1,6 @@
-// Native child webviews backing the desktop-only, machine-proxied Browser
-// tab. Each open "document" (a Browser tile's own internal tab, see the
-// design spec's Decision 2) gets its own real Tauri Webview, overlaid at
-// the React placeholder div's on-screen rect and routed through a chosen
-// machine's SOCKS5/HTTP forward proxy via `proxy_url`. See
+// Native child webviews backing the desktop Browser tab. Each document gets
+// its own Tauri Webview, overlaid at the React placeholder's on-screen rect.
+// It connects locally or through a chosen machine's SOCKS5/HTTP proxy. See
 // docs/superpowers/specs/2026-07-13-desktop-proxied-browser-tab-design.md.
 
 use std::collections::HashMap;
@@ -47,9 +45,8 @@ fn webview_label(tab_id: &str, doc_id: &str) -> String {
 const BROWSER_TILE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
 
-/// Creates the native child webview for one Browser-tile document, proxied
-/// through `proxy_url` (an `http://` or `socks5://` URL) and immediately
-/// navigated to `initial_url`. Called once per document, the first time the
+/// Creates a native child webview, optionally proxied through `proxy_url`
+/// (an `http://` or `socks5://` URL), and navigates it to `initial_url`. Called once per document, the first time the
 /// user actually navigates somewhere (the bookmarks/blank home page never
 /// creates a webview at all).
 ///
@@ -66,7 +63,7 @@ pub fn browser_tile_open(
     state: tauri::State<'_, BrowserTiles>,
     tab_id: String,
     doc_id: String,
-    proxy_url: String,
+    proxy_url: Option<String>,
     initial_url: String,
 ) -> Result<(), String> {
     let label = webview_label(&tab_id, &doc_id);
@@ -83,11 +80,18 @@ pub fn browser_tile_open(
         .get_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
 
-    let proxy: Url = proxy_url.parse().map_err(|e| format!("invalid proxy url: {e}"))?;
+    let proxy = proxy_url
+        .map(|url| url.parse::<Url>().map_err(|e| format!("invalid proxy url: {e}")))
+        .transpose()?;
     let target: Url = initial_url.parse().map_err(|e| format!("invalid target url: {e}"))?;
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
-        .proxy_url(proxy)
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target));
+    let builder = if let Some(proxy) = proxy {
+        builder.proxy_url(proxy)
+    } else {
+        builder
+    };
+    let builder = builder
         // Per-webview hook (unlike `on_page_load`, which is global and only
         // carries the URL) — lets the React tab strip follow the loaded
         // page's own <title> instead of guessing one from the URL.

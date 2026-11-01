@@ -4,7 +4,7 @@ import { useCommandPalette } from '@/features/palette/useCommandPalette'
 
 const mocks = vi.hoisted(() => ({
   openBrowserTab: vi.fn(), openLocalTerminalTab: vi.fn(), closePalette: vi.fn(), navigate: vi.fn(),
-  noop: vi.fn(), machines: [{ id: 'm-local', name: 'local' }],
+  noop: vi.fn(), machines: [{ id: 'm-remote', name: 'remote' }, { id: 'm-local', name: 'local' }],
 }))
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mocks.navigate }))
 vi.mock('@/features/tabs/useIsTauri', () => ({ useIsTauri: () => true }))
@@ -43,7 +43,14 @@ describe('new tab search flow', () => {
     const { result } = renderHook(() => useCommandPalette({ wsId: 'ws1', leafId: 'leaf', open: true, mode: 'new-tab' }))
     act(() => result.current.setQuery('zsh aliases'))
     act(() => result.current.run())
-    expect(mocks.openBrowserTab).toHaveBeenCalledWith('ws1', 'm-local', 'https://www.google.com/search?q=zsh+aliases')
+    expect(mocks.openBrowserTab).toHaveBeenCalledWith('ws1', undefined, 'https://www.google.com/search?q=zsh+aliases')
     expect(mocks.closePalette).toHaveBeenCalled()
   })
+  it('opens typed URLs on the local browser', () => {
+    const { result } = renderHook(() => useCommandPalette({ wsId: 'ws1', leafId: 'leaf', open: true, mode: 'new-tab' }))
+    act(() => result.current.setQuery('example.com'))
+    act(() => result.current.run())
+    expect(mocks.openBrowserTab).toHaveBeenCalledWith('ws1', undefined, 'https://example.com')
+  })
+
 })

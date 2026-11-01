@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useDevDeckStore } from '@/store/useDevDeckStore'
+import { startProxy } from '@/lib/machineApi'
 
 // The native webview bridge is the whole subject here: a Browser tile whose
 // tab is no longer the selected one in its leaf must tell Rust to hide, since
@@ -119,6 +120,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   observerCallbacks.length = 0
   for (const fn of Object.values(bridge)) fn.mockClear()
+  vi.mocked(startProxy).mockClear()
 })
 
 describe('BrowserTile native webview follows its tab selection', () => {
@@ -165,4 +167,32 @@ describe('BrowserTile native webview follows its tab selection', () => {
 
     expect(bridge.setBrowserTileBounds).not.toHaveBeenCalled()
   })
+})
+
+
+it('opens a local browser without starting a runtime proxy', async () => {
+  useDevDeckStore.getState().setBrowserDocState(TAB_ID, DOC_ID, { machineId: null, proxy: null })
+  render(<BrowserTile tabId={TAB_ID} isActive />)
+  await waitFor(() => expect(bridge.openBrowserTile).toHaveBeenCalledWith(TAB_ID, DOC_ID, null, 'https://google.com'))
+  expect(startProxy).not.toHaveBeenCalled()
+  expect(screen.getByRole('combobox', { name: 'Machine: Local' })).toBeInTheDocument()
+})
+
+
+it('navigates a local browser without assigning a runtime', async () => {
+  useDevDeckStore.getState().setBrowserDocState(TAB_ID, DOC_ID, { machineId: null, proxy: null })
+  render(<BrowserTile tabId={TAB_ID} isActive />)
+  await waitFor(() => expect(bridge.openBrowserTile).toHaveBeenCalledWith(TAB_ID, DOC_ID, null, 'https://google.com'))
+  fireEvent.click(screen.getByRole('button', { name: 'Edit address' }))
+  const input = screen.getByRole('textbox', { name: 'Address' })
+  fireEvent.change(input, { target: { value: 'example.com' } })
+  fireEvent.submit(input.closest('form')!)
+  await waitFor(() => expect(bridge.navigateBrowserTile).toHaveBeenCalledWith(TAB_ID, DOC_ID, 'https://example.com'))
+  expect(useDevDeckStore.getState().browserTiles[TAB_ID].docs[0].machineId).toBeNull()
+})
+
+it('does not silently open locally when a remote proxy is missing', () => {
+  useDevDeckStore.getState().setBrowserDocState(TAB_ID, DOC_ID, { proxy: null })
+  render(<BrowserTile tabId={TAB_ID} isActive />)
+  expect(bridge.openBrowserTile).not.toHaveBeenCalled()
 })
