@@ -60,7 +60,20 @@ func buildSessionCmd(session, agentBin, workDir string, args []string) *exec.Cmd
 		}
 	}
 	cmd.Dir = resolveWorkDir(workDir)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "DEVDECK_SESSION="+session)
+	env := os.Environ()
+	if agentBin == "" && strings.HasPrefix(session, "local-terminal-") {
+		// GUI launchers can leak their own no-color setting into the user's shell.
+		filtered := make([]string, 0, len(env)+1)
+		for _, item := range env {
+			key, _, _ := strings.Cut(item, "=")
+			if strings.EqualFold(key, "NO_COLOR") || strings.EqualFold(key, "COLORTERM") {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		env = append(filtered, "COLORTERM=truecolor")
+	}
+	cmd.Env = append(env, "TERM=xterm-256color", "DEVDECK_SESSION="+session)
 	return cmd
 }
 
